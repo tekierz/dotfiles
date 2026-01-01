@@ -522,21 +522,13 @@ export PATH="$HOME/.local/bin:$PATH"
 # Linuxbrew
 [[ -d /home/linuxbrew/.linuxbrew ]] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
-# Vim keybindings
-bindkey -v
-export KEYTIMEOUT=1
+# Emacs keybindings (Mac-style navigation)
+bindkey -e
 
-# Better vim mode experience
-bindkey '^P' up-history
-bindkey '^N' down-history
-bindkey '^?' backward-delete-char
-bindkey '^h' backward-delete-char
-bindkey '^w' backward-kill-word
-
-# Edit command in nvim with Ctrl-e
+# Edit command in nvim with Ctrl-x Ctrl-e (standard emacs binding)
 autoload -Uz edit-command-line
 zle -N edit-command-line
-bindkey '^e' edit-command-line
+bindkey '^x^e' edit-command-line
 
 # eza aliases (modern ls replacement)
 if command -v eza &> /dev/null; then
@@ -1058,11 +1050,12 @@ cat << 'EOF'
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ ZSH (vim mode)                                                              │
+│ ZSH (emacs/Mac-style)                                                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Esc              Enter normal mode       Ctrl-p/n       History up/down    │
-│ Ctrl-e           Edit command in nvim    Ctrl-w         Delete word back   │
+│ Ctrl-a/e         Start/end of line       Ctrl-p/n       History up/down    │
+│ Ctrl-x Ctrl-e    Edit command in nvim    Ctrl-w         Delete word back   │
 │ Ctrl-r           Search history          Ctrl-f         Accept suggestion  │
+│ Alt-b/f          Word back/forward       Ctrl-k         Kill to end        │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
