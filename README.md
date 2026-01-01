@@ -21,8 +21,9 @@ Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/De
 | **fastfetch** | System info display |
 | **neovim** | Editor (Kickstart.nvim) |
 | **sshh** | Quick SSH connection manager |
+| **macmon** | macOS system monitor (macOS only) |
 
-### macOS Quality-of-Life Apps (macOS only)
+### macOS Quality-of-Life Apps (optional, macOS only)
 
 | App | Description |
 |-----|-------------|
@@ -39,6 +40,18 @@ Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/De
 | **mas** | Mac App Store CLI |
 | **trash** | Move files to trash from CLI |
 
+### Raspberry Pi Support
+
+Optimized configurations for different Pi models:
+
+| Model | Flag | Notes |
+|-------|------|-------|
+| **Pi 5** | `--raspi5` | Full toolset, all features |
+| **Pi 4** | `--raspi` | Full toolset |
+| **Pi Zero 2** | `--raspizero2` | Lightweight (skips yazi, btop) |
+
+Raspberry Pi installs via apt + manual builds for modern tools not in repos.
+
 ## Installation
 
 ### Quick Install (Recommended)
@@ -47,10 +60,14 @@ Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/De
 # macOS/Linux
 curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash
 
-# Or clone and run
-git clone https://github.com/tekierz/dotfiles.git
-cd dotfiles
-./bin/dotfiles-setup
+# With all macOS apps
+curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --macos-apps
+
+# Raspberry Pi
+curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --raspi
+
+# Raspberry Pi Zero 2 (lightweight)
+curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --raspizero2
 ```
 
 ### Homebrew
@@ -69,6 +86,17 @@ cd dotfiles
 chmod +x bin/dotfiles-setup
 ./bin/dotfiles-setup
 ```
+
+### Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `--macos-apps` | Install all optional macOS quality-of-life apps |
+| `--raspi` | Raspberry Pi mode (auto-detect model) |
+| `--raspi5` | Raspberry Pi 5 optimizations |
+| `--raspizero2` | Raspberry Pi Zero 2 (lightweight mode) |
+| `-y, --yes` | Skip confirmation prompts |
+| `-h, --help` | Show help |
 
 ## Features
 

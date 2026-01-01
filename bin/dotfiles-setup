@@ -2,24 +2,36 @@
 #
 # Dotfiles Setup Script
 # https://github.com/tekierz/dotfiles
-# Sets up terminal environment on macOS or Linux (Arch-based)
+# Sets up terminal environment on macOS, Linux (Arch-based), or Raspberry Pi
 # Theme: Catppuccin Mocha
 #
 
 VERSION="1.0.0"
 
-# Handle --help and --version
-case "${1:-}" in
-    -h|--help|help)
-        cat << 'EOF'
+# Default flags
+INSTALL_MACOS_APPS=false
+RASPI_MODE=false
+RASPI_MODEL=""
+SKIP_PROMPTS=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help|help)
+            cat << 'EOF'
 dotfiles-setup - Cross-platform terminal environment setup
 
 USAGE
     dotfiles-setup [options]
 
 OPTIONS
-    -h, --help      Show this help message
-    -v, --version   Show version
+    -h, --help          Show this help message
+    -v, --version       Show version
+    --macos-apps        Install optional macOS quality-of-life apps
+    --raspi             Raspberry Pi mode (auto-detect model)
+    --raspi5            Raspberry Pi 5 optimizations
+    --raspizero2        Raspberry Pi Zero 2 optimizations (lightweight)
+    -y, --yes           Skip confirmation prompts
 
 DESCRIPTION
     Sets up a complete terminal environment with Catppuccin Mocha theme.
@@ -27,24 +39,52 @@ DESCRIPTION
     Installs and configures:
       • zsh with syntax highlighting & autosuggestions
       • tmux with powerline status bar
-      • Ghostty terminal config
+      • Ghostty terminal config (where available)
       • eza, yazi, zoxide, fzf, bat, delta
       • neovim (Kickstart.nvim)
       • Custom utilities: hk, caff, sshh
 
-    Supports: macOS, Arch Linux, Debian/Ubuntu
+    Supports: macOS, Arch Linux, Debian/Ubuntu, Raspberry Pi OS
 
 HOMEPAGE
     https://github.com/tekierz/dotfiles
 
 EOF
-        exit 0
-        ;;
-    -v|--version|version)
-        echo "dotfiles-setup version $VERSION"
-        exit 0
-        ;;
-esac
+            exit 0
+            ;;
+        -v|--version|version)
+            echo "dotfiles-setup version $VERSION"
+            exit 0
+            ;;
+        --macos-apps)
+            INSTALL_MACOS_APPS=true
+            shift
+            ;;
+        --raspi)
+            RASPI_MODE=true
+            shift
+            ;;
+        --raspi5)
+            RASPI_MODE=true
+            RASPI_MODEL="pi5"
+            shift
+            ;;
+        --raspizero2)
+            RASPI_MODE=true
+            RASPI_MODEL="zero2"
+            shift
+            ;;
+        -y|--yes)
+            SKIP_PROMPTS=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage"
+            exit 1
+            ;;
+    esac
+done
 
 set -e
 
@@ -79,6 +119,56 @@ print_error() {
     echo -e "${RED}✗${NC} $1"
 }
 
+# Ask user yes/no question
+ask_user() {
+    if [[ "$SKIP_PROMPTS" == "true" ]]; then
+        return 0
+    fi
+    local prompt="$1"
+    local default="${2:-n}"
+    local reply
+
+    if [[ "$default" == "y" ]]; then
+        echo -ne "${CYAN}?${NC} $prompt [Y/n]: "
+    else
+        echo -ne "${CYAN}?${NC} $prompt [y/N]: "
+    fi
+    read -r reply
+    reply=${reply:-$default}
+    [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# Backup config file if it exists
+backup_config() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        local backup="${file}.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$file" "$backup"
+        print_warning "Backed up existing config: $backup"
+    fi
+}
+
+# Write config only if it doesn't exist, otherwise prompt
+write_config() {
+    local file="$1"
+    local content="$2"
+    local description="${3:-config}"
+
+    if [[ -f "$file" ]]; then
+        if ask_user "Config $file exists. Overwrite?"; then
+            backup_config "$file"
+            echo "$content" > "$file"
+            print_success "Updated $description"
+        else
+            print_warning "Skipped $description (keeping existing)"
+        fi
+    else
+        mkdir -p "$(dirname "$file")"
+        echo "$content" > "$file"
+        print_success "Created $description"
+    fi
+}
+
 # Detect OS
 detect_os() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -86,17 +176,41 @@ detect_os() {
     elif [[ -f /etc/arch-release ]] || [[ -f /etc/cachyos-release ]]; then
         OS="arch"
     elif [[ -f /etc/debian_version ]]; then
-        OS="debian"
+        # Check if it's a Raspberry Pi
+        if [[ -f /proc/device-tree/model ]] && grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
+            OS="raspi"
+            # Auto-detect Pi model if not specified
+            if [[ -z "$RASPI_MODEL" ]]; then
+                if grep -q "Pi 5" /proc/device-tree/model 2>/dev/null; then
+                    RASPI_MODEL="pi5"
+                elif grep -q "Zero 2" /proc/device-tree/model 2>/dev/null; then
+                    RASPI_MODEL="zero2"
+                elif grep -q "Pi 4" /proc/device-tree/model 2>/dev/null; then
+                    RASPI_MODEL="pi4"
+                else
+                    RASPI_MODEL="generic"
+                fi
+            fi
+        else
+            OS="debian"
+        fi
     else
         OS="unknown"
     fi
     echo "$OS"
 }
 
-OS=$(detect_os)
+# Override OS if raspi mode is forced
+if [[ "$RASPI_MODE" == "true" ]]; then
+    OS="raspi"
+else
+    OS=$(detect_os)
+fi
 
 print_header "Dotfiles Setup (Catppuccin Mocha Theme)"
-echo -e "Detected OS: ${CYAN}$OS${NC}\n"
+echo -e "Detected OS: ${CYAN}$OS${NC}"
+[[ "$OS" == "raspi" ]] && echo -e "Raspberry Pi Model: ${CYAN}${RASPI_MODEL}${NC}"
+echo ""
 
 # ============================================================================
 # PACKAGE INSTALLATION
@@ -148,29 +262,135 @@ install_packages() {
         print_step "Installing Ghostty..."
         brew install --cask ghostty 2>/dev/null || print_warning "Ghostty not available via brew, install manually"
 
-        # macOS Quality of Life Apps
-        print_step "Installing macOS quality-of-life apps..."
-        brew install --cask \
-            rectangle \
-            raycast \
-            stats \
-            alt-tab \
-            monitorcontrol \
-            mos \
-            karabiner-elements \
-            iina \
-            the-unarchiver \
-            appcleaner \
+        # macOS system monitor (macmon)
+        print_step "Installing macmon..."
+        brew install macmon 2>/dev/null || print_warning "macmon not available"
+
+        # Optional macOS Quality of Life Apps
+        if [[ "$INSTALL_MACOS_APPS" == "true" ]] || ask_user "Install optional macOS quality-of-life apps? (Rectangle, Raycast, Stats, etc.)"; then
+            print_step "Installing macOS quality-of-life apps..."
+
+            # Essential (always install)
+            brew install --cask \
+                rectangle \
+                raycast \
+                stats \
+                2>/dev/null || true
+
+            # Optional (prompt individually if not using --macos-apps flag)
+            if [[ "$INSTALL_MACOS_APPS" == "true" ]] || [[ "$SKIP_PROMPTS" == "true" ]]; then
+                brew install --cask \
+                    alt-tab \
+                    monitorcontrol \
+                    mos \
+                    karabiner-elements \
+                    iina \
+                    the-unarchiver \
+                    appcleaner \
+                    2>/dev/null || true
+
+                brew install \
+                    mas \
+                    trash \
+                    switchaudio-osx \
+                    2>/dev/null || true
+            else
+                # Ask for each optional app
+                ask_user "Install AltTab (Windows-style alt-tab)?" && brew install --cask alt-tab 2>/dev/null || true
+                ask_user "Install MonitorControl (external monitor brightness)?" && brew install --cask monitorcontrol 2>/dev/null || true
+                ask_user "Install Mos (smooth scrolling for mouse)?" && brew install --cask mos 2>/dev/null || true
+                ask_user "Install Karabiner-Elements (keyboard customization)?" && brew install --cask karabiner-elements 2>/dev/null || true
+                ask_user "Install IINA (modern video player)?" && brew install --cask iina 2>/dev/null || true
+                ask_user "Install The Unarchiver?" && brew install --cask the-unarchiver 2>/dev/null || true
+                ask_user "Install AppCleaner?" && brew install --cask appcleaner 2>/dev/null || true
+                ask_user "Install mas (Mac App Store CLI)?" && brew install mas 2>/dev/null || true
+                ask_user "Install trash (CLI trash command)?" && brew install trash 2>/dev/null || true
+            fi
+
+            print_success "macOS apps installed"
+        else
+            print_warning "Skipped macOS apps (use --macos-apps to install)"
+        fi
+
+    elif [[ "$OS" == "raspi" ]]; then
+        print_step "Installing packages for Raspberry Pi..."
+
+        # Base packages for all Pi models
+        sudo apt update
+        sudo apt install -y \
+            zsh \
+            tmux \
+            neovim \
+            fzf \
+            bat \
+            ripgrep \
+            fd-find \
+            git \
+            curl \
+            wget \
+            htop \
             2>/dev/null || true
 
-        # Optional: Additional useful CLI tools for macOS
-        brew install \
-            mas \
-            trash \
-            switchaudio-osx \
-            2>/dev/null || true
+        # Model-specific optimizations
+        if [[ "$RASPI_MODEL" == "zero2" ]]; then
+            print_step "Applying Raspberry Pi Zero 2 optimizations (lightweight)..."
+            # Skip heavy tools for Zero 2
+            print_warning "Skipping yazi, btop (too heavy for Zero 2)"
+        else
+            # Pi 4/5 can handle more
+            print_step "Installing additional tools for Pi ${RASPI_MODEL}..."
+            sudo apt install -y \
+                btop \
+                2>/dev/null || true
+        fi
 
-        print_success "macOS apps installed"
+        # Install from source/binary for tools not in apt
+        print_step "Installing modern CLI tools..."
+
+        # eza (modern ls)
+        if ! command -v eza &> /dev/null; then
+            if [[ "$RASPI_MODEL" != "zero2" ]]; then
+                print_step "Installing eza..."
+                sudo apt install -y eza 2>/dev/null || \
+                    cargo install eza 2>/dev/null || \
+                    print_warning "Could not install eza"
+            fi
+        fi
+
+        # zoxide
+        if ! command -v zoxide &> /dev/null; then
+            print_step "Installing zoxide..."
+            curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash 2>/dev/null || \
+                print_warning "Could not install zoxide"
+        fi
+
+        # yazi (skip on Zero 2)
+        if [[ "$RASPI_MODEL" != "zero2" ]] && ! command -v yazi &> /dev/null; then
+            print_step "Installing yazi..."
+            cargo install --locked yazi-fm 2>/dev/null || \
+                print_warning "Could not install yazi (requires cargo)"
+        fi
+
+        # delta
+        if ! command -v delta &> /dev/null; then
+            print_step "Installing delta..."
+            cargo install git-delta 2>/dev/null || \
+                print_warning "Could not install delta"
+        fi
+
+        # Pi-specific: install zsh plugins manually
+        print_step "Installing zsh plugins..."
+        ZSH_PLUGINS_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins"
+        mkdir -p "$ZSH_PLUGINS_DIR"
+
+        if [[ ! -d "$ZSH_PLUGINS_DIR/zsh-syntax-highlighting" ]]; then
+            git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_PLUGINS_DIR/zsh-syntax-highlighting" 2>/dev/null || true
+        fi
+        if [[ ! -d "$ZSH_PLUGINS_DIR/zsh-autosuggestions" ]]; then
+            git clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_PLUGINS_DIR/zsh-autosuggestions" 2>/dev/null || true
+        fi
+
+        print_success "Raspberry Pi packages installed"
 
     elif [[ "$OS" == "arch" ]]; then
         print_step "Installing packages via pacman..."
