@@ -1,0 +1,1172 @@
+#!/usr/bin/env bash
+#
+# Dotfiles Setup Script
+# https://github.com/tekierz/dotfiles
+# Sets up terminal environment on macOS or Linux (Arch-based)
+# Theme: Catppuccin Mocha
+#
+
+VERSION="1.0.0"
+
+# Handle --help and --version
+case "${1:-}" in
+    -h|--help|help)
+        cat << 'EOF'
+dotfiles-setup - Cross-platform terminal environment setup
+
+USAGE
+    dotfiles-setup [options]
+
+OPTIONS
+    -h, --help      Show this help message
+    -v, --version   Show version
+
+DESCRIPTION
+    Sets up a complete terminal environment with Catppuccin Mocha theme.
+
+    Installs and configures:
+      • zsh with syntax highlighting & autosuggestions
+      • tmux with powerline status bar
+      • Ghostty terminal config
+      • eza, yazi, zoxide, fzf, bat, delta
+      • neovim (Kickstart.nvim)
+      • Custom utilities: hk, caff, sshh
+
+    Supports: macOS, Arch Linux, Debian/Ubuntu
+
+HOMEPAGE
+    https://github.com/tekierz/dotfiles
+
+EOF
+        exit 0
+        ;;
+    -v|--version|version)
+        echo "dotfiles-setup version $VERSION"
+        exit 0
+        ;;
+esac
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+print_header() {
+    echo -e "\n${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${PURPLE}  $1${NC}"
+    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+}
+
+print_step() {
+    echo -e "${CYAN}▶${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+# Detect OS
+detect_os() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        OS="macos"
+    elif [[ -f /etc/arch-release ]] || [[ -f /etc/cachyos-release ]]; then
+        OS="arch"
+    elif [[ -f /etc/debian_version ]]; then
+        OS="debian"
+    else
+        OS="unknown"
+    fi
+    echo "$OS"
+}
+
+OS=$(detect_os)
+
+print_header "Dotfiles Setup (Catppuccin Mocha Theme)"
+echo -e "Detected OS: ${CYAN}$OS${NC}\n"
+
+# ============================================================================
+# PACKAGE INSTALLATION
+# ============================================================================
+
+install_packages() {
+    print_header "Installing Packages"
+
+    if [[ "$OS" == "macos" ]]; then
+        # Install Homebrew if not present
+        if ! command -v brew &> /dev/null; then
+            print_step "Installing Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+            # Add to path for this session
+            eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null || eval "$(/usr/local/bin/brew shellenv)"
+            print_success "Homebrew installed"
+        else
+            print_success "Homebrew already installed"
+        fi
+
+        print_step "Installing packages via Homebrew..."
+        brew install \
+            zsh \
+            zsh-syntax-highlighting \
+            zsh-autosuggestions \
+            eza \
+            yazi \
+            zoxide \
+            fzf \
+            bat \
+            ripgrep \
+            fd \
+            git-delta \
+            btop \
+            fastfetch \
+            tmux \
+            neovim \
+            tlrc \
+            powerlevel10k \
+            2>/dev/null || true
+
+        # Install fonts
+        print_step "Installing Nerd Fonts..."
+        brew tap homebrew/cask-fonts 2>/dev/null || true
+        brew install --cask font-jetbrains-mono-nerd-font font-iosevka-nerd-font 2>/dev/null || true
+
+        # Install Ghostty if available
+        print_step "Installing Ghostty..."
+        brew install --cask ghostty 2>/dev/null || print_warning "Ghostty not available via brew, install manually"
+
+    elif [[ "$OS" == "arch" ]]; then
+        print_step "Installing packages via pacman..."
+        sudo pacman -S --needed --noconfirm \
+            zsh \
+            zsh-syntax-highlighting \
+            zsh-autosuggestions \
+            eza \
+            yazi \
+            zoxide \
+            fzf \
+            bat \
+            ripgrep \
+            fd \
+            git-delta \
+            btop \
+            fastfetch \
+            tmux \
+            neovim \
+            ttf-jetbrains-mono-nerd \
+            pacman-contrib \
+            2>/dev/null || true
+
+        # Enable paccache timer
+        sudo systemctl enable --now paccache.timer 2>/dev/null || true
+
+        # Install paru packages
+        if command -v paru &> /dev/null; then
+            print_step "Installing AUR packages..."
+            paru -S --needed --noconfirm \
+                ghostty \
+                2>/dev/null || true
+        fi
+
+    elif [[ "$OS" == "debian" ]]; then
+        print_step "Installing packages via apt..."
+        sudo apt update
+        sudo apt install -y \
+            zsh \
+            tmux \
+            neovim \
+            fzf \
+            bat \
+            ripgrep \
+            fd-find \
+            btop \
+            2>/dev/null || true
+
+        print_warning "Some packages may need manual installation on Debian/Ubuntu"
+        print_warning "Consider using Homebrew for: eza, yazi, zoxide, delta, fastfetch"
+    fi
+
+    print_success "Package installation complete"
+}
+
+# ============================================================================
+# DIRECTORY SETUP
+# ============================================================================
+
+setup_directories() {
+    print_header "Setting Up Directories"
+
+    mkdir -p ~/.config/ghostty/themes
+    mkdir -p ~/.config/yazi
+    mkdir -p ~/.config/bat
+    mkdir -p ~/.config/nvim
+    mkdir -p ~/.local/bin
+
+    print_success "Directories created"
+}
+
+# ============================================================================
+# ZSH CONFIGURATION
+# ============================================================================
+
+setup_zsh() {
+    print_header "Configuring Zsh"
+
+    # Determine plugin paths based on OS
+    if [[ "$OS" == "macos" ]]; then
+        SYNTAX_HL_PATH="/opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+        AUTOSUGG_PATH="/opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
+        FZF_KEYBIND_PATH="/opt/homebrew/opt/fzf/shell/key-bindings.zsh"
+        FZF_COMPLETION_PATH="/opt/homebrew/opt/fzf/shell/completion.zsh"
+        P10K_PATH="/opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme"
+
+        # Intel Mac fallback
+        if [[ ! -f "$SYNTAX_HL_PATH" ]]; then
+            SYNTAX_HL_PATH="/usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+            AUTOSUGG_PATH="/usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
+            FZF_KEYBIND_PATH="/usr/local/opt/fzf/shell/key-bindings.zsh"
+            FZF_COMPLETION_PATH="/usr/local/opt/fzf/shell/completion.zsh"
+            P10K_PATH="/usr/local/share/powerlevel10k/powerlevel10k.zsh-theme"
+        fi
+    else
+        SYNTAX_HL_PATH="/usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+        AUTOSUGG_PATH="/usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
+        FZF_KEYBIND_PATH="/usr/share/fzf/key-bindings.zsh"
+        FZF_COMPLETION_PATH="/usr/share/fzf/completion.zsh"
+        P10K_PATH=""
+    fi
+
+    cat > ~/.zshrc << 'ZSHRC_EOF'
+# System info on new shell
+command -v fastfetch &> /dev/null && fastfetch
+
+# Enable Powerlevel10k instant prompt
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+# Powerlevel10k theme (macOS)
+[[ -f /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme ]] && \
+  source /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme
+[[ -f /usr/local/share/powerlevel10k/powerlevel10k.zsh-theme ]] && \
+  source /usr/local/share/powerlevel10k/powerlevel10k.zsh-theme
+
+# CachyOS config (Linux)
+[[ -f /usr/share/cachyos-zsh-config/cachyos-config.zsh ]] && \
+  source /usr/share/cachyos-zsh-config/cachyos-config.zsh
+
+# PATH additions
+export PATH="$HOME/.local/bin:$PATH"
+
+# Homebrew (macOS)
+[[ -d /opt/homebrew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
+[[ -d /usr/local/Homebrew ]] && eval "$(/usr/local/bin/brew shellenv)"
+
+# Linuxbrew
+[[ -d /home/linuxbrew/.linuxbrew ]] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+# Vim keybindings
+bindkey -v
+export KEYTIMEOUT=1
+
+# Better vim mode experience
+bindkey '^P' up-history
+bindkey '^N' down-history
+bindkey '^?' backward-delete-char
+bindkey '^h' backward-delete-char
+bindkey '^w' backward-kill-word
+
+# Edit command in nvim with Ctrl-e
+autoload -Uz edit-command-line
+zle -N edit-command-line
+bindkey '^e' edit-command-line
+
+# eza aliases (modern ls replacement)
+if command -v eza &> /dev/null; then
+  alias ls='eza --icons --group-directories-first'
+  alias ll='eza -l --icons --group-directories-first --git'
+  alias la='eza -la --icons --group-directories-first --git'
+  alias lt='eza --tree --level=2 --icons --group-directories-first'
+  alias lta='eza --tree --level=2 -a --icons --group-directories-first'
+fi
+
+# zoxide (smarter cd)
+if command -v zoxide &> /dev/null; then
+  eval "$(zoxide init zsh)"
+  alias cd='z'
+fi
+
+# yazi file manager (y to open, exit to cd into last dir)
+function y() {
+  local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+  yazi "$@" --cwd-file="$tmp"
+  if cwd="$(cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+    builtin cd "$cwd" || z "$cwd" 2>/dev/null
+  fi
+  rm -f -- "$tmp"
+}
+
+# fzf (fuzzy finder)
+[[ -f /usr/share/fzf/key-bindings.zsh ]] && source /usr/share/fzf/key-bindings.zsh
+[[ -f /usr/share/fzf/completion.zsh ]] && source /usr/share/fzf/completion.zsh
+[[ -f /opt/homebrew/opt/fzf/shell/key-bindings.zsh ]] && source /opt/homebrew/opt/fzf/shell/key-bindings.zsh
+[[ -f /opt/homebrew/opt/fzf/shell/completion.zsh ]] && source /opt/homebrew/opt/fzf/shell/completion.zsh
+[[ -f /usr/local/opt/fzf/shell/key-bindings.zsh ]] && source /usr/local/opt/fzf/shell/key-bindings.zsh
+[[ -f /usr/local/opt/fzf/shell/completion.zsh ]] && source /usr/local/opt/fzf/shell/completion.zsh
+
+export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border'
+if command -v fd &> /dev/null; then
+  export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+  export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+  export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
+fi
+
+# fzf colors (Catppuccin Mocha)
+export FZF_DEFAULT_OPTS="$FZF_DEFAULT_OPTS \
+  --color=fg:#cdd6f4,bg:-1,hl:#f38ba8 \
+  --color=fg+:#cdd6f4,bg+:#313244,hl+:#f38ba8 \
+  --color=info:#cba6f7,prompt:#94e2d5,pointer:#f5e0dc \
+  --color=marker:#f5e0dc,spinner:#f5e0dc,header:#94e2d5 \
+  --prompt='  ' --pointer='▶' --marker='✓'"
+
+# Preview files with bat in fzf
+if command -v bat &> /dev/null; then
+  export FZF_CTRL_T_OPTS="--preview 'bat --color=always --style=numbers --line-range=:500 {}'"
+fi
+
+# Colorful man pages
+export LESS_TERMCAP_mb=$'\e[1;32m'
+export LESS_TERMCAP_md=$'\e[1;32m'
+export LESS_TERMCAP_me=$'\e[0m'
+export LESS_TERMCAP_se=$'\e[0m'
+export LESS_TERMCAP_so=$'\e[01;33m'
+export LESS_TERMCAP_ue=$'\e[0m'
+export LESS_TERMCAP_us=$'\e[1;4;31m'
+
+# Zsh syntax highlighting & autosuggestions
+[[ -f /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+  source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+[[ -f /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
+  source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+[[ -f /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+  source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+[[ -f /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
+  source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[[ -f /usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+  source /usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+[[ -f /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
+  source /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+
+# Autosuggestion style
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=244'
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+bindkey '^f' autosuggest-accept
+
+# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+[[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+ZSHRC_EOF
+
+    print_success "Zsh configured"
+}
+
+# ============================================================================
+# TMUX CONFIGURATION
+# ============================================================================
+
+setup_tmux() {
+    print_header "Configuring Tmux"
+
+    cat > ~/.tmux.conf << 'TMUX_EOF'
+# Terminal settings
+set -g default-terminal "tmux-256color"
+set -ga terminal-overrides ",xterm-256color:Tc"
+
+# Use Ctrl-a instead of Ctrl-b (easier to reach)
+set -g prefix C-a
+unbind C-b
+bind C-a send-prefix
+
+# Vim-style pane navigation (hjkl)
+bind h select-pane -L
+bind j select-pane -D
+bind k select-pane -U
+bind l select-pane -R
+
+# Vim-style pane resizing
+bind -r H resize-pane -L 5
+bind -r J resize-pane -D 5
+bind -r K resize-pane -U 5
+bind -r L resize-pane -R 5
+
+# Split panes with | and - (more intuitive)
+bind | split-window -h -c "#{pane_current_path}"
+bind - split-window -v -c "#{pane_current_path}"
+
+# New windows open in current path
+bind c new-window -c "#{pane_current_path}"
+
+# Enable mouse
+set -g mouse on
+
+# Start window/pane numbering at 1
+set -g base-index 1
+setw -g pane-base-index 1
+set -g renumber-windows on
+
+# Faster escape time (important for nvim)
+set -sg escape-time 0
+
+# Increase scrollback buffer
+set -g history-limit 50000
+
+# Reload config with r
+bind r source-file ~/.tmux.conf \; display "Config reloaded!"
+
+# Vi mode for copy mode
+setw -g mode-keys vi
+bind -T copy-mode-vi v send -X begin-selection
+bind -T copy-mode-vi y send -X copy-selection-and-cancel
+
+# Quick window switching (Alt + number, no prefix needed)
+bind -n M-1 select-window -t 1
+bind -n M-2 select-window -t 2
+bind -n M-3 select-window -t 3
+bind -n M-4 select-window -t 4
+bind -n M-5 select-window -t 5
+
+# Alt + hjkl pane navigation (no prefix needed)
+bind -n M-h select-pane -L
+bind -n M-j select-pane -D
+bind -n M-k select-pane -U
+bind -n M-l select-pane -R
+
+# Status bar (Catppuccin Mocha)
+set -g status-position top
+set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
+set -g status-left '#[fg=#1e1e2e,bg=#89b4fa,bold]  #S #[fg=#89b4fa,bg=#1e1e2e]'
+set -g status-right '#[fg=#45475a]#[fg=#cdd6f4,bg=#45475a] %H:%M #[fg=#89b4fa]#[fg=#1e1e2e,bg=#89b4fa,bold] %d %b '
+set -g status-left-length 30
+set -g status-right-length 50
+
+# Window status
+setw -g window-status-current-style 'fg=#1e1e2e bg=#a6e3a1 bold'
+setw -g window-status-current-format '#[fg=#1e1e2e,bg=#a6e3a1]#[fg=#1e1e2e,bg=#a6e3a1] #I  #W #[fg=#a6e3a1,bg=#1e1e2e]'
+setw -g window-status-style 'fg=#6c7086 bg=#1e1e2e'
+setw -g window-status-format '  #I  #W  '
+setw -g window-status-separator ''
+
+# Pane borders
+set -g pane-border-style 'fg=#45475a'
+set -g pane-active-border-style 'fg=#89b4fa'
+
+# Messages
+set -g message-style 'bg=#f9e2af fg=#1e1e2e bold'
+
+# Mode (copy mode, etc)
+setw -g mode-style 'bg=#f38ba8 fg=#1e1e2e bold'
+
+# Don't exit copy mode on mouse drag end
+unbind -T copy-mode-vi MouseDragEnd1Pane
+TMUX_EOF
+
+    print_success "Tmux configured"
+}
+
+# ============================================================================
+# GHOSTTY CONFIGURATION
+# ============================================================================
+
+setup_ghostty() {
+    print_header "Configuring Ghostty"
+
+    cat > ~/.config/ghostty/config << 'GHOSTTY_EOF'
+font-family = JetBrainsMono Nerd Font
+font-size = 13
+
+# Catppuccin Mocha theme
+theme = catppuccin-mocha
+
+background-opacity = 0.9
+
+window-padding-x = 8
+window-padding-y = 8
+
+cursor-style = block
+cursor-style-blink = false
+mouse-hide-while-typing = true
+
+confirm-close-surface = false
+window-save-state = always
+
+shell-integration = detect
+
+clipboard-read = ask
+clipboard-write = allow
+clipboard-paste-protection = true
+
+scrollback-limit = 67108864
+GHOSTTY_EOF
+
+    # Create theme file
+    cat > ~/.config/ghostty/themes/catppuccin-mocha << 'THEME_EOF'
+# Catppuccin Mocha theme for Ghostty
+
+background = #1e1e2e
+foreground = #cdd6f4
+cursor-color = #f5e0dc
+cursor-text = #1e1e2e
+selection-background = #585b70
+selection-foreground = #cdd6f4
+
+palette = 0=#45475a
+palette = 8=#585b70
+palette = 1=#f38ba8
+palette = 9=#f38ba8
+palette = 2=#a6e3a1
+palette = 10=#a6e3a1
+palette = 3=#f9e2af
+palette = 11=#f9e2af
+palette = 4=#89b4fa
+palette = 12=#89b4fa
+palette = 5=#f5c2e7
+palette = 13=#f5c2e7
+palette = 6=#94e2d5
+palette = 14=#94e2d5
+palette = 7=#bac2de
+palette = 15=#a6adc8
+THEME_EOF
+
+    print_success "Ghostty configured"
+}
+
+# ============================================================================
+# YAZI CONFIGURATION
+# ============================================================================
+
+setup_yazi() {
+    print_header "Configuring Yazi"
+
+    cat > ~/.config/yazi/yazi.toml << 'YAZI_EOF'
+[manager]
+ratio = [1, 3, 4]
+sort_by = "natural"
+sort_dir_first = true
+show_hidden = false
+show_symlink = true
+
+[preview]
+tab_size = 2
+max_width = 1000
+max_height = 1000
+
+[opener]
+edit = [
+  { run = 'nvim "$@"', block = true, for = "unix" },
+]
+
+[open]
+rules = [
+  { mime = "text/*", use = "edit" },
+  { mime = "application/json", use = "edit" },
+  { mime = "application/x-yaml", use = "edit" },
+]
+YAZI_EOF
+
+    cat > ~/.config/yazi/keymap.toml << 'KEYMAP_EOF'
+[manager]
+keymap = [
+  { on = ["<Esc>"], run = "escape", desc = "Exit visual mode" },
+  { on = ["q"], run = "quit", desc = "Quit" },
+  { on = ["Q"], run = "quit --no-cwd-file", desc = "Quit without cd" },
+
+  # Navigation (vim-style)
+  { on = ["k"], run = "arrow -1", desc = "Move up" },
+  { on = ["j"], run = "arrow 1", desc = "Move down" },
+  { on = ["K"], run = "arrow -5", desc = "Move up 5" },
+  { on = ["J"], run = "arrow 5", desc = "Move down 5" },
+  { on = ["h"], run = "leave", desc = "Go to parent" },
+  { on = ["l"], run = "enter", desc = "Enter directory" },
+  { on = ["<C-u>"], run = "arrow -50%", desc = "Half page up" },
+  { on = ["<C-d>"], run = "arrow 50%", desc = "Half page down" },
+
+  { on = ["g", "g"], run = "arrow -99999999", desc = "Go to top" },
+  { on = ["G"], run = "arrow 99999999", desc = "Go to bottom" },
+
+  # Selection
+  { on = ["<Space>"], run = ["select --state=none", "arrow 1"], desc = "Toggle select" },
+  { on = ["v"], run = "visual_mode", desc = "Visual mode" },
+
+  # Operations
+  { on = ["o"], run = "open", desc = "Open" },
+  { on = ["<Enter>"], run = "open", desc = "Open" },
+  { on = ["y"], run = "yank", desc = "Yank" },
+  { on = ["x"], run = "yank --cut", desc = "Cut" },
+  { on = ["p"], run = "paste", desc = "Paste" },
+  { on = ["d"], run = "remove", desc = "Trash" },
+  { on = ["D"], run = "remove --permanently", desc = "Delete" },
+  { on = ["a"], run = "create", desc = "Create" },
+  { on = ["r"], run = "rename --cursor=before_ext", desc = "Rename" },
+
+  # Find
+  { on = ["/"], run = "find --smart", desc = "Find" },
+  { on = ["n"], run = "find_arrow", desc = "Next match" },
+  { on = ["N"], run = "find_arrow --previous", desc = "Prev match" },
+  { on = ["f"], run = "filter --smart", desc = "Filter" },
+
+  # Goto
+  { on = ["g", "h"], run = "cd ~", desc = "Go home" },
+  { on = ["g", "c"], run = "cd ~/.config", desc = "Go config" },
+  { on = ["g", "d"], run = "cd ~/Downloads", desc = "Go downloads" },
+
+  # Toggle
+  { on = ["."], run = "hidden toggle", desc = "Toggle hidden" },
+]
+KEYMAP_EOF
+
+    cat > ~/.config/yazi/theme.toml << 'THEME_EOF'
+# Catppuccin Mocha theme for Yazi
+
+[manager]
+cwd = { fg = "#94e2d5" }
+hovered = { fg = "#1e1e2e", bg = "#89b4fa" }
+preview_hovered = { underline = true }
+
+find_keyword = { fg = "#f9e2af", bold = true, italic = true, underline = true }
+find_position = { fg = "#f38ba8", bg = "reset", bold = true }
+
+marker_copied = { fg = "#a6e3a1", bg = "#a6e3a1" }
+marker_cut = { fg = "#f38ba8", bg = "#f38ba8" }
+marker_marked = { fg = "#89b4fa", bg = "#89b4fa" }
+marker_selected = { fg = "#f9e2af", bg = "#f9e2af" }
+
+tab_active = { fg = "#1e1e2e", bg = "#cdd6f4" }
+tab_inactive = { fg = "#cdd6f4", bg = "#45475a" }
+
+border_symbol = "│"
+border_style = { fg = "#7f849c" }
+
+[status]
+separator_open = ""
+separator_close = ""
+separator_style = { fg = "#45475a", bg = "#45475a" }
+
+mode_normal = { fg = "#1e1e2e", bg = "#89b4fa", bold = true }
+mode_select = { fg = "#1e1e2e", bg = "#a6e3a1", bold = true }
+
+progress_label = { fg = "#cdd6f4", bold = true }
+progress_normal = { fg = "#89b4fa", bg = "#45475a" }
+progress_error = { fg = "#f38ba8", bg = "#45475a" }
+
+permissions_t = { fg = "#89b4fa" }
+permissions_r = { fg = "#f9e2af" }
+permissions_w = { fg = "#f38ba8" }
+permissions_x = { fg = "#a6e3a1" }
+permissions_s = { fg = "#7f849c" }
+
+[input]
+border = { fg = "#89b4fa" }
+title = {}
+value = {}
+selected = { reversed = true }
+
+[select]
+border = { fg = "#89b4fa" }
+active = { fg = "#f38ba8", bold = true }
+inactive = {}
+
+[tasks]
+border = { fg = "#89b4fa" }
+title = {}
+hovered = { fg = "#f38ba8", underline = true }
+
+[which]
+cols = 3
+mask = { bg = "#313244" }
+cand = { fg = "#94e2d5" }
+rest = { fg = "#9399b2" }
+desc = { fg = "#f38ba8" }
+separator = "  "
+separator_style = { fg = "#585b70" }
+
+[help]
+on = { fg = "#94e2d5" }
+run = { fg = "#f38ba8" }
+desc = {}
+hovered = { reversed = true, bold = true }
+footer = { fg = "#45475a", bg = "#cdd6f4" }
+
+[filetype]
+rules = [
+  { mime = "image/*", fg = "#f9e2af" },
+  { mime = "video/*", fg = "#f38ba8" },
+  { mime = "audio/*", fg = "#f38ba8" },
+  { mime = "application/zip", fg = "#cba6f7" },
+  { mime = "application/gzip", fg = "#cba6f7" },
+  { mime = "application/x-tar", fg = "#cba6f7" },
+  { mime = "application/pdf", fg = "#f38ba8" },
+  { name = "*", fg = "#cdd6f4" },
+  { name = "*/", fg = "#89b4fa" },
+]
+THEME_EOF
+
+    print_success "Yazi configured"
+}
+
+# ============================================================================
+# GIT CONFIGURATION
+# ============================================================================
+
+setup_git() {
+    print_header "Configuring Git"
+
+    cat > ~/.gitconfig << 'GIT_EOF'
+[core]
+    pager = delta
+
+[interactive]
+    diffFilter = delta --color-only
+
+[delta]
+    navigate = true
+    dark = true
+    side-by-side = true
+    line-numbers = true
+    syntax-theme = Catppuccin Mocha
+    file-style = bold yellow ul
+    file-decoration-style = none
+    hunk-header-style = file line-number syntax
+    hunk-header-decoration-style = blue box
+
+[merge]
+    conflictstyle = diff3
+
+[diff]
+    colorMoved = default
+
+[alias]
+    st = status -sb
+    co = checkout
+    br = branch
+    ci = commit
+    lg = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+    last = log -1 HEAD --stat
+    unstage = reset HEAD --
+GIT_EOF
+
+    print_warning "Remember to set your git user.name and user.email!"
+    print_success "Git configured"
+}
+
+# ============================================================================
+# BAT CONFIGURATION
+# ============================================================================
+
+setup_bat() {
+    print_header "Configuring Bat"
+
+    cat > ~/.config/bat/config << 'BAT_EOF'
+--theme="Catppuccin Mocha"
+--style="numbers,changes,header"
+--italic-text=always
+--paging=auto
+BAT_EOF
+
+    print_success "Bat configured"
+}
+
+# ============================================================================
+# UTILITY SCRIPTS
+# ============================================================================
+
+setup_utilities() {
+    print_header "Setting Up Utility Scripts"
+
+    # Hotkey reference
+    cat > ~/.local/bin/hk << 'HK_EOF'
+#!/usr/bin/env bash
+cat << 'EOF'
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                              HOTKEY REFERENCE                                ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TMUX (prefix = Ctrl-a)                                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-a |         Split vertical          Alt-h/j/k/l    Navigate panes     │
+│ Ctrl-a -         Split horizontal        Alt-1/2/3/4/5  Switch window      │
+│ Ctrl-a c         New window              Ctrl-a d       Detach             │
+│ Ctrl-a h/j/k/l   Navigate panes          Ctrl-a r       Reload config      │
+│ Ctrl-a H/J/K/L   Resize panes            Ctrl-a [       Copy mode (vim)    │
+│ Ctrl-a n/p       Next/prev window        v/y            Select/yank (copy) │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ZSH (vim mode)                                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Esc              Enter normal mode       Ctrl-p/n       History up/down    │
+│ Ctrl-e           Edit command in nvim    Ctrl-w         Delete word back   │
+│ Ctrl-r           Search history          Ctrl-f         Accept suggestion  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ YAZI (file manager, launch with: y)                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ h/j/k/l          Navigate                .              Toggle hidden      │
+│ J/K              Move 5 lines            /              Search             │
+│ gg/G             Top/bottom              f              Filter             │
+│ Space            Toggle select           v              Visual mode        │
+│ Enter/o          Open                    a              Create file/dir    │
+│ y                Yank (copy)             r              Rename             │
+│ x                Cut                     d              Trash              │
+│ p                Paste                   D              Delete permanent   │
+│ q                Quit (cd to dir)        Q              Quit (stay)        │
+│ gh               Go home                 gc             Go ~/.config       │
+│ gd               Go ~/Downloads                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ EZA (ls replacement)                                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ls               List with icons         la             List all + git     │
+│ ll               Long format + git       lt             Tree view          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ZOXIDE (smart cd)                                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ cd <query>       Jump to frecent dir     cd -           Previous dir       │
+│ zi               Interactive selection                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ FZF (fuzzy finder)                                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-r           Fuzzy search history    Ctrl-t         Fuzzy find file    │
+│ Alt-c            Fuzzy cd into dir       **<Tab>        Path completion    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GHOSTTY                                                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-Shift-,     Reload config           Ctrl-Shift-c   Copy               │
+│ Ctrl-Shift-v     Paste                   Ctrl-Shift-n   New window         │
+│ Cmd-Shift-,      Reload (macOS)          Cmd-c/v        Copy/Paste (macOS) │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ NVIM (basics)                                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ i                Insert mode             Esc            Normal mode        │
+│ :w               Save                    :q             Quit               │
+│ :wq              Save and quit           :q!            Quit no save       │
+│ h/j/k/l          Navigate                dd             Delete line        │
+│ yy               Yank line               p              Paste              │
+│ u                Undo                    Ctrl-r         Redo               │
+│ /                Search                  n/N            Next/prev match    │
+│ Space            Leader key (menu)       :Tutor         Built-in tutorial  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CAFF (caffeine - prevent sleep)                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ caff             Toggle on/off           caff status    Check state        │
+│ caff on          Keep awake              caff off       Allow sleep        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ SSHH (quick SSH connect)                                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ sshh             Show menu & select      sshh 1/2/3     Connect directly   │
+│ sshh list        List all hosts          sshh edit      Edit ~/.sshh       │
+│ sshh add "Name" "user@host" [port]       Add new host                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+EOF
+HK_EOF
+    chmod +x ~/.local/bin/hk
+
+    # Caffeine script
+    cat > ~/.local/bin/caff << 'CAFF_EOF'
+#!/usr/bin/env bash
+
+PIDFILE="/tmp/caffeine-$USER.pid"
+
+status() {
+    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "☕ Caffeine: ON (PID $(cat "$PIDFILE"))"
+        return 0
+    else
+        echo "😴 Caffeine: OFF"
+        rm -f "$PIDFILE" 2>/dev/null
+        return 1
+    fi
+}
+
+start() {
+    if status > /dev/null 2>&1; then
+        echo "☕ Caffeine is already running"
+        return 0
+    fi
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        caffeinate -di &
+    else
+        systemd-inhibit --what=idle:sleep:handle-lid-switch \
+            --who="caffeine" \
+            --why="User requested stay awake" \
+            --mode=block \
+            sleep infinity &
+    fi
+
+    echo $! > "$PIDFILE"
+    echo "☕ Caffeine: ON - system will stay awake"
+}
+
+stop() {
+    if [[ -f "$PIDFILE" ]]; then
+        pid=$(cat "$PIDFILE")
+        if kill "$pid" 2>/dev/null; then
+            rm -f "$PIDFILE"
+            echo "😴 Caffeine: OFF - sleep enabled"
+            return 0
+        fi
+    fi
+    echo "😴 Caffeine is not running"
+    rm -f "$PIDFILE" 2>/dev/null
+}
+
+toggle() {
+    if status > /dev/null 2>&1; then
+        stop
+    else
+        start
+    fi
+}
+
+case "${1:-toggle}" in
+    on|start) start ;;
+    off|stop) stop ;;
+    status) status ;;
+    toggle|"") toggle ;;
+    *)
+        echo "Usage: caff [on|off|status|toggle]"
+        exit 1
+        ;;
+esac
+CAFF_EOF
+    chmod +x ~/.local/bin/caff
+
+    # SSH Quick Connect
+    cat > ~/.local/bin/sshh << 'SSHH_EOF'
+#!/usr/bin/env bash
+#
+# sshh - Quick SSH connection manager
+# Reads hosts from ~/.sshh and provides a simple menu
+#
+
+CONFIG_FILE="$HOME/.sshh"
+
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+PURPLE='\033[0;35m'
+RED='\033[0;31m'
+DIM='\033[2m'
+NC='\033[0m'
+
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo -e "${RED}✗${NC} Config file not found: ${CYAN}$CONFIG_FILE${NC}"
+    echo ""
+    echo "Create it with format: name | user@host | port (port optional)"
+    echo -e "Example: ${CYAN}Work Server${NC} | ${GREEN}admin@192.168.1.100${NC}"
+    exit 1
+fi
+
+declare -a NAMES CONNECTIONS PORTS
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    IFS='|' read -ra PARTS <<< "$line"
+    name=$(echo "${PARTS[0]}" | xargs)
+    conn=$(echo "${PARTS[1]}" | xargs)
+    port=$(echo "${PARTS[2]:-22}" | xargs)
+    if [[ -n "$name" && -n "$conn" ]]; then
+        NAMES+=("$name")
+        CONNECTIONS+=("$conn")
+        PORTS+=("$port")
+    fi
+done < "$CONFIG_FILE"
+
+if [[ ${#NAMES[@]} -eq 0 ]]; then
+    echo -e "${RED}✗${NC} No hosts found in ${CYAN}$CONFIG_FILE${NC}"
+    exit 1
+fi
+
+show_menu() {
+    echo ""
+    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${PURPLE}  SSH Quick Connect${NC}"
+    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    for i in "${!NAMES[@]}"; do
+        num=$((i + 1))
+        port_display=""
+        [[ "${PORTS[$i]}" != "22" ]] && port_display="${DIM}:${PORTS[$i]}${NC}"
+        printf "  ${YELLOW}%d${NC}  ${CYAN}%-20s${NC} ${GREEN}%s${NC}%s\n" \
+            "$num" "${NAMES[$i]}" "${CONNECTIONS[$i]}" "$port_display"
+    done
+    echo ""
+    echo -e "  ${DIM}q  Quit${NC}"
+    echo ""
+    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+if [[ -n "$1" ]]; then
+    if [[ "$1" =~ ^[0-9]+$ ]]; then
+        idx=$(($1 - 1))
+        if [[ $idx -ge 0 && $idx -lt ${#NAMES[@]} ]]; then
+            echo -e "${GREEN}▶${NC} Connecting to ${CYAN}${NAMES[$idx]}${NC}..."
+            [[ "${PORTS[$idx]}" != "22" ]] && exec ssh -p "${PORTS[$idx]}" "${CONNECTIONS[$idx]}"
+            exec ssh "${CONNECTIONS[$idx]}"
+        fi
+        echo -e "${RED}✗${NC} Invalid selection: $1" && exit 1
+    elif [[ "$1" == "list" || "$1" == "-l" ]]; then
+        show_menu && exit 0
+    elif [[ "$1" == "edit" || "$1" == "-e" ]]; then
+        ${EDITOR:-nvim} "$CONFIG_FILE" && exit 0
+    elif [[ "$1" == "add" ]]; then
+        shift
+        if [[ $# -ge 2 ]]; then
+            echo "$1 | $2 | ${3:-22}" >> "$CONFIG_FILE"
+            echo -e "${GREEN}✓${NC} Added: ${CYAN}$1${NC} → ${GREEN}$2${NC}"
+            exit 0
+        fi
+        echo "Usage: sshh add \"Name\" \"user@host\" [port]" && exit 1
+    elif [[ "$1" == "help" || "$1" == "-h" ]]; then
+        echo "Usage: sshh [command|number]"
+        echo "  (none)    Show menu"
+        echo "  <num>     Connect to host #"
+        echo "  list      Show hosts"
+        echo "  edit      Edit config"
+        echo "  add       Add host"
+        exit 0
+    fi
+    echo -e "${RED}✗${NC} Unknown: $1" && exit 1
+fi
+
+show_menu
+echo -ne "Select [1-${#NAMES[@]}]: "
+read -r choice
+[[ "$choice" == "q" || "$choice" == "Q" ]] && exit 0
+if [[ "$choice" =~ ^[0-9]+$ ]]; then
+    idx=$((choice - 1))
+    if [[ $idx -ge 0 && $idx -lt ${#NAMES[@]} ]]; then
+        echo -e "\n${GREEN}▶${NC} Connecting to ${CYAN}${NAMES[$idx]}${NC}...\n"
+        [[ "${PORTS[$idx]}" != "22" ]] && exec ssh -p "${PORTS[$idx]}" "${CONNECTIONS[$idx]}"
+        exec ssh "${CONNECTIONS[$idx]}"
+    fi
+fi
+echo -e "${RED}✗${NC} Invalid selection" && exit 1
+SSHH_EOF
+    chmod +x ~/.local/bin/sshh
+
+    # Create template .sshh config if it doesn't exist
+    if [[ ! -f ~/.sshh ]]; then
+        cat > ~/.sshh << 'SSHH_CONFIG_EOF'
+# SSH Quick Connect Configuration
+# Format: Name | user@host | port (port is optional, defaults to 22)
+#
+# Examples:
+# Work Server | admin@192.168.1.100
+# Home NAS | user@nas.local | 2222
+# Raspberry Pi | pi@raspberrypi.local
+
+SSHH_CONFIG_EOF
+        print_success "Created ~/.sshh template"
+    fi
+
+    print_success "Utility scripts created"
+}
+
+# ============================================================================
+# NVIM SETUP
+# ============================================================================
+
+setup_nvim() {
+    print_header "Setting Up Neovim"
+
+    if [[ ! -d ~/.config/nvim/.git ]]; then
+        print_step "Cloning Kickstart.nvim..."
+        rm -rf ~/.config/nvim
+        git clone https://github.com/nvim-lua/kickstart.nvim.git ~/.config/nvim
+        print_success "Kickstart.nvim installed"
+        print_warning "Run 'nvim' to complete plugin installation"
+        print_warning "Add Catppuccin theme: edit ~/.config/nvim/init.lua"
+    else
+        print_success "Neovim config already exists"
+    fi
+}
+
+# ============================================================================
+# SET DEFAULT SHELL
+# ============================================================================
+
+set_default_shell() {
+    print_header "Setting Default Shell"
+
+    if [[ "$SHELL" != *"zsh"* ]]; then
+        print_step "Changing default shell to zsh..."
+        if [[ "$OS" == "macos" ]]; then
+            chsh -s /bin/zsh
+        else
+            chsh -s "$(which zsh)"
+        fi
+        print_success "Default shell changed to zsh"
+        print_warning "Log out and back in for changes to take effect"
+    else
+        print_success "Zsh is already the default shell"
+    fi
+}
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+main() {
+    install_packages
+    setup_directories
+    setup_zsh
+    setup_tmux
+    setup_ghostty
+    setup_yazi
+    setup_git
+    setup_bat
+    setup_utilities
+    setup_nvim
+    set_default_shell
+
+    print_header "Setup Complete! 🎉"
+    echo -e "Theme: ${PURPLE}Catppuccin Mocha${NC}\n"
+    echo -e "Next steps:"
+    echo -e "  1. ${CYAN}source ~/.zshrc${NC} or restart terminal"
+    echo -e "  2. ${CYAN}tmux${NC} to start tmux"
+    echo -e "  3. ${CYAN}nvim${NC} to finish plugin installation"
+    echo -e "  4. ${CYAN}p10k configure${NC} to customize prompt"
+    echo -e "  5. ${CYAN}hk${NC} to see hotkey reference"
+    echo -e "\n${GREEN}Enjoy your new terminal! ✨${NC}\n"
+}
+
+# Run main
+main "$@"
