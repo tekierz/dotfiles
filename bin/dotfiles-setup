@@ -148,6 +148,30 @@ install_packages() {
         print_step "Installing Ghostty..."
         brew install --cask ghostty 2>/dev/null || print_warning "Ghostty not available via brew, install manually"
 
+        # macOS Quality of Life Apps
+        print_step "Installing macOS quality-of-life apps..."
+        brew install --cask \
+            rectangle \
+            raycast \
+            stats \
+            alt-tab \
+            monitorcontrol \
+            mos \
+            karabiner-elements \
+            iina \
+            the-unarchiver \
+            appcleaner \
+            2>/dev/null || true
+
+        # Optional: Additional useful CLI tools for macOS
+        brew install \
+            mas \
+            trash \
+            switchaudio-osx \
+            2>/dev/null || true
+
+        print_success "macOS apps installed"
+
     elif [[ "$OS" == "arch" ]]; then
         print_step "Installing packages via pacman..."
         sudo pacman -S --needed --noconfirm \
@@ -892,6 +916,15 @@ cat << 'EOF'
 │ sshh             Show menu & select      sshh 1/2/3     Connect directly   │
 │ sshh list        List all hosts          sshh edit      Edit ~/.sshh       │
 │ sshh add "Name" "user@host" [port]       Add new host                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ macOS APPS (Rectangle, Raycast, AltTab)                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-Opt-←/→     Half left/right         Ctrl-Opt-↑     Maximize           │
+│ Ctrl-Opt-Enter   Full screen             Ctrl-Opt-C     Center window      │
+│ Ctrl-Opt-U/I/J/K Corners                 Cmd-Space      Raycast launcher   │
+│ Opt-Tab          AltTab switcher         Opt-`          Same app windows   │
 └─────────────────────────────────────────────────────────────────────────────┘
 EOF
 HK_EOF

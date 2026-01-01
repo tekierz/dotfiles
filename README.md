@@ -22,6 +22,23 @@ Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/De
 | **neovim** | Editor (Kickstart.nvim) |
 | **sshh** | Quick SSH connection manager |
 
+### macOS Quality-of-Life Apps (macOS only)
+
+| App | Description |
+|-----|-------------|
+| **Rectangle** | Window snapping & management |
+| **Raycast** | Spotlight replacement with superpowers |
+| **Stats** | System monitor in menu bar |
+| **AltTab** | Windows-style alt-tab switcher |
+| **MonitorControl** | Control external monitor brightness |
+| **Mos** | Smooth scrolling for external mouse |
+| **Karabiner-Elements** | Keyboard customization |
+| **IINA** | Modern video player |
+| **The Unarchiver** | Archive extraction |
+| **AppCleaner** | Clean app uninstallation |
+| **mas** | Mac App Store CLI |
+| **trash** | Move files to trash from CLI |
+
 ## Installation
 
 ### Quick Install (Recommended)
