@@ -1312,6 +1312,25 @@ scrollback-limit = 67108864
 
 # Shift+Enter for newlines in Claude Code
 keybind = shift+enter=text:\n
+
+# Tab switching (Super+number, like macOS Cmd+number)
+keybind = super+one=goto_tab:1
+keybind = super+two=goto_tab:2
+keybind = super+three=goto_tab:3
+keybind = super+four=goto_tab:4
+keybind = super+five=goto_tab:5
+keybind = super+six=goto_tab:6
+keybind = super+seven=goto_tab:7
+keybind = super+eight=goto_tab:8
+keybind = super+nine=goto_tab:9
+
+# macOS-style copy/paste (Super = Cmd)
+keybind = super+c=copy_to_clipboard
+keybind = super+v=paste_from_clipboard
+
+# Tab navigation (avoid Super+t/w - conflicts with some DEs)
+keybind = super+shift+left_bracket=previous_tab
+keybind = super+shift+right_bracket=next_tab
 GHOSTTY_EOF
 
     # Generate theme file based on selected theme
@@ -1597,9 +1616,10 @@ cat << 'EOF'
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ GHOSTTY                                                                     │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Ctrl-Shift-,     Reload config           Ctrl-Shift-c   Copy               │
-│ Ctrl-Shift-v     Paste                   Ctrl-Shift-n   New window         │
-│ Cmd-Shift-,      Reload (macOS)          Cmd-c/v        Copy/Paste (macOS) │
+│ Super-c/v        Copy/Paste (macOS-style) Super-1/2/3... Switch to tab N   │
+│ Super-{/}        Prev/next tab           Ctrl-Shift-n   New window         │
+│ Ctrl-Shift-,     Reload config           Ctrl-Shift-c/v Alternate copy/paste│
+│ Cmd-c/v          Copy/Paste (macOS)      Cmd-1/2/3...   Switch tab (macOS) │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1720,9 +1740,10 @@ cat << 'EOF'
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ GHOSTTY                                                                     │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Ctrl-Shift-,     Reload config           Ctrl-Shift-c   Copy               │
-│ Ctrl-Shift-v     Paste                   Ctrl-Shift-n   New window         │
-│ Cmd-Shift-,      Reload (macOS)          Cmd-c/v        Copy/Paste (macOS) │
+│ Super-c/v        Copy/Paste (macOS-style) Super-1/2/3... Switch to tab N   │
+│ Super-{/}        Prev/next tab           Ctrl-Shift-n   New window         │
+│ Ctrl-Shift-,     Reload config           Ctrl-Shift-c/v Alternate copy/paste│
+│ Cmd-c/v          Copy/Paste (macOS)      Cmd-1/2/3...   Switch tab (macOS) │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
