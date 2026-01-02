@@ -51,6 +51,16 @@ These tools form the foundation of the terminal environment and are installed on
 | **fastfetch** | Fast system information display showing OS, kernel, packages, memory, and more. Runs on shell startup. |
 | **tlrc** | Rust client for tldr pages—simplified, practical man pages with examples. `tldr tar` is much friendlier than `man tar`. |
 
+### Clipboard (Platform-Specific)
+
+| Tool | Platform | Description |
+|------|----------|-------------|
+| **pbcopy/pbpaste** | macOS | Built-in clipboard commands. No installation needed. |
+| **wl-clipboard** | Linux (Wayland) | Provides `wl-copy` and `wl-paste` for Wayland sessions (GNOME, KDE Plasma on Wayland). |
+| **xclip** | Linux (X11) | Clipboard access for X11 sessions. Fallback for older systems or X11-based desktops. |
+
+> **Note:** tmux is configured to auto-detect which clipboard tool is available and use it for mouse selection copy and middle-click paste.
+
 ### Custom Utilities
 
 These small scripts are installed to `~/.local/bin/`:

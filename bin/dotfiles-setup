@@ -821,6 +821,7 @@ install_packages() {
             curl \
             wget \
             htop \
+            xclip \
             2>/dev/null || true
 
         # Model-specific optimizations
@@ -904,6 +905,8 @@ install_packages() {
             neovim \
             ttf-jetbrains-mono-nerd \
             pacman-contrib \
+            wl-clipboard \
+            xclip \
             2>/dev/null || true
 
         # Enable paccache timer
@@ -929,6 +932,8 @@ install_packages() {
             ripgrep \
             fd-find \
             btop \
+            xclip \
+            wl-clipboard \
             2>/dev/null || true
 
         print_warning "Some packages may need manual installation on Debian/Ubuntu"
@@ -1190,8 +1195,24 @@ set -g status-position top
 set -g status-left-length 30
 set -g status-right-length 50
 
-# Don't exit copy mode on mouse drag end
-unbind -T copy-mode-vi MouseDragEnd1Pane
+# Clipboard integration (cross-platform)
+# Detects: pbcopy (macOS), wl-copy (Wayland), xclip (X11)
+
+# Mouse selection copies to system clipboard
+bind -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel \
+    'sh -c "command -v pbcopy >/dev/null && pbcopy || ([ \"\$XDG_SESSION_TYPE\" = wayland ] && wl-copy || xclip -sel clip)"'
+bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel \
+    'sh -c "command -v pbcopy >/dev/null && pbcopy || ([ \"\$XDG_SESSION_TYPE\" = wayland ] && wl-copy || xclip -sel clip)"'
+
+# M-w (emacs) / y (vim) copies to system clipboard in copy mode
+bind -T copy-mode M-w send-keys -X copy-pipe-and-cancel \
+    'sh -c "command -v pbcopy >/dev/null && pbcopy || ([ \"\$XDG_SESSION_TYPE\" = wayland ] && wl-copy || xclip -sel clip)"'
+bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel \
+    'sh -c "command -v pbcopy >/dev/null && pbcopy || ([ \"\$XDG_SESSION_TYPE\" = wayland ] && wl-copy || xclip -sel clip)"'
+
+# Middle mouse pastes from system clipboard
+bind -n MouseDown2Pane run \
+    'sh -c "(command -v pbpaste >/dev/null && pbpaste || ([ \"\$XDG_SESSION_TYPE\" = wayland ] && wl-paste || xclip -sel clip -o)) | tmux load-buffer - && tmux paste-buffer"'
 TMUX_EOF
 
     # Add theme colors
