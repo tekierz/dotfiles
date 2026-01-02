@@ -6,7 +6,9 @@
 # Theme: Catppuccin Mocha
 #
 
-VERSION="1.0.0"
+set -euo pipefail
+
+VERSION="1.0.1"
 
 # Default flags
 INSTALL_MACOS_APPS=false
@@ -272,18 +274,33 @@ load_theme_colors() {
 # Save current settings to config file
 save_settings() {
     mkdir -p "$DOTFILES_CONFIG_DIR"
+    chmod 700 "$DOTFILES_CONFIG_DIR"
     cat > "$DOTFILES_CONFIG_DIR/settings" << EOF
 # Dotfiles settings - do not edit manually, use 'dotfiles' command
 THEME="$THEME"
 NAV_STYLE="$NAV_STYLE"
 EOF
+    chmod 600 "$DOTFILES_CONFIG_DIR/settings"
 }
 
 # Load settings from config file
-load_settings() {
-    if [[ -f "$DOTFILES_CONFIG_DIR/settings" ]]; then
-        source "$DOTFILES_CONFIG_DIR/settings"
+# Safe setting parser - extracts only known variables (no arbitrary code execution)
+safe_read_setting() {
+    local file="$1" key="$2" default="${3:-}"
+    if [[ -f "$file" ]]; then
+        local value
+        value=$(grep -E "^${key}=" "$file" 2>/dev/null | head -1 | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$//')
+        echo "${value:-$default}"
+    else
+        echo "$default"
     fi
+}
+
+load_settings() {
+    local settings_file="$DOTFILES_CONFIG_DIR/settings"
+    THEME=$(safe_read_setting "$settings_file" "THEME" "catppuccin-mocha")
+    NAV_STYLE=$(safe_read_setting "$settings_file" "NAV_STYLE" "emacs")
+    ACTIVE_USER=$(safe_read_setting "$settings_file" "ACTIVE_USER" "")
 }
 
 # Generate Ghostty theme file
@@ -1012,15 +1029,16 @@ if command -v zoxide &> /dev/null; then
   alias cd='z'
 fi
 
-# yazi file manager (y to open, exit to cd into last dir)
+# yazi file manager (y or yazi to open, q exits to dir, Q exits without cd)
 function y() {
   local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-  yazi "$@" --cwd-file="$tmp"
+  command yazi "$@" --cwd-file="$tmp"
   if cwd="$(cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
     builtin cd "$cwd" || z "$cwd" 2>/dev/null
   fi
   rm -f -- "$tmp"
 }
+alias yazi='y'
 
 # fzf (fuzzy finder)
 [[ -f /usr/share/fzf/key-bindings.zsh ]] && source /usr/share/fzf/key-bindings.zsh
@@ -1961,22 +1979,36 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Safe setting parser - extracts only known variables (no arbitrary code execution)
+safe_read_setting() {
+    local file="$1" key="$2" default="${3:-}"
+    if [[ -f "$file" ]]; then
+        local value
+        value=$(grep -E "^${key}=" "$file" 2>/dev/null | head -1 | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$//')
+        echo "${value:-$default}"
+    else
+        echo "$default"
+    fi
+}
+
 # Load current settings
 load_settings() {
-    THEME="catppuccin-mocha"
-    NAV_STYLE="emacs"
-    ACTIVE_USER=""
-    [[ -f "$DOTFILES_CONFIG_DIR/settings" ]] && source "$DOTFILES_CONFIG_DIR/settings"
+    local settings_file="$DOTFILES_CONFIG_DIR/settings"
+    THEME=$(safe_read_setting "$settings_file" "THEME" "catppuccin-mocha")
+    NAV_STYLE=$(safe_read_setting "$settings_file" "NAV_STYLE" "emacs")
+    ACTIVE_USER=$(safe_read_setting "$settings_file" "ACTIVE_USER" "")
 }
 
 # Save settings
 save_settings() {
     mkdir -p "$DOTFILES_CONFIG_DIR"
+    chmod 700 "$DOTFILES_CONFIG_DIR"
     cat > "$DOTFILES_CONFIG_DIR/settings" << EOF
 THEME="$THEME"
 NAV_STYLE="$NAV_STYLE"
 ACTIVE_USER="$ACTIVE_USER"
 EOF
+    chmod 600 "$DOTFILES_CONFIG_DIR/settings"
 }
 
 # Theme color loader (same as in dotfiles-setup)
@@ -2124,7 +2156,9 @@ load_user_profile() {
     local username="$1"
     local profile="$DOTFILES_USERS_DIR/${username}.settings"
     if [[ -f "$profile" ]]; then
-        source "$profile"
+        # Safe loading - only read known variables
+        THEME=$(safe_read_setting "$profile" "THEME" "catppuccin-mocha")
+        NAV_STYLE=$(safe_read_setting "$profile" "NAV_STYLE" "emacs")
         return 0
     fi
     return 1
@@ -2134,11 +2168,13 @@ load_user_profile() {
 save_user_profile() {
     local username="$1"
     mkdir -p "$DOTFILES_USERS_DIR"
+    chmod 700 "$DOTFILES_USERS_DIR"
     cat > "$DOTFILES_USERS_DIR/${username}.settings" << EOF
 # User: $username
 THEME="$THEME"
 NAV_STYLE="$NAV_STYLE"
 EOF
+    chmod 600 "$DOTFILES_USERS_DIR/${username}.settings"
 }
 
 # List all user profiles
