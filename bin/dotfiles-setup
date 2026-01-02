@@ -13,6 +13,448 @@ INSTALL_MACOS_APPS=false
 RASPI_MODE=false
 RASPI_MODEL=""
 SKIP_PROMPTS=false
+NAV_STYLE="emacs"  # "emacs" (default, beginner-friendly) or "vim"
+THEME="catppuccin-mocha"  # Default theme
+
+# Supported themes
+SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin-macchiato dracula gruvbox-dark gruvbox-light nord tokyo-night solarized-dark solarized-light monokai rose-pine"
+
+# Settings directory
+DOTFILES_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
+
+# Load theme colors based on selected theme
+load_theme_colors() {
+    local theme="${1:-$THEME}"
+
+    case "$theme" in
+        catppuccin-mocha)
+            # Catppuccin Mocha - Dark, warm pastels
+            T_BG="#1e1e2e"; T_FG="#cdd6f4"
+            T_CURSOR="#f5e0dc"; T_CURSOR_TEXT="#1e1e2e"
+            T_SEL_BG="#585b70"; T_SEL_FG="#cdd6f4"
+            T_BLACK="#45475a"; T_BRIGHT_BLACK="#585b70"
+            T_RED="#f38ba8"; T_BRIGHT_RED="#f38ba8"
+            T_GREEN="#a6e3a1"; T_BRIGHT_GREEN="#a6e3a1"
+            T_YELLOW="#f9e2af"; T_BRIGHT_YELLOW="#f9e2af"
+            T_BLUE="#89b4fa"; T_BRIGHT_BLUE="#89b4fa"
+            T_MAGENTA="#f5c2e7"; T_BRIGHT_MAGENTA="#f5c2e7"
+            T_CYAN="#94e2d5"; T_BRIGHT_CYAN="#94e2d5"
+            T_WHITE="#bac2de"; T_BRIGHT_WHITE="#a6adc8"
+            # UI accents
+            T_ACCENT="#89b4fa"; T_ACCENT2="#a6e3a1"; T_ACCENT3="#f38ba8"
+            T_SURFACE="#313244"; T_OVERLAY="#45475a"; T_MUTED="#6c7086"
+            T_BAT_THEME="Catppuccin Mocha"; T_DELTA_THEME="Catppuccin Mocha"
+            T_IS_LIGHT=false
+            ;;
+        catppuccin-latte)
+            # Catppuccin Latte - Light, warm pastels
+            T_BG="#eff1f5"; T_FG="#4c4f69"
+            T_CURSOR="#dc8a78"; T_CURSOR_TEXT="#eff1f5"
+            T_SEL_BG="#acb0be"; T_SEL_FG="#4c4f69"
+            T_BLACK="#5c5f77"; T_BRIGHT_BLACK="#6c6f85"
+            T_RED="#d20f39"; T_BRIGHT_RED="#d20f39"
+            T_GREEN="#40a02b"; T_BRIGHT_GREEN="#40a02b"
+            T_YELLOW="#df8e1d"; T_BRIGHT_YELLOW="#df8e1d"
+            T_BLUE="#1e66f5"; T_BRIGHT_BLUE="#1e66f5"
+            T_MAGENTA="#ea76cb"; T_BRIGHT_MAGENTA="#ea76cb"
+            T_CYAN="#179299"; T_BRIGHT_CYAN="#179299"
+            T_WHITE="#acb0be"; T_BRIGHT_WHITE="#bcc0cc"
+            T_ACCENT="#1e66f5"; T_ACCENT2="#40a02b"; T_ACCENT3="#d20f39"
+            T_SURFACE="#ccd0da"; T_OVERLAY="#bcc0cc"; T_MUTED="#8c8fa1"
+            T_BAT_THEME="Catppuccin Latte"; T_DELTA_THEME="Catppuccin Latte"
+            T_IS_LIGHT=true
+            ;;
+        catppuccin-frappe)
+            # Catppuccin Frappé - Medium dark, muted pastels
+            T_BG="#303446"; T_FG="#c6d0f5"
+            T_CURSOR="#f2d5cf"; T_CURSOR_TEXT="#303446"
+            T_SEL_BG="#626880"; T_SEL_FG="#c6d0f5"
+            T_BLACK="#51576d"; T_BRIGHT_BLACK="#626880"
+            T_RED="#e78284"; T_BRIGHT_RED="#e78284"
+            T_GREEN="#a6d189"; T_BRIGHT_GREEN="#a6d189"
+            T_YELLOW="#e5c890"; T_BRIGHT_YELLOW="#e5c890"
+            T_BLUE="#8caaee"; T_BRIGHT_BLUE="#8caaee"
+            T_MAGENTA="#f4b8e4"; T_BRIGHT_MAGENTA="#f4b8e4"
+            T_CYAN="#81c8be"; T_BRIGHT_CYAN="#81c8be"
+            T_WHITE="#b5bfe2"; T_BRIGHT_WHITE="#a5adce"
+            T_ACCENT="#8caaee"; T_ACCENT2="#a6d189"; T_ACCENT3="#e78284"
+            T_SURFACE="#414559"; T_OVERLAY="#51576d"; T_MUTED="#737994"
+            T_BAT_THEME="Catppuccin Frappe"; T_DELTA_THEME="Catppuccin Frappe"
+            T_IS_LIGHT=false
+            ;;
+        catppuccin-macchiato)
+            # Catppuccin Macchiato - Dark, warm muted
+            T_BG="#24273a"; T_FG="#cad3f5"
+            T_CURSOR="#f4dbd6"; T_CURSOR_TEXT="#24273a"
+            T_SEL_BG="#5b6078"; T_SEL_FG="#cad3f5"
+            T_BLACK="#494d64"; T_BRIGHT_BLACK="#5b6078"
+            T_RED="#ed8796"; T_BRIGHT_RED="#ed8796"
+            T_GREEN="#a6da95"; T_BRIGHT_GREEN="#a6da95"
+            T_YELLOW="#eed49f"; T_BRIGHT_YELLOW="#eed49f"
+            T_BLUE="#8aadf4"; T_BRIGHT_BLUE="#8aadf4"
+            T_MAGENTA="#f5bde6"; T_BRIGHT_MAGENTA="#f5bde6"
+            T_CYAN="#8bd5ca"; T_BRIGHT_CYAN="#8bd5ca"
+            T_WHITE="#b8c0e0"; T_BRIGHT_WHITE="#a5adcb"
+            T_ACCENT="#8aadf4"; T_ACCENT2="#a6da95"; T_ACCENT3="#ed8796"
+            T_SURFACE="#363a4f"; T_OVERLAY="#494d64"; T_MUTED="#6e738d"
+            T_BAT_THEME="Catppuccin Macchiato"; T_DELTA_THEME="Catppuccin Macchiato"
+            T_IS_LIGHT=false
+            ;;
+        dracula)
+            # Dracula - Dark with vibrant purples and pinks
+            T_BG="#282a36"; T_FG="#f8f8f2"
+            T_CURSOR="#f8f8f2"; T_CURSOR_TEXT="#282a36"
+            T_SEL_BG="#44475a"; T_SEL_FG="#f8f8f2"
+            T_BLACK="#21222c"; T_BRIGHT_BLACK="#6272a4"
+            T_RED="#ff5555"; T_BRIGHT_RED="#ff6e6e"
+            T_GREEN="#50fa7b"; T_BRIGHT_GREEN="#69ff94"
+            T_YELLOW="#f1fa8c"; T_BRIGHT_YELLOW="#ffffa5"
+            T_BLUE="#bd93f9"; T_BRIGHT_BLUE="#d6acff"
+            T_MAGENTA="#ff79c6"; T_BRIGHT_MAGENTA="#ff92df"
+            T_CYAN="#8be9fd"; T_BRIGHT_CYAN="#a4ffff"
+            T_WHITE="#f8f8f2"; T_BRIGHT_WHITE="#ffffff"
+            T_ACCENT="#bd93f9"; T_ACCENT2="#50fa7b"; T_ACCENT3="#ff79c6"
+            T_SURFACE="#44475a"; T_OVERLAY="#6272a4"; T_MUTED="#6272a4"
+            T_BAT_THEME="Dracula"; T_DELTA_THEME="Dracula"
+            T_IS_LIGHT=false
+            ;;
+        gruvbox-dark)
+            # Gruvbox Dark - Retro warm browns and oranges
+            T_BG="#282828"; T_FG="#ebdbb2"
+            T_CURSOR="#ebdbb2"; T_CURSOR_TEXT="#282828"
+            T_SEL_BG="#504945"; T_SEL_FG="#ebdbb2"
+            T_BLACK="#282828"; T_BRIGHT_BLACK="#928374"
+            T_RED="#cc241d"; T_BRIGHT_RED="#fb4934"
+            T_GREEN="#98971a"; T_BRIGHT_GREEN="#b8bb26"
+            T_YELLOW="#d79921"; T_BRIGHT_YELLOW="#fabd2f"
+            T_BLUE="#458588"; T_BRIGHT_BLUE="#83a598"
+            T_MAGENTA="#b16286"; T_BRIGHT_MAGENTA="#d3869b"
+            T_CYAN="#689d6a"; T_BRIGHT_CYAN="#8ec07c"
+            T_WHITE="#a89984"; T_BRIGHT_WHITE="#ebdbb2"
+            T_ACCENT="#83a598"; T_ACCENT2="#b8bb26"; T_ACCENT3="#fb4934"
+            T_SURFACE="#3c3836"; T_OVERLAY="#504945"; T_MUTED="#928374"
+            T_BAT_THEME="gruvbox-dark"; T_DELTA_THEME="gruvbox-dark"
+            T_IS_LIGHT=false
+            ;;
+        gruvbox-light)
+            # Gruvbox Light - Warm paper-like tones
+            T_BG="#fbf1c7"; T_FG="#3c3836"
+            T_CURSOR="#3c3836"; T_CURSOR_TEXT="#fbf1c7"
+            T_SEL_BG="#d5c4a1"; T_SEL_FG="#3c3836"
+            T_BLACK="#fbf1c7"; T_BRIGHT_BLACK="#928374"
+            T_RED="#cc241d"; T_BRIGHT_RED="#9d0006"
+            T_GREEN="#98971a"; T_BRIGHT_GREEN="#79740e"
+            T_YELLOW="#d79921"; T_BRIGHT_YELLOW="#b57614"
+            T_BLUE="#458588"; T_BRIGHT_BLUE="#076678"
+            T_MAGENTA="#b16286"; T_BRIGHT_MAGENTA="#8f3f71"
+            T_CYAN="#689d6a"; T_BRIGHT_CYAN="#427b58"
+            T_WHITE="#7c6f64"; T_BRIGHT_WHITE="#3c3836"
+            T_ACCENT="#076678"; T_ACCENT2="#79740e"; T_ACCENT3="#9d0006"
+            T_SURFACE="#ebdbb2"; T_OVERLAY="#d5c4a1"; T_MUTED="#928374"
+            T_BAT_THEME="gruvbox-light"; T_DELTA_THEME="gruvbox-light"
+            T_IS_LIGHT=true
+            ;;
+        nord)
+            # Nord - Arctic cool blues and grays
+            T_BG="#2e3440"; T_FG="#d8dee9"
+            T_CURSOR="#d8dee9"; T_CURSOR_TEXT="#2e3440"
+            T_SEL_BG="#434c5e"; T_SEL_FG="#d8dee9"
+            T_BLACK="#3b4252"; T_BRIGHT_BLACK="#4c566a"
+            T_RED="#bf616a"; T_BRIGHT_RED="#bf616a"
+            T_GREEN="#a3be8c"; T_BRIGHT_GREEN="#a3be8c"
+            T_YELLOW="#ebcb8b"; T_BRIGHT_YELLOW="#ebcb8b"
+            T_BLUE="#81a1c1"; T_BRIGHT_BLUE="#81a1c1"
+            T_MAGENTA="#b48ead"; T_BRIGHT_MAGENTA="#b48ead"
+            T_CYAN="#88c0d0"; T_BRIGHT_CYAN="#8fbcbb"
+            T_WHITE="#e5e9f0"; T_BRIGHT_WHITE="#eceff4"
+            T_ACCENT="#88c0d0"; T_ACCENT2="#a3be8c"; T_ACCENT3="#bf616a"
+            T_SURFACE="#3b4252"; T_OVERLAY="#434c5e"; T_MUTED="#4c566a"
+            T_BAT_THEME="Nord"; T_DELTA_THEME="Nord"
+            T_IS_LIGHT=false
+            ;;
+        tokyo-night)
+            # Tokyo Night - Rich purples and blues
+            T_BG="#1a1b26"; T_FG="#a9b1d6"
+            T_CURSOR="#c0caf5"; T_CURSOR_TEXT="#1a1b26"
+            T_SEL_BG="#33467c"; T_SEL_FG="#c0caf5"
+            T_BLACK="#15161e"; T_BRIGHT_BLACK="#414868"
+            T_RED="#f7768e"; T_BRIGHT_RED="#f7768e"
+            T_GREEN="#9ece6a"; T_BRIGHT_GREEN="#9ece6a"
+            T_YELLOW="#e0af68"; T_BRIGHT_YELLOW="#e0af68"
+            T_BLUE="#7aa2f7"; T_BRIGHT_BLUE="#7aa2f7"
+            T_MAGENTA="#bb9af7"; T_BRIGHT_MAGENTA="#bb9af7"
+            T_CYAN="#7dcfff"; T_BRIGHT_CYAN="#7dcfff"
+            T_WHITE="#a9b1d6"; T_BRIGHT_WHITE="#c0caf5"
+            T_ACCENT="#7aa2f7"; T_ACCENT2="#9ece6a"; T_ACCENT3="#f7768e"
+            T_SURFACE="#24283b"; T_OVERLAY="#414868"; T_MUTED="#565f89"
+            T_BAT_THEME="TwoDark"; T_DELTA_THEME="TwoDark"
+            T_IS_LIGHT=false
+            ;;
+        solarized-dark)
+            # Solarized Dark - Low contrast, easy on eyes
+            T_BG="#002b36"; T_FG="#839496"
+            T_CURSOR="#839496"; T_CURSOR_TEXT="#002b36"
+            T_SEL_BG="#073642"; T_SEL_FG="#93a1a1"
+            T_BLACK="#073642"; T_BRIGHT_BLACK="#586e75"
+            T_RED="#dc322f"; T_BRIGHT_RED="#cb4b16"
+            T_GREEN="#859900"; T_BRIGHT_GREEN="#586e75"
+            T_YELLOW="#b58900"; T_BRIGHT_YELLOW="#657b83"
+            T_BLUE="#268bd2"; T_BRIGHT_BLUE="#839496"
+            T_MAGENTA="#d33682"; T_BRIGHT_MAGENTA="#6c71c4"
+            T_CYAN="#2aa198"; T_BRIGHT_CYAN="#93a1a1"
+            T_WHITE="#eee8d5"; T_BRIGHT_WHITE="#fdf6e3"
+            T_ACCENT="#268bd2"; T_ACCENT2="#859900"; T_ACCENT3="#dc322f"
+            T_SURFACE="#073642"; T_OVERLAY="#586e75"; T_MUTED="#657b83"
+            T_BAT_THEME="Solarized (dark)"; T_DELTA_THEME="Solarized (dark)"
+            T_IS_LIGHT=false
+            ;;
+        solarized-light)
+            # Solarized Light - Low contrast light theme
+            T_BG="#fdf6e3"; T_FG="#657b83"
+            T_CURSOR="#657b83"; T_CURSOR_TEXT="#fdf6e3"
+            T_SEL_BG="#eee8d5"; T_SEL_FG="#586e75"
+            T_BLACK="#073642"; T_BRIGHT_BLACK="#002b36"
+            T_RED="#dc322f"; T_BRIGHT_RED="#cb4b16"
+            T_GREEN="#859900"; T_BRIGHT_GREEN="#586e75"
+            T_YELLOW="#b58900"; T_BRIGHT_YELLOW="#657b83"
+            T_BLUE="#268bd2"; T_BRIGHT_BLUE="#839496"
+            T_MAGENTA="#d33682"; T_BRIGHT_MAGENTA="#6c71c4"
+            T_CYAN="#2aa198"; T_BRIGHT_CYAN="#93a1a1"
+            T_WHITE="#eee8d5"; T_BRIGHT_WHITE="#fdf6e3"
+            T_ACCENT="#268bd2"; T_ACCENT2="#859900"; T_ACCENT3="#dc322f"
+            T_SURFACE="#eee8d5"; T_OVERLAY="#93a1a1"; T_MUTED="#839496"
+            T_BAT_THEME="Solarized (light)"; T_DELTA_THEME="Solarized (light)"
+            T_IS_LIGHT=true
+            ;;
+        monokai)
+            # Monokai - Classic vibrant theme
+            T_BG="#272822"; T_FG="#f8f8f2"
+            T_CURSOR="#f8f8f2"; T_CURSOR_TEXT="#272822"
+            T_SEL_BG="#49483e"; T_SEL_FG="#f8f8f2"
+            T_BLACK="#272822"; T_BRIGHT_BLACK="#75715e"
+            T_RED="#f92672"; T_BRIGHT_RED="#f92672"
+            T_GREEN="#a6e22e"; T_BRIGHT_GREEN="#a6e22e"
+            T_YELLOW="#f4bf75"; T_BRIGHT_YELLOW="#f4bf75"
+            T_BLUE="#66d9ef"; T_BRIGHT_BLUE="#66d9ef"
+            T_MAGENTA="#ae81ff"; T_BRIGHT_MAGENTA="#ae81ff"
+            T_CYAN="#a1efe4"; T_BRIGHT_CYAN="#a1efe4"
+            T_WHITE="#f8f8f2"; T_BRIGHT_WHITE="#f9f8f5"
+            T_ACCENT="#66d9ef"; T_ACCENT2="#a6e22e"; T_ACCENT3="#f92672"
+            T_SURFACE="#3e3d32"; T_OVERLAY="#49483e"; T_MUTED="#75715e"
+            T_BAT_THEME="Monokai Extended"; T_DELTA_THEME="Monokai Extended"
+            T_IS_LIGHT=false
+            ;;
+        rose-pine)
+            # Rosé Pine - Soft muted pinks and greens
+            T_BG="#191724"; T_FG="#e0def4"
+            T_CURSOR="#524f67"; T_CURSOR_TEXT="#e0def4"
+            T_SEL_BG="#403d52"; T_SEL_FG="#e0def4"
+            T_BLACK="#26233a"; T_BRIGHT_BLACK="#6e6a86"
+            T_RED="#eb6f92"; T_BRIGHT_RED="#eb6f92"
+            T_GREEN="#9ccfd8"; T_BRIGHT_GREEN="#9ccfd8"
+            T_YELLOW="#f6c177"; T_BRIGHT_YELLOW="#f6c177"
+            T_BLUE="#31748f"; T_BRIGHT_BLUE="#31748f"
+            T_MAGENTA="#c4a7e7"; T_BRIGHT_MAGENTA="#c4a7e7"
+            T_CYAN="#ebbcba"; T_BRIGHT_CYAN="#ebbcba"
+            T_WHITE="#e0def4"; T_BRIGHT_WHITE="#e0def4"
+            T_ACCENT="#c4a7e7"; T_ACCENT2="#9ccfd8"; T_ACCENT3="#eb6f92"
+            T_SURFACE="#1f1d2e"; T_OVERLAY="#26233a"; T_MUTED="#6e6a86"
+            T_BAT_THEME="base16"; T_DELTA_THEME="base16"
+            T_IS_LIGHT=false
+            ;;
+        *)
+            echo "Unknown theme: $theme"
+            return 1
+            ;;
+    esac
+}
+
+# Save current settings to config file
+save_settings() {
+    mkdir -p "$DOTFILES_CONFIG_DIR"
+    cat > "$DOTFILES_CONFIG_DIR/settings" << EOF
+# Dotfiles settings - do not edit manually, use 'dotfiles' command
+THEME="$THEME"
+NAV_STYLE="$NAV_STYLE"
+EOF
+}
+
+# Load settings from config file
+load_settings() {
+    if [[ -f "$DOTFILES_CONFIG_DIR/settings" ]]; then
+        source "$DOTFILES_CONFIG_DIR/settings"
+    fi
+}
+
+# Generate Ghostty theme file
+generate_ghostty_theme() {
+    load_theme_colors
+    mkdir -p ~/.config/ghostty/themes
+    cat > ~/.config/ghostty/themes/dotfiles-theme << EOF
+# Generated by dotfiles - Theme: $THEME
+
+background = ${T_BG}
+foreground = ${T_FG}
+cursor-color = ${T_CURSOR}
+cursor-text = ${T_CURSOR_TEXT}
+selection-background = ${T_SEL_BG}
+selection-foreground = ${T_SEL_FG}
+
+palette = 0=${T_BLACK}
+palette = 8=${T_BRIGHT_BLACK}
+palette = 1=${T_RED}
+palette = 9=${T_BRIGHT_RED}
+palette = 2=${T_GREEN}
+palette = 10=${T_BRIGHT_GREEN}
+palette = 3=${T_YELLOW}
+palette = 11=${T_BRIGHT_YELLOW}
+palette = 4=${T_BLUE}
+palette = 12=${T_BRIGHT_BLUE}
+palette = 5=${T_MAGENTA}
+palette = 13=${T_BRIGHT_MAGENTA}
+palette = 6=${T_CYAN}
+palette = 14=${T_BRIGHT_CYAN}
+palette = 7=${T_WHITE}
+palette = 15=${T_BRIGHT_WHITE}
+EOF
+}
+
+# Generate fzf color config (for .zshrc)
+generate_fzf_colors() {
+    load_theme_colors
+    local bg_opt="-1"
+    [[ "$T_IS_LIGHT" == "true" ]] && bg_opt="-1"
+
+    echo "export FZF_DEFAULT_OPTS=\"\$FZF_DEFAULT_OPTS \\
+  --color=fg:${T_FG},bg:${bg_opt},hl:${T_ACCENT3} \\
+  --color=fg+:${T_FG},bg+:${T_SURFACE},hl+:${T_ACCENT3} \\
+  --color=info:${T_MAGENTA},prompt:${T_CYAN},pointer:${T_CURSOR} \\
+  --color=marker:${T_CURSOR},spinner:${T_CURSOR},header:${T_CYAN} \\
+  --prompt='  ' --pointer='▶' --marker='✓'\""
+}
+
+# Generate tmux theme config
+generate_tmux_theme() {
+    load_theme_colors
+    cat << EOF
+# Theme: $THEME (generated by dotfiles)
+set -g status-style 'bg=${T_BG} fg=${T_FG}'
+set -g status-left '#[fg=${T_BG},bg=${T_ACCENT},bold]  #S #[fg=${T_ACCENT},bg=${T_BG}]'
+set -g status-right '#[fg=${T_OVERLAY}]#[fg=${T_FG},bg=${T_OVERLAY}] %H:%M #[fg=${T_ACCENT}]#[fg=${T_BG},bg=${T_ACCENT},bold] %d %b '
+
+setw -g window-status-current-style 'fg=${T_BG} bg=${T_ACCENT2} bold'
+setw -g window-status-current-format '#[fg=${T_BG},bg=${T_ACCENT2}]#[fg=${T_BG},bg=${T_ACCENT2}] #I  #W #[fg=${T_ACCENT2},bg=${T_BG}]'
+setw -g window-status-style 'fg=${T_MUTED} bg=${T_BG}'
+setw -g window-status-format '  #I  #W  '
+setw -g window-status-separator ''
+
+set -g pane-border-style 'fg=${T_OVERLAY}'
+set -g pane-active-border-style 'fg=${T_ACCENT}'
+set -g message-style 'bg=${T_YELLOW} fg=${T_BG} bold'
+setw -g mode-style 'bg=${T_ACCENT3} fg=${T_BG} bold'
+EOF
+}
+
+# Generate yazi theme
+generate_yazi_theme() {
+    load_theme_colors
+    cat << EOF
+# Theme: $THEME (generated by dotfiles)
+
+[manager]
+cwd = { fg = "${T_CYAN}" }
+hovered = { fg = "${T_BG}", bg = "${T_ACCENT}" }
+preview_hovered = { underline = true }
+
+find_keyword = { fg = "${T_YELLOW}", bold = true, italic = true, underline = true }
+find_position = { fg = "${T_ACCENT3}", bg = "reset", bold = true }
+
+marker_copied = { fg = "${T_GREEN}", bg = "${T_GREEN}" }
+marker_cut = { fg = "${T_ACCENT3}", bg = "${T_ACCENT3}" }
+marker_marked = { fg = "${T_ACCENT}", bg = "${T_ACCENT}" }
+marker_selected = { fg = "${T_YELLOW}", bg = "${T_YELLOW}" }
+
+tab_active = { fg = "${T_BG}", bg = "${T_FG}" }
+tab_inactive = { fg = "${T_FG}", bg = "${T_OVERLAY}" }
+
+border_symbol = "│"
+border_style = { fg = "${T_MUTED}" }
+
+[status]
+separator_open = ""
+separator_close = ""
+separator_style = { fg = "${T_OVERLAY}", bg = "${T_OVERLAY}" }
+
+mode_normal = { fg = "${T_BG}", bg = "${T_ACCENT}", bold = true }
+mode_select = { fg = "${T_BG}", bg = "${T_ACCENT2}", bold = true }
+
+progress_label = { fg = "${T_FG}", bold = true }
+progress_normal = { fg = "${T_ACCENT}", bg = "${T_OVERLAY}" }
+progress_error = { fg = "${T_ACCENT3}", bg = "${T_OVERLAY}" }
+
+permissions_t = { fg = "${T_ACCENT}" }
+permissions_r = { fg = "${T_YELLOW}" }
+permissions_w = { fg = "${T_ACCENT3}" }
+permissions_x = { fg = "${T_GREEN}" }
+permissions_s = { fg = "${T_MUTED}" }
+
+[input]
+border = { fg = "${T_ACCENT}" }
+title = {}
+value = {}
+selected = { reversed = true }
+
+[select]
+border = { fg = "${T_ACCENT}" }
+active = { fg = "${T_ACCENT3}", bold = true }
+inactive = {}
+
+[tasks]
+border = { fg = "${T_ACCENT}" }
+title = {}
+hovered = { fg = "${T_ACCENT3}", underline = true }
+
+[which]
+cols = 3
+mask = { bg = "${T_SURFACE}" }
+cand = { fg = "${T_CYAN}" }
+rest = { fg = "${T_MUTED}" }
+desc = { fg = "${T_ACCENT3}" }
+separator = "  "
+separator_style = { fg = "${T_OVERLAY}" }
+
+[help]
+on = { fg = "${T_CYAN}" }
+run = { fg = "${T_ACCENT3}" }
+desc = {}
+hovered = { reversed = true, bold = true }
+footer = { fg = "${T_OVERLAY}", bg = "${T_FG}" }
+
+[filetype]
+rules = [
+  { mime = "image/*", fg = "${T_YELLOW}" },
+  { mime = "video/*", fg = "${T_ACCENT3}" },
+  { mime = "audio/*", fg = "${T_ACCENT3}" },
+  { mime = "application/zip", fg = "${T_MAGENTA}" },
+  { mime = "application/gzip", fg = "${T_MAGENTA}" },
+  { mime = "application/x-tar", fg = "${T_MAGENTA}" },
+  { mime = "application/pdf", fg = "${T_ACCENT3}" },
+  { name = "*", fg = "${T_FG}" },
+  { name = "*/", fg = "${T_ACCENT}" },
+]
+EOF
+}
+
+# Generate bat config
+generate_bat_config() {
+    load_theme_colors
+    cat << EOF
+--theme="${T_BAT_THEME}"
+--style="numbers,changes,header"
+--italic-text=always
+--paging=auto
+EOF
+}
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -27,6 +469,13 @@ USAGE
 OPTIONS
     -h, --help          Show this help message
     -v, --version       Show version
+    --emacs             Emacs/Mac-style navigation (default, beginner-friendly)
+    --vim               Vim-style navigation (hjkl everywhere)
+    --theme <name>      Color theme (default: catppuccin-mocha)
+                        Themes: catppuccin-mocha, catppuccin-latte,
+                        catppuccin-frappe, catppuccin-macchiato, dracula,
+                        gruvbox-dark, gruvbox-light, nord, tokyo-night,
+                        solarized-dark, solarized-light, monokai, rose-pine
     --macos-apps        Install optional macOS quality-of-life apps
     --raspi             Raspberry Pi mode (auto-detect model)
     --raspi5            Raspberry Pi 5 optimizations
@@ -77,6 +526,30 @@ EOF
         -y|--yes)
             SKIP_PROMPTS=true
             shift
+            ;;
+        --vim)
+            NAV_STYLE="vim"
+            shift
+            ;;
+        --emacs)
+            NAV_STYLE="emacs"
+            shift
+            ;;
+        --theme)
+            if [[ -n "$2" && ! "$2" =~ ^- ]]; then
+                THEME="$2"
+                # Validate theme
+                if [[ ! " $SUPPORTED_THEMES " =~ " $THEME " ]]; then
+                    echo "Error: Unknown theme '$THEME'"
+                    echo "Supported themes: $SUPPORTED_THEMES"
+                    exit 1
+                fi
+                shift 2
+            else
+                echo "Error: --theme requires a theme name"
+                echo "Supported themes: $SUPPORTED_THEMES"
+                exit 1
+            fi
             ;;
         *)
             echo "Unknown option: $1"
@@ -210,6 +683,8 @@ fi
 print_header "Dotfiles Setup (Catppuccin Mocha Theme)"
 echo -e "Detected OS: ${CYAN}$OS${NC}"
 [[ "$OS" == "raspi" ]] && echo -e "Raspberry Pi Model: ${CYAN}${RASPI_MODEL}${NC}"
+echo -e "Navigation Style: ${CYAN}$NAV_STYLE${NC} (use --vim or --emacs to change)"
+echo -e "Theme: ${PURPLE}$THEME${NC} (use --theme <name> to change)"
 echo ""
 
 # ============================================================================
@@ -522,14 +997,6 @@ export PATH="$HOME/.local/bin:$PATH"
 # Linuxbrew
 [[ -d /home/linuxbrew/.linuxbrew ]] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
-# Emacs keybindings (Mac-style navigation)
-bindkey -e
-
-# Edit command in nvim with Ctrl-x Ctrl-e (standard emacs binding)
-autoload -Uz edit-command-line
-zle -N edit-command-line
-bindkey '^x^e' edit-command-line
-
 # eza aliases (modern ls replacement)
 if command -v eza &> /dev/null; then
   alias ls='eza --icons --group-directories-first'
@@ -570,13 +1037,8 @@ if command -v fd &> /dev/null; then
   export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
 fi
 
-# fzf colors (Catppuccin Mocha)
-export FZF_DEFAULT_OPTS="$FZF_DEFAULT_OPTS \
-  --color=fg:#cdd6f4,bg:-1,hl:#f38ba8 \
-  --color=fg+:#cdd6f4,bg+:#313244,hl+:#f38ba8 \
-  --color=info:#cba6f7,prompt:#94e2d5,pointer:#f5e0dc \
-  --color=marker:#f5e0dc,spinner:#f5e0dc,header:#94e2d5 \
-  --prompt='  ' --pointer='▶' --marker='✓'"
+# fzf colors (set by dotfiles - do not edit, use 'dotfiles theme' to change)
+# FZF_COLORS_PLACEHOLDER
 
 # Preview files with bat in fzf
 if command -v bat &> /dev/null; then
@@ -615,7 +1077,45 @@ bindkey '^f' autosuggest-accept
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
 ZSHRC_EOF
 
-    print_success "Zsh configured"
+    # Add navigation-style specific keybindings
+    if [[ "$NAV_STYLE" == "vim" ]]; then
+        cat >> ~/.zshrc << 'ZSHRC_VIM_EOF'
+
+# Vim keybindings
+bindkey -v
+export KEYTIMEOUT=1
+
+# Better vim mode experience
+bindkey '^P' up-history
+bindkey '^N' down-history
+bindkey '^?' backward-delete-char
+bindkey '^h' backward-delete-char
+bindkey '^w' backward-kill-word
+
+# Edit command in nvim with Ctrl-e
+autoload -Uz edit-command-line
+zle -N edit-command-line
+bindkey '^e' edit-command-line
+ZSHRC_VIM_EOF
+    else
+        cat >> ~/.zshrc << 'ZSHRC_EMACS_EOF'
+
+# Emacs keybindings (Mac-style navigation)
+bindkey -e
+
+# Edit command in nvim with Ctrl-x Ctrl-e
+autoload -Uz edit-command-line
+zle -N edit-command-line
+bindkey '^x^e' edit-command-line
+ZSHRC_EMACS_EOF
+    fi
+
+    # Replace FZF colors placeholder with theme-specific colors
+    local fzf_colors
+    fzf_colors=$(generate_fzf_colors)
+    sed -i "s|# FZF_COLORS_PLACEHOLDER|$fzf_colors|" ~/.zshrc
+
+    print_success "Zsh configured ($NAV_STYLE navigation, $THEME theme)"
 }
 
 # ============================================================================
@@ -625,6 +1125,7 @@ ZSHRC_EOF
 setup_tmux() {
     print_header "Configuring Tmux"
 
+    # Base tmux config (common to both navigation styles)
     cat > ~/.tmux.conf << 'TMUX_EOF'
 # Terminal settings
 set -g default-terminal "tmux-256color"
@@ -634,18 +1135,6 @@ set -ga terminal-overrides ",xterm-256color:Tc"
 set -g prefix C-a
 unbind C-b
 bind C-a send-prefix
-
-# Vim-style pane navigation (hjkl)
-bind h select-pane -L
-bind j select-pane -D
-bind k select-pane -U
-bind l select-pane -R
-
-# Vim-style pane resizing
-bind -r H resize-pane -L 5
-bind -r J resize-pane -D 5
-bind -r K resize-pane -U 5
-bind -r L resize-pane -R 5
 
 # Split panes with | and - (more intuitive)
 bind | split-window -h -c "#{pane_current_path}"
@@ -671,11 +1160,6 @@ set -g history-limit 50000
 # Reload config with r
 bind r source-file ~/.tmux.conf \; display "Config reloaded!"
 
-# Vi mode for copy mode
-setw -g mode-keys vi
-bind -T copy-mode-vi v send -X begin-selection
-bind -T copy-mode-vi y send -X copy-selection-and-cancel
-
 # Quick window switching (Alt + number, no prefix needed)
 bind -n M-1 select-window -t 1
 bind -n M-2 select-window -t 2
@@ -683,42 +1167,72 @@ bind -n M-3 select-window -t 3
 bind -n M-4 select-window -t 4
 bind -n M-5 select-window -t 5
 
+# Status bar position and lengths
+set -g status-position top
+set -g status-left-length 30
+set -g status-right-length 50
+
+# Don't exit copy mode on mouse drag end
+unbind -T copy-mode-vi MouseDragEnd1Pane
+TMUX_EOF
+
+    # Add theme colors
+    generate_tmux_theme >> ~/.tmux.conf
+
+    # Add navigation-style specific bindings
+    if [[ "$NAV_STYLE" == "vim" ]]; then
+        cat >> ~/.tmux.conf << 'TMUX_VIM_EOF'
+
+# Vim-style pane navigation (hjkl)
+bind h select-pane -L
+bind j select-pane -D
+bind k select-pane -U
+bind l select-pane -R
+
+# Vim-style pane resizing
+bind -r H resize-pane -L 5
+bind -r J resize-pane -D 5
+bind -r K resize-pane -U 5
+bind -r L resize-pane -R 5
+
 # Alt + hjkl pane navigation (no prefix needed)
 bind -n M-h select-pane -L
 bind -n M-j select-pane -D
 bind -n M-k select-pane -U
 bind -n M-l select-pane -R
 
-# Status bar (Catppuccin Mocha)
-set -g status-position top
-set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
-set -g status-left '#[fg=#1e1e2e,bg=#89b4fa,bold]  #S #[fg=#89b4fa,bg=#1e1e2e]'
-set -g status-right '#[fg=#45475a]#[fg=#cdd6f4,bg=#45475a] %H:%M #[fg=#89b4fa]#[fg=#1e1e2e,bg=#89b4fa,bold] %d %b '
-set -g status-left-length 30
-set -g status-right-length 50
+# Vi mode for copy mode
+setw -g mode-keys vi
+bind -T copy-mode-vi v send -X begin-selection
+bind -T copy-mode-vi y send -X copy-selection-and-cancel
+TMUX_VIM_EOF
+    else
+        cat >> ~/.tmux.conf << 'TMUX_EMACS_EOF'
 
-# Window status
-setw -g window-status-current-style 'fg=#1e1e2e bg=#a6e3a1 bold'
-setw -g window-status-current-format '#[fg=#1e1e2e,bg=#a6e3a1]#[fg=#1e1e2e,bg=#a6e3a1] #I  #W #[fg=#a6e3a1,bg=#1e1e2e]'
-setw -g window-status-style 'fg=#6c7086 bg=#1e1e2e'
-setw -g window-status-format '  #I  #W  '
-setw -g window-status-separator ''
+# Arrow key pane navigation (with prefix)
+bind Left select-pane -L
+bind Down select-pane -D
+bind Up select-pane -U
+bind Right select-pane -R
 
-# Pane borders
-set -g pane-border-style 'fg=#45475a'
-set -g pane-active-border-style 'fg=#89b4fa'
+# Arrow key pane resizing
+bind -r S-Left resize-pane -L 5
+bind -r S-Down resize-pane -D 5
+bind -r S-Up resize-pane -U 5
+bind -r S-Right resize-pane -R 5
 
-# Messages
-set -g message-style 'bg=#f9e2af fg=#1e1e2e bold'
+# Alt + arrow pane navigation (no prefix needed)
+bind -n M-Left select-pane -L
+bind -n M-Down select-pane -D
+bind -n M-Up select-pane -U
+bind -n M-Right select-pane -R
 
-# Mode (copy mode, etc)
-setw -g mode-style 'bg=#f38ba8 fg=#1e1e2e bold'
+# Emacs mode for copy mode
+setw -g mode-keys emacs
+TMUX_EMACS_EOF
+    fi
 
-# Don't exit copy mode on mouse drag end
-unbind -T copy-mode-vi MouseDragEnd1Pane
-TMUX_EOF
-
-    print_success "Tmux configured"
+    print_success "Tmux configured ($NAV_STYLE navigation)"
 }
 
 # ============================================================================
@@ -728,12 +1242,14 @@ TMUX_EOF
 setup_ghostty() {
     print_header "Configuring Ghostty"
 
+    mkdir -p ~/.config/ghostty/themes
+
     cat > ~/.config/ghostty/config << 'GHOSTTY_EOF'
 font-family = JetBrainsMono Nerd Font
 font-size = 13
 
-# Catppuccin Mocha theme
-theme = catppuccin-mocha
+# Theme (managed by dotfiles command)
+theme = dotfiles-theme
 
 background-opacity = 0.9
 
@@ -754,36 +1270,13 @@ clipboard-write = allow
 clipboard-paste-protection = true
 
 scrollback-limit = 67108864
+
+# Shift+Enter for newlines in Claude Code
+keybind = shift+enter=text:\n
 GHOSTTY_EOF
 
-    # Create theme file
-    cat > ~/.config/ghostty/themes/catppuccin-mocha << 'THEME_EOF'
-# Catppuccin Mocha theme for Ghostty
-
-background = #1e1e2e
-foreground = #cdd6f4
-cursor-color = #f5e0dc
-cursor-text = #1e1e2e
-selection-background = #585b70
-selection-foreground = #cdd6f4
-
-palette = 0=#45475a
-palette = 8=#585b70
-palette = 1=#f38ba8
-palette = 9=#f38ba8
-palette = 2=#a6e3a1
-palette = 10=#a6e3a1
-palette = 3=#f9e2af
-palette = 11=#f9e2af
-palette = 4=#89b4fa
-palette = 12=#89b4fa
-palette = 5=#f5c2e7
-palette = 13=#f5c2e7
-palette = 6=#94e2d5
-palette = 14=#94e2d5
-palette = 7=#bac2de
-palette = 15=#a6adc8
-THEME_EOF
+    # Generate theme file based on selected theme
+    generate_ghostty_theme
 
     print_success "Ghostty configured"
 }
@@ -821,7 +1314,9 @@ rules = [
 ]
 YAZI_EOF
 
-    cat > ~/.config/yazi/keymap.toml << 'KEYMAP_EOF'
+    # Write keymap based on navigation style
+    if [[ "$NAV_STYLE" == "vim" ]]; then
+        cat > ~/.config/yazi/keymap.toml << 'KEYMAP_VIM_EOF'
 [manager]
 keymap = [
   { on = ["<Esc>"], run = "escape", desc = "Exit visual mode" },
@@ -870,95 +1365,60 @@ keymap = [
   # Toggle
   { on = ["."], run = "hidden toggle", desc = "Toggle hidden" },
 ]
-KEYMAP_EOF
-
-    cat > ~/.config/yazi/theme.toml << 'THEME_EOF'
-# Catppuccin Mocha theme for Yazi
-
+KEYMAP_VIM_EOF
+    else
+        cat > ~/.config/yazi/keymap.toml << 'KEYMAP_EMACS_EOF'
 [manager]
-cwd = { fg = "#94e2d5" }
-hovered = { fg = "#1e1e2e", bg = "#89b4fa" }
-preview_hovered = { underline = true }
+keymap = [
+  { on = ["<Esc>"], run = "escape", desc = "Exit visual mode" },
+  { on = ["q"], run = "quit", desc = "Quit" },
+  { on = ["Q"], run = "quit --no-cwd-file", desc = "Quit without cd" },
 
-find_keyword = { fg = "#f9e2af", bold = true, italic = true, underline = true }
-find_position = { fg = "#f38ba8", bg = "reset", bold = true }
+  # Navigation (arrow keys)
+  { on = ["<Up>"], run = "arrow -1", desc = "Move up" },
+  { on = ["<Down>"], run = "arrow 1", desc = "Move down" },
+  { on = ["<S-Up>"], run = "arrow -5", desc = "Move up 5" },
+  { on = ["<S-Down>"], run = "arrow 5", desc = "Move down 5" },
+  { on = ["<Left>"], run = "leave", desc = "Go to parent" },
+  { on = ["<Right>"], run = "enter", desc = "Enter directory" },
+  { on = ["<PageUp>"], run = "arrow -50%", desc = "Half page up" },
+  { on = ["<PageDown>"], run = "arrow 50%", desc = "Half page down" },
+  { on = ["<Home>"], run = "arrow -99999999", desc = "Go to top" },
+  { on = ["<End>"], run = "arrow 99999999", desc = "Go to bottom" },
 
-marker_copied = { fg = "#a6e3a1", bg = "#a6e3a1" }
-marker_cut = { fg = "#f38ba8", bg = "#f38ba8" }
-marker_marked = { fg = "#89b4fa", bg = "#89b4fa" }
-marker_selected = { fg = "#f9e2af", bg = "#f9e2af" }
+  # Selection
+  { on = ["<Space>"], run = ["select --state=none", "arrow 1"], desc = "Toggle select" },
+  { on = ["<C-a>"], run = "select_all --state=true", desc = "Select all" },
 
-tab_active = { fg = "#1e1e2e", bg = "#cdd6f4" }
-tab_inactive = { fg = "#cdd6f4", bg = "#45475a" }
+  # Operations
+  { on = ["<Enter>"], run = "open", desc = "Open" },
+  { on = ["<C-c>"], run = "yank", desc = "Copy" },
+  { on = ["<C-x>"], run = "yank --cut", desc = "Cut" },
+  { on = ["<C-v>"], run = "paste", desc = "Paste" },
+  { on = ["<Delete>"], run = "remove", desc = "Trash" },
+  { on = ["<S-Delete>"], run = "remove --permanently", desc = "Delete" },
+  { on = ["<C-n>"], run = "create", desc = "New file/dir" },
+  { on = ["<F2>"], run = "rename --cursor=before_ext", desc = "Rename" },
 
-border_symbol = "│"
-border_style = { fg = "#7f849c" }
+  # Find
+  { on = ["<C-f>"], run = "find --smart", desc = "Find" },
+  { on = ["<F3>"], run = "find_arrow", desc = "Next match" },
+  { on = ["<S-F3>"], run = "find_arrow --previous", desc = "Prev match" },
 
-[status]
-separator_open = ""
-separator_close = ""
-separator_style = { fg = "#45475a", bg = "#45475a" }
+  # Goto
+  { on = ["<A-h>"], run = "cd ~", desc = "Go home" },
+  { on = ["<A-d>"], run = "cd ~/Downloads", desc = "Go downloads" },
 
-mode_normal = { fg = "#1e1e2e", bg = "#89b4fa", bold = true }
-mode_select = { fg = "#1e1e2e", bg = "#a6e3a1", bold = true }
-
-progress_label = { fg = "#cdd6f4", bold = true }
-progress_normal = { fg = "#89b4fa", bg = "#45475a" }
-progress_error = { fg = "#f38ba8", bg = "#45475a" }
-
-permissions_t = { fg = "#89b4fa" }
-permissions_r = { fg = "#f9e2af" }
-permissions_w = { fg = "#f38ba8" }
-permissions_x = { fg = "#a6e3a1" }
-permissions_s = { fg = "#7f849c" }
-
-[input]
-border = { fg = "#89b4fa" }
-title = {}
-value = {}
-selected = { reversed = true }
-
-[select]
-border = { fg = "#89b4fa" }
-active = { fg = "#f38ba8", bold = true }
-inactive = {}
-
-[tasks]
-border = { fg = "#89b4fa" }
-title = {}
-hovered = { fg = "#f38ba8", underline = true }
-
-[which]
-cols = 3
-mask = { bg = "#313244" }
-cand = { fg = "#94e2d5" }
-rest = { fg = "#9399b2" }
-desc = { fg = "#f38ba8" }
-separator = "  "
-separator_style = { fg = "#585b70" }
-
-[help]
-on = { fg = "#94e2d5" }
-run = { fg = "#f38ba8" }
-desc = {}
-hovered = { reversed = true, bold = true }
-footer = { fg = "#45475a", bg = "#cdd6f4" }
-
-[filetype]
-rules = [
-  { mime = "image/*", fg = "#f9e2af" },
-  { mime = "video/*", fg = "#f38ba8" },
-  { mime = "audio/*", fg = "#f38ba8" },
-  { mime = "application/zip", fg = "#cba6f7" },
-  { mime = "application/gzip", fg = "#cba6f7" },
-  { mime = "application/x-tar", fg = "#cba6f7" },
-  { mime = "application/pdf", fg = "#f38ba8" },
-  { name = "*", fg = "#cdd6f4" },
-  { name = "*/", fg = "#89b4fa" },
+  # Toggle
+  { on = ["<C-h>"], run = "hidden toggle", desc = "Toggle hidden" },
 ]
-THEME_EOF
+KEYMAP_EMACS_EOF
+    fi
 
-    print_success "Yazi configured"
+    # Generate theme file based on selected theme
+    generate_yazi_theme > ~/.config/yazi/theme.toml
+
+    print_success "Yazi configured ($NAV_STYLE navigation)"
 }
 
 # ============================================================================
@@ -968,7 +1428,11 @@ THEME_EOF
 setup_git() {
     print_header "Configuring Git"
 
-    cat > ~/.gitconfig << 'GIT_EOF'
+    load_theme_colors
+    local dark_mode="true"
+    [[ "$T_IS_LIGHT" == "true" ]] && dark_mode="false"
+
+    cat > ~/.gitconfig << GIT_EOF
 [core]
     pager = delta
 
@@ -977,10 +1441,10 @@ setup_git() {
 
 [delta]
     navigate = true
-    dark = true
+    dark = $dark_mode
     side-by-side = true
     line-numbers = true
-    syntax-theme = Catppuccin Mocha
+    syntax-theme = $T_DELTA_THEME
     file-style = bold yellow ul
     file-decoration-style = none
     hunk-header-style = file line-number syntax
@@ -1003,7 +1467,7 @@ setup_git() {
 GIT_EOF
 
     print_warning "Remember to set your git user.name and user.email!"
-    print_success "Git configured"
+    print_success "Git configured ($THEME theme)"
 }
 
 # ============================================================================
@@ -1013,14 +1477,10 @@ GIT_EOF
 setup_bat() {
     print_header "Configuring Bat"
 
-    cat > ~/.config/bat/config << 'BAT_EOF'
---theme="Catppuccin Mocha"
---style="numbers,changes,header"
---italic-text=always
---paging=auto
-BAT_EOF
+    mkdir -p ~/.config/bat
+    generate_bat_config > ~/.config/bat/config
 
-    print_success "Bat configured"
+    print_success "Bat configured ($THEME theme)"
 }
 
 # ============================================================================
@@ -1030,12 +1490,13 @@ BAT_EOF
 setup_utilities() {
     print_header "Setting Up Utility Scripts"
 
-    # Hotkey reference
-    cat > ~/.local/bin/hk << 'HK_EOF'
+    # Hotkey reference (navigation-style dependent)
+    if [[ "$NAV_STYLE" == "vim" ]]; then
+        cat > ~/.local/bin/hk << 'HK_VIM_EOF'
 #!/usr/bin/env bash
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                              HOTKEY REFERENCE                                ║
+║                         HOTKEY REFERENCE (vim style)                         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1050,12 +1511,11 @@ cat << 'EOF'
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ ZSH (emacs/Mac-style)                                                       │
+│ ZSH (vim mode)                                                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Ctrl-a/e         Start/end of line       Ctrl-p/n       History up/down    │
-│ Ctrl-x Ctrl-e    Edit command in nvim    Ctrl-w         Delete word back   │
+│ Esc              Enter normal mode       Ctrl-p/n       History up/down    │
+│ Ctrl-e           Edit command in nvim    Ctrl-w         Delete word back   │
 │ Ctrl-r           Search history          Ctrl-f         Accept suggestion  │
-│ Alt-b/f          Word back/forward       Ctrl-k         Kill to end        │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1140,7 +1600,118 @@ cat << 'EOF'
 │ Opt-Tab          AltTab switcher         Opt-`          Same app windows   │
 └─────────────────────────────────────────────────────────────────────────────┘
 EOF
-HK_EOF
+HK_VIM_EOF
+    else
+        cat > ~/.local/bin/hk << 'HK_EMACS_EOF'
+#!/usr/bin/env bash
+cat << 'EOF'
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                      HOTKEY REFERENCE (emacs/Mac style)                      ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TMUX (prefix = Ctrl-a)                                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-a |         Split vertical          Alt-Arrow      Navigate panes     │
+│ Ctrl-a -         Split horizontal        Alt-1/2/3/4/5  Switch window      │
+│ Ctrl-a c         New window              Ctrl-a d       Detach             │
+│ Ctrl-a Arrow     Navigate panes          Ctrl-a r       Reload config      │
+│ Ctrl-a S-Arrow   Resize panes            Ctrl-a [       Copy mode          │
+│ Ctrl-a n/p       Next/prev window                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ZSH (emacs/Mac-style)                                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-a/e         Start/end of line       Ctrl-p/n       History up/down    │
+│ Ctrl-x Ctrl-e    Edit command in nvim    Ctrl-w         Delete word back   │
+│ Ctrl-r           Search history          Ctrl-f         Accept suggestion  │
+│ Alt-b/f          Word back/forward       Ctrl-k         Kill to end        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ YAZI (file manager, launch with: y)                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Arrow keys       Navigate                Ctrl-h         Toggle hidden      │
+│ Shift-Up/Down    Move 5 lines            Ctrl-f         Search             │
+│ Home/End         Top/bottom              PageUp/Down    Half page          │
+│ Space            Toggle select           Ctrl-a         Select all         │
+│ Enter            Open                    Ctrl-n         New file/dir       │
+│ Ctrl-c           Copy                    F2             Rename             │
+│ Ctrl-x           Cut                     Delete         Trash              │
+│ Ctrl-v           Paste                   Shift-Delete   Delete permanent   │
+│ q                Quit (cd to dir)        Q              Quit (stay)        │
+│ Alt-h            Go home                 Alt-d          Go ~/Downloads     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ EZA (ls replacement)                                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ls               List with icons         la             List all + git     │
+│ ll               Long format + git       lt             Tree view          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ZOXIDE (smart cd)                                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ cd <query>       Jump to frecent dir     cd -           Previous dir       │
+│ zi               Interactive selection                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ FZF (fuzzy finder)                                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-r           Fuzzy search history    Ctrl-t         Fuzzy find file    │
+│ Alt-c            Fuzzy cd into dir       **<Tab>        Path completion    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GHOSTTY                                                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-Shift-,     Reload config           Ctrl-Shift-c   Copy               │
+│ Ctrl-Shift-v     Paste                   Ctrl-Shift-n   New window         │
+│ Cmd-Shift-,      Reload (macOS)          Cmd-c/v        Copy/Paste (macOS) │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ NVIM (basics)                                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ i                Insert mode             Esc            Normal mode        │
+│ :w               Save                    :q             Quit               │
+│ :wq              Save and quit           :q!            Quit no save       │
+│ Arrow keys       Navigate                dd             Delete line        │
+│ yy               Yank line               p              Paste              │
+│ u                Undo                    Ctrl-r         Redo               │
+│ /                Search                  n/N            Next/prev match    │
+│ Space            Leader key (menu)       :Tutor         Built-in tutorial  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CAFF (caffeine - prevent sleep)                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ caff             Toggle on/off           caff status    Check state        │
+│ caff on          Keep awake              caff off       Allow sleep        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ SSHH (quick SSH connect)                                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ sshh             Show menu & select      sshh 1/2/3     Connect directly   │
+│ sshh list        List all hosts          sshh edit      Edit ~/.sshh       │
+│ sshh add "Name" "user@host" [port]       Add new host                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ macOS APPS (Rectangle, Raycast, AltTab)                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ctrl-Opt-←/→     Half left/right         Ctrl-Opt-↑     Maximize           │
+│ Ctrl-Opt-Enter   Full screen             Ctrl-Opt-C     Center window      │
+│ Ctrl-Opt-U/I/J/K Corners                 Cmd-Space      Raycast launcher   │
+│ Opt-Tab          AltTab switcher         Opt-`          Same app windows   │
+└─────────────────────────────────────────────────────────────────────────────┘
+EOF
+HK_EMACS_EOF
+    fi
     chmod +x ~/.local/bin/hk
 
     # Caffeine script
@@ -1343,6 +1914,443 @@ SSHH_CONFIG_EOF
         print_success "Created ~/.sshh template"
     fi
 
+    # Create dotfiles management CLI
+    cat > ~/.local/bin/dotfiles << 'DOTFILES_CLI_EOF'
+#!/usr/bin/env bash
+#
+# dotfiles - Terminal environment management CLI
+# Switch themes and navigation styles dynamically
+#
+
+VERSION="1.0.0"
+DOTFILES_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
+SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin-macchiato dracula gruvbox-dark gruvbox-light nord tokyo-night solarized-dark solarized-light monokai rose-pine"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Load current settings
+load_settings() {
+    THEME="catppuccin-mocha"
+    NAV_STYLE="emacs"
+    [[ -f "$DOTFILES_CONFIG_DIR/settings" ]] && source "$DOTFILES_CONFIG_DIR/settings"
+}
+
+# Save settings
+save_settings() {
+    mkdir -p "$DOTFILES_CONFIG_DIR"
+    cat > "$DOTFILES_CONFIG_DIR/settings" << EOF
+THEME="$THEME"
+NAV_STYLE="$NAV_STYLE"
+EOF
+}
+
+# Theme color loader (same as in dotfiles-setup)
+load_theme_colors() {
+    local theme="${1:-$THEME}"
+    case "$theme" in
+        catppuccin-mocha)
+            T_BG="#1e1e2e"; T_FG="#cdd6f4"; T_CURSOR="#f5e0dc"; T_CURSOR_TEXT="#1e1e2e"
+            T_SEL_BG="#585b70"; T_SEL_FG="#cdd6f4"
+            T_BLACK="#45475a"; T_BRIGHT_BLACK="#585b70"; T_RED="#f38ba8"; T_BRIGHT_RED="#f38ba8"
+            T_GREEN="#a6e3a1"; T_BRIGHT_GREEN="#a6e3a1"; T_YELLOW="#f9e2af"; T_BRIGHT_YELLOW="#f9e2af"
+            T_BLUE="#89b4fa"; T_BRIGHT_BLUE="#89b4fa"; T_MAGENTA="#f5c2e7"; T_BRIGHT_MAGENTA="#f5c2e7"
+            T_CYAN="#94e2d5"; T_BRIGHT_CYAN="#94e2d5"; T_WHITE="#bac2de"; T_BRIGHT_WHITE="#a6adc8"
+            T_ACCENT="#89b4fa"; T_ACCENT2="#a6e3a1"; T_ACCENT3="#f38ba8"
+            T_SURFACE="#313244"; T_OVERLAY="#45475a"; T_MUTED="#6c7086"
+            T_BAT_THEME="Catppuccin Mocha"; T_DELTA_THEME="Catppuccin Mocha"; T_IS_LIGHT=false ;;
+        catppuccin-latte)
+            T_BG="#eff1f5"; T_FG="#4c4f69"; T_CURSOR="#dc8a78"; T_CURSOR_TEXT="#eff1f5"
+            T_SEL_BG="#acb0be"; T_SEL_FG="#4c4f69"
+            T_BLACK="#5c5f77"; T_BRIGHT_BLACK="#6c6f85"; T_RED="#d20f39"; T_BRIGHT_RED="#d20f39"
+            T_GREEN="#40a02b"; T_BRIGHT_GREEN="#40a02b"; T_YELLOW="#df8e1d"; T_BRIGHT_YELLOW="#df8e1d"
+            T_BLUE="#1e66f5"; T_BRIGHT_BLUE="#1e66f5"; T_MAGENTA="#ea76cb"; T_BRIGHT_MAGENTA="#ea76cb"
+            T_CYAN="#179299"; T_BRIGHT_CYAN="#179299"; T_WHITE="#acb0be"; T_BRIGHT_WHITE="#bcc0cc"
+            T_ACCENT="#1e66f5"; T_ACCENT2="#40a02b"; T_ACCENT3="#d20f39"
+            T_SURFACE="#ccd0da"; T_OVERLAY="#bcc0cc"; T_MUTED="#8c8fa1"
+            T_BAT_THEME="Catppuccin Latte"; T_DELTA_THEME="Catppuccin Latte"; T_IS_LIGHT=true ;;
+        dracula)
+            T_BG="#282a36"; T_FG="#f8f8f2"; T_CURSOR="#f8f8f2"; T_CURSOR_TEXT="#282a36"
+            T_SEL_BG="#44475a"; T_SEL_FG="#f8f8f2"
+            T_BLACK="#21222c"; T_BRIGHT_BLACK="#6272a4"; T_RED="#ff5555"; T_BRIGHT_RED="#ff6e6e"
+            T_GREEN="#50fa7b"; T_BRIGHT_GREEN="#69ff94"; T_YELLOW="#f1fa8c"; T_BRIGHT_YELLOW="#ffffa5"
+            T_BLUE="#bd93f9"; T_BRIGHT_BLUE="#d6acff"; T_MAGENTA="#ff79c6"; T_BRIGHT_MAGENTA="#ff92df"
+            T_CYAN="#8be9fd"; T_BRIGHT_CYAN="#a4ffff"; T_WHITE="#f8f8f2"; T_BRIGHT_WHITE="#ffffff"
+            T_ACCENT="#bd93f9"; T_ACCENT2="#50fa7b"; T_ACCENT3="#ff79c6"
+            T_SURFACE="#44475a"; T_OVERLAY="#6272a4"; T_MUTED="#6272a4"
+            T_BAT_THEME="Dracula"; T_DELTA_THEME="Dracula"; T_IS_LIGHT=false ;;
+        gruvbox-dark)
+            T_BG="#282828"; T_FG="#ebdbb2"; T_CURSOR="#ebdbb2"; T_CURSOR_TEXT="#282828"
+            T_SEL_BG="#504945"; T_SEL_FG="#ebdbb2"
+            T_BLACK="#282828"; T_BRIGHT_BLACK="#928374"; T_RED="#cc241d"; T_BRIGHT_RED="#fb4934"
+            T_GREEN="#98971a"; T_BRIGHT_GREEN="#b8bb26"; T_YELLOW="#d79921"; T_BRIGHT_YELLOW="#fabd2f"
+            T_BLUE="#458588"; T_BRIGHT_BLUE="#83a598"; T_MAGENTA="#b16286"; T_BRIGHT_MAGENTA="#d3869b"
+            T_CYAN="#689d6a"; T_BRIGHT_CYAN="#8ec07c"; T_WHITE="#a89984"; T_BRIGHT_WHITE="#ebdbb2"
+            T_ACCENT="#83a598"; T_ACCENT2="#b8bb26"; T_ACCENT3="#fb4934"
+            T_SURFACE="#3c3836"; T_OVERLAY="#504945"; T_MUTED="#928374"
+            T_BAT_THEME="gruvbox-dark"; T_DELTA_THEME="gruvbox-dark"; T_IS_LIGHT=false ;;
+        gruvbox-light)
+            T_BG="#fbf1c7"; T_FG="#3c3836"; T_CURSOR="#3c3836"; T_CURSOR_TEXT="#fbf1c7"
+            T_SEL_BG="#d5c4a1"; T_SEL_FG="#3c3836"
+            T_BLACK="#fbf1c7"; T_BRIGHT_BLACK="#928374"; T_RED="#cc241d"; T_BRIGHT_RED="#9d0006"
+            T_GREEN="#98971a"; T_BRIGHT_GREEN="#79740e"; T_YELLOW="#d79921"; T_BRIGHT_YELLOW="#b57614"
+            T_BLUE="#458588"; T_BRIGHT_BLUE="#076678"; T_MAGENTA="#b16286"; T_BRIGHT_MAGENTA="#8f3f71"
+            T_CYAN="#689d6a"; T_BRIGHT_CYAN="#427b58"; T_WHITE="#7c6f64"; T_BRIGHT_WHITE="#3c3836"
+            T_ACCENT="#076678"; T_ACCENT2="#79740e"; T_ACCENT3="#9d0006"
+            T_SURFACE="#ebdbb2"; T_OVERLAY="#d5c4a1"; T_MUTED="#928374"
+            T_BAT_THEME="gruvbox-light"; T_DELTA_THEME="gruvbox-light"; T_IS_LIGHT=true ;;
+        nord)
+            T_BG="#2e3440"; T_FG="#d8dee9"; T_CURSOR="#d8dee9"; T_CURSOR_TEXT="#2e3440"
+            T_SEL_BG="#434c5e"; T_SEL_FG="#d8dee9"
+            T_BLACK="#3b4252"; T_BRIGHT_BLACK="#4c566a"; T_RED="#bf616a"; T_BRIGHT_RED="#bf616a"
+            T_GREEN="#a3be8c"; T_BRIGHT_GREEN="#a3be8c"; T_YELLOW="#ebcb8b"; T_BRIGHT_YELLOW="#ebcb8b"
+            T_BLUE="#81a1c1"; T_BRIGHT_BLUE="#81a1c1"; T_MAGENTA="#b48ead"; T_BRIGHT_MAGENTA="#b48ead"
+            T_CYAN="#88c0d0"; T_BRIGHT_CYAN="#8fbcbb"; T_WHITE="#e5e9f0"; T_BRIGHT_WHITE="#eceff4"
+            T_ACCENT="#88c0d0"; T_ACCENT2="#a3be8c"; T_ACCENT3="#bf616a"
+            T_SURFACE="#3b4252"; T_OVERLAY="#434c5e"; T_MUTED="#4c566a"
+            T_BAT_THEME="Nord"; T_DELTA_THEME="Nord"; T_IS_LIGHT=false ;;
+        tokyo-night)
+            T_BG="#1a1b26"; T_FG="#a9b1d6"; T_CURSOR="#c0caf5"; T_CURSOR_TEXT="#1a1b26"
+            T_SEL_BG="#33467c"; T_SEL_FG="#c0caf5"
+            T_BLACK="#15161e"; T_BRIGHT_BLACK="#414868"; T_RED="#f7768e"; T_BRIGHT_RED="#f7768e"
+            T_GREEN="#9ece6a"; T_BRIGHT_GREEN="#9ece6a"; T_YELLOW="#e0af68"; T_BRIGHT_YELLOW="#e0af68"
+            T_BLUE="#7aa2f7"; T_BRIGHT_BLUE="#7aa2f7"; T_MAGENTA="#bb9af7"; T_BRIGHT_MAGENTA="#bb9af7"
+            T_CYAN="#7dcfff"; T_BRIGHT_CYAN="#7dcfff"; T_WHITE="#a9b1d6"; T_BRIGHT_WHITE="#c0caf5"
+            T_ACCENT="#7aa2f7"; T_ACCENT2="#9ece6a"; T_ACCENT3="#f7768e"
+            T_SURFACE="#24283b"; T_OVERLAY="#414868"; T_MUTED="#565f89"
+            T_BAT_THEME="TwoDark"; T_DELTA_THEME="TwoDark"; T_IS_LIGHT=false ;;
+        solarized-dark)
+            T_BG="#002b36"; T_FG="#839496"; T_CURSOR="#839496"; T_CURSOR_TEXT="#002b36"
+            T_SEL_BG="#073642"; T_SEL_FG="#93a1a1"
+            T_BLACK="#073642"; T_BRIGHT_BLACK="#586e75"; T_RED="#dc322f"; T_BRIGHT_RED="#cb4b16"
+            T_GREEN="#859900"; T_BRIGHT_GREEN="#586e75"; T_YELLOW="#b58900"; T_BRIGHT_YELLOW="#657b83"
+            T_BLUE="#268bd2"; T_BRIGHT_BLUE="#839496"; T_MAGENTA="#d33682"; T_BRIGHT_MAGENTA="#6c71c4"
+            T_CYAN="#2aa198"; T_BRIGHT_CYAN="#93a1a1"; T_WHITE="#eee8d5"; T_BRIGHT_WHITE="#fdf6e3"
+            T_ACCENT="#268bd2"; T_ACCENT2="#859900"; T_ACCENT3="#dc322f"
+            T_SURFACE="#073642"; T_OVERLAY="#586e75"; T_MUTED="#657b83"
+            T_BAT_THEME="Solarized (dark)"; T_DELTA_THEME="Solarized (dark)"; T_IS_LIGHT=false ;;
+        solarized-light)
+            T_BG="#fdf6e3"; T_FG="#657b83"; T_CURSOR="#657b83"; T_CURSOR_TEXT="#fdf6e3"
+            T_SEL_BG="#eee8d5"; T_SEL_FG="#586e75"
+            T_BLACK="#073642"; T_BRIGHT_BLACK="#002b36"; T_RED="#dc322f"; T_BRIGHT_RED="#cb4b16"
+            T_GREEN="#859900"; T_BRIGHT_GREEN="#586e75"; T_YELLOW="#b58900"; T_BRIGHT_YELLOW="#657b83"
+            T_BLUE="#268bd2"; T_BRIGHT_BLUE="#839496"; T_MAGENTA="#d33682"; T_BRIGHT_MAGENTA="#6c71c4"
+            T_CYAN="#2aa198"; T_BRIGHT_CYAN="#93a1a1"; T_WHITE="#eee8d5"; T_BRIGHT_WHITE="#fdf6e3"
+            T_ACCENT="#268bd2"; T_ACCENT2="#859900"; T_ACCENT3="#dc322f"
+            T_SURFACE="#eee8d5"; T_OVERLAY="#93a1a1"; T_MUTED="#839496"
+            T_BAT_THEME="Solarized (light)"; T_DELTA_THEME="Solarized (light)"; T_IS_LIGHT=true ;;
+        monokai)
+            T_BG="#272822"; T_FG="#f8f8f2"; T_CURSOR="#f8f8f2"; T_CURSOR_TEXT="#272822"
+            T_SEL_BG="#49483e"; T_SEL_FG="#f8f8f2"
+            T_BLACK="#272822"; T_BRIGHT_BLACK="#75715e"; T_RED="#f92672"; T_BRIGHT_RED="#f92672"
+            T_GREEN="#a6e22e"; T_BRIGHT_GREEN="#a6e22e"; T_YELLOW="#f4bf75"; T_BRIGHT_YELLOW="#f4bf75"
+            T_BLUE="#66d9ef"; T_BRIGHT_BLUE="#66d9ef"; T_MAGENTA="#ae81ff"; T_BRIGHT_MAGENTA="#ae81ff"
+            T_CYAN="#a1efe4"; T_BRIGHT_CYAN="#a1efe4"; T_WHITE="#f8f8f2"; T_BRIGHT_WHITE="#f9f8f5"
+            T_ACCENT="#66d9ef"; T_ACCENT2="#a6e22e"; T_ACCENT3="#f92672"
+            T_SURFACE="#3e3d32"; T_OVERLAY="#49483e"; T_MUTED="#75715e"
+            T_BAT_THEME="Monokai Extended"; T_DELTA_THEME="Monokai Extended"; T_IS_LIGHT=false ;;
+        rose-pine)
+            T_BG="#191724"; T_FG="#e0def4"; T_CURSOR="#524f67"; T_CURSOR_TEXT="#e0def4"
+            T_SEL_BG="#403d52"; T_SEL_FG="#e0def4"
+            T_BLACK="#26233a"; T_BRIGHT_BLACK="#6e6a86"; T_RED="#eb6f92"; T_BRIGHT_RED="#eb6f92"
+            T_GREEN="#9ccfd8"; T_BRIGHT_GREEN="#9ccfd8"; T_YELLOW="#f6c177"; T_BRIGHT_YELLOW="#f6c177"
+            T_BLUE="#31748f"; T_BRIGHT_BLUE="#31748f"; T_MAGENTA="#c4a7e7"; T_BRIGHT_MAGENTA="#c4a7e7"
+            T_CYAN="#ebbcba"; T_BRIGHT_CYAN="#ebbcba"; T_WHITE="#e0def4"; T_BRIGHT_WHITE="#e0def4"
+            T_ACCENT="#c4a7e7"; T_ACCENT2="#9ccfd8"; T_ACCENT3="#eb6f92"
+            T_SURFACE="#1f1d2e"; T_OVERLAY="#26233a"; T_MUTED="#6e6a86"
+            T_BAT_THEME="base16"; T_DELTA_THEME="base16"; T_IS_LIGHT=false ;;
+        *) # Default catppuccin variants
+            load_theme_colors "catppuccin-mocha" ;;
+    esac
+}
+
+# Update Ghostty theme
+update_ghostty() {
+    load_theme_colors
+    mkdir -p ~/.config/ghostty/themes
+    cat > ~/.config/ghostty/themes/dotfiles-theme << EOF
+# Generated by dotfiles - Theme: $THEME
+background = ${T_BG}
+foreground = ${T_FG}
+cursor-color = ${T_CURSOR}
+cursor-text = ${T_CURSOR_TEXT}
+selection-background = ${T_SEL_BG}
+selection-foreground = ${T_SEL_FG}
+palette = 0=${T_BLACK}
+palette = 8=${T_BRIGHT_BLACK}
+palette = 1=${T_RED}
+palette = 9=${T_BRIGHT_RED}
+palette = 2=${T_GREEN}
+palette = 10=${T_BRIGHT_GREEN}
+palette = 3=${T_YELLOW}
+palette = 11=${T_BRIGHT_YELLOW}
+palette = 4=${T_BLUE}
+palette = 12=${T_BRIGHT_BLUE}
+palette = 5=${T_MAGENTA}
+palette = 13=${T_BRIGHT_MAGENTA}
+palette = 6=${T_CYAN}
+palette = 14=${T_BRIGHT_CYAN}
+palette = 7=${T_WHITE}
+palette = 15=${T_BRIGHT_WHITE}
+EOF
+}
+
+# Update tmux theme
+update_tmux() {
+    load_theme_colors
+    # Remove old theme lines and add new ones
+    if [[ -f ~/.tmux.conf ]]; then
+        sed -i '/^# Theme:/d; /^set -g status-style/d; /^set -g status-left /d; /^set -g status-right /d' ~/.tmux.conf
+        sed -i '/^setw -g window-status-current-style/d; /^setw -g window-status-current-format/d' ~/.tmux.conf
+        sed -i '/^setw -g window-status-style/d; /^setw -g window-status-format/d; /^setw -g window-status-separator/d' ~/.tmux.conf
+        sed -i '/^set -g pane-border-style/d; /^set -g pane-active-border-style/d' ~/.tmux.conf
+        sed -i '/^set -g message-style/d; /^setw -g mode-style/d' ~/.tmux.conf
+
+        cat >> ~/.tmux.conf << EOF
+# Theme: $THEME (generated by dotfiles)
+set -g status-style 'bg=${T_BG} fg=${T_FG}'
+set -g status-left '#[fg=${T_BG},bg=${T_ACCENT},bold]  #S #[fg=${T_ACCENT},bg=${T_BG}]'
+set -g status-right '#[fg=${T_OVERLAY}]#[fg=${T_FG},bg=${T_OVERLAY}] %H:%M #[fg=${T_ACCENT}]#[fg=${T_BG},bg=${T_ACCENT},bold] %d %b '
+setw -g window-status-current-style 'fg=${T_BG} bg=${T_ACCENT2} bold'
+setw -g window-status-current-format '#[fg=${T_BG},bg=${T_ACCENT2}]#[fg=${T_BG},bg=${T_ACCENT2}] #I  #W #[fg=${T_ACCENT2},bg=${T_BG}]'
+setw -g window-status-style 'fg=${T_MUTED} bg=${T_BG}'
+setw -g window-status-format '  #I  #W  '
+setw -g window-status-separator ''
+set -g pane-border-style 'fg=${T_OVERLAY}'
+set -g pane-active-border-style 'fg=${T_ACCENT}'
+set -g message-style 'bg=${T_YELLOW} fg=${T_BG} bold'
+setw -g mode-style 'bg=${T_ACCENT3} fg=${T_BG} bold'
+EOF
+    fi
+}
+
+# Update fzf colors in zshrc
+update_fzf() {
+    load_theme_colors
+    local fzf_colors="export FZF_DEFAULT_OPTS=\"\$FZF_DEFAULT_OPTS \\
+  --color=fg:${T_FG},bg:-1,hl:${T_ACCENT3} \\
+  --color=fg+:${T_FG},bg+:${T_SURFACE},hl+:${T_ACCENT3} \\
+  --color=info:${T_MAGENTA},prompt:${T_CYAN},pointer:${T_CURSOR} \\
+  --color=marker:${T_CURSOR},spinner:${T_CURSOR},header:${T_CYAN} \\
+  --prompt='  ' --pointer='▶' --marker='✓'\""
+
+    if [[ -f ~/.zshrc ]]; then
+        # Remove old fzf colors and replace
+        sed -i '/^export FZF_DEFAULT_OPTS=.*--color=/d' ~/.zshrc
+        sed -i '/^  --color=/d' ~/.zshrc
+        # Add new colors after the placeholder comment
+        sed -i "s|# fzf colors.*|# fzf colors ($THEME)\n$fzf_colors|" ~/.zshrc
+    fi
+}
+
+# Update yazi theme
+update_yazi() {
+    load_theme_colors
+    mkdir -p ~/.config/yazi
+    cat > ~/.config/yazi/theme.toml << EOF
+# Theme: $THEME (generated by dotfiles)
+[manager]
+cwd = { fg = "${T_CYAN}" }
+hovered = { fg = "${T_BG}", bg = "${T_ACCENT}" }
+preview_hovered = { underline = true }
+find_keyword = { fg = "${T_YELLOW}", bold = true, italic = true, underline = true }
+find_position = { fg = "${T_ACCENT3}", bg = "reset", bold = true }
+marker_copied = { fg = "${T_GREEN}", bg = "${T_GREEN}" }
+marker_cut = { fg = "${T_ACCENT3}", bg = "${T_ACCENT3}" }
+marker_marked = { fg = "${T_ACCENT}", bg = "${T_ACCENT}" }
+marker_selected = { fg = "${T_YELLOW}", bg = "${T_YELLOW}" }
+tab_active = { fg = "${T_BG}", bg = "${T_FG}" }
+tab_inactive = { fg = "${T_FG}", bg = "${T_OVERLAY}" }
+border_symbol = "│"
+border_style = { fg = "${T_MUTED}" }
+[status]
+separator_open = ""
+separator_close = ""
+separator_style = { fg = "${T_OVERLAY}", bg = "${T_OVERLAY}" }
+mode_normal = { fg = "${T_BG}", bg = "${T_ACCENT}", bold = true }
+mode_select = { fg = "${T_BG}", bg = "${T_ACCENT2}", bold = true }
+progress_label = { fg = "${T_FG}", bold = true }
+progress_normal = { fg = "${T_ACCENT}", bg = "${T_OVERLAY}" }
+progress_error = { fg = "${T_ACCENT3}", bg = "${T_OVERLAY}" }
+permissions_t = { fg = "${T_ACCENT}" }
+permissions_r = { fg = "${T_YELLOW}" }
+permissions_w = { fg = "${T_ACCENT3}" }
+permissions_x = { fg = "${T_GREEN}" }
+permissions_s = { fg = "${T_MUTED}" }
+[input]
+border = { fg = "${T_ACCENT}" }
+title = {}
+value = {}
+selected = { reversed = true }
+[select]
+border = { fg = "${T_ACCENT}" }
+active = { fg = "${T_ACCENT3}", bold = true }
+inactive = {}
+[tasks]
+border = { fg = "${T_ACCENT}" }
+title = {}
+hovered = { fg = "${T_ACCENT3}", underline = true }
+[which]
+cols = 3
+mask = { bg = "${T_SURFACE}" }
+cand = { fg = "${T_CYAN}" }
+rest = { fg = "${T_MUTED}" }
+desc = { fg = "${T_ACCENT3}" }
+separator = "  "
+separator_style = { fg = "${T_OVERLAY}" }
+[help]
+on = { fg = "${T_CYAN}" }
+run = { fg = "${T_ACCENT3}" }
+desc = {}
+hovered = { reversed = true, bold = true }
+footer = { fg = "${T_OVERLAY}", bg = "${T_FG}" }
+[filetype]
+rules = [
+  { mime = "image/*", fg = "${T_YELLOW}" },
+  { mime = "video/*", fg = "${T_ACCENT3}" },
+  { mime = "audio/*", fg = "${T_ACCENT3}" },
+  { mime = "application/zip", fg = "${T_MAGENTA}" },
+  { mime = "application/gzip", fg = "${T_MAGENTA}" },
+  { mime = "application/x-tar", fg = "${T_MAGENTA}" },
+  { mime = "application/pdf", fg = "${T_ACCENT3}" },
+  { name = "*", fg = "${T_FG}" },
+  { name = "*/", fg = "${T_ACCENT}" },
+]
+EOF
+}
+
+# Update bat config
+update_bat() {
+    load_theme_colors
+    mkdir -p ~/.config/bat
+    cat > ~/.config/bat/config << EOF
+--theme="${T_BAT_THEME}"
+--style="numbers,changes,header"
+--italic-text=always
+--paging=auto
+EOF
+}
+
+# Update all theme configs
+apply_theme() {
+    echo -e "${BLUE}Applying theme: ${CYAN}$THEME${NC}"
+    update_ghostty
+    update_tmux
+    update_fzf
+    update_yazi
+    update_bat
+    save_settings
+    echo -e "${GREEN}✓${NC} Theme applied! Restart your terminal or reload configs."
+    echo -e "  • tmux: ${CYAN}tmux source ~/.tmux.conf${NC}"
+    echo -e "  • zsh:  ${CYAN}source ~/.zshrc${NC}"
+    echo -e "  • ghostty: ${CYAN}Ctrl-Shift-,${NC} to reload"
+}
+
+# Show status
+show_status() {
+    load_settings
+    echo -e "${BLUE}Current Settings:${NC}"
+    echo -e "  Theme:      ${CYAN}$THEME${NC}"
+    echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
+}
+
+# List themes
+list_themes() {
+    echo -e "${BLUE}Available Themes:${NC}"
+    for theme in $SUPPORTED_THEMES; do
+        if [[ "$theme" == "$THEME" ]]; then
+            echo -e "  ${GREEN}●${NC} $theme ${GREEN}(current)${NC}"
+        else
+            echo -e "  ○ $theme"
+        fi
+    done
+}
+
+# Show help
+show_help() {
+    cat << EOF
+${BLUE}dotfiles${NC} - Terminal environment management
+
+${YELLOW}USAGE${NC}
+    dotfiles <command> [args]
+
+${YELLOW}COMMANDS${NC}
+    theme <name>    Set color theme
+    nav <style>     Set navigation style (emacs|vim)
+    list-themes     Show available themes
+    status          Show current settings
+    help            Show this help
+
+${YELLOW}EXAMPLES${NC}
+    dotfiles theme dracula
+    dotfiles theme catppuccin-mocha
+    dotfiles nav vim
+    dotfiles list-themes
+
+${YELLOW}THEMES${NC}
+    catppuccin-mocha (default), catppuccin-latte, catppuccin-frappe,
+    catppuccin-macchiato, dracula, gruvbox-dark, gruvbox-light,
+    nord, tokyo-night, solarized-dark, solarized-light, monokai, rose-pine
+EOF
+}
+
+# Main
+load_settings
+
+case "${1:-}" in
+    theme)
+        if [[ -z "${2:-}" ]]; then
+            echo -e "${RED}Error: theme name required${NC}"
+            echo "Usage: dotfiles theme <name>"
+            list_themes
+            exit 1
+        fi
+        if [[ ! " $SUPPORTED_THEMES " =~ " $2 " ]]; then
+            echo -e "${RED}Error: Unknown theme '$2'${NC}"
+            list_themes
+            exit 1
+        fi
+        THEME="$2"
+        apply_theme
+        ;;
+    nav)
+        if [[ "${2:-}" != "emacs" && "${2:-}" != "vim" ]]; then
+            echo -e "${RED}Error: nav style must be 'emacs' or 'vim'${NC}"
+            exit 1
+        fi
+        NAV_STYLE="$2"
+        save_settings
+        echo -e "${GREEN}✓${NC} Navigation style set to ${CYAN}$NAV_STYLE${NC}"
+        echo -e "${YELLOW}Note:${NC} Re-run dotfiles-setup to apply navigation changes."
+        ;;
+    list-themes|themes)
+        list_themes
+        ;;
+    status)
+        show_status
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    "")
+        show_status
+        echo ""
+        show_help
+        ;;
+    *)
+        echo -e "${RED}Unknown command: $1${NC}"
+        show_help
+        exit 1
+        ;;
+esac
+DOTFILES_CLI_EOF
+    chmod +x ~/.local/bin/dotfiles
+
     print_success "Utility scripts created"
 }
 
@@ -1391,6 +2399,9 @@ set_default_shell() {
 # ============================================================================
 
 main() {
+    # Load theme colors for setup
+    load_theme_colors
+
     install_packages
     setup_directories
     setup_zsh
@@ -1403,15 +2414,22 @@ main() {
     setup_nvim
     set_default_shell
 
-    print_header "Setup Complete! 🎉"
-    echo -e "Theme: ${PURPLE}Catppuccin Mocha${NC}\n"
+    # Save current settings
+    save_settings
+
+    print_header "Setup Complete!"
+    echo -e "Theme: ${PURPLE}$THEME${NC}"
+    echo -e "Navigation: ${CYAN}$NAV_STYLE${NC}\n"
     echo -e "Next steps:"
     echo -e "  1. ${CYAN}source ~/.zshrc${NC} or restart terminal"
     echo -e "  2. ${CYAN}tmux${NC} to start tmux"
     echo -e "  3. ${CYAN}nvim${NC} to finish plugin installation"
     echo -e "  4. ${CYAN}p10k configure${NC} to customize prompt"
     echo -e "  5. ${CYAN}hk${NC} to see hotkey reference"
-    echo -e "\n${GREEN}Enjoy your new terminal! ✨${NC}\n"
+    echo -e "\nTo change theme/navigation anytime:"
+    echo -e "  ${CYAN}dotfiles theme <name>${NC}  - Switch theme"
+    echo -e "  ${CYAN}dotfiles list-themes${NC}   - Show available themes"
+    echo -e "\n${GREEN}Enjoy your new terminal!${NC}\n"
 }
 
 # Run main

@@ -1,14 +1,14 @@
 # dotfiles-setup
 
-A cross-platform terminal environment setup script with a **Catppuccin Mocha** theme.
+A cross-platform terminal environment setup script with **13 customizable themes**.
 
-Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Windows (via WSL).
+Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Windows (via WSL). Switch themes anytime with the `dotfiles` command.
 
 ## What It Installs & Configures
 
 | Tool | Description |
 |------|-------------|
-| **zsh** | Shell with Mac-style navigation, syntax highlighting, autosuggestions |
+| **zsh** | Shell with configurable navigation, syntax highlighting, autosuggestions |
 | **tmux** | Terminal multiplexer with powerline status bar |
 | **Ghostty** | Modern terminal emulator |
 | **eza** | Modern `ls` replacement with icons |
@@ -91,6 +91,9 @@ chmod +x bin/dotfiles-setup
 
 | Option | Description |
 |--------|-------------|
+| `--theme <name>` | Set color theme (default: catppuccin-mocha) |
+| `--emacs` | Emacs/Mac-style navigation (default, beginner-friendly) |
+| `--vim` | Vim-style navigation (hjkl everywhere) |
 | `--macos-apps` | Install all optional macOS quality-of-life apps |
 | `--raspi` | Raspberry Pi mode (auto-detect model) |
 | `--raspi5` | Raspberry Pi 5 optimizations |
@@ -100,31 +103,70 @@ chmod +x bin/dotfiles-setup
 
 ## Features
 
-### Consistent Theme (Catppuccin Mocha)
+### Themes
 
-All tools are configured with the Catppuccin Mocha color scheme for a unified look:
+All tools share a unified color scheme. Choose from 13 themes during install or switch anytime:
 
+| Theme | Description |
+|-------|-------------|
+| `catppuccin-mocha` | Warm dark theme (default) |
+| `catppuccin-macchiato` | Medium-dark variant |
+| `catppuccin-frappe` | Muted dark variant |
+| `catppuccin-latte` | Light theme |
+| `dracula` | Popular purple-tinted dark theme |
+| `gruvbox-dark` | Retro warm dark theme |
+| `gruvbox-light` | Retro warm light theme |
+| `nord` | Arctic, bluish dark theme |
+| `tokyo-night` | Tokyo cityscape inspired |
+| `solarized-dark` | Precision dark theme |
+| `solarized-light` | Precision light theme |
+| `monokai` | Sublime Text classic |
+| `rose-pine` | Soft, muted dark theme |
+
+**Switch themes anytime:**
+
+```bash
+dotfiles theme dracula      # Switch to Dracula
+dotfiles theme nord         # Switch to Nord
+dotfiles list-themes        # Show all themes
+dotfiles status             # Show current settings
+```
+
+Themes apply consistently across:
 - Terminal (Ghostty)
 - Tmux status bar
 - fzf fuzzy finder
 - Yazi file manager
 - Git diffs (delta)
 - Bat syntax highlighting
-- Man pages
 
-### Keyboard Navigation
+### Navigation Styles
 
-| Context | Style | Keys |
-|---------|-------|------|
-| Zsh | Mac/Emacs | `Ctrl-a/e` start/end, `Alt-b/f` word nav, `Ctrl-x Ctrl-e` edit in nvim |
-| Tmux | Vim | `hjkl` pane navigation, `Alt-hjkl` without prefix |
-| Yazi | Vim | Full vim keybindings |
-| fzf | Vim | Vim-style selection |
+Choose between two navigation styles with `--emacs` (default) or `--vim`:
+
+#### Emacs/Mac Style (default, beginner-friendly)
+
+| Tool | Navigation |
+|------|------------|
+| Zsh | `Ctrl-a/e` start/end, `Alt-b/f` word nav, `Ctrl-x Ctrl-e` edit in nvim |
+| Tmux | Arrow keys for pane navigation, `Alt-Arrow` without prefix |
+| Yazi | Arrow keys, `Ctrl-c/x/v` copy/cut/paste, `F2` rename |
+| Nvim | Arrow keys work alongside standard vim keys |
+
+#### Vim Style
+
+| Tool | Navigation |
+|------|------------|
+| Zsh | `Esc` for normal mode, `hjkl` navigation, `Ctrl-e` edit in nvim |
+| Tmux | `hjkl` pane navigation, `Alt-hjkl` without prefix |
+| Yazi | `hjkl` navigation, `y/x/p` yank/cut/paste, `r` rename |
+| Nvim | Full vim keybindings |
 
 ### Custom Utilities
 
 | Command | Description |
 |---------|-------------|
+| `dotfiles` | Switch themes/navigation, show status |
 | `hk` | Hotkey reference cheatsheet |
 | `caff` | Toggle system sleep (like Caffeine) |
 | `sshh` | Quick SSH connection manager |
@@ -152,6 +194,7 @@ After running, configs are placed in:
 | `~/.config/yazi/` | Yazi file manager |
 | `~/.config/bat/config` | Bat configuration |
 | `~/.gitconfig` | Git with delta |
+| `~/.config/dotfiles/settings` | Theme and navigation preferences |
 | `~/.sshh` | SSH hosts for sshh |
 
 ## Post-Install
@@ -161,7 +204,8 @@ After running, configs are placed in:
 3. Run `nvim` to install plugins
 4. Run `p10k configure` to customize prompt
 5. Run `hk` to see all hotkeys
-6. Run `sshh edit` to add SSH hosts
+6. Run `dotfiles status` to see current theme/navigation
+7. Run `sshh edit` to add SSH hosts
 
 ## Requirements
 
