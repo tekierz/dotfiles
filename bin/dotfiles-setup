@@ -1592,6 +1592,19 @@ cat << 'EOF'
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
+│ DOTFILES (theme & user management)                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ dotfiles status              Show current settings (user, theme, nav)       │
+│ dotfiles theme <name>        Switch theme (e.g., dracula, nord, gruvbox)    │
+│ dotfiles nav emacs|vim       Set navigation style                           │
+│ dotfiles list-themes         Show all 13 available themes                   │
+│ dotfiles --<User>            Quick switch user (e.g., dotfiles --Pratik)    │
+│ dotfiles user <name>         Switch to user profile                         │
+│ dotfiles user add <name>     Create new user (interactive or with flags)    │
+│ dotfiles users               List all user profiles                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
 │ macOS APPS (Rectangle, Raycast, AltTab)                                     │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Ctrl-Opt-←/→     Half left/right         Ctrl-Opt-↑     Maximize           │
@@ -1699,6 +1712,19 @@ cat << 'EOF'
 │ sshh             Show menu & select      sshh 1/2/3     Connect directly   │
 │ sshh list        List all hosts          sshh edit      Edit ~/.sshh       │
 │ sshh add "Name" "user@host" [port]       Add new host                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ DOTFILES (theme & user management)                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ dotfiles status              Show current settings (user, theme, nav)       │
+│ dotfiles theme <name>        Switch theme (e.g., dracula, nord, gruvbox)    │
+│ dotfiles nav emacs|vim       Set navigation style                           │
+│ dotfiles list-themes         Show all 13 available themes                   │
+│ dotfiles --<User>            Quick switch user (e.g., dotfiles --Pratik)    │
+│ dotfiles user <name>         Switch to user profile                         │
+│ dotfiles user add <name>     Create new user (interactive or with flags)    │
+│ dotfiles users               List all user profiles                         │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1922,8 +1948,9 @@ SSHH_CONFIG_EOF
 # Switch themes and navigation styles dynamically
 #
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 DOTFILES_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
+DOTFILES_USERS_DIR="$DOTFILES_CONFIG_DIR/users"
 SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin-macchiato dracula gruvbox-dark gruvbox-light nord tokyo-night solarized-dark solarized-light monokai rose-pine"
 
 # Colors
@@ -1938,6 +1965,7 @@ NC='\033[0m'
 load_settings() {
     THEME="catppuccin-mocha"
     NAV_STYLE="emacs"
+    ACTIVE_USER=""
     [[ -f "$DOTFILES_CONFIG_DIR/settings" ]] && source "$DOTFILES_CONFIG_DIR/settings"
 }
 
@@ -1947,6 +1975,7 @@ save_settings() {
     cat > "$DOTFILES_CONFIG_DIR/settings" << EOF
 THEME="$THEME"
 NAV_STYLE="$NAV_STYLE"
+ACTIVE_USER="$ACTIVE_USER"
 EOF
 }
 
@@ -2068,6 +2097,290 @@ load_theme_colors() {
             load_theme_colors "catppuccin-mocha" ;;
     esac
 }
+
+# ============================================================================
+# USER MANAGEMENT FUNCTIONS
+# ============================================================================
+
+# Validate username (alphanumeric, underscores, hyphens, 1-32 chars)
+validate_username() {
+    local username="$1"
+    if [[ ! "$username" =~ ^[a-zA-Z][a-zA-Z0-9_-]{0,31}$ ]]; then
+        echo -e "${RED}Error: Invalid username '${username}'${NC}"
+        echo "Username must start with a letter and contain only letters, numbers, underscores, or hyphens (max 32 chars)."
+        return 1
+    fi
+    return 0
+}
+
+# Check if user profile exists
+user_exists() {
+    local username="$1"
+    [[ -f "$DOTFILES_USERS_DIR/${username}.settings" ]]
+}
+
+# Load user profile
+load_user_profile() {
+    local username="$1"
+    local profile="$DOTFILES_USERS_DIR/${username}.settings"
+    if [[ -f "$profile" ]]; then
+        source "$profile"
+        return 0
+    fi
+    return 1
+}
+
+# Save user profile
+save_user_profile() {
+    local username="$1"
+    mkdir -p "$DOTFILES_USERS_DIR"
+    cat > "$DOTFILES_USERS_DIR/${username}.settings" << EOF
+# User: $username
+THEME="$THEME"
+NAV_STYLE="$NAV_STYLE"
+EOF
+}
+
+# List all user profiles
+list_users() {
+    load_settings
+    echo -e "${BLUE}User Profiles:${NC}"
+
+    if [[ ! -d "$DOTFILES_USERS_DIR" ]] || [[ -z "$(ls -A "$DOTFILES_USERS_DIR" 2>/dev/null)" ]]; then
+        echo -e "  ${YELLOW}No user profiles found${NC}"
+        echo -e "  Create one with: ${CYAN}dotfiles user add <username>${NC}"
+        return
+    fi
+
+    for profile in "$DOTFILES_USERS_DIR"/*.settings; do
+        [[ -f "$profile" ]] || continue
+        local name=$(basename "$profile" .settings)
+        # Load profile to show details
+        local user_theme user_nav
+        source "$profile"
+        user_theme="${THEME:-unknown}"
+        user_nav="${NAV_STYLE:-unknown}"
+
+        if [[ "$name" == "$ACTIVE_USER" ]]; then
+            echo -e "  ${GREEN}●${NC} ${GREEN}$name${NC} (theme: $user_theme, nav: $user_nav) ${GREEN}[active]${NC}"
+        else
+            echo -e "  ○ $name (theme: $user_theme, nav: $user_nav)"
+        fi
+    done
+    # Reload main settings after iterating
+    load_settings
+}
+
+# Interactive theme selection
+interactive_select_theme() {
+    echo -e "\n${BLUE}Select a theme:${NC}\n"
+    local themes=($SUPPORTED_THEMES)
+    local i=1
+    for theme in "${themes[@]}"; do
+        printf "  %2d) %s\n" "$i" "$theme"
+        ((i++))
+    done
+    echo ""
+
+    local selection
+    while true; do
+        read -rp "Enter number (1-${#themes[@]}): " selection
+        if [[ "$selection" =~ ^[0-9]+$ ]] && ((selection >= 1 && selection <= ${#themes[@]})); then
+            THEME="${themes[$((selection-1))]}"
+            echo -e "${GREEN}Selected: $THEME${NC}"
+            return 0
+        fi
+        echo -e "${RED}Invalid selection. Please enter a number 1-${#themes[@]}${NC}"
+    done
+}
+
+# Interactive nav style selection
+interactive_select_nav() {
+    echo -e "\n${BLUE}Select navigation style:${NC}\n"
+    echo "  1) emacs - Arrow keys, Ctrl-A/E, beginner-friendly (recommended)"
+    echo "  2) vim   - hjkl navigation, modal editing"
+    echo ""
+
+    local selection
+    while true; do
+        read -rp "Enter number (1 or 2): " selection
+        case "$selection" in
+            1) NAV_STYLE="emacs"; echo -e "${GREEN}Selected: emacs${NC}"; return 0 ;;
+            2) NAV_STYLE="vim"; echo -e "${GREEN}Selected: vim${NC}"; return 0 ;;
+            *) echo -e "${RED}Invalid selection. Please enter 1 or 2${NC}" ;;
+        esac
+    done
+}
+
+# Full interactive setup for new user
+interactive_user_setup() {
+    local username="$1"
+    echo -e "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}  Setting up profile for: ${CYAN}$username${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    # Default values
+    THEME="catppuccin-mocha"
+    NAV_STYLE="emacs"
+
+    interactive_select_theme
+    interactive_select_nav
+
+    # Save the profile
+    save_user_profile "$username"
+
+    echo -e "\n${GREEN}Profile created for $username!${NC}"
+    echo -e "  Theme: ${CYAN}$THEME${NC}"
+    echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
+
+    # Ask if they want to apply now
+    echo ""
+    read -rp "Apply these settings now? [Y/n]: " apply
+    apply=${apply:-y}
+    if [[ "$apply" =~ ^[Yy]$ ]]; then
+        ACTIVE_USER="$username"
+        apply_theme
+    fi
+}
+
+# Switch to a user profile
+switch_to_user() {
+    local username="$1"
+
+    if ! validate_username "$username"; then
+        return 1
+    fi
+
+    # Check if user exists
+    if ! user_exists "$username"; then
+        echo -e "${YELLOW}User '$username' does not exist.${NC}"
+        read -rp "Create new profile for '$username'? [Y/n]: " create
+        create=${create:-y}
+        if [[ "$create" =~ ^[Yy]$ ]]; then
+            interactive_user_setup "$username"
+        else
+            echo "Aborted."
+            return 1
+        fi
+        return 0
+    fi
+
+    # Load user profile
+    load_user_profile "$username"
+    ACTIVE_USER="$username"
+    apply_theme
+    echo -e "${GREEN}Switched to user: ${CYAN}$username${NC}"
+}
+
+# Add a new user profile (explicit creation)
+add_user() {
+    local username=""
+    local theme=""
+    local nav=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --theme)
+                theme="$2"
+                shift 2
+                ;;
+            --nav)
+                nav="$2"
+                shift 2
+                ;;
+            *)
+                if [[ -z "$username" ]]; then
+                    username="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$username" ]]; then
+        echo -e "${RED}Error: username required${NC}"
+        echo "Usage: dotfiles user add <username> [--theme <name>] [--nav emacs|vim]"
+        return 1
+    fi
+
+    if ! validate_username "$username"; then
+        return 1
+    fi
+
+    if user_exists "$username"; then
+        echo -e "${YELLOW}User '$username' already exists.${NC}"
+        read -rp "Overwrite profile? [y/N]: " overwrite
+        if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
+            echo "Aborted."
+            return 1
+        fi
+    fi
+
+    # If both theme and nav are provided, create directly
+    if [[ -n "$theme" && -n "$nav" ]]; then
+        # Validate theme
+        if [[ ! " $SUPPORTED_THEMES " =~ " $theme " ]]; then
+            echo -e "${RED}Error: Unknown theme '$theme'${NC}"
+            list_themes
+            return 1
+        fi
+        # Validate nav
+        if [[ "$nav" != "emacs" && "$nav" != "vim" ]]; then
+            echo -e "${RED}Error: nav must be 'emacs' or 'vim'${NC}"
+            return 1
+        fi
+        THEME="$theme"
+        NAV_STYLE="$nav"
+        save_user_profile "$username"
+        echo -e "${GREEN}Created profile for: ${CYAN}$username${NC}"
+        echo -e "  Theme: ${CYAN}$THEME${NC}"
+        echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
+    else
+        # Interactive setup
+        interactive_user_setup "$username"
+    fi
+}
+
+# Delete a user profile
+delete_user() {
+    local username="$1"
+
+    if [[ -z "$username" ]]; then
+        echo -e "${RED}Error: username required${NC}"
+        echo "Usage: dotfiles user delete <username>"
+        return 1
+    fi
+
+    if ! user_exists "$username"; then
+        echo -e "${RED}Error: User '$username' does not exist${NC}"
+        return 1
+    fi
+
+    load_settings
+
+    if [[ "$username" == "$ACTIVE_USER" ]]; then
+        echo -e "${YELLOW}Warning: '$username' is the active user${NC}"
+    fi
+
+    read -rp "Delete profile for '$username'? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        rm -f "$DOTFILES_USERS_DIR/${username}.settings"
+        echo -e "${GREEN}Deleted profile: $username${NC}"
+
+        if [[ "$username" == "$ACTIVE_USER" ]]; then
+            ACTIVE_USER=""
+            save_settings
+            echo -e "${YELLOW}Note: Switch to another user with 'dotfiles user <name>'${NC}"
+        fi
+    else
+        echo "Aborted."
+    fi
+}
+
+# ============================================================================
+# THEME UPDATE FUNCTIONS
+# ============================================================================
 
 # Update Ghostty theme
 update_ghostty() {
@@ -2255,6 +2568,9 @@ apply_theme() {
 show_status() {
     load_settings
     echo -e "${BLUE}Current Settings:${NC}"
+    if [[ -n "$ACTIVE_USER" ]]; then
+        echo -e "  User:       ${CYAN}$ACTIVE_USER${NC}"
+    fi
     echo -e "  Theme:      ${CYAN}$THEME${NC}"
     echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
 }
@@ -2280,17 +2596,26 @@ ${YELLOW}USAGE${NC}
     dotfiles <command> [args]
 
 ${YELLOW}COMMANDS${NC}
-    theme <name>    Set color theme
-    nav <style>     Set navigation style (emacs|vim)
-    list-themes     Show available themes
-    status          Show current settings
-    help            Show this help
+    theme <name>       Set color theme
+    nav <style>        Set navigation style (emacs|vim)
+    list-themes        Show available themes
+    status             Show current settings
+    help               Show this help
+
+${YELLOW}USER COMMANDS${NC}
+    user <name>        Switch to user profile (creates if new)
+    --<Name>           Quick switch (e.g., dotfiles --Pratik)
+    user add <name>    Create user profile
+    user delete <name> Delete a user profile
+    users              List all user profiles
 
 ${YELLOW}EXAMPLES${NC}
     dotfiles theme dracula
-    dotfiles theme catppuccin-mocha
     dotfiles nav vim
-    dotfiles list-themes
+    dotfiles --Pratik               # Quick switch to Pratik
+    dotfiles user NickMC            # Switch to NickMC
+    dotfiles user add TimPike --theme nord --nav vim
+    dotfiles users                  # List all profiles
 
 ${YELLOW}THEMES${NC}
     catppuccin-mocha (default), catppuccin-latte, catppuccin-frappe,
@@ -2336,6 +2661,40 @@ case "${1:-}" in
         ;;
     help|--help|-h)
         show_help
+        ;;
+    user)
+        case "${2:-}" in
+            add)
+                shift 2
+                add_user "$@"
+                ;;
+            delete|remove|rm)
+                delete_user "${3:-}"
+                ;;
+            "")
+                echo -e "${RED}Error: username required${NC}"
+                echo "Usage: dotfiles user <username>"
+                echo "       dotfiles user add <username> [--theme <name>] [--nav emacs|vim]"
+                exit 1
+                ;;
+            *)
+                switch_to_user "$2"
+                ;;
+        esac
+        ;;
+    users)
+        list_users
+        ;;
+    --*)
+        # Quick switch: --Username syntax
+        username="${1#--}"
+        if [[ -n "$username" ]] && validate_username "$username" 2>/dev/null; then
+            switch_to_user "$username"
+        else
+            echo -e "${RED}Unknown option: $1${NC}"
+            show_help
+            exit 1
+        fi
         ;;
     "")
         show_status

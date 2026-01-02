@@ -162,6 +162,37 @@ Choose between two navigation styles with `--emacs` (default) or `--vim`:
 | Yazi | `hjkl` navigation, `y/x/p` yank/cut/paste, `r` rename |
 | Nvim | Full vim keybindings |
 
+### Multi-User Support
+
+Multiple people can share the same machine with their own theme and navigation preferences:
+
+```bash
+dotfiles --Pratik              # Quick switch to Pratik's settings
+dotfiles --NickMC              # Quick switch to NickMC's settings
+dotfiles user TimPike          # Switch to TimPike (creates profile if new)
+dotfiles users                 # List all user profiles
+```
+
+**Create user profiles:**
+
+```bash
+# Interactive setup (guided theme/nav selection)
+dotfiles user add Caitlyn
+
+# Or specify options directly
+dotfiles user add EvanGB --theme nord --nav vim
+dotfiles user add KCMarsh --theme dracula --nav emacs
+```
+
+**Manage profiles:**
+
+```bash
+dotfiles users                 # List all profiles with active marker
+dotfiles user delete OldUser   # Remove a profile
+```
+
+User profiles are stored in `~/.config/dotfiles/users/` and switching applies changes immediately.
+
 ### Custom Utilities
 
 | Command | Description |
@@ -194,7 +225,8 @@ After running, configs are placed in:
 | `~/.config/yazi/` | Yazi file manager |
 | `~/.config/bat/config` | Bat configuration |
 | `~/.gitconfig` | Git with delta |
-| `~/.config/dotfiles/settings` | Theme and navigation preferences |
+| `~/.config/dotfiles/settings` | Theme, navigation, and active user |
+| `~/.config/dotfiles/users/` | User profile settings |
 | `~/.sshh` | SSH hosts for sshh |
 
 ## Post-Install
