@@ -8,7 +8,7 @@ Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/De
 
 | Tool | Description |
 |------|-------------|
-| **zsh** | Shell with vim mode, syntax highlighting, autosuggestions |
+| **zsh** | Shell with Mac-style navigation, syntax highlighting, autosuggestions |
 | **tmux** | Terminal multiplexer with powerline status bar |
 | **Ghostty** | Modern terminal emulator |
 | **eza** | Modern `ls` replacement with icons |
@@ -112,14 +112,14 @@ All tools are configured with the Catppuccin Mocha color scheme for a unified lo
 - Bat syntax highlighting
 - Man pages
 
-### Vim-Style Navigation Everywhere
+### Keyboard Navigation
 
-| Context | Keys |
-|---------|------|
-| Zsh | `Esc` for normal mode, `Ctrl-e` edit in nvim |
-| Tmux | `hjkl` pane navigation, `Alt-hjkl` without prefix |
-| Yazi | Full vim keybindings |
-| fzf | Vim-style selection |
+| Context | Style | Keys |
+|---------|-------|------|
+| Zsh | Mac/Emacs | `Ctrl-a/e` start/end, `Alt-b/f` word nav, `Ctrl-x Ctrl-e` edit in nvim |
+| Tmux | Vim | `hjkl` pane navigation, `Alt-hjkl` without prefix |
+| Yazi | Vim | Full vim keybindings |
+| fzf | Vim | Vim-style selection |
 
 ### Custom Utilities
 
