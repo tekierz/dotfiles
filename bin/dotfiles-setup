@@ -1577,11 +1577,11 @@ setup_de_shortcuts() {
 
     # Detect desktop environment
     local de="${XDG_CURRENT_DESKTOP:-}"
-    de="${de,,}"  # lowercase
+    de="$(echo "$de" | tr '[:upper:]' '[:lower:]')"  # lowercase (portable)
 
     # Also check session type
     local session="${XDG_SESSION_DESKTOP:-}"
-    session="${session,,}"
+    session="$(echo "$session" | tr '[:upper:]' '[:lower:]')"
 
     # Detect by checking for running processes or config tools
     if [[ -z "$de" ]]; then
@@ -3088,7 +3088,7 @@ apply_keyboard_style() {
 
     # Detect desktop environment
     local de="${XDG_CURRENT_DESKTOP:-}"
-    de="${de,,}"
+    de="$(echo "$de" | tr '[:upper:]' '[:lower:]')"
 
     # Detect by tools if XDG_CURRENT_DESKTOP is empty
     if [[ -z "$de" ]]; then
