@@ -13,68 +13,99 @@ func (a *App) renderAnimation() string {
 		return "Loading..."
 	}
 
-	// Create multicolor matrix rain effect
-	var content strings.Builder
+	// Fixed dimensions for consistent rendering
+	const rainWidth = 50
+	const rainHeight = 12
+
 	progress := float64(a.animFrame) / 30.0
 
-	// Matrix rain with rainbow colors
-	rainHeight := min(a.height-8, 16)
-	rainWidth := min(a.width-4, 60)
+	// Build animation frame line by line for consistent widths
+	var lines []string
+
+	// Matrix rain characters - ASCII only for consistent width
+	matrixChars := "01!@#$%^&*<>[]{}|;:~`"
 
 	for y := 0; y < rainHeight; y++ {
+		var line strings.Builder
 		for x := 0; x < rainWidth; x++ {
-			// Determine if this cell should have a character
-			if (x+y+a.animFrame)%7 == 0 || (x*y+a.animFrame)%11 == 0 {
-				chars := "01アイウエオカキクケコサシスセソタチツテトナニヌネノ"
-				runeChars := []rune(chars)
-				char := runeChars[(x*y+a.animFrame)%len(runeChars)]
+			// Seed based on position for stable patterns that shift with frame
+			seed := x*17 + y*31 + a.animFrame
 
-				// Rainbow color based on position and frame
+			// Determine character and color
+			if seed%7 == 0 || (x+y+a.animFrame)%11 == 0 {
+				// Bright matrix character
+				char := matrixChars[seed%len(matrixChars)]
 				colorIdx := ((x + y + a.animFrame) * len(GradientRainbow)) / (rainWidth + rainHeight)
 				colorIdx = colorIdx % len(GradientRainbow)
 				style := lipgloss.NewStyle().Foreground(GradientRainbow[colorIdx])
-				content.WriteString(style.Render(string(char)))
-			} else if (x+y+a.animFrame)%13 == 0 {
-				// Dim background characters
+				line.WriteString(style.Render(string(char)))
+			} else if seed%13 == 0 {
+				// Dim background character
 				colorIdx := ((x + a.animFrame) * len(GradientCyber)) / rainWidth
 				colorIdx = colorIdx % len(GradientCyber)
 				style := lipgloss.NewStyle().Foreground(GradientCyber[colorIdx])
-				content.WriteString(style.Render("░"))
+				line.WriteString(style.Render("░"))
+			} else if seed%19 == 0 {
+				// Occasional dim dot
+				style := lipgloss.NewStyle().Foreground(ColorBorder)
+				line.WriteString(style.Render("·"))
 			} else {
-				content.WriteString(" ")
+				line.WriteString(" ")
 			}
 		}
-		content.WriteString("\n")
+		lines = append(lines, line.String())
 	}
 
-	// Add the logo when animation is > 40% complete
+	// Add logo reveal when animation is > 40% complete
 	if progress > 0.4 {
-		content.WriteString("\n")
-		// Animated gradient logo reveal
 		logoText := "D O T F I L E S"
-		visibleChars := int(float64(len(logoText)) * (progress - 0.4) * 2.5)
-		if visibleChars > len(logoText) {
-			visibleChars = len(logoText)
+		logoRunes := []rune(logoText)
+		visibleCount := int(float64(len(logoRunes)) * (progress - 0.4) * 2.5)
+		if visibleCount > len(logoRunes) {
+			visibleCount = len(logoRunes)
 		}
-		visible := logoText[:visibleChars]
-		content.WriteString(GradientText("░▒▓█ ", GradientCyber))
-		content.WriteString(GradientText(visible, GradientRainbow))
-		if visibleChars >= len(logoText) {
-			content.WriteString(GradientText(" █▓▒░", []lipgloss.Color{
+
+		var logoLine strings.Builder
+		// Center the logo
+		padding := (rainWidth - len(logoText) - 10) / 2
+		if padding < 0 {
+			padding = 0
+		}
+		logoLine.WriteString(strings.Repeat(" ", padding))
+		logoLine.WriteString(GradientText("░▒▓█ ", GradientCyber))
+
+		// Reveal characters one by one
+		for i, r := range logoRunes {
+			if i < visibleCount {
+				colorIdx := (i * len(GradientRainbow)) / len(logoRunes)
+				style := lipgloss.NewStyle().Foreground(GradientRainbow[colorIdx]).Bold(true)
+				logoLine.WriteString(style.Render(string(r)))
+			} else {
+				logoLine.WriteString(" ")
+			}
+		}
+
+		if visibleCount >= len(logoRunes) {
+			logoLine.WriteString(GradientText(" █▓▒░", []lipgloss.Color{
 				"#8b00ff", "#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff7f00", "#ff0000",
 			}))
 		}
+
+		lines = append(lines, "")
+		lines = append(lines, logoLine.String())
 	}
 
-	// Pulsing border
+	content := strings.Join(lines, "\n")
+
+	// Pulsing border color
 	borderColor := GradientCyber[a.animFrame%len(GradientCyber)]
 	frame := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(1, 2).
-		Render(content.String())
+		Render(content)
 
-	// Add skip hint at the bottom
+	// Skip hint
 	hint := lipgloss.NewStyle().
 		Foreground(ColorTextMuted).
 		Render("\n  [Press any key to skip]")
