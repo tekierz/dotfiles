@@ -282,48 +282,81 @@ func (a *App) renderFileTree() string {
 // renderProgress renders the installation progress screen
 func (a *App) renderProgress() string {
 	title := TitleStyle.Render("Installing...")
+	if a.installComplete {
+		title = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true).Render("✓ Installation Complete!")
+	}
 
 	steps := []struct {
-		name   string
-		status string
+		name string
 	}{
-		{"Initializing backup", "✓"},
-		{"Installing packages", "▶"},
-		{"Configuring zsh", "○"},
-		{"Configuring tmux", "○"},
-		{"Configuring ghostty", "○"},
-		{"Configuring yazi", "○"},
-		{"Configuring git", "○"},
-		{"Setting up utilities", "○"},
-		{"Setting up neovim", "○"},
-		{"Finalizing", "○"},
+		{"Initializing backup"},
+		{"Installing packages"},
+		{"Configuring zsh"},
+		{"Configuring tmux"},
+		{"Configuring ghostty"},
+		{"Configuring yazi"},
+		{"Configuring git"},
+		{"Setting up utilities"},
+		{"Setting up neovim"},
+		{"Finalizing"},
 	}
 
 	var stepList strings.Builder
-	for _, s := range steps {
+	for i, s := range steps {
+		var status string
 		var style lipgloss.Style
-		switch s.status {
-		case "✓":
+
+		if i < a.installStep {
+			status = "✓"
 			style = lipgloss.NewStyle().Foreground(ColorGreen)
-		case "▶":
+		} else if i == a.installStep && a.installRunning {
+			status = "▶"
 			style = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
-		default:
+		} else {
+			status = "○"
 			style = lipgloss.NewStyle().Foreground(ColorTextMuted)
 		}
-		stepList.WriteString(style.Render(fmt.Sprintf("  %s %s\n", s.status, s.name)))
+		stepList.WriteString(style.Render(fmt.Sprintf("  %s %s\n", status, s.name)))
 	}
 
-	progress := ProgressBar(0.2, 40)
+	// Calculate progress
+	progressPercent := float64(a.installStep) / float64(len(steps))
+	if a.installComplete {
+		progressPercent = 1.0
+	}
+	progress := ProgressBar(progressPercent, 40)
 
-	// Output panel (placeholder)
+	// Output panel - show real output
+	var outputLines string
+	if len(a.installOutput) > 0 {
+		// Show last 6 lines
+		start := 0
+		if len(a.installOutput) > 6 {
+			start = len(a.installOutput) - 6
+		}
+		outputLines = strings.Join(a.installOutput[start:], "\n")
+	} else if a.installRunning {
+		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Starting installation...")
+	} else if !a.installComplete {
+		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Press ENTER to start")
+	}
+
 	output := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorBorder).
-		Width(50).
-		Height(6).
+		Width(60).
+		Height(8).
 		Padding(0, 1).
-		Render("$ brew install zsh zsh-syntax-highlighting...\n" +
-			lipgloss.NewStyle().Foreground(ColorGreen).Render("==> Downloading zsh-5.9.tar.xz"))
+		Render(outputLines)
+
+	var help string
+	if a.installComplete {
+		help = HelpStyle.Render("[ENTER] Continue")
+	} else if a.installRunning {
+		help = HelpStyle.Render("Installation in progress...")
+	} else {
+		help = HelpStyle.Render("[ENTER] Start    [ESC] Back")
+	}
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -334,6 +367,8 @@ func (a *App) renderProgress() string {
 		progress,
 		"",
 		output,
+		"",
+		help,
 	)
 
 	return lipgloss.Place(

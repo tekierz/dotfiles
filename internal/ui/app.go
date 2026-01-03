@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/runner"
 )
 
 // Screen represents different screens in the wizard
@@ -60,9 +62,12 @@ type App struct {
 	deepDive   bool
 
 	// Installation state
-	installStep    int
-	installOutput  []string
-	installRunning bool
+	installStep     int
+	installOutput   []string
+	installRunning  bool
+	installComplete bool
+	installCmd      *exec.Cmd
+	runner          *runner.Runner
 
 	// Error state
 	lastError error
@@ -71,9 +76,11 @@ type App struct {
 // NewApp creates a new application instance
 func NewApp(skipIntro bool) *App {
 	app := &App{
-		skipIntro: skipIntro,
-		theme:     "catppuccin-mocha",
-		navStyle:  "emacs",
+		skipIntro:     skipIntro,
+		theme:         "catppuccin-mocha",
+		navStyle:      "emacs",
+		runner:        runner.NewRunner(),
+		installOutput: make([]string, 0, 100),
 	}
 
 	if skipIntro {
@@ -104,6 +111,19 @@ type durdrawAvailableMsg bool
 
 // animationDoneMsg indicates the animation has finished
 type animationDoneMsg struct{}
+
+// installOutputMsg carries output from the installation
+type installOutputMsg struct {
+	line runner.OutputLine
+}
+
+// installDoneMsg indicates installation completed
+type installDoneMsg struct {
+	err error
+}
+
+// installStartMsg triggers installation start
+type installStartMsg struct{}
 
 func tickAnimation() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
@@ -148,6 +168,30 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case animationDoneMsg:
 		a.animationDone = true
 		a.screen = ScreenWelcome
+		return a, nil
+
+	case installStartMsg:
+		return a, a.startInstallation()
+
+	case installOutputMsg:
+		a.installOutput = append(a.installOutput, msg.line.Text)
+		// Keep only the last 20 lines for display
+		if len(a.installOutput) > 20 {
+			a.installOutput = a.installOutput[len(a.installOutput)-20:]
+		}
+		// Update step based on output type
+		if msg.line.Type == runner.OutputStep {
+			a.installStep++
+		}
+		return a, nil
+
+	case installDoneMsg:
+		a.installRunning = false
+		a.installComplete = true
+		if msg.err != nil {
+			a.lastError = msg.err
+			a.screen = ScreenError
+		}
 		return a, nil
 	}
 
@@ -215,7 +259,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "enter":
 			a.screen = ScreenProgress
-			// TODO: Start installation here
+			return a, func() tea.Msg { return installStartMsg{} }
 		case "esc":
 			a.screen = ScreenNavPicker
 		}
@@ -274,5 +318,62 @@ func (a *App) View() string {
 		return a.renderError()
 	default:
 		return "Unknown screen"
+	}
+}
+
+// startInstallation begins the installation process
+func (a *App) startInstallation() tea.Cmd {
+	if a.installRunning {
+		return nil
+	}
+
+	a.installRunning = true
+	a.installStep = 0
+	a.installOutput = []string{}
+
+	// Configure the runner with user selections
+	a.runner.Theme = a.theme
+	a.runner.NavStyle = a.navStyle
+
+	return func() tea.Msg {
+		cmd, stdout, stderr, err := a.runner.RunSetup()
+		if err != nil {
+			return installDoneMsg{err: err}
+		}
+		a.installCmd = cmd
+
+		// Create channels for output
+		outputCh := make(chan runner.OutputLine, 100)
+
+		// Start goroutines to read output
+		go runner.StreamOutput(stdout, outputCh, "stdout")
+		go runner.StreamOutput(stderr, outputCh, "stderr")
+
+		// Wait for command to complete
+		go func() {
+			waitErr := cmd.Wait()
+			close(outputCh)
+			// Note: We can't easily send tea.Msg from here
+			// The UI will detect completion via installRunning flag
+			if waitErr != nil {
+				a.lastError = waitErr
+			}
+			a.installRunning = false
+			a.installComplete = true
+		}()
+
+		// Read output in this goroutine and return
+		// Note: This is a simplified version - full async would need more work
+		for line := range outputCh {
+			a.installOutput = append(a.installOutput, line.Text)
+			if len(a.installOutput) > 20 {
+				a.installOutput = a.installOutput[len(a.installOutput)-20:]
+			}
+			if line.Type == runner.OutputStep {
+				a.installStep++
+			}
+		}
+
+		return installDoneMsg{err: nil}
 	}
 }
