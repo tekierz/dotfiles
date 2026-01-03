@@ -40,6 +40,9 @@ type DeepDiveConfig struct {
 
 	// macOS Apps
 	MacApps map[string]bool
+
+	// Utilities (hk, caff, sshh)
+	Utilities map[string]bool
 }
 
 // NewDeepDiveConfig creates a new config with defaults
@@ -106,16 +109,23 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 
 		// macOS Apps defaults
 		MacApps: map[string]bool{
-			"rectangle":      true,
-			"raycast":        true,
-			"stats":          true,
-			"alt-tab":        false,
+			"rectangle":       true,
+			"raycast":         true,
+			"stats":           true,
+			"alt-tab":         false,
 			"monitor-control": false,
-			"mos":            false,
-			"karabiner":      false,
-			"iina":           false,
-			"the-unarchiver": true,
-			"appcleaner":     true,
+			"mos":             false,
+			"karabiner":       false,
+			"iina":            false,
+			"the-unarchiver":  true,
+			"appcleaner":      true,
+		},
+
+		// Utilities defaults (all enabled by default)
+		Utilities: map[string]bool{
+			"hk":   true,
+			"caff": true,
+			"sshh": true,
 		},
 	}
 }
@@ -177,6 +187,12 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Name:        "macOS Apps",
 			Description: "Optional productivity applications",
 			Screen:      ScreenConfigMacApps,
+			Icon:        "",
+		},
+		{
+			Name:        "Utilities",
+			Description: "hk, caff, sshh helper tools",
+			Screen:      ScreenConfigUtilities,
 			Icon:        "",
 		},
 	}

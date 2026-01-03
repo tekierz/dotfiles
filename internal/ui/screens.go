@@ -13,101 +13,175 @@ func (a *App) renderAnimation() string {
 		return "Loading..."
 	}
 
-	// Use fallback animation
-	anim := NewFallbackAnimation(a.width, a.height)
-	for i := 0; i < a.animFrame; i++ {
-		anim.NextFrame()
+	// Create multicolor matrix rain effect
+	var content strings.Builder
+	progress := float64(a.animFrame) / 30.0
+
+	// Matrix rain with rainbow colors
+	rainHeight := min(a.height-8, 16)
+	rainWidth := min(a.width-4, 60)
+
+	for y := 0; y < rainHeight; y++ {
+		for x := 0; x < rainWidth; x++ {
+			// Determine if this cell should have a character
+			if (x+y+a.animFrame)%7 == 0 || (x*y+a.animFrame)%11 == 0 {
+				chars := "01アイウエオカキクケコサシスセソタチツテトナニヌネノ"
+				runeChars := []rune(chars)
+				char := runeChars[(x*y+a.animFrame)%len(runeChars)]
+
+				// Rainbow color based on position and frame
+				colorIdx := ((x + y + a.animFrame) * len(GradientRainbow)) / (rainWidth + rainHeight)
+				colorIdx = colorIdx % len(GradientRainbow)
+				style := lipgloss.NewStyle().Foreground(GradientRainbow[colorIdx])
+				content.WriteString(style.Render(string(char)))
+			} else if (x+y+a.animFrame)%13 == 0 {
+				// Dim background characters
+				colorIdx := ((x + a.animFrame) * len(GradientCyber)) / rainWidth
+				colorIdx = colorIdx % len(GradientCyber)
+				style := lipgloss.NewStyle().Foreground(GradientCyber[colorIdx])
+				content.WriteString(style.Render("░"))
+			} else {
+				content.WriteString(" ")
+			}
+		}
+		content.WriteString("\n")
 	}
 
-	frame := anim.NextFrame()
+	// Add the logo when animation is > 40% complete
+	if progress > 0.4 {
+		content.WriteString("\n")
+		// Animated gradient logo reveal
+		logoText := "D O T F I L E S"
+		visibleChars := int(float64(len(logoText)) * (progress - 0.4) * 2.5)
+		if visibleChars > len(logoText) {
+			visibleChars = len(logoText)
+		}
+		visible := logoText[:visibleChars]
+		content.WriteString(GradientText("░▒▓█ ", GradientCyber))
+		content.WriteString(GradientText(visible, GradientRainbow))
+		if visibleChars >= len(logoText) {
+			content.WriteString(GradientText(" █▓▒░", []lipgloss.Color{
+				"#8b00ff", "#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff7f00", "#ff0000",
+			}))
+		}
+	}
 
-	// Style the frame with cyberpunk colors
-	styled := lipgloss.NewStyle().
-		Foreground(ColorCyan).
-		Render(frame)
+	// Pulsing border
+	borderColor := GradientCyber[a.animFrame%len(GradientCyber)]
+	frame := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Render(content.String())
 
 	// Add skip hint at the bottom
 	hint := lipgloss.NewStyle().
 		Foreground(ColorTextMuted).
-		Render("\n\n  [Press any key to skip]")
+		Render("\n  [Press any key to skip]")
 
-	return styled + hint
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		frame+hint,
+	)
 }
 
 // renderWelcome renders the welcome/main menu screen
 func (a *App) renderWelcome() string {
-	// Logo with glitch effect
-	logo := GlitchText("D O T F I L E S")
+	// ASCII Logo with gradient
+	logo := ASCIILogo()
 
-	// Status box
-	statusBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorBorder).
-		Padding(0, 1).
-		Render(fmt.Sprintf(
-			"  %s SYSTEM: %s\n  %s THEMES: %s\n  %s TOOLS:  %s",
-			lipgloss.NewStyle().Foreground(ColorCyan).Render(">"),
-			StatusReadyStyle.Render("Ready"),
-			lipgloss.NewStyle().Foreground(ColorCyan).Render(">"),
-			lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("13 loaded"),
-			lipgloss.NewStyle().Foreground(ColorCyan).Render(">"),
-			lipgloss.NewStyle().Foreground(ColorTextMuted).Render("zsh • tmux • nvim • yazi • ghostty"),
-		))
+	// Decorative border
+	topBorder := CyberBorder(60)
 
-	// Description
-	desc := lipgloss.NewStyle().
-		Foreground(ColorText).
-		Render("Your terminal environment, configured in minutes.\nCross-platform. Fully reversible. Open source.")
+	// Status indicators with neon styling
+	statusContent := fmt.Sprintf(
+		"  %s %s  %s %s  %s %s",
+		StatusDot("success"),
+		GradientText("SYSTEM READY", GradientCyber),
+		StatusDot("success"),
+		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("13 THEMES"),
+		StatusDot("success"),
+		lipgloss.NewStyle().Foreground(ColorMagenta).Render("ALL TOOLS"),
+	)
 
-	// Buttons
-	quickSetupStyle := ButtonStyle
-	deepDiveStyle := ButtonStyle
+	// Tools list with icons
+	tools := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
+		"zsh • tmux • neovim • yazi • ghostty • fzf • zoxide • bat • delta")
+
+	// Description with gradient accent
+	desc := lipgloss.JoinVertical(lipgloss.Center,
+		lipgloss.NewStyle().Foreground(ColorText).Render("Your terminal environment, configured in minutes."),
+		lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render("Cross-platform · Fully reversible · Open source"),
+	)
+
+	// Buttons with better styling
+	var quickSetup, deepDive string
 
 	if !a.deepDive {
-		quickSetupStyle = ButtonActiveStyle
+		quickSetup = lipgloss.NewStyle().
+			Padding(1, 3).
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(ColorCyan).
+			Foreground(ColorCyan).
+			Bold(true).
+			Render("▶ QUICK SETUP\n  Recommended")
+		deepDive = lipgloss.NewStyle().
+			Padding(1, 3).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBorder).
+			Foreground(ColorTextMuted).
+			Render("  DEEP DIVE\n  Customize all")
 	} else {
-		deepDiveStyle = ButtonActiveStyle
+		quickSetup = lipgloss.NewStyle().
+			Padding(1, 3).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBorder).
+			Foreground(ColorTextMuted).
+			Render("  QUICK SETUP\n  Recommended")
+		deepDive = lipgloss.NewStyle().
+			Padding(1, 3).
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(ColorMagenta).
+			Foreground(ColorMagenta).
+			Bold(true).
+			Render("▶ DEEP DIVE\n  Customize all")
 	}
-
-	quickSetup := quickSetupStyle.Render(fmt.Sprintf(" %s QUICK SETUP\n   Recommended ", func() string {
-		if !a.deepDive {
-			return "▶"
-		}
-		return " "
-	}()))
-
-	deepDive := deepDiveStyle.Render(fmt.Sprintf(" %s DEEP DIVE\n   Customize all ", func() string {
-		if a.deepDive {
-			return "▶"
-		}
-		return " "
-	}()))
 
 	buttons := lipgloss.JoinHorizontal(lipgloss.Top, quickSetup, "  ", deepDive)
 
-	// Help text
-	help := HelpStyle.Render("[←→] Select    [ENTER] Continue    [Q] Quit")
+	// Help text with gradient
+	help := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
+		"←→ select • enter continue • q quit")
+
+	// Bottom border
+	bottomBorder := CyberBorder(60)
 
 	// Compose the screen
 	content := lipgloss.JoinVertical(
 		lipgloss.Center,
-		"",
+		topBorder,
 		logo,
-		"",
-		statusBox,
+		statusContent,
+		tools,
 		"",
 		desc,
 		"",
 		buttons,
 		"",
 		help,
+		bottomBorder,
 	)
 
-	// Center on screen
+	// Center on screen with styled container
+	container := lipgloss.NewStyle().
+		Padding(1, 2).
+		Render(content)
+
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(content),
+		container,
 	)
 }
 

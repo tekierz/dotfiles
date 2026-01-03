@@ -754,3 +754,66 @@ func renderCheckboxInline(checked, focused bool) string {
 	}
 	return boxStyle.Render(box)
 }
+
+// renderConfigUtilities renders the utilities selection screen
+func (a *App) renderConfigUtilities() string {
+	title := renderConfigTitle("", "Utilities", "Helper tools from tekierz/homebrew-tap")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	utilities := []struct {
+		id   string
+		name string
+		desc string
+	}{
+		{"hk", "hk", "SSH host key manager"},
+		{"caff", "caff", "Keep system awake utility"},
+		{"sshh", "sshh", "SSH config helper"},
+	}
+
+	content.WriteString(lipgloss.NewStyle().
+		Foreground(ColorTextMuted).
+		Italic(true).
+		Render("Select which utilities to install:\n\n"))
+
+	for i, util := range utilities {
+		focused := a.utilityIndex == i
+		enabled := cfg.Utilities[util.id]
+
+		cursor := "  "
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		}
+
+		checkbox := renderCheckboxInline(enabled, focused)
+
+		nameStyle := unfocusedStyle
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if focused {
+			nameStyle = focusedStyle
+			descStyle = lipgloss.NewStyle().Foreground(ColorText)
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+			cursor,
+			checkbox,
+			nameStyle.Render(fmt.Sprintf("%-8s", util.name)),
+			descStyle.Render(util.desc),
+		))
+	}
+
+	content.WriteString("\n")
+	content.WriteString(lipgloss.NewStyle().
+		Foreground(ColorTextMuted).
+		Render("These tools are installed from the tekierz/homebrew-tap."))
+
+	box := configBoxStyle.Width(55).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}

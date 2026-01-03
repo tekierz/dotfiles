@@ -30,6 +30,7 @@ const (
 	ScreenConfigGit
 	ScreenConfigYazi
 	ScreenConfigFzf
+	ScreenConfigUtilities
 	ScreenConfigMacApps
 )
 
@@ -77,6 +78,7 @@ type App struct {
 	deepDiveConfig    *DeepDiveConfig
 	configFieldIndex  int // Currently focused field in config screens
 	macAppIndex       int // Currently focused app in macOS screen
+	utilityIndex      int // Currently focused utility
 
 	// Installation state
 	installStep     int
@@ -631,6 +633,26 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.macAppIndex = 0
 			a.screen = ScreenDeepDiveMenu
 		}
+
+	// Utilities config
+	case ScreenConfigUtilities:
+		utilities := []string{"hk", "caff", "sshh"}
+		switch key {
+		case "up", "k":
+			if a.utilityIndex > 0 {
+				a.utilityIndex--
+			}
+		case "down", "j":
+			if a.utilityIndex < len(utilities)-1 {
+				a.utilityIndex++
+			}
+		case " ":
+			util := utilities[a.utilityIndex]
+			a.deepDiveConfig.Utilities[util] = !a.deepDiveConfig.Utilities[util]
+		case "esc", "enter":
+			a.utilityIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
 	}
 
 	return a, nil
@@ -674,6 +696,8 @@ func (a *App) View() string {
 		return a.renderConfigFzf()
 	case ScreenConfigMacApps:
 		return a.renderConfigMacApps()
+	case ScreenConfigUtilities:
+		return a.renderConfigUtilities()
 	default:
 		return "Unknown screen"
 	}
