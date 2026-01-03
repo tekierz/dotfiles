@@ -15,6 +15,10 @@ INSTALL_MACOS_APPS=false
 RASPI_MODE=false
 RASPI_MODEL=""
 SKIP_PROMPTS=false
+SKIP_BACKUP=false
+DO_LIST_BACKUPS=false
+DO_RESTORE=false
+RESTORE_SESSION=""
 NAV_STYLE="emacs"  # "emacs" (default, beginner-friendly) or "vim"
 THEME="catppuccin-mocha"  # Default theme
 
@@ -23,6 +27,8 @@ SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin
 
 # Settings directory
 DOTFILES_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
+DOTFILES_BACKUP_DIR="$DOTFILES_CONFIG_DIR/backups"
+BACKUP_MANIFEST=""
 
 # Load theme colors based on selected theme
 load_theme_colors() {
@@ -498,6 +504,9 @@ OPTIONS
     --raspi5            Raspberry Pi 5 optimizations
     --raspizero2        Raspberry Pi Zero 2 optimizations (lightweight)
     -y, --yes           Skip confirmation prompts
+    --restore [name]    Restore configs from backup (most recent if no name)
+    --list-backups      List available backup sessions
+    --no-backup         Skip creating backups (not recommended)
 
 DESCRIPTION
     Sets up a complete terminal environment with Catppuccin Mocha theme.
@@ -542,6 +551,24 @@ EOF
             ;;
         -y|--yes)
             SKIP_PROMPTS=true
+            shift
+            ;;
+        --no-backup)
+            SKIP_BACKUP=true
+            shift
+            ;;
+        --list-backups)
+            # Defer to after functions are defined
+            DO_LIST_BACKUPS=true
+            shift
+            ;;
+        --restore)
+            # Defer to after functions are defined
+            DO_RESTORE=true
+            if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+                RESTORE_SESSION="$2"
+                shift
+            fi
             shift
             ;;
         --vim)
@@ -628,35 +655,188 @@ ask_user() {
     [[ "$reply" =~ ^[Yy]$ ]]
 }
 
-# Backup config file if it exists
-backup_config() {
-    local file="$1"
-    if [[ -f "$file" ]]; then
-        local backup="${file}.backup.$(date +%Y%m%d_%H%M%S)"
-        cp "$file" "$backup"
-        print_warning "Backed up existing config: $backup"
+# ============================================================================
+# BACKUP SYSTEM
+# ============================================================================
+# All existing configs are backed up before modification, enabling full restore
+
+# Initialize backup session - creates timestamped backup directory
+init_backup_session() {
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    BACKUP_SESSION_DIR="$DOTFILES_BACKUP_DIR/$timestamp"
+    BACKUP_MANIFEST="$BACKUP_SESSION_DIR/manifest.txt"
+
+    mkdir -p "$BACKUP_SESSION_DIR"
+    chmod 700 "$BACKUP_SESSION_DIR"
+
+    # Write manifest header
+    cat > "$BACKUP_MANIFEST" << EOF
+# Dotfiles Backup Manifest
+# Created: $(date)
+# Version: $VERSION
+# OS: $OS
+# Theme: $THEME
+# Navigation: $NAV_STYLE
+#
+# Format: original_path|backup_path|existed_before
+EOF
+    chmod 600 "$BACKUP_MANIFEST"
+
+    print_success "Backup session initialized: $BACKUP_SESSION_DIR"
+}
+
+# Backup a single file before modification
+# Usage: backup_file "/path/to/file"
+# Returns: 0 if file existed and was backed up, 1 if file didn't exist
+backup_file() {
+    local original="$1"
+    local relative_path="${original#$HOME/}"
+    local backup_path="$BACKUP_SESSION_DIR/$relative_path"
+
+    if [[ -f "$original" ]]; then
+        # Create directory structure in backup
+        mkdir -p "$(dirname "$backup_path")"
+        cp -p "$original" "$backup_path"
+        echo "$original|$backup_path|yes" >> "$BACKUP_MANIFEST"
+        return 0
+    else
+        # Record that file didn't exist (for clean uninstall)
+        echo "$original||no" >> "$BACKUP_MANIFEST"
+        return 1
     fi
 }
 
-# Write config only if it doesn't exist, otherwise prompt
-write_config() {
+# Backup a directory before modification
+# Usage: backup_directory "/path/to/dir"
+backup_directory() {
+    local original="$1"
+    local relative_path="${original#$HOME/}"
+    local backup_path="$BACKUP_SESSION_DIR/$relative_path"
+
+    if [[ -d "$original" ]]; then
+        mkdir -p "$(dirname "$backup_path")"
+        cp -rp "$original" "$backup_path"
+        echo "$original|$backup_path|yes|directory" >> "$BACKUP_MANIFEST"
+        return 0
+    else
+        echo "$original||no|directory" >> "$BACKUP_MANIFEST"
+        return 1
+    fi
+}
+
+# Safe write - backs up existing file before writing new content
+# Usage: safe_write_config "path" "content" "description"
+safe_write_config() {
     local file="$1"
     local content="$2"
     local description="${3:-config}"
 
-    if [[ -f "$file" ]]; then
-        if ask_user "Config $file exists. Overwrite?"; then
-            backup_config "$file"
-            echo "$content" > "$file"
-            print_success "Updated $description"
-        else
-            print_warning "Skipped $description (keeping existing)"
-        fi
-    else
-        mkdir -p "$(dirname "$file")"
-        echo "$content" > "$file"
-        print_success "Created $description"
+    # Backup existing file if it exists
+    if [[ -n "$BACKUP_SESSION_DIR" ]]; then
+        backup_file "$file"
     fi
+
+    # Create directory and write file
+    mkdir -p "$(dirname "$file")"
+    echo "$content" > "$file"
+    print_success "Created $description"
+}
+
+# List available backup sessions
+list_backups() {
+    echo -e "${BLUE}Available Backups:${NC}"
+    if [[ ! -d "$DOTFILES_BACKUP_DIR" ]]; then
+        echo "  No backups found"
+        return
+    fi
+
+    local count=0
+    for backup in "$DOTFILES_BACKUP_DIR"/*/; do
+        [[ -d "$backup" ]] || continue
+        local name=$(basename "$backup")
+        local manifest="$backup/manifest.txt"
+        if [[ -f "$manifest" ]]; then
+            local files=$(grep -c "|yes" "$manifest" 2>/dev/null || echo "0")
+            echo -e "  ${CYAN}$name${NC} - $files files backed up"
+            ((count++))
+        fi
+    done
+
+    if [[ $count -eq 0 ]]; then
+        echo "  No backups found"
+    fi
+}
+
+# Restore from a backup session
+# Usage: restore_backup [session_name]
+restore_backup() {
+    local session="${1:-}"
+
+    if [[ -z "$session" ]]; then
+        # Find most recent backup
+        session=$(ls -1t "$DOTFILES_BACKUP_DIR" 2>/dev/null | head -1)
+        if [[ -z "$session" ]]; then
+            print_error "No backups found"
+            return 1
+        fi
+        echo -e "Using most recent backup: ${CYAN}$session${NC}"
+    fi
+
+    local backup_dir="$DOTFILES_BACKUP_DIR/$session"
+    local manifest="$backup_dir/manifest.txt"
+
+    if [[ ! -f "$manifest" ]]; then
+        print_error "Backup not found: $session"
+        return 1
+    fi
+
+    echo -e "${YELLOW}This will restore your configs to the state before dotfiles-setup was run.${NC}"
+    echo -e "${YELLOW}Files created by dotfiles-setup will be removed.${NC}"
+    if ! ask_user "Continue with restore?" "n"; then
+        echo "Restore cancelled."
+        return 1
+    fi
+
+    local restored=0
+    local removed=0
+    local errors=0
+
+    while IFS='|' read -r original backup existed type || [[ -n "$original" ]]; do
+        # Skip comments and empty lines
+        [[ "$original" =~ ^# ]] && continue
+        [[ -z "$original" ]] && continue
+
+        if [[ "$existed" == "yes" ]]; then
+            # File existed before - restore it
+            if [[ "$type" == "directory" ]]; then
+                if [[ -d "$backup" ]]; then
+                    rm -rf "$original" 2>/dev/null
+                    cp -rp "$backup" "$original" && ((restored++)) || ((errors++))
+                fi
+            else
+                if [[ -f "$backup" ]]; then
+                    mkdir -p "$(dirname "$original")"
+                    cp -p "$backup" "$original" && ((restored++)) || ((errors++))
+                fi
+            fi
+        else
+            # File didn't exist before - remove it
+            if [[ "$type" == "directory" ]]; then
+                [[ -d "$original" ]] && rm -rf "$original" && ((removed++))
+            else
+                [[ -f "$original" ]] && rm -f "$original" && ((removed++))
+            fi
+        fi
+    done < "$manifest"
+
+    print_success "Restore complete: $restored files restored, $removed files removed, $errors errors"
+
+    if [[ $errors -gt 0 ]]; then
+        print_warning "Some files could not be restored. Check permissions."
+    fi
+
+    echo -e "\nRestart your terminal for changes to take effect."
 }
 
 # Detect OS
@@ -695,6 +875,17 @@ if [[ "$RASPI_MODE" == "true" ]]; then
     OS="raspi"
 else
     OS=$(detect_os)
+fi
+
+# Handle --list-backups and --restore before main setup
+if [[ "$DO_LIST_BACKUPS" == "true" ]]; then
+    list_backups
+    exit 0
+fi
+
+if [[ "$DO_RESTORE" == "true" ]]; then
+    restore_backup "$RESTORE_SESSION"
+    exit $?
 fi
 
 print_header "Dotfiles Setup (Catppuccin Mocha Theme)"
@@ -966,6 +1157,9 @@ setup_directories() {
 setup_zsh() {
     print_header "Configuring Zsh"
 
+    # Backup existing zshrc
+    [[ -n "${BACKUP_SESSION_DIR:-}" ]] && backup_file "$HOME/.zshrc"
+
     # Determine plugin paths based on OS
     if [[ "$OS" == "macos" ]]; then
         SYNTAX_HL_PATH="/opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
@@ -1148,6 +1342,9 @@ ZSHRC_EMACS_EOF
 setup_tmux() {
     print_header "Configuring Tmux"
 
+    # Backup existing tmux.conf
+    [[ -n "${BACKUP_SESSION_DIR:-}" ]] && backup_file "$HOME/.tmux.conf"
+
     # Base tmux config (common to both navigation styles)
     cat > ~/.tmux.conf << 'TMUX_EOF'
 # Terminal settings
@@ -1280,6 +1477,12 @@ TMUX_EMACS_EOF
 
 setup_ghostty() {
     print_header "Configuring Ghostty"
+
+    # Backup existing ghostty config
+    [[ -n "${BACKUP_SESSION_DIR:-}" ]] && {
+        backup_file "$HOME/.config/ghostty/config"
+        backup_directory "$HOME/.config/ghostty/themes"
+    }
 
     mkdir -p ~/.config/ghostty/themes
 
@@ -1448,6 +1651,11 @@ setup_xfce_shortcuts() {
 setup_yazi() {
     print_header "Configuring Yazi"
 
+    # Backup existing yazi config directory
+    [[ -n "${BACKUP_SESSION_DIR:-}" ]] && backup_directory "$HOME/.config/yazi"
+
+    mkdir -p ~/.config/yazi
+
     cat > ~/.config/yazi/yazi.toml << 'YAZI_EOF'
 [manager]
 ratio = [1, 3, 4]
@@ -1588,6 +1796,9 @@ KEYMAP_EMACS_EOF
 setup_git() {
     print_header "Configuring Git"
 
+    # Backup existing gitconfig
+    [[ -n "${BACKUP_SESSION_DIR:-}" ]] && backup_file "$HOME/.gitconfig"
+
     load_theme_colors
     local dark_mode="true"
     [[ "$T_IS_LIGHT" == "true" ]] && dark_mode="false"
@@ -1637,6 +1848,9 @@ GIT_EOF
 setup_bat() {
     print_header "Configuring Bat"
 
+    # Backup existing bat config
+    [[ -n "${BACKUP_SESSION_DIR:-}" ]] && backup_file "$HOME/.config/bat/config"
+
     mkdir -p ~/.config/bat
     generate_bat_config > ~/.config/bat/config
 
@@ -1649,6 +1863,17 @@ setup_bat() {
 
 setup_utilities() {
     print_header "Setting Up Utility Scripts"
+
+    # Backup existing utility scripts
+    [[ -n "${BACKUP_SESSION_DIR:-}" ]] && {
+        backup_file "$HOME/.local/bin/hk"
+        backup_file "$HOME/.local/bin/caff"
+        backup_file "$HOME/.local/bin/sshh"
+        backup_file "$HOME/.local/bin/dotfiles"
+        backup_file "$HOME/.sshh"
+    }
+
+    mkdir -p ~/.local/bin
 
     # Hotkey reference (navigation-style dependent)
     if [[ "$NAV_STYLE" == "vim" ]]; then
@@ -2345,11 +2570,10 @@ list_users() {
     for profile in "$DOTFILES_USERS_DIR"/*.settings; do
         [[ -f "$profile" ]] || continue
         local name=$(basename "$profile" .settings)
-        # Load profile to show details
+        # Load profile safely (no source to avoid code execution)
         local user_theme user_nav
-        source "$profile"
-        user_theme="${THEME:-unknown}"
-        user_nav="${NAV_STYLE:-unknown}"
+        user_theme=$(safe_read_setting "$profile" "THEME" "unknown")
+        user_nav=$(safe_read_setting "$profile" "NAV_STYLE" "unknown")
 
         if [[ "$name" == "$ACTIVE_USER" ]]; then
             echo -e "  ${GREEN}●${NC} ${GREEN}$name${NC} (theme: $user_theme, nav: $user_nav) ${GREEN}[active]${NC}"
@@ -2357,8 +2581,6 @@ list_users() {
             echo -e "  ○ $name (theme: $user_theme, nav: $user_nav)"
         fi
     done
-    # Reload main settings after iterating
-    load_settings
 }
 
 # Interactive theme selection
@@ -2964,6 +3186,99 @@ list_themes() {
     done
 }
 
+# ============================================================================
+# BACKUP & RESTORE (for CLI)
+# ============================================================================
+DOTFILES_BACKUP_DIR="$DOTFILES_CONFIG_DIR/backups"
+
+# List available backup sessions
+list_backups() {
+    echo -e "${BLUE}Available Backups:${NC}"
+    if [[ ! -d "$DOTFILES_BACKUP_DIR" ]]; then
+        echo "  No backups found"
+        echo -e "  Backups are created when running ${CYAN}dotfiles-setup${NC}"
+        return
+    fi
+
+    local count=0
+    for backup in "$DOTFILES_BACKUP_DIR"/*/; do
+        [[ -d "$backup" ]] || continue
+        local name=$(basename "$backup")
+        local manifest="$backup/manifest.txt"
+        if [[ -f "$manifest" ]]; then
+            local files=$(grep -c "|yes" "$manifest" 2>/dev/null || echo "0")
+            echo -e "  ${CYAN}$name${NC} - $files files backed up"
+            ((count++))
+        fi
+    done
+
+    if [[ $count -eq 0 ]]; then
+        echo "  No backups found"
+    fi
+}
+
+# Restore from a backup session
+restore_backup() {
+    local session="${1:-}"
+
+    if [[ -z "$session" ]]; then
+        session=$(ls -1t "$DOTFILES_BACKUP_DIR" 2>/dev/null | head -1)
+        if [[ -z "$session" ]]; then
+            echo -e "${RED}Error: No backups found${NC}"
+            return 1
+        fi
+        echo -e "Using most recent backup: ${CYAN}$session${NC}"
+    fi
+
+    local backup_dir="$DOTFILES_BACKUP_DIR/$session"
+    local manifest="$backup_dir/manifest.txt"
+
+    if [[ ! -f "$manifest" ]]; then
+        echo -e "${RED}Error: Backup not found: $session${NC}"
+        return 1
+    fi
+
+    echo -e "${YELLOW}This will restore configs to the state before dotfiles-setup was run.${NC}"
+    echo -e "${YELLOW}Files created by dotfiles-setup will be removed.${NC}"
+    echo ""
+    read -rp "Continue with restore? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo "Restore cancelled."
+        return 1
+    fi
+
+    local restored=0 removed=0 errors=0
+
+    while IFS='|' read -r original backup existed type || [[ -n "$original" ]]; do
+        [[ "$original" =~ ^# ]] && continue
+        [[ -z "$original" ]] && continue
+
+        if [[ "$existed" == "yes" ]]; then
+            if [[ "$type" == "directory" ]]; then
+                if [[ -d "$backup" ]]; then
+                    rm -rf "$original" 2>/dev/null
+                    cp -rp "$backup" "$original" && ((restored++)) || ((errors++))
+                fi
+            else
+                if [[ -f "$backup" ]]; then
+                    mkdir -p "$(dirname "$original")"
+                    cp -p "$backup" "$original" && ((restored++)) || ((errors++))
+                fi
+            fi
+        else
+            if [[ "$type" == "directory" ]]; then
+                [[ -d "$original" ]] && rm -rf "$original" && ((removed++))
+            else
+                [[ -f "$original" ]] && rm -f "$original" && ((removed++))
+            fi
+        fi
+    done < "$manifest"
+
+    echo -e "${GREEN}✓${NC} Restore complete: $restored files restored, $removed files removed"
+    [[ $errors -gt 0 ]] && echo -e "${YELLOW}⚠${NC} $errors errors occurred"
+    echo -e "\nRestart your terminal for changes to take effect."
+}
+
 # Show help
 show_help() {
     cat << EOF
@@ -2979,6 +3294,10 @@ ${YELLOW}COMMANDS${NC}
     list-themes        Show available themes
     status             Show current settings
     help               Show this help
+
+${YELLOW}BACKUP & RESTORE${NC}
+    backups            List available backup sessions
+    restore [name]     Restore from backup (most recent if no name)
 
 ${YELLOW}USER COMMANDS${NC}
     user <name>        Switch to user profile (creates if new)
@@ -3051,6 +3370,12 @@ case "${1:-}" in
     list-themes|themes)
         list_themes
         ;;
+    backups|list-backups)
+        list_backups
+        ;;
+    restore)
+        restore_backup "${2:-}"
+        ;;
     status)
         show_status
         ;;
@@ -3116,6 +3441,9 @@ setup_nvim() {
     print_header "Setting Up Neovim"
 
     if [[ ! -d ~/.config/nvim/.git ]]; then
+        # Backup existing nvim config before replacing
+        [[ -n "${BACKUP_SESSION_DIR:-}" ]] && backup_directory "$HOME/.config/nvim"
+
         print_step "Cloning Kickstart.nvim..."
         rm -rf ~/.config/nvim
         git clone https://github.com/nvim-lua/kickstart.nvim.git ~/.config/nvim
@@ -3153,6 +3481,17 @@ set_default_shell() {
 # ============================================================================
 
 main() {
+    # Initialize backup session (unless --no-backup)
+    if [[ "$SKIP_BACKUP" != "true" ]]; then
+        print_header "Initializing Backup"
+        init_backup_session
+        echo -e "All existing configs will be backed up before modification."
+        echo -e "To restore: ${CYAN}dotfiles-setup --restore${NC}"
+        echo ""
+    else
+        print_warning "Backup disabled (--no-backup). Existing configs may be overwritten."
+    fi
+
     # Load theme colors for setup
     load_theme_colors
 
