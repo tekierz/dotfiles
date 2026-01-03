@@ -1907,9 +1907,7 @@ setup_utilities() {
     [[ -n "${BACKUP_SESSION_DIR:-}" ]] && {
         backup_file "$HOME/.local/bin/hk"
         backup_file "$HOME/.local/bin/caff"
-        backup_file "$HOME/.local/bin/sshh"
         backup_file "$HOME/.local/bin/dotfiles"
-        backup_file "$HOME/.sshh"
     }
 
     mkdir -p ~/.local/bin
@@ -2239,133 +2237,11 @@ esac
 CAFF_EOF
     chmod +x ~/.local/bin/caff
 
-    # SSH Quick Connect
-    cat > ~/.local/bin/sshh << 'SSHH_EOF'
-#!/usr/bin/env bash
-#
-# sshh - Quick SSH connection manager
-# Reads hosts from ~/.sshh and provides a simple menu
-#
-
-CONFIG_FILE="$HOME/.sshh"
-
-CYAN='\033[0;36m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-PURPLE='\033[0;35m'
-RED='\033[0;31m'
-DIM='\033[2m'
-NC='\033[0m'
-
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo -e "${RED}✗${NC} Config file not found: ${CYAN}$CONFIG_FILE${NC}"
-    echo ""
-    echo "Create it with format: name | user@host | port (port optional)"
-    echo -e "Example: ${CYAN}Work Server${NC} | ${GREEN}admin@192.168.1.100${NC}"
-    exit 1
-fi
-
-declare -a NAMES CONNECTIONS PORTS
-
-while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-    IFS='|' read -ra PARTS <<< "$line"
-    name=$(echo "${PARTS[0]}" | xargs)
-    conn=$(echo "${PARTS[1]}" | xargs)
-    port=$(echo "${PARTS[2]:-22}" | xargs)
-    if [[ -n "$name" && -n "$conn" ]]; then
-        NAMES+=("$name")
-        CONNECTIONS+=("$conn")
-        PORTS+=("$port")
-    fi
-done < "$CONFIG_FILE"
-
-if [[ ${#NAMES[@]} -eq 0 ]]; then
-    echo -e "${RED}✗${NC} No hosts found in ${CYAN}$CONFIG_FILE${NC}"
-    exit 1
-fi
-
-show_menu() {
-    echo ""
-    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${PURPLE}  SSH Quick Connect${NC}"
-    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    for i in "${!NAMES[@]}"; do
-        num=$((i + 1))
-        port_display=""
-        [[ "${PORTS[$i]}" != "22" ]] && port_display="${DIM}:${PORTS[$i]}${NC}"
-        printf "  ${YELLOW}%d${NC}  ${CYAN}%-20s${NC} ${GREEN}%s${NC}%s\n" \
-            "$num" "${NAMES[$i]}" "${CONNECTIONS[$i]}" "$port_display"
-    done
-    echo ""
-    echo -e "  ${DIM}q  Quit${NC}"
-    echo ""
-    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-}
-
-if [[ -n "$1" ]]; then
-    if [[ "$1" =~ ^[0-9]+$ ]]; then
-        idx=$(($1 - 1))
-        if [[ $idx -ge 0 && $idx -lt ${#NAMES[@]} ]]; then
-            echo -e "${GREEN}▶${NC} Connecting to ${CYAN}${NAMES[$idx]}${NC}..."
-            [[ "${PORTS[$idx]}" != "22" ]] && exec ssh -p "${PORTS[$idx]}" "${CONNECTIONS[$idx]}"
-            exec ssh "${CONNECTIONS[$idx]}"
+    # SSH Quick Connect - install from Homebrew tap on macOS
+    if [[ "$OS" == "macos" ]]; then
+        if ! command -v sshh &>/dev/null; then
+            brew install tekierz/tap/sshh 2>/dev/null || print_warning "Could not install sshh from tap"
         fi
-        echo -e "${RED}✗${NC} Invalid selection: $1" && exit 1
-    elif [[ "$1" == "list" || "$1" == "-l" ]]; then
-        show_menu && exit 0
-    elif [[ "$1" == "edit" || "$1" == "-e" ]]; then
-        ${EDITOR:-nvim} "$CONFIG_FILE" && exit 0
-    elif [[ "$1" == "add" ]]; then
-        shift
-        if [[ $# -ge 2 ]]; then
-            echo "$1 | $2 | ${3:-22}" >> "$CONFIG_FILE"
-            echo -e "${GREEN}✓${NC} Added: ${CYAN}$1${NC} → ${GREEN}$2${NC}"
-            exit 0
-        fi
-        echo "Usage: sshh add \"Name\" \"user@host\" [port]" && exit 1
-    elif [[ "$1" == "help" || "$1" == "-h" ]]; then
-        echo "Usage: sshh [command|number]"
-        echo "  (none)    Show menu"
-        echo "  <num>     Connect to host #"
-        echo "  list      Show hosts"
-        echo "  edit      Edit config"
-        echo "  add       Add host"
-        exit 0
-    fi
-    echo -e "${RED}✗${NC} Unknown: $1" && exit 1
-fi
-
-show_menu
-echo -ne "Select [1-${#NAMES[@]}]: "
-read -r choice
-[[ "$choice" == "q" || "$choice" == "Q" ]] && exit 0
-if [[ "$choice" =~ ^[0-9]+$ ]]; then
-    idx=$((choice - 1))
-    if [[ $idx -ge 0 && $idx -lt ${#NAMES[@]} ]]; then
-        echo -e "\n${GREEN}▶${NC} Connecting to ${CYAN}${NAMES[$idx]}${NC}...\n"
-        [[ "${PORTS[$idx]}" != "22" ]] && exec ssh -p "${PORTS[$idx]}" "${CONNECTIONS[$idx]}"
-        exec ssh "${CONNECTIONS[$idx]}"
-    fi
-fi
-echo -e "${RED}✗${NC} Invalid selection" && exit 1
-SSHH_EOF
-    chmod +x ~/.local/bin/sshh
-
-    # Create template .sshh config if it doesn't exist
-    if [[ ! -f ~/.sshh ]]; then
-        cat > ~/.sshh << 'SSHH_CONFIG_EOF'
-# SSH Quick Connect Configuration
-# Format: Name | user@host | port (port is optional, defaults to 22)
-#
-# Examples:
-# Work Server | admin@192.168.1.100
-# Home NAS | user@nas.local | 2222
-# Raspberry Pi | pi@raspberrypi.local
-
-SSHH_CONFIG_EOF
-        print_success "Created ~/.sshh template"
     fi
 
     # Create dotfiles management CLI
