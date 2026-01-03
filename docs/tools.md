@@ -209,6 +209,35 @@ Uses `--raspizero2` flag. Skips resource-heavy tools:
 
 ---
 
+## Desktop Environment Shortcuts
+
+The installer automatically configures desktop environment shortcuts to free up `Super+C/V/1-9` for Ghostty, making the Cmd key behave like macOS.
+
+### KDE Plasma
+
+| Original Shortcut | Action | Changed To |
+|-------------------|--------|------------|
+| `Super+V` | Show Clipboard Items | `Alt+V` |
+| `Super+1-9` | Activate Task Manager Entry | Disabled |
+
+### GNOME
+
+| Original Shortcut | Action | Changed To |
+|-------------------|--------|------------|
+| `Super+1-9` | Switch to Application | Disabled |
+
+### XFCE
+
+Any `Super+1-9` shortcuts are removed to avoid conflicts.
+
+### LXDE / LXQt / Headless
+
+No changes needed—these environments don't typically bind `Super+key` combinations.
+
+> **Note:** Log out/in after installation for DE shortcut changes to take full effect.
+
+---
+
 ## Installation Flags Reference
 
 | Flag | Description |

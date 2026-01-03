@@ -1340,6 +1340,123 @@ GHOSTTY_EOF
 }
 
 # ============================================================================
+# DESKTOP ENVIRONMENT SHORTCUTS
+# ============================================================================
+# Free up Super+C/V/1-9 for Ghostty by remapping DE shortcuts
+# This makes Cmd key behave like macOS when using a Mac keyboard on Linux
+
+setup_de_shortcuts() {
+    print_header "Configuring Desktop Environment Shortcuts"
+
+    # Detect desktop environment
+    local de="${XDG_CURRENT_DESKTOP:-}"
+    de="${de,,}"  # lowercase
+
+    # Also check session type
+    local session="${XDG_SESSION_DESKTOP:-}"
+    session="${session,,}"
+
+    # Detect by checking for running processes or config tools
+    if [[ -z "$de" ]]; then
+        if command -v kwriteconfig6 &>/dev/null || command -v kwriteconfig5 &>/dev/null; then
+            de="kde"
+        elif command -v gsettings &>/dev/null && gsettings list-schemas 2>/dev/null | grep -q "org.gnome"; then
+            de="gnome"
+        elif command -v xfconf-query &>/dev/null; then
+            de="xfce"
+        fi
+    fi
+
+    case "$de" in
+        *kde*|*plasma*)
+            setup_kde_shortcuts
+            ;;
+        *gnome*|*ubuntu*)
+            setup_gnome_shortcuts
+            ;;
+        *xfce*)
+            setup_xfce_shortcuts
+            ;;
+        *lxde*|*lxqt*|*pixel*)
+            print_warning "LXDE/LXQt detected - shortcuts usually don't conflict with Super+key"
+            ;;
+        *)
+            if [[ -z "$de" ]]; then
+                print_warning "No desktop environment detected (headless server?) - skipping DE shortcuts"
+            else
+                print_warning "Unknown desktop environment: $de - skipping shortcut configuration"
+            fi
+            return 0
+            ;;
+    esac
+}
+
+setup_kde_shortcuts() {
+    print_step "Configuring KDE Plasma shortcuts..."
+
+    # Find the right kwriteconfig command (KDE 5 vs 6)
+    local kwrite=""
+    if command -v kwriteconfig6 &>/dev/null; then
+        kwrite="kwriteconfig6"
+    elif command -v kwriteconfig5 &>/dev/null; then
+        kwrite="kwriteconfig5"
+    else
+        print_warning "kwriteconfig not found - configure shortcuts manually in System Settings"
+        return 1
+    fi
+
+    # Remap clipboard manager from Meta+V to Alt+V
+    $kwrite --file kglobalshortcutsrc --group org.kde.klipper \
+        --key "show-on-mouse-pos" "Alt+V,Meta+V,Show Clipboard Items at Mouse Position" 2>/dev/null
+
+    # Disable Meta+1-9 task manager shortcuts (frees them for Ghostty tabs)
+    for i in {1..9}; do
+        $kwrite --file kglobalshortcutsrc --group plasmashell \
+            --key "activate task manager entry $i" "none,Meta+$i,Activate Task Manager Entry $i" 2>/dev/null
+    done
+
+    # Try to reload shortcuts
+    if command -v qdbus &>/dev/null; then
+        qdbus org.kde.kglobalaccel /kglobalaccel reloadConfig 2>/dev/null || true
+    fi
+
+    print_success "KDE shortcuts configured"
+    print_warning "Log out/in for shortcuts to fully take effect"
+}
+
+setup_gnome_shortcuts() {
+    print_step "Configuring GNOME shortcuts..."
+
+    # GNOME doesn't use Super+V or Super+1-9 by default, but Ubuntu might
+    # Check for any conflicts
+
+    # Disable Super+number workspace switching if set
+    for i in {1..9}; do
+        gsettings set org.gnome.shell.keybindings switch-to-application-$i "[]" 2>/dev/null || true
+    done
+
+    # Disable Super+V if it's bound to something
+    gsettings set org.gnome.shell.keybindings toggle-message-tray "['<Super>m']" 2>/dev/null || true
+
+    print_success "GNOME shortcuts configured"
+}
+
+setup_xfce_shortcuts() {
+    print_step "Configuring XFCE shortcuts..."
+
+    # XFCE uses xfconf for settings
+    # Usually doesn't have many Super+key conflicts by default
+
+    # Check and clear any Super+1-9 bindings
+    for i in {1..9}; do
+        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Super>$i" -r 2>/dev/null || true
+        xfconf-query -c xfce4-keyboard-shortcuts -p "/xfwm4/custom/<Super>$i" -r 2>/dev/null || true
+    done
+
+    print_success "XFCE shortcuts configured"
+}
+
+# ============================================================================
 # YAZI CONFIGURATION
 # ============================================================================
 
@@ -2844,6 +2961,7 @@ main() {
     setup_zsh
     setup_tmux
     setup_ghostty
+    setup_de_shortcuts
     setup_yazi
     setup_git
     setup_bat
