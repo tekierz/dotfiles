@@ -1770,9 +1770,10 @@ cat << 'EOF'
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ DOTFILES (theme & user management)                                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ dotfiles status              Show current settings (user, theme, nav)       │
+│ dotfiles status              Show current settings (user, theme, nav, kbd)  │
 │ dotfiles theme <name>        Switch theme (e.g., dracula, nord, gruvbox)    │
 │ dotfiles nav emacs|vim       Set navigation style                           │
+│ dotfiles keyboard macos|linux  Set keyboard style for Ghostty/DE shortcuts  │
 │ dotfiles list-themes         Show all 13 available themes                   │
 │ dotfiles --<User>            Quick switch user (e.g., dotfiles --Pratik)    │
 │ dotfiles user <name>         Switch to user profile                         │
@@ -1894,9 +1895,10 @@ cat << 'EOF'
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ DOTFILES (theme & user management)                                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ dotfiles status              Show current settings (user, theme, nav)       │
+│ dotfiles status              Show current settings (user, theme, nav, kbd)  │
 │ dotfiles theme <name>        Switch theme (e.g., dracula, nord, gruvbox)    │
 │ dotfiles nav emacs|vim       Set navigation style                           │
+│ dotfiles keyboard macos|linux  Set keyboard style for Ghostty/DE shortcuts  │
 │ dotfiles list-themes         Show all 13 available themes                   │
 │ dotfiles --<User>            Quick switch user (e.g., dotfiles --Pratik)    │
 │ dotfiles user <name>         Switch to user profile                         │
@@ -2155,6 +2157,7 @@ load_settings() {
     local settings_file="$DOTFILES_CONFIG_DIR/settings"
     THEME=$(safe_read_setting "$settings_file" "THEME" "catppuccin-mocha")
     NAV_STYLE=$(safe_read_setting "$settings_file" "NAV_STYLE" "emacs")
+    KEYBOARD_STYLE=$(safe_read_setting "$settings_file" "KEYBOARD_STYLE" "macos")
     ACTIVE_USER=$(safe_read_setting "$settings_file" "ACTIVE_USER" "")
 }
 
@@ -2165,6 +2168,7 @@ save_settings() {
     cat > "$DOTFILES_CONFIG_DIR/settings" << EOF
 THEME="$THEME"
 NAV_STYLE="$NAV_STYLE"
+KEYBOARD_STYLE="${KEYBOARD_STYLE:-macos}"
 ACTIVE_USER="$ACTIVE_USER"
 EOF
     chmod 600 "$DOTFILES_CONFIG_DIR/settings"
@@ -2318,6 +2322,7 @@ load_user_profile() {
         # Safe loading - only read known variables
         THEME=$(safe_read_setting "$profile" "THEME" "catppuccin-mocha")
         NAV_STYLE=$(safe_read_setting "$profile" "NAV_STYLE" "emacs")
+        KEYBOARD_STYLE=$(safe_read_setting "$profile" "KEYBOARD_STYLE" "macos")
         return 0
     fi
     return 1
@@ -2332,6 +2337,7 @@ save_user_profile() {
 # User: $username
 THEME="$THEME"
 NAV_STYLE="$NAV_STYLE"
+KEYBOARD_STYLE="${KEYBOARD_STYLE:-macos}"
 EOF
     chmod 600 "$DOTFILES_USERS_DIR/${username}.settings"
 }
@@ -2407,6 +2413,24 @@ interactive_select_nav() {
     done
 }
 
+# Interactive keyboard style selection
+interactive_select_keyboard() {
+    echo -e "\n${BLUE}Select keyboard style:${NC}\n"
+    echo "  1) macos - Super+C/V for copy/paste, Super+1-9 for tabs (Mac keyboard recommended)"
+    echo "  2) linux - Standard Linux shortcuts (Ctrl+Shift+C/V)"
+    echo ""
+
+    local selection
+    while true; do
+        read -rp "Enter number (1 or 2): " selection
+        case "$selection" in
+            1) KEYBOARD_STYLE="macos"; echo -e "${GREEN}Selected: macos${NC}"; return 0 ;;
+            2) KEYBOARD_STYLE="linux"; echo -e "${GREEN}Selected: linux${NC}"; return 0 ;;
+            *) echo -e "${RED}Invalid selection. Please enter 1 or 2${NC}" ;;
+        esac
+    done
+}
+
 # Full interactive setup for new user
 interactive_user_setup() {
     local username="$1"
@@ -2417,9 +2441,11 @@ interactive_user_setup() {
     # Default values
     THEME="catppuccin-mocha"
     NAV_STYLE="emacs"
+    KEYBOARD_STYLE="macos"
 
     interactive_select_theme
     interactive_select_nav
+    interactive_select_keyboard
 
     # Save the profile
     save_user_profile "$username"
@@ -2427,6 +2453,7 @@ interactive_user_setup() {
     echo -e "\n${GREEN}Profile created for $username!${NC}"
     echo -e "  Theme: ${CYAN}$THEME${NC}"
     echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
+    echo -e "  Keyboard: ${CYAN}$KEYBOARD_STYLE${NC}"
 
     # Ask if they want to apply now
     echo ""
@@ -2435,6 +2462,7 @@ interactive_user_setup() {
     if [[ "$apply" =~ ^[Yy]$ ]]; then
         ACTIVE_USER="$username"
         apply_theme
+        apply_keyboard_style
     fi
 }
 
@@ -2464,6 +2492,7 @@ switch_to_user() {
     load_user_profile "$username"
     ACTIVE_USER="$username"
     apply_theme
+    apply_keyboard_style
     echo -e "${GREEN}Switched to user: ${CYAN}$username${NC}"
 }
 
@@ -2472,6 +2501,7 @@ add_user() {
     local username=""
     local theme=""
     local nav=""
+    local keyboard=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -2482,6 +2512,10 @@ add_user() {
                 ;;
             --nav)
                 nav="$2"
+                shift 2
+                ;;
+            --keyboard)
+                keyboard="$2"
                 shift 2
                 ;;
             *)
@@ -2495,7 +2529,7 @@ add_user() {
 
     if [[ -z "$username" ]]; then
         echo -e "${RED}Error: username required${NC}"
-        echo "Usage: dotfiles user add <username> [--theme <name>] [--nav emacs|vim]"
+        echo "Usage: dotfiles user add <username> [--theme <name>] [--nav emacs|vim] [--keyboard macos|linux]"
         return 1
     fi
 
@@ -2512,8 +2546,8 @@ add_user() {
         fi
     fi
 
-    # If both theme and nav are provided, create directly
-    if [[ -n "$theme" && -n "$nav" ]]; then
+    # If all options are provided, create directly (skip interactive)
+    if [[ -n "$theme" && -n "$nav" && -n "$keyboard" ]]; then
         # Validate theme
         if [[ ! " $SUPPORTED_THEMES " =~ " $theme " ]]; then
             echo -e "${RED}Error: Unknown theme '$theme'${NC}"
@@ -2525,12 +2559,19 @@ add_user() {
             echo -e "${RED}Error: nav must be 'emacs' or 'vim'${NC}"
             return 1
         fi
+        # Validate keyboard
+        if [[ "$keyboard" != "macos" && "$keyboard" != "linux" ]]; then
+            echo -e "${RED}Error: keyboard must be 'macos' or 'linux'${NC}"
+            return 1
+        fi
         THEME="$theme"
         NAV_STYLE="$nav"
+        KEYBOARD_STYLE="$keyboard"
         save_user_profile "$username"
         echo -e "${GREEN}Created profile for: ${CYAN}$username${NC}"
         echo -e "  Theme: ${CYAN}$THEME${NC}"
         echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
+        echo -e "  Keyboard: ${CYAN}$KEYBOARD_STYLE${NC}"
     else
         # Interactive setup
         interactive_user_setup "$username"
@@ -2759,6 +2800,117 @@ apply_theme() {
     echo -e "  • ghostty: ${CYAN}Ctrl-Shift-,${NC} to reload"
 }
 
+# Apply keyboard style (macos = Super+C/V, linux = Ctrl+Shift+C/V)
+apply_keyboard_style() {
+    local style="${KEYBOARD_STYLE:-macos}"
+    echo -e "${BLUE}Applying keyboard style: ${CYAN}$style${NC}"
+
+    # Detect desktop environment
+    local de="${XDG_CURRENT_DESKTOP:-}"
+    de="${de,,}"
+
+    # Detect by tools if XDG_CURRENT_DESKTOP is empty
+    if [[ -z "$de" ]]; then
+        if command -v kwriteconfig6 &>/dev/null || command -v kwriteconfig5 &>/dev/null; then
+            de="kde"
+        elif command -v gsettings &>/dev/null && gsettings list-schemas 2>/dev/null | grep -q "org.gnome"; then
+            de="gnome"
+        elif command -v xfconf-query &>/dev/null; then
+            de="xfce"
+        fi
+    fi
+
+    case "$de" in
+        *kde*|*plasma*)
+            apply_keyboard_kde "$style"
+            ;;
+        *gnome*|*ubuntu*)
+            apply_keyboard_gnome "$style"
+            ;;
+        *xfce*)
+            apply_keyboard_xfce "$style"
+            ;;
+        *)
+            if [[ -z "$de" ]]; then
+                echo -e "${YELLOW}No desktop environment detected - keyboard shortcuts unchanged${NC}"
+            else
+                echo -e "${YELLOW}Unknown DE: $de - keyboard shortcuts unchanged${NC}"
+            fi
+            return 0
+            ;;
+    esac
+}
+
+apply_keyboard_kde() {
+    local style="$1"
+    local kwrite=""
+
+    if command -v kwriteconfig6 &>/dev/null; then
+        kwrite="kwriteconfig6"
+    elif command -v kwriteconfig5 &>/dev/null; then
+        kwrite="kwriteconfig5"
+    else
+        echo -e "${YELLOW}kwriteconfig not found${NC}"
+        return 1
+    fi
+
+    if [[ "$style" == "macos" ]]; then
+        # macOS style: Free up Super+C/V/1-9 for Ghostty
+        $kwrite --file kglobalshortcutsrc --group org.kde.klipper \
+            --key "show-on-mouse-pos" "Alt+V,Meta+V,Show Clipboard Items at Mouse Position" 2>/dev/null
+        for i in {1..9}; do
+            $kwrite --file kglobalshortcutsrc --group plasmashell \
+                --key "activate task manager entry $i" "none,Meta+$i,Activate Task Manager Entry $i" 2>/dev/null
+        done
+        echo -e "${GREEN}✓${NC} KDE: Clipboard moved to Alt+V, Super+1-9 freed for Ghostty"
+    else
+        # Linux style: Restore defaults
+        $kwrite --file kglobalshortcutsrc --group org.kde.klipper \
+            --key "show-on-mouse-pos" "Meta+V,Meta+V,Show Clipboard Items at Mouse Position" 2>/dev/null
+        for i in {1..9}; do
+            $kwrite --file kglobalshortcutsrc --group plasmashell \
+                --key "activate task manager entry $i" "Meta+$i,Meta+$i,Activate Task Manager Entry $i" 2>/dev/null
+        done
+        echo -e "${GREEN}✓${NC} KDE: Restored default shortcuts (Super+V clipboard, Super+1-9 taskbar)"
+    fi
+
+    # Reload shortcuts
+    qdbus org.kde.kglobalaccel /kglobalaccel reloadConfig 2>/dev/null || true
+    echo -e "${YELLOW}Log out/in for full effect${NC}"
+}
+
+apply_keyboard_gnome() {
+    local style="$1"
+
+    if [[ "$style" == "macos" ]]; then
+        # Disable Super+1-9 app switching
+        for i in {1..9}; do
+            gsettings set org.gnome.shell.keybindings switch-to-application-$i "[]" 2>/dev/null || true
+        done
+        echo -e "${GREEN}✓${NC} GNOME: Super+1-9 freed for Ghostty"
+    else
+        # Restore defaults
+        for i in {1..9}; do
+            gsettings reset org.gnome.shell.keybindings switch-to-application-$i 2>/dev/null || true
+        done
+        echo -e "${GREEN}✓${NC} GNOME: Restored default Super+1-9 app switching"
+    fi
+}
+
+apply_keyboard_xfce() {
+    local style="$1"
+
+    if [[ "$style" == "macos" ]]; then
+        for i in {1..9}; do
+            xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Super>$i" -r 2>/dev/null || true
+            xfconf-query -c xfce4-keyboard-shortcuts -p "/xfwm4/custom/<Super>$i" -r 2>/dev/null || true
+        done
+        echo -e "${GREEN}✓${NC} XFCE: Super+1-9 freed for Ghostty"
+    else
+        echo -e "${GREEN}✓${NC} XFCE: Using default shortcuts"
+    fi
+}
+
 # Show status
 show_status() {
     load_settings
@@ -2768,6 +2920,7 @@ show_status() {
     fi
     echo -e "  Theme:      ${CYAN}$THEME${NC}"
     echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
+    echo -e "  Keyboard:   ${CYAN}${KEYBOARD_STYLE:-macos}${NC}"
 }
 
 # List themes
@@ -2793,6 +2946,7 @@ ${YELLOW}USAGE${NC}
 ${YELLOW}COMMANDS${NC}
     theme <name>       Set color theme
     nav <style>        Set navigation style (emacs|vim)
+    keyboard <style>   Set keyboard style (macos|linux)
     list-themes        Show available themes
     status             Show current settings
     help               Show this help
@@ -2807,10 +2961,15 @@ ${YELLOW}USER COMMANDS${NC}
 ${YELLOW}EXAMPLES${NC}
     dotfiles theme dracula
     dotfiles nav vim
+    dotfiles keyboard macos         # Cmd+C/V/1-9 in Ghostty
     dotfiles --Pratik               # Quick switch to Pratik
     dotfiles user NickMC            # Switch to NickMC
-    dotfiles user add TimPike --theme nord --nav vim
+    dotfiles user add TimPike --theme nord --nav vim --keyboard macos
     dotfiles users                  # List all profiles
+
+${YELLOW}KEYBOARD STYLES${NC}
+    macos  - Super+C/V for copy/paste, Super+1-9 for tabs (Mac-like)
+    linux  - Traditional Ctrl+Shift+C/V, restore DE defaults
 
 ${YELLOW}THEMES${NC}
     catppuccin-mocha (default), catppuccin-latte, catppuccin-frappe,
@@ -2848,6 +3007,17 @@ case "${1:-}" in
         echo -e "${GREEN}✓${NC} Navigation style set to ${CYAN}$NAV_STYLE${NC}"
         echo -e "${YELLOW}Note:${NC} Re-run dotfiles-setup to apply navigation changes."
         ;;
+    keyboard|kbd)
+        if [[ "${2:-}" != "macos" && "${2:-}" != "linux" ]]; then
+            echo -e "${RED}Error: keyboard style must be 'macos' or 'linux'${NC}"
+            echo "  macos - Super+C/V for copy/paste, Super+1-9 for tabs"
+            echo "  linux - Traditional shortcuts, restore DE defaults"
+            exit 1
+        fi
+        KEYBOARD_STYLE="$2"
+        save_settings
+        apply_keyboard_style
+        ;;
     list-themes|themes)
         list_themes
         ;;
@@ -2869,7 +3039,7 @@ case "${1:-}" in
             "")
                 echo -e "${RED}Error: username required${NC}"
                 echo "Usage: dotfiles user <username>"
-                echo "       dotfiles user add <username> [--theme <name>] [--nav emacs|vim]"
+                echo "       dotfiles user add <username> [--theme <name>] [--nav emacs|vim] [--keyboard macos|linux]"
                 exit 1
                 ;;
             *)
