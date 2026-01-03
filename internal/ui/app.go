@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"io"
 	"os/exec"
 	"time"
 
@@ -142,6 +143,14 @@ type installDoneMsg struct {
 // installStartMsg triggers installation start
 type installStartMsg struct{}
 
+// sudoRequiredMsg indicates sudo is needed
+type sudoRequiredMsg struct{}
+
+// sudoCachedMsg indicates sudo credentials are ready
+type sudoCachedMsg struct {
+	err error
+}
+
 func tickAnimation() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -187,7 +196,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.screen = ScreenWelcome
 		return a, nil
 
+	case sudoRequiredMsg:
+		// Need to prompt for sudo - use tea.Exec to exit alt screen
+		return a, tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
+			return sudoCachedMsg{err: err}
+		})
+
+	case sudoCachedMsg:
+		if msg.err != nil {
+			a.lastError = msg.err
+			a.screen = ScreenError
+			return a, nil
+		}
+		// Sudo cached successfully, start installation
+		return a, a.startInstallation()
+
 	case installStartMsg:
+		// Check if we need sudo first
+		if runner.NeedsSudo() && !runner.CheckSudoCached() {
+			return a, func() tea.Msg { return sudoRequiredMsg{} }
+		}
 		return a, a.startInstallation()
 
 	case installOutputMsg:
@@ -730,4 +758,31 @@ func togglePlugin(plugins *[]string, plugin string) {
 		}
 	}
 	*plugins = append(*plugins, plugin)
+}
+
+// execCommand wraps exec.Cmd to implement tea.ExecCommand
+type execCommand struct {
+	*exec.Cmd
+}
+
+func (e execCommand) SetStdin(r io.Reader)  { e.Cmd.Stdin = r }
+func (e execCommand) SetStdout(w io.Writer) { e.Cmd.Stdout = w }
+func (e execCommand) SetStderr(w io.Writer) { e.Cmd.Stderr = w }
+
+// sudoPromptCmd returns a command that prompts for sudo credentials
+func sudoPromptCmd() tea.ExecCommand {
+	// Use a script that shows a nice message then prompts for sudo
+	cmd := exec.Command("bash", "-c", `
+		echo ""
+		echo "┌────────────────────────────────────────────┐"
+		echo "│  Installation requires administrator       │"
+		echo "│  privileges to install system packages.    │"
+		echo "└────────────────────────────────────────────┘"
+		echo ""
+		sudo -v
+		echo ""
+		echo "Press any key to continue..."
+		read -n 1
+	`)
+	return execCommand{cmd}
 }

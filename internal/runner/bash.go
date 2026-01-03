@@ -46,6 +46,50 @@ func NewRunner() *Runner {
 	}
 }
 
+// NeedsSudo returns true if the current OS requires sudo for package installation
+func NeedsSudo() bool {
+	// Check if we're on Linux (macOS uses Homebrew which doesn't need sudo)
+	cmd := exec.Command("uname", "-s")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(output)) == "Linux"
+}
+
+// CheckSudoCached returns true if sudo credentials are already cached
+func CheckSudoCached() bool {
+	cmd := exec.Command("sudo", "-n", "true")
+	return cmd.Run() == nil
+}
+
+// CacheSudoCredentials prompts for sudo password and caches credentials
+// This should be called with stdin/stdout connected to the terminal
+func CacheSudoCredentials() error {
+	cmd := exec.Command("sudo", "-v")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// KeepSudoAlive starts a background goroutine that keeps sudo credentials fresh
+func KeepSudoAlive(stop chan struct{}) {
+	go func() {
+		ticker := exec.Command("bash", "-c", `
+			while true; do
+				sudo -n true 2>/dev/null
+				sleep 50
+			done
+		`)
+		ticker.Start()
+		<-stop
+		if ticker.Process != nil {
+			ticker.Process.Kill()
+		}
+	}()
+}
+
 // DetectOS runs the detect_os function and returns the result
 func (r *Runner) DetectOS() (string, error) {
 	cmd := exec.Command("bash", "-c", fmt.Sprintf(`
