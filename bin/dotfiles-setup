@@ -948,7 +948,7 @@ install_packages() {
             dust \
             bandwhich \
             gping \
-            dog \
+            doggo \
             trippy \
             2>/dev/null || true
 
@@ -1156,7 +1156,7 @@ install_packages() {
 
         print_warning "Some packages may need manual installation on Debian/Ubuntu"
         print_warning "Consider using Homebrew for: eza, yazi, zoxide, delta, fastfetch"
-        print_warning "Network tools (bandwhich, gping, dog, trippy) require cargo or Homebrew"
+        print_warning "Network tools (bandwhich, gping, doggo, trippy) require cargo or Homebrew"
     fi
 
     print_success "Package installation complete"
@@ -1258,7 +1258,7 @@ command -v ncdu &> /dev/null && alias diskuse='ncdu'
 # Network tools
 command -v bandwhich &> /dev/null && alias bandwidth='bandwhich'
 command -v gping &> /dev/null && alias ping='gping'
-command -v dog &> /dev/null && alias dig='dog'
+command -v doggo &> /dev/null && alias dig='doggo'
 command -v trippy &> /dev/null && alias trace='trip'
 
 # zoxide (smarter cd)

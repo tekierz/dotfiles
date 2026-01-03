@@ -65,7 +65,7 @@ These tools form the foundation of the terminal environment and are installed on
 |------|-------------|
 | **bandwhich** | Real-time bandwidth utilization by process and connection. See exactly what's using your network. Run with `bandwidth` or `sudo bandwhich`. |
 | **gping** | Ping with a live graph showing latency over time. Great for monitoring connection quality. Aliased to `ping`. |
-| **dog** | Modern DNS client (better `dig`). Clean output, supports DNS-over-TLS/HTTPS. Aliased to `dig`. |
+| **doggo** | Modern DNS client (better `dig`). Clean output, supports DNS-over-TLS/HTTPS. Aliased to `dig`. |
 | **trippy** | Network diagnostic tool combining traceroute and ping. Visual display of network path with latency per hop. Use `trace` or `trip`. |
 
 ### Clipboard (Platform-Specific)
@@ -188,7 +188,7 @@ Some tools require manual installation or Homebrew on Linux:
 | **zoxide** | Installed via curl script |
 | **git-delta** | May need Homebrew |
 | **Ghostty** | Manual installation required |
-| **dust, bandwhich, gping, dog, trippy** | Network tools require cargo or Homebrew |
+| **dust, bandwhich, gping, doggo, trippy** | Network tools require cargo or Homebrew |
 
 ---
 

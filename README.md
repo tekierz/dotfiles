@@ -32,7 +32,7 @@ Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/De
 | **dust** | Intuitive `du` with visual bars |
 | **bandwhich** | Real-time bandwidth by process |
 | **gping** | Ping with a live graph |
-| **dog** | Modern DNS client (better `dig`) |
+| **doggo** | Modern DNS client (better `dig`) |
 | **trippy** | Visual traceroute + ping |
 
 ### macOS Quality-of-Life Apps (optional, macOS only)
@@ -253,7 +253,7 @@ diskuse # ncdu (interactive analyzer)
 
 # Network analysis
 ping    # gping (graphical ping)
-dig     # dog (modern DNS)
+dig     # doggo (modern DNS)
 trace   # trippy (visual traceroute)
 bandwidth # bandwhich (bandwidth monitor)
 ```
