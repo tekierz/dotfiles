@@ -807,3 +807,112 @@ func (a *App) renderConfigUtilities() string {
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
+
+// renderConfigCLITools renders the CLI tools selection screen
+func (a *App) renderConfigCLITools() string {
+	title := renderConfigTitle("", "CLI Tools", "Terminal-based productivity tools")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	tools := []struct {
+		id   string
+		name string
+		desc string
+	}{
+		{"lazygit", "LazyGit", "Simple terminal UI for Git"},
+		{"lazydocker", "LazyDocker", "Simple terminal UI for Docker"},
+		{"btop", "btop", "Resource monitor with TUI"},
+		{"glow", "Glow", "Render markdown on the CLI"},
+		{"claude-code", "Claude Code", "AI-powered coding assistant (npm)"},
+	}
+
+	for i, tool := range tools {
+		focused := a.cliToolIndex == i
+		enabled := cfg.CLITools[tool.id]
+
+		cursor := "  "
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		}
+
+		checkbox := renderCheckboxInline(enabled, focused)
+
+		nameStyle := unfocusedStyle
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if focused {
+			nameStyle = focusedStyle
+			descStyle = lipgloss.NewStyle().Foreground(ColorText)
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+			cursor,
+			checkbox,
+			nameStyle.Render(fmt.Sprintf("%-14s", tool.name)),
+			descStyle.Render(tool.desc),
+		))
+	}
+
+	box := configBoxStyle.Width(60).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}
+
+// renderConfigGUIApps renders the GUI apps selection screen
+func (a *App) renderConfigGUIApps() string {
+	title := renderConfigTitle("", "GUI Apps", "Desktop applications (cross-platform)")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	apps := []struct {
+		id   string
+		name string
+		desc string
+	}{
+		{"zen-browser", "Zen Browser", "Privacy-focused browser based on Firefox"},
+		{"cursor", "Cursor", "AI-first code editor"},
+		{"lm-studio", "LM Studio", "Run local LLMs"},
+		{"obs", "OBS Studio", "Streaming and recording software"},
+	}
+
+	for i, app := range apps {
+		focused := a.guiAppIndex == i
+		enabled := cfg.GUIApps[app.id]
+
+		cursor := "  "
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		}
+
+		checkbox := renderCheckboxInline(enabled, focused)
+
+		nameStyle := unfocusedStyle
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if focused {
+			nameStyle = focusedStyle
+			descStyle = lipgloss.NewStyle().Foreground(ColorText)
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+			cursor,
+			checkbox,
+			nameStyle.Render(fmt.Sprintf("%-14s", app.name)),
+			descStyle.Render(app.desc),
+		))
+	}
+
+	box := configBoxStyle.Width(60).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}

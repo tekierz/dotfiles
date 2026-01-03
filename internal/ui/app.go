@@ -39,6 +39,9 @@ const (
 	ScreenHotkeys
 	ScreenBackups
 	ScreenConfigApps
+	// Additional config screens
+	ScreenConfigCLITools
+	ScreenConfigGUIApps
 )
 
 // Available themes
@@ -87,6 +90,8 @@ type App struct {
 	configFieldIndex  int // Currently focused field in config screens
 	macAppIndex       int // Currently focused app in macOS screen
 	utilityIndex      int // Currently focused utility
+	cliToolIndex      int // Currently focused CLI tool
+	guiAppIndex       int // Currently focused GUI app
 
 	// Installation state
 	installStep     int
@@ -674,6 +679,46 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.screen = ScreenDeepDiveMenu
 		}
 
+	// CLI Tools config
+	case ScreenConfigCLITools:
+		tools := []string{"lazygit", "lazydocker", "btop", "glow", "claude-code"}
+		switch key {
+		case "up", "k":
+			if a.cliToolIndex > 0 {
+				a.cliToolIndex--
+			}
+		case "down", "j":
+			if a.cliToolIndex < len(tools)-1 {
+				a.cliToolIndex++
+			}
+		case " ":
+			tool := tools[a.cliToolIndex]
+			a.deepDiveConfig.CLITools[tool] = !a.deepDiveConfig.CLITools[tool]
+		case "esc", "enter":
+			a.cliToolIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// GUI Apps config
+	case ScreenConfigGUIApps:
+		apps := []string{"zen-browser", "cursor", "lm-studio", "obs"}
+		switch key {
+		case "up", "k":
+			if a.guiAppIndex > 0 {
+				a.guiAppIndex--
+			}
+		case "down", "j":
+			if a.guiAppIndex < len(apps)-1 {
+				a.guiAppIndex++
+			}
+		case " ":
+			app := apps[a.guiAppIndex]
+			a.deepDiveConfig.GUIApps[app] = !a.deepDiveConfig.GUIApps[app]
+		case "esc", "enter":
+			a.guiAppIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
 	// Main menu navigation
 	case ScreenMainMenu:
 		items := GetMainMenuItems()
@@ -796,6 +841,10 @@ func (a *App) View() string {
 		return a.renderConfigMacApps()
 	case ScreenConfigUtilities:
 		return a.renderConfigUtilities()
+	case ScreenConfigCLITools:
+		return a.renderConfigCLITools()
+	case ScreenConfigGUIApps:
+		return a.renderConfigGUIApps()
 	// Management platform screens
 	case ScreenMainMenu:
 		return a.renderMainMenu()

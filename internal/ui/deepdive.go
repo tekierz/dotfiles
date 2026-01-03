@@ -43,6 +43,12 @@ type DeepDiveConfig struct {
 
 	// Utilities (hk, caff, sshh)
 	Utilities map[string]bool
+
+	// CLI Tools (lazygit, lazydocker, etc.)
+	CLITools map[string]bool
+
+	// GUI Apps (Zen Browser, Cursor, etc.)
+	GUIApps map[string]bool
 }
 
 // NewDeepDiveConfig creates a new config with defaults
@@ -127,6 +133,23 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"caff": true,
 			"sshh": true,
 		},
+
+		// CLI Tools defaults
+		CLITools: map[string]bool{
+			"lazygit":     true,
+			"lazydocker":  true,
+			"btop":        true,
+			"glow":        true,
+			"claude-code": false,
+		},
+
+		// GUI Apps defaults
+		GUIApps: map[string]bool{
+			"zen-browser": false,
+			"cursor":      false,
+			"lm-studio":   false,
+			"obs":         false,
+		},
 	}
 }
 
@@ -184,8 +207,20 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Icon:        "",
 		},
 		{
+			Name:        "CLI Tools",
+			Description: "LazyGit, LazyDocker, btop, glow",
+			Screen:      ScreenConfigCLITools,
+			Icon:        "",
+		},
+		{
+			Name:        "GUI Apps",
+			Description: "Zen Browser, Cursor, LM Studio, OBS",
+			Screen:      ScreenConfigGUIApps,
+			Icon:        "",
+		},
+		{
 			Name:        "macOS Apps",
-			Description: "Optional productivity applications",
+			Description: "Rectangle, Raycast, and more",
 			Screen:      ScreenConfigMacApps,
 			Icon:        "",
 		},
