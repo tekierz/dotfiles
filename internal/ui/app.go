@@ -32,6 +32,13 @@ const (
 	ScreenConfigFzf
 	ScreenConfigUtilities
 	ScreenConfigMacApps
+	// Management platform screens (new)
+	ScreenMainMenu
+	ScreenManage
+	ScreenUpdate
+	ScreenHotkeys
+	ScreenBackups
+	ScreenConfigApps
 )
 
 // Available themes
@@ -58,6 +65,7 @@ var themes = []struct {
 // App is the main application model
 type App struct {
 	screen        Screen
+	startScreen   Screen // Initial screen to show (for CLI routing)
 	skipIntro     bool
 	width         int
 	height        int
@@ -87,6 +95,15 @@ type App struct {
 	installComplete bool
 	installCmd      *exec.Cmd
 	runner          *runner.Runner
+
+	// Management platform state (new)
+	mainMenuIndex   int      // Main menu cursor
+	manageIndex     int      // Manage screen cursor
+	updateIndex     int      // Update screen cursor
+	hotkeyFilter    string   // Filter hotkeys by tool
+	hotkeyCursor    int      // Hotkeys screen cursor
+	hotkeyCategory  int      // Current category in hotkeys
+	backupIndex     int      // Backup selection cursor
 
 	// Error state
 	lastError error
@@ -809,4 +826,86 @@ func sudoPromptCmd() tea.ExecCommand {
 		read -n 1
 	`)
 	return execCommand{cmd}
+}
+
+// SetStartScreen sets the initial screen to display (for CLI routing)
+func (a *App) SetStartScreen(screen Screen) {
+	a.startScreen = screen
+	a.screen = screen
+	if screen != ScreenAnimation && screen != ScreenWelcome {
+		a.skipIntro = true
+	}
+}
+
+// SetHotkeyFilter sets the tool filter for hotkeys screen
+func (a *App) SetHotkeyFilter(tool string) {
+	a.hotkeyFilter = tool
+}
+
+// GetToolConfigScreen returns the screen constant for a tool name
+func GetToolConfigScreen(tool string) (Screen, bool) {
+	screens := map[string]Screen{
+		"ghostty":   ScreenConfigGhostty,
+		"tmux":      ScreenConfigTmux,
+		"zsh":       ScreenConfigZsh,
+		"neovim":    ScreenConfigNeovim,
+		"git":       ScreenConfigGit,
+		"yazi":      ScreenConfigYazi,
+		"fzf":       ScreenConfigFzf,
+		"apps":      ScreenConfigApps,
+		"utilities": ScreenConfigUtilities,
+	}
+
+	screen, ok := screens[tool]
+	return screen, ok
+}
+
+// MainMenuItem represents an item in the main menu
+type MainMenuItem struct {
+	Name        string
+	Description string
+	Icon        string
+	Screen      Screen
+}
+
+// GetMainMenuItems returns the main menu items for the management platform
+func GetMainMenuItems() []MainMenuItem {
+	return []MainMenuItem{
+		{
+			Name:        "Install",
+			Description: "Full installation wizard",
+			Icon:        "",
+			Screen:      ScreenWelcome,
+		},
+		{
+			Name:        "Manage",
+			Description: "Configure installed tools",
+			Icon:        "",
+			Screen:      ScreenManage,
+		},
+		{
+			Name:        "Update",
+			Description: "Check and install updates",
+			Icon:        "",
+			Screen:      ScreenUpdate,
+		},
+		{
+			Name:        "Theme",
+			Description: "Change color theme",
+			Icon:        "",
+			Screen:      ScreenThemePicker,
+		},
+		{
+			Name:        "Hotkeys",
+			Description: "View keyboard shortcuts",
+			Icon:        "",
+			Screen:      ScreenHotkeys,
+		},
+		{
+			Name:        "Backups",
+			Description: "View and restore backups",
+			Icon:        "",
+			Screen:      ScreenBackups,
+		},
+	}
 }

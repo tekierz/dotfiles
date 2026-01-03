@@ -1,34 +1,51 @@
-.PHONY: build install test clean run dev
+.PHONY: build build-all install test clean run dev
 
 # Binary names
+DOTFILES_BIN = bin/dotfiles
 INSTALLER_BIN = bin/dotfiles-installer
 SETUP_SCRIPT = bin/dotfiles-setup
 
 # Go build flags
 LDFLAGS = -s -w
+VERSION = 2.0.0-dev
 
-# Build the installer
+# Build the main dotfiles CLI (new)
 build:
-	@echo "Building installer..."
+	@echo "Building dotfiles CLI..."
+	go build -ldflags "$(LDFLAGS) -X main.version=$(VERSION)" -o $(DOTFILES_BIN) ./cmd/dotfiles
+
+# Build both the new CLI and legacy installer
+build-all: build
+	@echo "Building legacy installer..."
 	go build -ldflags "$(LDFLAGS)" -o $(INSTALLER_BIN) ./cmd/installer
 
 # Build for development (with debug info)
 dev:
 	@echo "Building for development..."
-	go build -o $(INSTALLER_BIN) ./cmd/installer
+	go build -o $(DOTFILES_BIN) ./cmd/dotfiles
 
-# Run the installer directly
+# Run the dotfiles CLI
 run: dev
-	./$(INSTALLER_BIN)
+	./$(DOTFILES_BIN)
 
 # Run with skip-intro flag
 run-quick: dev
-	./$(INSTALLER_BIN) --skip-intro
+	./$(DOTFILES_BIN) --skip-intro install
+
+# Run specific subcommand
+run-install: dev
+	./$(DOTFILES_BIN) install
+
+run-status: dev
+	./$(DOTFILES_BIN) status
+
+run-theme: dev
+	./$(DOTFILES_BIN) theme list
 
 # Install to system
 install: build
 	@echo "Installing..."
-	install -m 755 $(INSTALLER_BIN) /usr/local/bin/dotfiles-installer
+	install -m 755 $(DOTFILES_BIN) /usr/local/bin/dotfiles
 	install -m 755 $(SETUP_SCRIPT) /usr/local/bin/dotfiles-setup
 
 # Run tests
