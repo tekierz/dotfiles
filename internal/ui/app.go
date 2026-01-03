@@ -42,11 +42,23 @@ const (
 	// Additional config screens
 	ScreenConfigCLITools
 	ScreenConfigGUIApps
-	// Individual CLI tool config screens
+	// Individual CLI tool config screens (installer)
 	ScreenConfigLazyGit
 	ScreenConfigLazyDocker
 	ScreenConfigBtop
 	ScreenConfigGlow
+	// Management config screens (detailed)
+	ScreenManageGhostty
+	ScreenManageTmux
+	ScreenManageZsh
+	ScreenManageNeovim
+	ScreenManageGit
+	ScreenManageYazi
+	ScreenManageFzf
+	ScreenManageLazyGit
+	ScreenManageLazyDocker
+	ScreenManageBtop
+	ScreenManageGlow
 )
 
 // Available themes
@@ -89,7 +101,7 @@ type App struct {
 	navStyle   string
 	deepDive   bool
 
-	// Deep dive state
+	// Deep dive state (installer)
 	deepDiveMenuIndex int
 	deepDiveConfig    *DeepDiveConfig
 	configFieldIndex  int // Currently focused field in config screens
@@ -97,6 +109,9 @@ type App struct {
 	utilityIndex      int // Currently focused utility
 	cliToolIndex      int // Currently focused CLI tool
 	guiAppIndex       int // Currently focused GUI app
+
+	// Management state (detailed config)
+	manageConfig *ManageConfig
 
 	// Installation state
 	installStep     int
@@ -128,6 +143,7 @@ func NewApp(skipIntro bool) *App {
 		runner:         runner.NewRunner(),
 		installOutput:  make([]string, 0, 100),
 		deepDiveConfig: NewDeepDiveConfig(),
+		manageConfig:   NewManageConfig(),
 	}
 
 	if skipIntro {
@@ -909,16 +925,69 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Manage screen navigation
 	case ScreenManage:
+		manageTools := getManageTools()
 		switch key {
 		case "up", "k":
 			if a.manageIndex > 0 {
 				a.manageIndex--
 			}
 		case "down", "j":
-			a.manageIndex++
+			if a.manageIndex < len(manageTools)-1 {
+				a.manageIndex++
+			}
+		case "enter":
+			if a.manageIndex < len(manageTools) {
+				a.configFieldIndex = 0
+				a.screen = manageTools[a.manageIndex].screen
+			}
 		case "esc":
 			a.screen = ScreenMainMenu
 		}
+
+	// Management config screens
+	case ScreenManageGhostty:
+		maxFields := 7
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageTmux:
+		maxFields := 7
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageZsh:
+		maxFields := 6
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageNeovim:
+		maxFields := 7
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageGit:
+		maxFields := 6
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageYazi:
+		maxFields := 4
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageFzf:
+		maxFields := 4
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageLazyGit:
+		maxFields := 3
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageLazyDocker:
+		maxFields := 1
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageBtop:
+		maxFields := 5
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
+	case ScreenManageGlow:
+		maxFields := 3
+		a.handleManageNavigation(key, maxFields, ScreenManage)
 
 	// Backups screen navigation
 	case ScreenBackups:
@@ -987,7 +1056,29 @@ func (a *App) View() string {
 	case ScreenMainMenu:
 		return a.renderMainMenu()
 	case ScreenManage:
-		return a.renderManage()
+		return a.renderManageDetailed()
+	case ScreenManageGhostty:
+		return a.renderManageGhostty()
+	case ScreenManageTmux:
+		return a.renderManageTmux()
+	case ScreenManageZsh:
+		return a.renderManageZsh()
+	case ScreenManageNeovim:
+		return a.renderManageNeovim()
+	case ScreenManageGit:
+		return a.renderManageGit()
+	case ScreenManageYazi:
+		return a.renderManageYazi()
+	case ScreenManageFzf:
+		return a.renderManageFzf()
+	case ScreenManageLazyGit:
+		return a.renderManageLazyGit()
+	case ScreenManageLazyDocker:
+		return a.renderManageLazyDocker()
+	case ScreenManageBtop:
+		return a.renderManageBtop()
+	case ScreenManageGlow:
+		return a.renderManageGlow()
 	case ScreenUpdate:
 		return a.renderUpdate()
 	case ScreenHotkeys:
@@ -1053,6 +1144,23 @@ func (a *App) startInstallation() tea.Cmd {
 		}
 
 		return installDoneMsg{err: nil}
+	}
+}
+
+// handleManageNavigation handles common navigation for management config screens
+func (a *App) handleManageNavigation(key string, maxFields int, backScreen Screen) {
+	switch key {
+	case "up", "k":
+		if a.configFieldIndex > 0 {
+			a.configFieldIndex--
+		}
+	case "down", "j":
+		if a.configFieldIndex < maxFields {
+			a.configFieldIndex++
+		}
+	case "esc":
+		a.configFieldIndex = 0
+		a.screen = backScreen
 	}
 }
 
