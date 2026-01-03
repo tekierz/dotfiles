@@ -44,11 +44,30 @@ type DeepDiveConfig struct {
 	// Utilities (hk, caff, sshh)
 	Utilities map[string]bool
 
-	// CLI Tools (lazygit, lazydocker, etc.)
+	// CLI Tools install flags
 	CLITools map[string]bool
 
-	// GUI Apps (Zen Browser, Cursor, etc.)
+	// GUI Apps install flags
 	GUIApps map[string]bool
+
+	// LazyGit settings
+	LazyGitSideBySide bool
+	LazyGitMouseMode  bool
+	LazyGitTheme      string
+
+	// LazyDocker settings
+	LazyDockerMouseMode bool
+
+	// Btop settings
+	BtopTheme      string
+	BtopUpdateMs   int
+	BtopShowTemp   bool
+	BtopGraphType  string
+
+	// Glow settings
+	GlowPager string
+	GlowStyle string
+	GlowWidth int
 }
 
 // NewDeepDiveConfig creates a new config with defaults
@@ -150,6 +169,25 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"lm-studio":   false,
 			"obs":         false,
 		},
+
+		// LazyGit defaults
+		LazyGitSideBySide: true,
+		LazyGitMouseMode:  true,
+		LazyGitTheme:      "auto",
+
+		// LazyDocker defaults
+		LazyDockerMouseMode: true,
+
+		// Btop defaults
+		BtopTheme:     "auto",
+		BtopUpdateMs:  2000,
+		BtopShowTemp:  true,
+		BtopGraphType: "braille",
+
+		// Glow defaults
+		GlowPager: "auto",
+		GlowStyle: "auto",
+		GlowWidth: 80,
 	}
 }
 
@@ -207,9 +245,27 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Icon:        "",
 		},
 		{
-			Name:        "CLI Tools",
-			Description: "LazyGit, LazyDocker, btop, glow",
-			Screen:      ScreenConfigCLITools,
+			Name:        "LazyGit",
+			Description: "Git UI theme, diff view, mouse mode",
+			Screen:      ScreenConfigLazyGit,
+			Icon:        "",
+		},
+		{
+			Name:        "LazyDocker",
+			Description: "Docker UI mouse mode",
+			Screen:      ScreenConfigLazyDocker,
+			Icon:        "",
+		},
+		{
+			Name:        "Btop",
+			Description: "System monitor theme, graphs, refresh",
+			Screen:      ScreenConfigBtop,
+			Icon:        "",
+		},
+		{
+			Name:        "Glow",
+			Description: "Markdown viewer style, pager, width",
+			Screen:      ScreenConfigGlow,
 			Icon:        "",
 		},
 		{

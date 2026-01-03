@@ -916,3 +916,155 @@ func (a *App) renderConfigGUIApps() string {
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
+
+// renderConfigLazyGit renders the LazyGit configuration screen
+func (a *App) renderConfigLazyGit() string {
+	title := renderConfigTitle("", "LazyGit", "Simple terminal UI for Git commands")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	// Side-by-side diff
+	content.WriteString(renderFieldLabel("Side-by-Side Diff", a.configFieldIndex == 0))
+	content.WriteString(renderToggle(cfg.LazyGitSideBySide, a.configFieldIndex == 0))
+	content.WriteString("\n\n")
+
+	// Mouse mode
+	content.WriteString(renderFieldLabel("Mouse Mode", a.configFieldIndex == 1))
+	content.WriteString(renderToggle(cfg.LazyGitMouseMode, a.configFieldIndex == 1))
+	content.WriteString("\n\n")
+
+	// Theme
+	content.WriteString(renderFieldLabel("Theme", a.configFieldIndex == 2))
+	content.WriteString(renderOptionSelector(
+		[]string{"auto", "dark", "light"},
+		[]string{"Auto", "Dark", "Light"},
+		cfg.LazyGitTheme,
+		a.configFieldIndex == 2,
+	))
+
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}
+
+// renderConfigLazyDocker renders the LazyDocker configuration screen
+func (a *App) renderConfigLazyDocker() string {
+	title := renderConfigTitle("", "LazyDocker", "Simple terminal UI for Docker")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	// Mouse mode
+	content.WriteString(renderFieldLabel("Mouse Mode", true))
+	content.WriteString(renderToggle(cfg.LazyDockerMouseMode, true))
+
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("space toggle • enter/esc save & back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}
+
+// renderConfigBtop renders the Btop configuration screen
+func (a *App) renderConfigBtop() string {
+	title := renderConfigTitle("", "Btop", "Resource monitor with beautiful TUI")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	// Theme
+	content.WriteString(renderFieldLabel("Theme", a.configFieldIndex == 0))
+	content.WriteString(renderOptionSelector(
+		[]string{"auto", "dracula", "gruvbox", "nord", "tokyo-night"},
+		[]string{"Auto", "Dracula", "Gruvbox", "Nord", "Tokyo"},
+		cfg.BtopTheme,
+		a.configFieldIndex == 0,
+	))
+	content.WriteString("\n\n")
+
+	// Update interval
+	content.WriteString(renderFieldLabel("Update Interval", a.configFieldIndex == 1))
+	intervalStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	if a.configFieldIndex == 1 {
+		intervalStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	}
+	content.WriteString(fmt.Sprintf("    ◀ %s ▶", intervalStyle.Render(fmt.Sprintf("%dms", cfg.BtopUpdateMs))))
+	content.WriteString("\n\n")
+
+	// Show temperature
+	content.WriteString(renderFieldLabel("Show CPU Temp", a.configFieldIndex == 2))
+	content.WriteString(renderToggle(cfg.BtopShowTemp, a.configFieldIndex == 2))
+	content.WriteString("\n\n")
+
+	// Graph type
+	content.WriteString(renderFieldLabel("Graph Type", a.configFieldIndex == 3))
+	content.WriteString(renderOptionSelector(
+		[]string{"braille", "block", "tty"},
+		[]string{"Braille", "Block", "TTY"},
+		cfg.BtopGraphType,
+		a.configFieldIndex == 3,
+	))
+
+	box := configBoxStyle.Width(55).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • space toggle • esc back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}
+
+// renderConfigGlow renders the Glow configuration screen
+func (a *App) renderConfigGlow() string {
+	title := renderConfigTitle("", "Glow", "Render markdown on the CLI")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	// Style
+	content.WriteString(renderFieldLabel("Style", a.configFieldIndex == 0))
+	content.WriteString(renderOptionSelector(
+		[]string{"auto", "dark", "light", "notty"},
+		[]string{"Auto", "Dark", "Light", "No TTY"},
+		cfg.GlowStyle,
+		a.configFieldIndex == 0,
+	))
+	content.WriteString("\n\n")
+
+	// Pager
+	content.WriteString(renderFieldLabel("Pager", a.configFieldIndex == 1))
+	content.WriteString(renderOptionSelector(
+		[]string{"auto", "less", "more", "none"},
+		[]string{"Auto", "Less", "More", "None"},
+		cfg.GlowPager,
+		a.configFieldIndex == 1,
+	))
+	content.WriteString("\n\n")
+
+	// Width
+	content.WriteString(renderFieldLabel("Width", a.configFieldIndex == 2))
+	widthStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	if a.configFieldIndex == 2 {
+		widthStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	}
+	content.WriteString(fmt.Sprintf("    ◀ %s ▶", widthStyle.Render(fmt.Sprintf("%d chars", cfg.GlowWidth))))
+
+	box := configBoxStyle.Width(55).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • esc back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}

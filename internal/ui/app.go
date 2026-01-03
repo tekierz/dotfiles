@@ -42,6 +42,11 @@ const (
 	// Additional config screens
 	ScreenConfigCLITools
 	ScreenConfigGUIApps
+	// Individual CLI tool config screens
+	ScreenConfigLazyGit
+	ScreenConfigLazyDocker
+	ScreenConfigBtop
+	ScreenConfigGlow
 )
 
 // Available themes
@@ -719,6 +724,131 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.screen = ScreenDeepDiveMenu
 		}
 
+	// LazyGit config
+	case ScreenConfigLazyGit:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 2 {
+				a.configFieldIndex++
+			}
+		case "left", "right", "h", "l":
+			if a.configFieldIndex == 2 {
+				opts := []string{"auto", "dark", "light"}
+				a.deepDiveConfig.LazyGitTheme = cycleOption(opts, a.deepDiveConfig.LazyGitTheme, key == "right" || key == "l")
+			}
+		case " ":
+			switch a.configFieldIndex {
+			case 0:
+				a.deepDiveConfig.LazyGitSideBySide = !a.deepDiveConfig.LazyGitSideBySide
+			case 1:
+				a.deepDiveConfig.LazyGitMouseMode = !a.deepDiveConfig.LazyGitMouseMode
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// LazyDocker config
+	case ScreenConfigLazyDocker:
+		switch key {
+		case " ":
+			a.deepDiveConfig.LazyDockerMouseMode = !a.deepDiveConfig.LazyDockerMouseMode
+		case "esc", "enter":
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// Btop config
+	case ScreenConfigBtop:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 3 {
+				a.configFieldIndex++
+			}
+		case "left", "h":
+			switch a.configFieldIndex {
+			case 0:
+				opts := []string{"auto", "dracula", "gruvbox", "nord", "tokyo-night"}
+				a.deepDiveConfig.BtopTheme = cycleOption(opts, a.deepDiveConfig.BtopTheme, false)
+			case 1:
+				if a.deepDiveConfig.BtopUpdateMs > 500 {
+					a.deepDiveConfig.BtopUpdateMs -= 500
+				}
+			case 3:
+				opts := []string{"braille", "block", "tty"}
+				a.deepDiveConfig.BtopGraphType = cycleOption(opts, a.deepDiveConfig.BtopGraphType, false)
+			}
+		case "right", "l":
+			switch a.configFieldIndex {
+			case 0:
+				opts := []string{"auto", "dracula", "gruvbox", "nord", "tokyo-night"}
+				a.deepDiveConfig.BtopTheme = cycleOption(opts, a.deepDiveConfig.BtopTheme, true)
+			case 1:
+				if a.deepDiveConfig.BtopUpdateMs < 10000 {
+					a.deepDiveConfig.BtopUpdateMs += 500
+				}
+			case 3:
+				opts := []string{"braille", "block", "tty"}
+				a.deepDiveConfig.BtopGraphType = cycleOption(opts, a.deepDiveConfig.BtopGraphType, true)
+			}
+		case " ":
+			if a.configFieldIndex == 2 {
+				a.deepDiveConfig.BtopShowTemp = !a.deepDiveConfig.BtopShowTemp
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// Glow config
+	case ScreenConfigGlow:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 2 {
+				a.configFieldIndex++
+			}
+		case "left", "h":
+			switch a.configFieldIndex {
+			case 0:
+				opts := []string{"auto", "dark", "light", "notty"}
+				a.deepDiveConfig.GlowStyle = cycleOption(opts, a.deepDiveConfig.GlowStyle, false)
+			case 1:
+				opts := []string{"auto", "less", "more", "none"}
+				a.deepDiveConfig.GlowPager = cycleOption(opts, a.deepDiveConfig.GlowPager, false)
+			case 2:
+				if a.deepDiveConfig.GlowWidth > 40 {
+					a.deepDiveConfig.GlowWidth -= 10
+				}
+			}
+		case "right", "l":
+			switch a.configFieldIndex {
+			case 0:
+				opts := []string{"auto", "dark", "light", "notty"}
+				a.deepDiveConfig.GlowStyle = cycleOption(opts, a.deepDiveConfig.GlowStyle, true)
+			case 1:
+				opts := []string{"auto", "less", "more", "none"}
+				a.deepDiveConfig.GlowPager = cycleOption(opts, a.deepDiveConfig.GlowPager, true)
+			case 2:
+				if a.deepDiveConfig.GlowWidth < 200 {
+					a.deepDiveConfig.GlowWidth += 10
+				}
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
 	// Main menu navigation
 	case ScreenMainMenu:
 		items := GetMainMenuItems()
@@ -845,6 +975,14 @@ func (a *App) View() string {
 		return a.renderConfigCLITools()
 	case ScreenConfigGUIApps:
 		return a.renderConfigGUIApps()
+	case ScreenConfigLazyGit:
+		return a.renderConfigLazyGit()
+	case ScreenConfigLazyDocker:
+		return a.renderConfigLazyDocker()
+	case ScreenConfigBtop:
+		return a.renderConfigBtop()
+	case ScreenConfigGlow:
+		return a.renderConfigGlow()
 	// Management platform screens
 	case ScreenMainMenu:
 		return a.renderMainMenu()
