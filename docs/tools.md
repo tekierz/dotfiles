@@ -51,6 +51,23 @@ These tools form the foundation of the terminal environment and are installed on
 | **fastfetch** | Fast system information display showing OS, kernel, packages, memory, and more. Runs on shell startup. |
 | **tlrc** | Rust client for tldr pages—simplified, practical man pages with examples. `tldr tar` is much friendlier than `man tar`. |
 
+### Disk Analysis
+
+| Tool | Description |
+|------|-------------|
+| **ncdu** | Interactive disk usage analyzer with ncurses interface. Navigate directories, delete files, see what's eating space. Aliased to `diskuse`. |
+| **duf** | Modern `df` replacement with colorful output showing disk usage per mount. Aliased to `df`. |
+| **dust** | Intuitive `du` replacement written in Rust. Shows directory sizes with visual bars. Aliased to `du`. |
+
+### Network Analysis
+
+| Tool | Description |
+|------|-------------|
+| **bandwhich** | Real-time bandwidth utilization by process and connection. See exactly what's using your network. Run with `bandwidth` or `sudo bandwhich`. |
+| **gping** | Ping with a live graph showing latency over time. Great for monitoring connection quality. Aliased to `ping`. |
+| **dog** | Modern DNS client (better `dig`). Clean output, supports DNS-over-TLS/HTTPS. Aliased to `dig`. |
+| **trippy** | Network diagnostic tool combining traceroute and ping. Visual display of network path with latency per hop. Use `trace` or `trip`. |
+
 ### Clipboard (Platform-Specific)
 
 | Tool | Platform | Description |
@@ -132,12 +149,14 @@ All [Core Tools](#core-tools-all-platforms) plus:
 | Tool | Source | Description |
 |------|--------|-------------|
 | **pacman-contrib** | [Default] | Pacman utilities including `paccache` for cleaning old packages. Auto-enabled timer keeps cache from growing indefinitely. |
-| **Ghostty** | [Default] | Installed from AUR via `paru` if available. |
+| **Ghostty** | AUR | Installed from AUR via `paru` if available. |
+| **ncdu, duf, bandwhich, gping** | [Default] | Disk and network tools from official repos. |
+| **dust, dog, trippy** | AUR | Additional analysis tools from AUR (requires `paru`). |
 
 ### Requirements
 
 - **pacman**: System package manager (included with Arch)
-- **paru**: AUR helper for installing community packages (recommended but optional)
+- **paru**: AUR helper for installing community packages (required for Ghostty, dust, dog, trippy)
 
 ---
 
@@ -155,6 +174,8 @@ All [Core Tools](#core-tools-all-platforms) plus:
 | **ripgrep** | [Default] | Fast grep |
 | **fd-find** | [Default] | Fast find (binary may be `fdfind`) |
 | **btop** | [Default] | System monitor |
+| **ncdu** | [Default] | Interactive disk usage analyzer |
+| **duf** | [Default] | Modern df replacement (Ubuntu 22.04+) |
 
 ### Limitations
 
@@ -167,6 +188,7 @@ Some tools require manual installation or Homebrew on Linux:
 | **zoxide** | Installed via curl script |
 | **git-delta** | May need Homebrew |
 | **Ghostty** | Manual installation required |
+| **dust, bandwhich, gping, dog, trippy** | Network tools require cargo or Homebrew |
 
 ---
 

@@ -934,6 +934,13 @@ install_packages() {
             neovim \
             tlrc \
             powerlevel10k \
+            ncdu \
+            duf \
+            dust \
+            bandwhich \
+            gping \
+            dog \
+            trippy \
             2>/dev/null || true
 
         # Install fonts
@@ -1098,6 +1105,10 @@ install_packages() {
             pacman-contrib \
             wl-clipboard \
             xclip \
+            ncdu \
+            duf \
+            bandwhich \
+            gping \
             2>/dev/null || true
 
         # Enable paccache timer
@@ -1108,6 +1119,9 @@ install_packages() {
             print_step "Installing AUR packages..."
             paru -S --needed --noconfirm \
                 ghostty \
+                dust \
+                dog \
+                trippy \
                 2>/dev/null || true
         fi
 
@@ -1125,10 +1139,15 @@ install_packages() {
             btop \
             xclip \
             wl-clipboard \
+            ncdu \
             2>/dev/null || true
+
+        # Install duf if available (Ubuntu 22.04+)
+        sudo apt install -y duf 2>/dev/null || true
 
         print_warning "Some packages may need manual installation on Debian/Ubuntu"
         print_warning "Consider using Homebrew for: eza, yazi, zoxide, delta, fastfetch"
+        print_warning "Network tools (bandwhich, gping, dog, trippy) require cargo or Homebrew"
     fi
 
     print_success "Package installation complete"
@@ -1221,6 +1240,17 @@ if command -v eza &> /dev/null; then
   alias lt='eza --tree --level=2 --icons --group-directories-first'
   alias lta='eza --tree --level=2 -a --icons --group-directories-first'
 fi
+
+# Disk usage tools
+command -v duf &> /dev/null && alias df='duf'
+command -v dust &> /dev/null && alias du='dust'
+command -v ncdu &> /dev/null && alias diskuse='ncdu'
+
+# Network tools
+command -v bandwhich &> /dev/null && alias bandwidth='bandwhich'
+command -v gping &> /dev/null && alias ping='gping'
+command -v dog &> /dev/null && alias dig='dog'
+command -v trippy &> /dev/null && alias trace='trip'
 
 # zoxide (smarter cd)
 if command -v zoxide &> /dev/null; then
