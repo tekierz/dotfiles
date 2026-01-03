@@ -673,6 +673,84 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.utilityIndex = 0
 			a.screen = ScreenDeepDiveMenu
 		}
+
+	// Main menu navigation
+	case ScreenMainMenu:
+		items := GetMainMenuItems()
+		switch key {
+		case "up", "k":
+			if a.mainMenuIndex > 0 {
+				a.mainMenuIndex--
+			}
+		case "down", "j":
+			if a.mainMenuIndex < len(items)-1 {
+				a.mainMenuIndex++
+			}
+		case "enter":
+			a.screen = items[a.mainMenuIndex].Screen
+		}
+
+	// Update screen navigation
+	case ScreenUpdate:
+		switch key {
+		case "up", "k":
+			if a.updateIndex > 0 {
+				a.updateIndex--
+			}
+		case "down", "j":
+			a.updateIndex++
+		case "esc":
+			a.screen = ScreenMainMenu
+		}
+
+	// Hotkeys screen navigation
+	case ScreenHotkeys:
+		categories := GetHotkeyCategories()
+		switch key {
+		case "left", "h":
+			if a.hotkeyCategory > 0 {
+				a.hotkeyCategory--
+				a.hotkeyCursor = 0
+			}
+		case "right", "l":
+			if a.hotkeyCategory < len(categories)-1 {
+				a.hotkeyCategory++
+				a.hotkeyCursor = 0
+			}
+		case "up", "k":
+			if a.hotkeyCursor > 0 {
+				a.hotkeyCursor--
+			}
+		case "down", "j":
+			if a.hotkeyCategory < len(categories) {
+				maxIdx := len(categories[a.hotkeyCategory].Hotkeys) - 1
+				if a.hotkeyCursor < maxIdx {
+					a.hotkeyCursor++
+				}
+			}
+		case "esc":
+			a.screen = ScreenMainMenu
+		}
+
+	// Manage screen navigation
+	case ScreenManage:
+		switch key {
+		case "up", "k":
+			if a.manageIndex > 0 {
+				a.manageIndex--
+			}
+		case "down", "j":
+			a.manageIndex++
+		case "esc":
+			a.screen = ScreenMainMenu
+		}
+
+	// Backups screen navigation
+	case ScreenBackups:
+		switch key {
+		case "esc":
+			a.screen = ScreenMainMenu
+		}
 	}
 
 	return a, nil
@@ -718,6 +796,17 @@ func (a *App) View() string {
 		return a.renderConfigMacApps()
 	case ScreenConfigUtilities:
 		return a.renderConfigUtilities()
+	// Management platform screens
+	case ScreenMainMenu:
+		return a.renderMainMenu()
+	case ScreenManage:
+		return a.renderManage()
+	case ScreenUpdate:
+		return a.renderUpdate()
+	case ScreenHotkeys:
+		return a.renderHotkeys()
+	case ScreenBackups:
+		return a.renderBackups()
 	default:
 		return "Unknown screen"
 	}
