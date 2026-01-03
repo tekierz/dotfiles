@@ -7,669 +7,750 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Focused field styles
+var (
+	focusedStyle = lipgloss.NewStyle().
+			Foreground(ColorCyan).
+			Bold(true)
+
+	unfocusedStyle = lipgloss.NewStyle().
+			Foreground(ColorTextMuted)
+
+	sectionHeaderStyle = lipgloss.NewStyle().
+				Foreground(ColorMagenta).
+				Bold(true).
+				MarginTop(1)
+
+	configBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBorder).
+			Padding(1, 2)
+
+	activeOptionStyle = lipgloss.NewStyle().
+				Background(ColorCyan).
+				Foreground(lipgloss.Color("#000000")).
+				Padding(0, 1)
+
+	inactiveOptionStyle = lipgloss.NewStyle().
+				Foreground(ColorTextMuted).
+				Padding(0, 1)
+)
+
 // renderDeepDiveMenu renders the deep dive tool selection menu
 func (a *App) renderDeepDiveMenu() string {
-	title := TitleStyle.Render("Deep Dive Configuration")
+	// Title with decorative border
+	titleBox := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(ColorMagenta).
+		Padding(0, 2).
+		Render(lipgloss.NewStyle().
+			Foreground(ColorMagenta).
+			Bold(true).
+			Render("◈ DEEP DIVE CONFIGURATION ◈"))
+
 	subtitle := lipgloss.NewStyle().
 		Foreground(ColorTextMuted).
-		Render("Customize individual tool settings")
+		Italic(true).
+		Render("Customize each tool before installation")
 
 	items := GetDeepDiveMenuItems()
 	var menuList strings.Builder
 
 	for i, item := range items {
-		prefix := "  "
-		style := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		isSelected := i == a.deepDiveMenuIndex
 
-		if i == a.deepDiveMenuIndex {
-			prefix = "▶ "
-			style = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+		// Icon
+		iconStyle := unfocusedStyle
+		if isSelected {
+			iconStyle = lipgloss.NewStyle().Foreground(ColorNeonPink)
+		}
+
+		// Name
+		nameStyle := unfocusedStyle
+		if isSelected {
+			nameStyle = focusedStyle
+		}
+
+		// Description
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if isSelected {
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
 
-		menuList.WriteString(style.Render(fmt.Sprintf("%s%s %-12s", prefix, item.Icon, item.Name)))
-		menuList.WriteString(descStyle.Render(fmt.Sprintf("  %s", item.Description)))
-		menuList.WriteString("\n")
+		// Cursor
+		cursor := "  "
+		if isSelected {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		}
+
+		menuList.WriteString(fmt.Sprintf("%s%s %s  %s\n",
+			cursor,
+			iconStyle.Render(item.Icon),
+			nameStyle.Render(fmt.Sprintf("%-12s", item.Name)),
+			descStyle.Render(item.Description),
+		))
 	}
 
-	// Add "Continue to Installation" option at the bottom
+	// Continue option
 	continueIdx := len(items)
-	continuePrefix := "  "
-	continueStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-	if a.deepDiveMenuIndex == continueIdx {
-		continuePrefix = "▶ "
+	continueSelected := a.deepDiveMenuIndex == continueIdx
+	continueCursor := "  "
+	continueStyle := unfocusedStyle
+	if continueSelected {
+		continueCursor = lipgloss.NewStyle().Foreground(ColorGreen).Render("▸ ")
 		continueStyle = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
 	}
 	menuList.WriteString("\n")
-	menuList.WriteString(continueStyle.Render(fmt.Sprintf("%s→ Continue to Installation", continuePrefix)))
+	menuList.WriteString(fmt.Sprintf("%s%s\n", continueCursor, continueStyle.Render("▶ Continue to Installation")))
 
-	help := HelpStyle.Render("[↑↓/jk] Navigate    [ENTER] Configure    [ESC] Back")
+	// Wrap menu in a box
+	menuBox := configBoxStyle.Render(menuList.String())
+
+	help := HelpStyle.Render("↑↓/jk navigate • enter select • esc back")
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Center,
+		titleBox,
+		subtitle,
+		"",
+		menuBox,
+		"",
+		help,
+	)
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			title,
-			subtitle,
-			"",
-			menuList.String(),
-			"",
-			help,
-		)),
+		content,
 	)
 }
 
 // renderConfigGhostty renders the Ghostty configuration screen
 func (a *App) renderConfigGhostty() string {
-	title := TitleStyle.Render("󰆍 Ghostty Configuration")
+	title := renderConfigTitle("󰆍", "Ghostty", "Terminal emulator settings")
 
 	cfg := a.deepDiveConfig
+	var content strings.Builder
 
-	// Font size selector
-	fontSizeLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Font Size:")
-	fontSizeValue := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).
-		Render(fmt.Sprintf(" %d ", cfg.GhosttyFontSize))
-	fontSizeHint := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("[←→] to adjust")
+	// Font size
+	fontFocused := a.configFieldIndex == 0
+	content.WriteString(renderFieldLabel("Font Size", fontFocused))
+	content.WriteString(renderNumberControl(cfg.GhosttyFontSize, 8, 32, fontFocused))
+	content.WriteString("\n\n")
 
-	// Opacity slider
-	opacityLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Opacity:")
-	opacityBar := renderSlider(cfg.GhosttyOpacity, 100, 20)
-	opacityValue := lipgloss.NewStyle().Foreground(ColorCyan).Render(fmt.Sprintf(" %d%%", cfg.GhosttyOpacity))
+	// Opacity
+	opacityFocused := a.configFieldIndex == 1
+	content.WriteString(renderFieldLabel("Background Opacity", opacityFocused))
+	content.WriteString(renderSliderControl(cfg.GhosttyOpacity, 100, 24, opacityFocused))
+	content.WriteString("\n\n")
 
 	// Tab keybindings
-	tabLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Tab Keybindings:")
-	tabOptions := []string{"super", "ctrl", "alt"}
-	var tabButtons strings.Builder
-	for _, opt := range tabOptions {
-		style := ButtonStyle
-		if cfg.GhosttyTabBindings == opt {
-			style = ButtonActiveStyle
-		}
-		tabButtons.WriteString(style.Render(fmt.Sprintf(" %s+N ", opt)))
-		tabButtons.WriteString(" ")
-	}
+	tabFocused := a.configFieldIndex == 2
+	content.WriteString(renderFieldLabel("New Tab Keybinding", tabFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"super", "ctrl", "alt"},
+		[]string{"⌘/Super+N", "Ctrl+N", "Alt+N"},
+		cfg.GhosttyTabBindings,
+		tabFocused,
+	))
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		fontSizeLabel,
-		lipgloss.JoinHorizontal(lipgloss.Center, fontSizeValue, fontSizeHint),
-		"",
-		opacityLabel,
-		lipgloss.JoinHorizontal(lipgloss.Center, opacityBar, opacityValue),
-		"",
-		tabLabel,
-		tabButtons.String(),
-		"",
-	)
-
-	help := HelpStyle.Render("[←→] Adjust    [↑↓] Navigate    [ENTER] Save    [ESC] Back")
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • enter/esc save & back")
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			"",
-			help,
-		)),
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
 
 // renderConfigTmux renders the Tmux configuration screen
 func (a *App) renderConfigTmux() string {
-	title := TitleStyle.Render(" Tmux Configuration")
+	title := renderConfigTitle("", "Tmux", "Terminal multiplexer settings")
 
 	cfg := a.deepDiveConfig
+	var content strings.Builder
 
-	// Prefix key options
-	prefixLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Prefix Key:")
-	prefixOptions := []struct {
-		value string
-		label string
-	}{
-		{"ctrl-a", "Ctrl-A"},
-		{"ctrl-b", "Ctrl-B (default)"},
-		{"ctrl-space", "Ctrl-Space"},
-	}
-	var prefixButtons strings.Builder
-	for _, opt := range prefixOptions {
-		style := ButtonStyle
-		if cfg.TmuxPrefix == opt.value {
-			style = ButtonActiveStyle
-		}
-		prefixButtons.WriteString(style.Render(fmt.Sprintf(" %s ", opt.label)))
-		prefixButtons.WriteString(" ")
-	}
+	// Prefix key
+	prefixFocused := a.configFieldIndex == 0
+	content.WriteString(renderFieldLabel("Prefix Key", prefixFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"ctrl-a", "ctrl-b", "ctrl-space"},
+		[]string{"Ctrl-A", "Ctrl-B", "Ctrl-Space"},
+		cfg.TmuxPrefix,
+		prefixFocused,
+	))
+	content.WriteString("\n\n")
 
 	// Split bindings
-	splitLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Split Bindings:")
-	splitOptions := []struct {
-		value string
-		label string
-	}{
-		{"pipes", "| and - (intuitive)"},
-		{"percent", "% and \" (default)"},
-	}
-	var splitButtons strings.Builder
-	for _, opt := range splitOptions {
-		style := ButtonStyle
-		if cfg.TmuxSplitBinds == opt.value {
-			style = ButtonActiveStyle
-		}
-		splitButtons.WriteString(style.Render(fmt.Sprintf(" %s ", opt.label)))
-		splitButtons.WriteString(" ")
-	}
+	splitFocused := a.configFieldIndex == 1
+	content.WriteString(renderFieldLabel("Split Pane Keys", splitFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"pipes", "percent"},
+		[]string{"| and − (intuitive)", "% and \" (default)"},
+		cfg.TmuxSplitBinds,
+		splitFocused,
+	))
+	content.WriteString("\n\n")
 
-	// Status bar position
-	statusLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Status Bar:")
-	statusOptions := []string{"top", "bottom"}
-	var statusButtons strings.Builder
-	for _, opt := range statusOptions {
-		style := ButtonStyle
-		if cfg.TmuxStatusBar == opt {
-			style = ButtonActiveStyle
-		}
-		statusButtons.WriteString(style.Render(fmt.Sprintf(" %s ", opt)))
-		statusButtons.WriteString(" ")
-	}
+	// Status bar
+	statusFocused := a.configFieldIndex == 2
+	content.WriteString(renderFieldLabel("Status Bar Position", statusFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"bottom", "top"},
+		[]string{"Bottom", "Top"},
+		cfg.TmuxStatusBar,
+		statusFocused,
+	))
+	content.WriteString("\n\n")
 
-	// Mouse mode toggle
-	mouseLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Mouse Mode:")
-	mouseValue := "OFF"
-	mouseStyle := lipgloss.NewStyle().Foreground(ColorRed)
-	if cfg.TmuxMouseMode {
-		mouseValue = "ON"
-		mouseStyle = lipgloss.NewStyle().Foreground(ColorGreen)
-	}
-	mouseToggle := lipgloss.JoinHorizontal(lipgloss.Center,
-		ButtonStyle.Render(" "+mouseStyle.Render(mouseValue)+" "),
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  [SPACE] to toggle"),
-	)
+	// Mouse mode
+	mouseFocused := a.configFieldIndex == 3
+	content.WriteString(renderFieldLabel("Mouse Support", mouseFocused))
+	content.WriteString(renderToggle(cfg.TmuxMouseMode, mouseFocused))
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		prefixLabel,
-		prefixButtons.String(),
-		"",
-		splitLabel,
-		splitButtons.String(),
-		"",
-		statusLabel,
-		statusButtons.String(),
-		"",
-		mouseLabel,
-		mouseToggle,
-	)
-
-	help := HelpStyle.Render("[←→] Select    [SPACE] Toggle    [ENTER] Save    [ESC] Back")
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • enter/esc back")
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			"",
-			help,
-		)),
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
 
 // renderConfigZsh renders the Zsh configuration screen
 func (a *App) renderConfigZsh() string {
-	title := TitleStyle.Render(" Zsh Configuration")
+	title := renderConfigTitle("", "Zsh", "Shell prompt and plugins")
 
 	cfg := a.deepDiveConfig
+	var content strings.Builder
 
-	// Prompt style
-	promptLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Prompt Style:")
-	promptOptions := []struct {
+	// Prompt style - radio buttons
+	content.WriteString(sectionHeaderStyle.Render("Prompt Style"))
+	content.WriteString("\n")
+	prompts := []struct {
 		value string
 		label string
+		desc  string
 	}{
-		{"p10k", "Powerlevel10k (recommended)"},
-		{"starship", "Starship"},
-		{"pure", "Pure"},
-		{"minimal", "Minimal"},
+		{"p10k", "Powerlevel10k", "Feature-rich, customizable"},
+		{"starship", "Starship", "Fast, minimal, cross-shell"},
+		{"pure", "Pure", "Pretty, minimal, fast"},
+		{"minimal", "Minimal", "Simple $ prompt"},
 	}
-	var promptButtons strings.Builder
-	for _, opt := range promptOptions {
-		style := ButtonStyle
-		if cfg.ZshPromptStyle == opt.value {
-			style = ButtonActiveStyle
-		}
-		promptButtons.WriteString(style.Render(fmt.Sprintf(" %s ", opt.label)))
-		promptButtons.WriteString("\n")
+	for i, p := range prompts {
+		focused := a.configFieldIndex == i
+		selected := cfg.ZshPromptStyle == p.value
+		content.WriteString(renderRadioOption(p.label, p.desc, selected, focused))
+		content.WriteString("\n")
 	}
 
-	// Plugins checkboxes
-	pluginsLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Plugins:")
-	availablePlugins := []string{
-		"zsh-autosuggestions",
-		"zsh-syntax-highlighting",
-		"zsh-completions",
-		"fzf-tab",
-		"zsh-history-substring-search",
+	// Plugins - checkboxes
+	content.WriteString(sectionHeaderStyle.Render("Plugins"))
+	content.WriteString("\n")
+	plugins := []struct {
+		id   string
+		name string
+	}{
+		{"zsh-autosuggestions", "Auto-suggestions"},
+		{"zsh-syntax-highlighting", "Syntax highlighting"},
+		{"zsh-completions", "Extra completions"},
+		{"fzf-tab", "FZF tab completion"},
+		{"zsh-history-substring-search", "History search"},
 	}
-	var pluginsList strings.Builder
-	for _, plugin := range availablePlugins {
-		checked := "[ ]"
-		style := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		for _, p := range cfg.ZshPlugins {
-			if p == plugin {
-				checked = "[✓]"
-				style = lipgloss.NewStyle().Foreground(ColorGreen)
+	for i, p := range plugins {
+		focused := a.configFieldIndex == i+4
+		enabled := false
+		for _, ep := range cfg.ZshPlugins {
+			if ep == p.id {
+				enabled = true
 				break
 			}
 		}
-		pluginsList.WriteString(style.Render(fmt.Sprintf("  %s %s\n", checked, plugin)))
+		content.WriteString(renderCheckbox(p.name, enabled, focused))
+		content.WriteString("\n")
 	}
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		promptLabel,
-		promptButtons.String(),
-		"",
-		pluginsLabel,
-		pluginsList.String(),
-	)
-
-	help := HelpStyle.Render("[↑↓] Navigate    [SPACE] Toggle    [ENTER] Save    [ESC] Back")
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space/enter select • esc back")
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			"",
-			help,
-		)),
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
 
 // renderConfigNeovim renders the Neovim configuration screen
 func (a *App) renderConfigNeovim() string {
-	title := TitleStyle.Render(" Neovim Configuration")
+	title := renderConfigTitle("", "Neovim", "Editor configuration and LSP")
 
 	cfg := a.deepDiveConfig
+	var content strings.Builder
 
-	// Config preset
-	configLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Configuration:")
-	configOptions := []struct {
+	// Config preset - radio buttons
+	content.WriteString(sectionHeaderStyle.Render("Configuration"))
+	content.WriteString("\n")
+	configs := []struct {
 		value string
 		label string
 		desc  string
 	}{
-		{"kickstart", "Kickstart.nvim", "Minimal, well-documented starting point"},
-		{"lazyvim", "LazyVim", "Full-featured, pre-configured IDE"},
-		{"nvchad", "NvChad", "Beautiful, fast, extensible"},
-		{"custom", "Custom", "Use your own config"},
+		{"kickstart", "Kickstart.nvim", "Minimal, well-documented"},
+		{"lazyvim", "LazyVim", "Full IDE experience"},
+		{"nvchad", "NvChad", "Beautiful and fast"},
+		{"custom", "Keep existing", "Don't modify config"},
 	}
-	var configList strings.Builder
-	for _, opt := range configOptions {
-		prefix := "  "
-		style := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if cfg.NeovimConfig == opt.value {
-			prefix = "▶ "
-			style = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
-		}
-		configList.WriteString(style.Render(fmt.Sprintf("%s%-15s", prefix, opt.label)))
-		configList.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render(opt.desc))
-		configList.WriteString("\n")
+	for i, c := range configs {
+		focused := a.configFieldIndex == i
+		selected := cfg.NeovimConfig == c.value
+		content.WriteString(renderRadioOption(c.label, c.desc, selected, focused))
+		content.WriteString("\n")
 	}
 
-	// LSP servers
-	lspLabel := lipgloss.NewStyle().Foreground(ColorText).Render("LSP Servers:")
-	availableLSPs := []struct {
+	// LSP servers - checkboxes
+	content.WriteString(sectionHeaderStyle.Render("LSP Servers"))
+	content.WriteString("\n")
+	lsps := []struct {
 		id   string
 		name string
 	}{
 		{"lua_ls", "Lua"},
 		{"pyright", "Python"},
-		{"tsserver", "TypeScript/JavaScript"},
+		{"tsserver", "TypeScript/JS"},
 		{"gopls", "Go"},
 		{"rust_analyzer", "Rust"},
 		{"clangd", "C/C++"},
 	}
-	var lspList strings.Builder
-	for _, lsp := range availableLSPs {
-		checked := "[ ]"
-		style := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		for _, l := range cfg.NeovimLSPs {
-			if l == lsp.id {
-				checked = "[✓]"
-				style = lipgloss.NewStyle().Foreground(ColorGreen)
+	for i, l := range lsps {
+		focused := a.configFieldIndex == i+4
+		enabled := false
+		for _, el := range cfg.NeovimLSPs {
+			if el == l.id {
+				enabled = true
 				break
 			}
 		}
-		lspList.WriteString(style.Render(fmt.Sprintf("  %s %-20s", checked, lsp.name)))
+		content.WriteString(renderCheckbox(l.name, enabled, focused))
+		content.WriteString("\n")
 	}
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		configLabel,
-		configList.String(),
-		"",
-		lspLabel,
-		lspList.String(),
-	)
-
-	help := HelpStyle.Render("[↑↓] Navigate    [SPACE] Toggle    [ENTER] Save    [ESC] Back")
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space/enter select • esc back")
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			"",
-			help,
-		)),
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
 
 // renderConfigGit renders the Git configuration screen
 func (a *App) renderConfigGit() string {
-	title := TitleStyle.Render(" Git Configuration")
+	title := renderConfigTitle("", "Git", "Version control settings")
 
 	cfg := a.deepDiveConfig
+	var content strings.Builder
 
-	// Delta side-by-side toggle
-	deltaLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Delta Diff View:")
-	deltaValue := "Line-by-line"
-	deltaStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-	if cfg.GitDeltaSideBySide {
-		deltaValue = "Side-by-side"
-		deltaStyle = lipgloss.NewStyle().Foreground(ColorGreen)
-	}
-	deltaToggle := lipgloss.JoinHorizontal(lipgloss.Center,
-		ButtonStyle.Render(" "+deltaStyle.Render(deltaValue)+" "),
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  [SPACE] to toggle"),
-	)
+	// Delta side-by-side
+	deltaFocused := a.configFieldIndex == 0
+	content.WriteString(renderFieldLabel("Delta Diff View", deltaFocused))
+	content.WriteString(renderToggleLabeled(cfg.GitDeltaSideBySide, "Side-by-side", "Unified", deltaFocused))
+	content.WriteString("\n\n")
 
 	// Default branch
-	branchLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Default Branch:")
-	branchOptions := []string{"main", "master", "develop"}
-	var branchButtons strings.Builder
-	for _, opt := range branchOptions {
-		style := ButtonStyle
-		if cfg.GitDefaultBranch == opt {
-			style = ButtonActiveStyle
-		}
-		branchButtons.WriteString(style.Render(fmt.Sprintf(" %s ", opt)))
-		branchButtons.WriteString(" ")
-	}
+	branchFocused := a.configFieldIndex == 1
+	content.WriteString(renderFieldLabel("Default Branch", branchFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"main", "master", "develop"},
+		[]string{"main", "master", "develop"},
+		cfg.GitDefaultBranch,
+		branchFocused,
+	))
+	content.WriteString("\n\n")
 
-	// Aliases
-	aliasLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Enable Aliases:")
-	aliases := []struct {
-		short string
-		full  string
-	}{
-		{"st", "status"},
-		{"co", "checkout"},
-		{"br", "branch"},
-		{"ci", "commit"},
-		{"lg", "log --oneline --graph"},
-		{"unstage", "reset HEAD --"},
+	// Aliases preview
+	content.WriteString(sectionHeaderStyle.Render("Included Aliases"))
+	content.WriteString("\n")
+	aliases := []string{
+		"git st → status",
+		"git co → checkout",
+		"git br → branch",
+		"git ci → commit",
+		"git lg → log --graph",
 	}
-	var aliasList strings.Builder
 	for _, alias := range aliases {
-		checked := "[✓]"
-		style := lipgloss.NewStyle().Foreground(ColorGreen)
-		aliasList.WriteString(style.Render(fmt.Sprintf("  %s git %s → %s\n", checked, alias.short, alias.full)))
+		content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  " + alias + "\n"))
 	}
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		deltaLabel,
-		deltaToggle,
-		"",
-		branchLabel,
-		branchButtons.String(),
-		"",
-		aliasLabel,
-		aliasList.String(),
-	)
-
-	help := HelpStyle.Render("[←→] Select    [SPACE] Toggle    [ENTER] Save    [ESC] Back")
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			"",
-			help,
-		)),
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
 
 // renderConfigYazi renders the Yazi configuration screen
 func (a *App) renderConfigYazi() string {
-	title := TitleStyle.Render("󰉋 Yazi Configuration")
+	title := renderConfigTitle("󰉋", "Yazi", "File manager settings")
 
 	cfg := a.deepDiveConfig
+	var content strings.Builder
 
-	// Keymap style
-	keymapLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Keymap Style:")
-	keymapOptions := []string{"vim", "emacs"}
-	var keymapButtons strings.Builder
-	for _, opt := range keymapOptions {
-		style := ButtonStyle
-		if cfg.YaziKeymap == opt {
-			style = ButtonActiveStyle
-		}
-		keymapButtons.WriteString(style.Render(fmt.Sprintf(" %s ", opt)))
-		keymapButtons.WriteString(" ")
-	}
+	// Keymap
+	keymapFocused := a.configFieldIndex == 0
+	content.WriteString(renderFieldLabel("Keymap Style", keymapFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"vim", "emacs"},
+		[]string{"Vim (hjkl)", "Emacs (arrows)"},
+		cfg.YaziKeymap,
+		keymapFocused,
+	))
+	content.WriteString("\n\n")
 
-	// Show hidden files
-	hiddenLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Show Hidden Files:")
-	hiddenValue := "OFF"
-	hiddenStyle := lipgloss.NewStyle().Foreground(ColorRed)
-	if cfg.YaziShowHidden {
-		hiddenValue = "ON"
-		hiddenStyle = lipgloss.NewStyle().Foreground(ColorGreen)
-	}
-	hiddenToggle := lipgloss.JoinHorizontal(lipgloss.Center,
-		ButtonStyle.Render(" "+hiddenStyle.Render(hiddenValue)+" "),
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  [SPACE] to toggle"),
-	)
+	// Show hidden
+	hiddenFocused := a.configFieldIndex == 1
+	content.WriteString(renderFieldLabel("Show Hidden Files", hiddenFocused))
+	content.WriteString(renderToggle(cfg.YaziShowHidden, hiddenFocused))
+	content.WriteString("\n\n")
 
 	// Preview mode
-	previewLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Preview Mode:")
-	previewOptions := []string{"auto", "always", "never"}
-	var previewButtons strings.Builder
-	for _, opt := range previewOptions {
-		style := ButtonStyle
-		if cfg.YaziPreviewMode == opt {
-			style = ButtonActiveStyle
-		}
-		previewButtons.WriteString(style.Render(fmt.Sprintf(" %s ", opt)))
-		previewButtons.WriteString(" ")
-	}
+	previewFocused := a.configFieldIndex == 2
+	content.WriteString(renderFieldLabel("File Preview", previewFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"auto", "always", "never"},
+		[]string{"Auto", "Always", "Never"},
+		cfg.YaziPreviewMode,
+		previewFocused,
+	))
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		keymapLabel,
-		keymapButtons.String(),
-		"",
-		hiddenLabel,
-		hiddenToggle,
-		"",
-		previewLabel,
-		previewButtons.String(),
-	)
-
-	help := HelpStyle.Render("[←→] Select    [SPACE] Toggle    [ENTER] Save    [ESC] Back")
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			"",
-			help,
-		)),
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
 
 // renderConfigFzf renders the FZF configuration screen
 func (a *App) renderConfigFzf() string {
-	title := TitleStyle.Render(" FZF Configuration")
+	title := renderConfigTitle("", "FZF", "Fuzzy finder settings")
 
 	cfg := a.deepDiveConfig
+	var content strings.Builder
 
 	// Preview toggle
-	previewLabel := lipgloss.NewStyle().Foreground(ColorText).Render("File Preview:")
-	previewValue := "OFF"
-	previewStyle := lipgloss.NewStyle().Foreground(ColorRed)
-	if cfg.FzfPreview {
-		previewValue = "ON"
-		previewStyle = lipgloss.NewStyle().Foreground(ColorGreen)
-	}
-	previewToggle := lipgloss.JoinHorizontal(lipgloss.Center,
-		ButtonStyle.Render(" "+previewStyle.Render(previewValue)+" "),
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  [SPACE] to toggle"),
-	)
+	previewFocused := a.configFieldIndex == 0
+	content.WriteString(renderFieldLabel("File Preview", previewFocused))
+	content.WriteString(renderToggle(cfg.FzfPreview, previewFocused))
+	content.WriteString("\n\n")
 
 	// Height slider
-	heightLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Height:")
-	heightBar := renderSlider(cfg.FzfHeight, 100, 20)
-	heightValue := lipgloss.NewStyle().Foreground(ColorCyan).Render(fmt.Sprintf(" %d%%", cfg.FzfHeight))
+	heightFocused := a.configFieldIndex == 1
+	content.WriteString(renderFieldLabel("Window Height", heightFocused))
+	content.WriteString(renderSliderControl(cfg.FzfHeight, 100, 24, heightFocused))
+	content.WriteString("\n\n")
 
 	// Layout
-	layoutLabel := lipgloss.NewStyle().Foreground(ColorText).Render("Layout:")
-	layoutOptions := []string{"reverse", "default", "reverse-list"}
-	var layoutButtons strings.Builder
-	for _, opt := range layoutOptions {
-		style := ButtonStyle
-		if cfg.FzfLayout == opt {
-			style = ButtonActiveStyle
-		}
-		layoutButtons.WriteString(style.Render(fmt.Sprintf(" %s ", opt)))
-		layoutButtons.WriteString(" ")
-	}
+	layoutFocused := a.configFieldIndex == 2
+	content.WriteString(renderFieldLabel("Layout", layoutFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"reverse", "default", "reverse-list"},
+		[]string{"Reverse ↑", "Default ↓", "Reverse List"},
+		cfg.FzfLayout,
+		layoutFocused,
+	))
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		previewLabel,
-		previewToggle,
-		"",
-		heightLabel,
-		lipgloss.JoinHorizontal(lipgloss.Center, heightBar, heightValue),
-		"",
-		layoutLabel,
-		layoutButtons.String(),
-	)
-
-	help := HelpStyle.Render("[←→] Adjust    [SPACE] Toggle    [ENTER] Save    [ESC] Back")
+	box := configBoxStyle.Width(50).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • space toggle • esc back")
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			"",
-			help,
-		)),
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
 
 // renderConfigMacApps renders the macOS apps selection screen
 func (a *App) renderConfigMacApps() string {
-	title := TitleStyle.Render(" macOS Applications")
-	subtitle := lipgloss.NewStyle().
-		Foreground(ColorTextMuted).
-		Render("Select optional productivity applications to install")
+	title := renderConfigTitle("", "macOS Apps", "Optional productivity applications")
 
 	cfg := a.deepDiveConfig
+	var content strings.Builder
 
 	apps := []struct {
 		id   string
 		name string
 		desc string
 	}{
-		{"rectangle", "Rectangle", "Window management with keyboard shortcuts"},
-		{"raycast", "Raycast", "Spotlight replacement with extensions"},
-		{"stats", "Stats", "System monitor in menu bar"},
-		{"alt-tab", "AltTab", "Windows-style alt-tab switcher"},
-		{"monitor-control", "MonitorControl", "External monitor brightness control"},
-		{"mos", "Mos", "Smooth scrolling for external mice"},
-		{"karabiner", "Karabiner-Elements", "Keyboard customization"},
-		{"iina", "IINA", "Modern media player"},
-		{"the-unarchiver", "The Unarchiver", "Archive extraction utility"},
-		{"appcleaner", "AppCleaner", "Application uninstaller"},
+		{"rectangle", "Rectangle", "Window management"},
+		{"raycast", "Raycast", "Spotlight replacement"},
+		{"stats", "Stats", "System monitor"},
+		{"alt-tab", "AltTab", "Window switcher"},
+		{"monitor-control", "MonitorControl", "Display brightness"},
+		{"mos", "Mos", "Smooth scrolling"},
+		{"karabiner", "Karabiner", "Keyboard customizer"},
+		{"iina", "IINA", "Media player"},
+		{"the-unarchiver", "The Unarchiver", "Archive utility"},
+		{"appcleaner", "AppCleaner", "App uninstaller"},
 	}
 
-	var appsList strings.Builder
-	for _, app := range apps {
-		checked := "[ ]"
-		style := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if enabled, ok := cfg.MacApps[app.id]; ok && enabled {
-			checked = "[✓]"
-			style = lipgloss.NewStyle().Foreground(ColorGreen)
+	for i, app := range apps {
+		focused := a.macAppIndex == i
+		enabled := cfg.MacApps[app.id]
+
+		cursor := "  "
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
 		}
-		appsList.WriteString(style.Render(fmt.Sprintf("  %s %-18s", checked, app.name)))
-		appsList.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render(app.desc))
-		appsList.WriteString("\n")
+
+		checkbox := renderCheckboxInline(enabled, focused)
+
+		nameStyle := unfocusedStyle
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if focused {
+			nameStyle = focusedStyle
+			descStyle = lipgloss.NewStyle().Foreground(ColorText)
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+			cursor,
+			checkbox,
+			nameStyle.Render(fmt.Sprintf("%-16s", app.name)),
+			descStyle.Render(app.desc),
+		))
 	}
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		subtitle,
-		"",
-		appsList.String(),
-	)
-
-	help := HelpStyle.Render("[↑↓] Navigate    [SPACE] Toggle    [ENTER] Save    [ESC] Back")
+	box := configBoxStyle.Width(55).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
 
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			"",
-			help,
-		)),
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
 
-// renderSlider creates a simple slider visualization
-func renderSlider(value, max, width int) string {
+// Helper render functions
+
+func renderConfigTitle(icon, name, subtitle string) string {
+	titleText := fmt.Sprintf("%s %s", icon, name)
+	title := lipgloss.NewStyle().
+		Foreground(ColorCyan).
+		Bold(true).
+		Render(titleText)
+
+	sub := lipgloss.NewStyle().
+		Foreground(ColorTextMuted).
+		Italic(true).
+		Render(subtitle)
+
+	return lipgloss.JoinVertical(lipgloss.Center, title, sub)
+}
+
+func renderFieldLabel(label string, focused bool) string {
+	style := unfocusedStyle
+	if focused {
+		style = focusedStyle
+	}
+	cursor := "  "
+	if focused {
+		cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+	}
+	return cursor + style.Render(label) + "\n"
+}
+
+func renderNumberControl(value, min, max int, focused bool) string {
+	leftArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("◀")
+	rightArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("▶")
+	if focused {
+		leftArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("◀")
+		rightArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("▶")
+	}
+
+	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
+	if focused {
+		valueStyle = lipgloss.NewStyle().
+			Background(ColorCyan).
+			Foreground(lipgloss.Color("#000000")).
+			Padding(0, 1)
+	}
+
+	return fmt.Sprintf("    %s %s %s", leftArrow, valueStyle.Render(fmt.Sprintf("%d", value)), rightArrow)
+}
+
+func renderSliderControl(value, max, width int, focused bool) string {
 	filled := (value * width) / max
 	if filled > width {
 		filled = width
 	}
 	empty := width - filled
 
-	filledStr := strings.Repeat("█", filled)
-	emptyStr := strings.Repeat("░", empty)
+	fillColor := ColorTextMuted
+	emptyColor := lipgloss.Color("#333333")
+	if focused {
+		fillColor = ColorCyan
+	}
 
-	return lipgloss.NewStyle().Foreground(ColorCyan).Render(filledStr) +
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render(emptyStr)
+	filledStr := strings.Repeat("━", filled)
+	emptyStr := strings.Repeat("─", empty)
+
+	slider := lipgloss.NewStyle().Foreground(fillColor).Render(filledStr) +
+		lipgloss.NewStyle().Foreground(emptyColor).Render(emptyStr)
+
+	valueStr := fmt.Sprintf(" %d%%", value)
+	if focused {
+		valueStr = lipgloss.NewStyle().Foreground(ColorCyan).Render(valueStr)
+	} else {
+		valueStr = lipgloss.NewStyle().Foreground(ColorTextMuted).Render(valueStr)
+	}
+
+	return "    " + slider + valueStr
+}
+
+func renderOptionSelector(values, labels []string, selected string, focused bool) string {
+	var parts []string
+	for i, v := range values {
+		label := labels[i]
+		if v == selected {
+			style := activeOptionStyle
+			if !focused {
+				style = lipgloss.NewStyle().
+					Background(ColorTextMuted).
+					Foreground(lipgloss.Color("#000000")).
+					Padding(0, 1)
+			}
+			parts = append(parts, style.Render(label))
+		} else {
+			parts = append(parts, inactiveOptionStyle.Render(label))
+		}
+	}
+	return "    " + strings.Join(parts, " ")
+}
+
+func renderToggle(value bool, focused bool) string {
+	onStyle := inactiveOptionStyle
+	offStyle := inactiveOptionStyle
+
+	if value {
+		onStyle = activeOptionStyle
+		if !focused {
+			onStyle = lipgloss.NewStyle().
+				Background(ColorGreen).
+				Foreground(lipgloss.Color("#000000")).
+				Padding(0, 1)
+		}
+	} else {
+		offStyle = lipgloss.NewStyle().
+			Background(ColorRed).
+			Foreground(lipgloss.Color("#ffffff")).
+			Padding(0, 1)
+		if !focused {
+			offStyle = lipgloss.NewStyle().
+				Background(ColorTextMuted).
+				Foreground(lipgloss.Color("#000000")).
+				Padding(0, 1)
+		}
+	}
+
+	return "    " + offStyle.Render("OFF") + " " + onStyle.Render("ON")
+}
+
+func renderToggleLabeled(value bool, onLabel, offLabel string, focused bool) string {
+	onStyle := inactiveOptionStyle
+	offStyle := inactiveOptionStyle
+
+	if value {
+		onStyle = activeOptionStyle
+		if !focused {
+			onStyle = lipgloss.NewStyle().
+				Background(ColorTextMuted).
+				Foreground(lipgloss.Color("#000000")).
+				Padding(0, 1)
+		}
+	} else {
+		offStyle = activeOptionStyle
+		if !focused {
+			offStyle = lipgloss.NewStyle().
+				Background(ColorTextMuted).
+				Foreground(lipgloss.Color("#000000")).
+				Padding(0, 1)
+		}
+	}
+
+	return "    " + offStyle.Render(offLabel) + " " + onStyle.Render(onLabel)
+}
+
+func renderRadioOption(label, desc string, selected, focused bool) string {
+	cursor := "  "
+	if focused {
+		cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+	}
+
+	radio := "○"
+	radioStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	if selected {
+		radio = "●"
+		radioStyle = lipgloss.NewStyle().Foreground(ColorGreen)
+	}
+	if focused {
+		radioStyle = lipgloss.NewStyle().Foreground(ColorCyan)
+	}
+
+	labelStyle := unfocusedStyle
+	if focused {
+		labelStyle = focusedStyle
+	}
+
+	descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+
+	return fmt.Sprintf("%s%s %s %s",
+		cursor,
+		radioStyle.Render(radio),
+		labelStyle.Render(fmt.Sprintf("%-16s", label)),
+		descStyle.Render(desc),
+	)
+}
+
+func renderCheckbox(label string, checked, focused bool) string {
+	cursor := "  "
+	if focused {
+		cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+	}
+
+	box := "☐"
+	boxStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	if checked {
+		box = "☑"
+		boxStyle = lipgloss.NewStyle().Foreground(ColorGreen)
+	}
+	if focused {
+		boxStyle = lipgloss.NewStyle().Foreground(ColorCyan)
+	}
+
+	labelStyle := unfocusedStyle
+	if focused {
+		labelStyle = focusedStyle
+	}
+
+	return fmt.Sprintf("%s%s %s", cursor, boxStyle.Render(box), labelStyle.Render(label))
+}
+
+func renderCheckboxInline(checked, focused bool) string {
+	box := "☐"
+	boxStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	if checked {
+		box = "☑"
+		boxStyle = lipgloss.NewStyle().Foreground(ColorGreen)
+	}
+	if focused {
+		boxStyle = lipgloss.NewStyle().Foreground(ColorCyan)
+	}
+	return boxStyle.Render(box)
 }

@@ -74,6 +74,8 @@ type App struct {
 	// Deep dive state
 	deepDiveMenuIndex int
 	deepDiveConfig    *DeepDiveConfig
+	configFieldIndex  int // Currently focused field in config screens
+	macAppIndex       int // Currently focused app in macOS screen
 
 	// Installation state
 	installStep     int
@@ -337,12 +339,268 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.screen = ScreenWelcome
 		}
 
-	// Config screens - all follow similar pattern
-	case ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh,
-		ScreenConfigNeovim, ScreenConfigGit, ScreenConfigYazi,
-		ScreenConfigFzf, ScreenConfigMacApps:
+	// Ghostty config
+	case ScreenConfigGhostty:
 		switch key {
-		case "enter", "esc":
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 2 {
+				a.configFieldIndex++
+			}
+		case "left", "h":
+			switch a.configFieldIndex {
+			case 0: // Font size
+				if a.deepDiveConfig.GhosttyFontSize > 8 {
+					a.deepDiveConfig.GhosttyFontSize--
+				}
+			case 1: // Opacity
+				if a.deepDiveConfig.GhosttyOpacity > 0 {
+					a.deepDiveConfig.GhosttyOpacity -= 5
+				}
+			case 2: // Tab bindings
+				opts := []string{"super", "ctrl", "alt"}
+				for i, o := range opts {
+					if o == a.deepDiveConfig.GhosttyTabBindings && i > 0 {
+						a.deepDiveConfig.GhosttyTabBindings = opts[i-1]
+						break
+					}
+				}
+			}
+		case "right", "l":
+			switch a.configFieldIndex {
+			case 0:
+				if a.deepDiveConfig.GhosttyFontSize < 32 {
+					a.deepDiveConfig.GhosttyFontSize++
+				}
+			case 1:
+				if a.deepDiveConfig.GhosttyOpacity < 100 {
+					a.deepDiveConfig.GhosttyOpacity += 5
+				}
+			case 2:
+				opts := []string{"super", "ctrl", "alt"}
+				for i, o := range opts {
+					if o == a.deepDiveConfig.GhosttyTabBindings && i < len(opts)-1 {
+						a.deepDiveConfig.GhosttyTabBindings = opts[i+1]
+						break
+					}
+				}
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// Tmux config
+	case ScreenConfigTmux:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 3 {
+				a.configFieldIndex++
+			}
+		case "left", "right", "h", "l":
+			switch a.configFieldIndex {
+			case 0: // Prefix
+				opts := []string{"ctrl-a", "ctrl-b", "ctrl-space"}
+				a.deepDiveConfig.TmuxPrefix = cycleOption(opts, a.deepDiveConfig.TmuxPrefix, key == "right" || key == "l")
+			case 1: // Split binds
+				if a.deepDiveConfig.TmuxSplitBinds == "pipes" {
+					a.deepDiveConfig.TmuxSplitBinds = "percent"
+				} else {
+					a.deepDiveConfig.TmuxSplitBinds = "pipes"
+				}
+			case 2: // Status bar
+				if a.deepDiveConfig.TmuxStatusBar == "top" {
+					a.deepDiveConfig.TmuxStatusBar = "bottom"
+				} else {
+					a.deepDiveConfig.TmuxStatusBar = "top"
+				}
+			}
+		case " ":
+			if a.configFieldIndex == 3 {
+				a.deepDiveConfig.TmuxMouseMode = !a.deepDiveConfig.TmuxMouseMode
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// Zsh config
+	case ScreenConfigZsh:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 8 { // 4 prompts + 5 plugins - 1
+				a.configFieldIndex++
+			}
+		case "left", "right", "h", "l", " ":
+			if a.configFieldIndex < 4 {
+				// Prompt style selection
+				opts := []string{"p10k", "starship", "pure", "minimal"}
+				a.deepDiveConfig.ZshPromptStyle = opts[a.configFieldIndex]
+			} else {
+				// Plugin toggle
+				plugins := []string{"zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "fzf-tab", "zsh-history-substring-search"}
+				pluginIdx := a.configFieldIndex - 4
+				if pluginIdx < len(plugins) {
+					togglePlugin(&a.deepDiveConfig.ZshPlugins, plugins[pluginIdx])
+				}
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// Neovim config
+	case ScreenConfigNeovim:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 9 { // 4 configs + 6 LSPs - 1
+				a.configFieldIndex++
+			}
+		case "left", "right", "h", "l", " ":
+			if a.configFieldIndex < 4 {
+				opts := []string{"kickstart", "lazyvim", "nvchad", "custom"}
+				a.deepDiveConfig.NeovimConfig = opts[a.configFieldIndex]
+			} else {
+				lsps := []string{"lua_ls", "pyright", "tsserver", "gopls", "rust_analyzer", "clangd"}
+				lspIdx := a.configFieldIndex - 4
+				if lspIdx < len(lsps) {
+					togglePlugin(&a.deepDiveConfig.NeovimLSPs, lsps[lspIdx])
+				}
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// Git config
+	case ScreenConfigGit:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 2 {
+				a.configFieldIndex++
+			}
+		case "left", "right", "h", "l":
+			if a.configFieldIndex == 1 {
+				opts := []string{"main", "master", "develop"}
+				a.deepDiveConfig.GitDefaultBranch = cycleOption(opts, a.deepDiveConfig.GitDefaultBranch, key == "right" || key == "l")
+			}
+		case " ":
+			if a.configFieldIndex == 0 {
+				a.deepDiveConfig.GitDeltaSideBySide = !a.deepDiveConfig.GitDeltaSideBySide
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// Yazi config
+	case ScreenConfigYazi:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 2 {
+				a.configFieldIndex++
+			}
+		case "left", "right", "h", "l":
+			switch a.configFieldIndex {
+			case 0:
+				if a.deepDiveConfig.YaziKeymap == "vim" {
+					a.deepDiveConfig.YaziKeymap = "emacs"
+				} else {
+					a.deepDiveConfig.YaziKeymap = "vim"
+				}
+			case 2:
+				opts := []string{"auto", "always", "never"}
+				a.deepDiveConfig.YaziPreviewMode = cycleOption(opts, a.deepDiveConfig.YaziPreviewMode, key == "right" || key == "l")
+			}
+		case " ":
+			if a.configFieldIndex == 1 {
+				a.deepDiveConfig.YaziShowHidden = !a.deepDiveConfig.YaziShowHidden
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// FZF config
+	case ScreenConfigFzf:
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < 2 {
+				a.configFieldIndex++
+			}
+		case "left", "h":
+			switch a.configFieldIndex {
+			case 1:
+				if a.deepDiveConfig.FzfHeight > 20 {
+					a.deepDiveConfig.FzfHeight -= 10
+				}
+			case 2:
+				opts := []string{"reverse", "default", "reverse-list"}
+				a.deepDiveConfig.FzfLayout = cycleOption(opts, a.deepDiveConfig.FzfLayout, false)
+			}
+		case "right", "l":
+			switch a.configFieldIndex {
+			case 1:
+				if a.deepDiveConfig.FzfHeight < 100 {
+					a.deepDiveConfig.FzfHeight += 10
+				}
+			case 2:
+				opts := []string{"reverse", "default", "reverse-list"}
+				a.deepDiveConfig.FzfLayout = cycleOption(opts, a.deepDiveConfig.FzfLayout, true)
+			}
+		case " ":
+			if a.configFieldIndex == 0 {
+				a.deepDiveConfig.FzfPreview = !a.deepDiveConfig.FzfPreview
+			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// macOS Apps config
+	case ScreenConfigMacApps:
+		apps := []string{"rectangle", "raycast", "stats", "alt-tab", "monitor-control", "mos", "karabiner", "iina", "the-unarchiver", "appcleaner"}
+		switch key {
+		case "up", "k":
+			if a.macAppIndex > 0 {
+				a.macAppIndex--
+			}
+		case "down", "j":
+			if a.macAppIndex < len(apps)-1 {
+				a.macAppIndex++
+			}
+		case " ":
+			app := apps[a.macAppIndex]
+			a.deepDiveConfig.MacApps[app] = !a.deepDiveConfig.MacApps[app]
+		case "esc", "enter":
+			a.macAppIndex = 0
 			a.screen = ScreenDeepDiveMenu
 		}
 	}
@@ -448,4 +706,28 @@ func (a *App) startInstallation() tea.Cmd {
 
 		return installDoneMsg{err: nil}
 	}
+}
+
+// cycleOption cycles through options forward or backward
+func cycleOption(opts []string, current string, forward bool) string {
+	for i, o := range opts {
+		if o == current {
+			if forward {
+				return opts[(i+1)%len(opts)]
+			}
+			return opts[(i-1+len(opts))%len(opts)]
+		}
+	}
+	return opts[0]
+}
+
+// togglePlugin adds or removes a plugin from the list
+func togglePlugin(plugins *[]string, plugin string) {
+	for i, p := range *plugins {
+		if p == plugin {
+			*plugins = append((*plugins)[:i], (*plugins)[i+1:]...)
+			return
+		}
+	}
+	*plugins = append(*plugins, plugin)
 }
