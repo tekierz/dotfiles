@@ -2157,7 +2157,8 @@ load_settings() {
     local settings_file="$DOTFILES_CONFIG_DIR/settings"
     THEME=$(safe_read_setting "$settings_file" "THEME" "catppuccin-mocha")
     NAV_STYLE=$(safe_read_setting "$settings_file" "NAV_STYLE" "emacs")
-    KEYBOARD_STYLE=$(safe_read_setting "$settings_file" "KEYBOARD_STYLE" "macos")
+    KEYBOARD_STYLE=$(safe_read_setting "$settings_file" "KEYBOARD_STYLE" "linux")
+    KEYBOARD_ENABLED=$(safe_read_setting "$settings_file" "KEYBOARD_ENABLED" "no")
     ACTIVE_USER=$(safe_read_setting "$settings_file" "ACTIVE_USER" "")
 }
 
@@ -2168,7 +2169,8 @@ save_settings() {
     cat > "$DOTFILES_CONFIG_DIR/settings" << EOF
 THEME="$THEME"
 NAV_STYLE="$NAV_STYLE"
-KEYBOARD_STYLE="${KEYBOARD_STYLE:-macos}"
+KEYBOARD_STYLE="${KEYBOARD_STYLE:-linux}"
+KEYBOARD_ENABLED="${KEYBOARD_ENABLED:-no}"
 ACTIVE_USER="$ACTIVE_USER"
 EOF
     chmod 600 "$DOTFILES_CONFIG_DIR/settings"
@@ -2323,6 +2325,7 @@ load_user_profile() {
         THEME=$(safe_read_setting "$profile" "THEME" "catppuccin-mocha")
         NAV_STYLE=$(safe_read_setting "$profile" "NAV_STYLE" "emacs")
         KEYBOARD_STYLE=$(safe_read_setting "$profile" "KEYBOARD_STYLE" "macos")
+        KEYBOARD_ENABLED=$(safe_read_setting "$profile" "KEYBOARD_ENABLED" "no")
         return 0
     fi
     return 1
@@ -2338,6 +2341,7 @@ save_user_profile() {
 THEME="$THEME"
 NAV_STYLE="$NAV_STYLE"
 KEYBOARD_STYLE="${KEYBOARD_STYLE:-macos}"
+KEYBOARD_ENABLED="${KEYBOARD_ENABLED:-no}"
 EOF
     chmod 600 "$DOTFILES_USERS_DIR/${username}.settings"
 }
@@ -2415,6 +2419,25 @@ interactive_select_nav() {
 
 # Interactive keyboard style selection
 interactive_select_keyboard() {
+    echo -e "\n${BLUE}Enable macOS-style keyboard shortcuts?${NC}\n"
+    echo "  This will modify your desktop environment (KDE/GNOME/XFCE) to free up"
+    echo "  Super+V (clipboard) and Super+1-9 (taskbar) so Ghostty can use them."
+    echo ""
+    echo -e "  ${YELLOW}Note: This modifies system-level shortcuts.${NC}"
+    echo ""
+
+    local enable
+    read -rp "Enable keyboard modifications? [y/N]: " enable
+    enable=${enable:-n}
+
+    if [[ ! "$enable" =~ ^[Yy]$ ]]; then
+        KEYBOARD_ENABLED="no"
+        KEYBOARD_STYLE="linux"
+        echo -e "${GREEN}Keyboard modifications disabled${NC}"
+        return 0
+    fi
+
+    KEYBOARD_ENABLED="yes"
     echo -e "\n${BLUE}Select keyboard style:${NC}\n"
     echo "  1) macos - Super+C/V for copy/paste, Super+1-9 for tabs (Mac keyboard recommended)"
     echo "  2) linux - Standard Linux shortcuts (Ctrl+Shift+C/V)"
@@ -2441,7 +2464,8 @@ interactive_user_setup() {
     # Default values
     THEME="catppuccin-mocha"
     NAV_STYLE="emacs"
-    KEYBOARD_STYLE="macos"
+    KEYBOARD_STYLE="linux"
+    KEYBOARD_ENABLED="no"
 
     interactive_select_theme
     interactive_select_nav
@@ -2453,7 +2477,11 @@ interactive_user_setup() {
     echo -e "\n${GREEN}Profile created for $username!${NC}"
     echo -e "  Theme: ${CYAN}$THEME${NC}"
     echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
-    echo -e "  Keyboard: ${CYAN}$KEYBOARD_STYLE${NC}"
+    if [[ "$KEYBOARD_ENABLED" == "yes" ]]; then
+        echo -e "  Keyboard: ${CYAN}$KEYBOARD_STYLE${NC} (DE shortcuts modified)"
+    else
+        echo -e "  Keyboard: ${CYAN}standard${NC} (no DE modifications)"
+    fi
 
     # Ask if they want to apply now
     echo ""
@@ -2462,7 +2490,9 @@ interactive_user_setup() {
     if [[ "$apply" =~ ^[Yy]$ ]]; then
         ACTIVE_USER="$username"
         apply_theme
-        apply_keyboard_style
+        if [[ "$KEYBOARD_ENABLED" == "yes" ]]; then
+            apply_keyboard_style
+        fi
     fi
 }
 
@@ -2492,7 +2522,9 @@ switch_to_user() {
     load_user_profile "$username"
     ACTIVE_USER="$username"
     apply_theme
-    apply_keyboard_style
+    if [[ "$KEYBOARD_ENABLED" == "yes" ]]; then
+        apply_keyboard_style
+    fi
     echo -e "${GREEN}Switched to user: ${CYAN}$username${NC}"
 }
 
@@ -2502,6 +2534,7 @@ add_user() {
     local theme=""
     local nav=""
     local keyboard=""
+    local keyboard_enabled=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -2516,6 +2549,7 @@ add_user() {
                 ;;
             --keyboard)
                 keyboard="$2"
+                keyboard_enabled="yes"
                 shift 2
                 ;;
             *)
@@ -2567,11 +2601,12 @@ add_user() {
         THEME="$theme"
         NAV_STYLE="$nav"
         KEYBOARD_STYLE="$keyboard"
+        KEYBOARD_ENABLED="${keyboard_enabled:-yes}"
         save_user_profile "$username"
         echo -e "${GREEN}Created profile for: ${CYAN}$username${NC}"
         echo -e "  Theme: ${CYAN}$THEME${NC}"
         echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
-        echo -e "  Keyboard: ${CYAN}$KEYBOARD_STYLE${NC}"
+        echo -e "  Keyboard: ${CYAN}$KEYBOARD_STYLE${NC} (DE mods enabled)"
     else
         # Interactive setup
         interactive_user_setup "$username"
@@ -2856,7 +2891,10 @@ apply_keyboard_kde() {
 
     if [[ "$style" == "macos" ]]; then
         # macOS style: Free up Super+C/V/1-9 for Ghostty
+        # Clipboard shortcut exists in BOTH org.kde.klipper and plasmashell sections
         $kwrite --file kglobalshortcutsrc --group org.kde.klipper \
+            --key "show-on-mouse-pos" "Alt+V,Meta+V,Show Clipboard Items at Mouse Position" 2>/dev/null
+        $kwrite --file kglobalshortcutsrc --group plasmashell \
             --key "show-on-mouse-pos" "Alt+V,Meta+V,Show Clipboard Items at Mouse Position" 2>/dev/null
         for i in {1..9}; do
             $kwrite --file kglobalshortcutsrc --group plasmashell \
@@ -2866,6 +2904,8 @@ apply_keyboard_kde() {
     else
         # Linux style: Restore defaults
         $kwrite --file kglobalshortcutsrc --group org.kde.klipper \
+            --key "show-on-mouse-pos" "Meta+V,Meta+V,Show Clipboard Items at Mouse Position" 2>/dev/null
+        $kwrite --file kglobalshortcutsrc --group plasmashell \
             --key "show-on-mouse-pos" "Meta+V,Meta+V,Show Clipboard Items at Mouse Position" 2>/dev/null
         for i in {1..9}; do
             $kwrite --file kglobalshortcutsrc --group plasmashell \
@@ -2920,7 +2960,11 @@ show_status() {
     fi
     echo -e "  Theme:      ${CYAN}$THEME${NC}"
     echo -e "  Navigation: ${CYAN}$NAV_STYLE${NC}"
-    echo -e "  Keyboard:   ${CYAN}${KEYBOARD_STYLE:-macos}${NC}"
+    if [[ "$KEYBOARD_ENABLED" == "yes" ]]; then
+        echo -e "  Keyboard:   ${CYAN}$KEYBOARD_STYLE${NC} (DE mods enabled)"
+    else
+        echo -e "  Keyboard:   ${CYAN}standard${NC} (no DE modifications)"
+    fi
 }
 
 # List themes
@@ -3015,6 +3059,7 @@ case "${1:-}" in
             exit 1
         fi
         KEYBOARD_STYLE="$2"
+        KEYBOARD_ENABLED="yes"
         save_settings
         apply_keyboard_style
         ;;
