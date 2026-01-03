@@ -767,15 +767,10 @@ func (a *App) renderConfigUtilities() string {
 		name string
 		desc string
 	}{
-		{"hk", "hk", "SSH host key manager"},
+		{"hk", "hk", "Hotkey reference viewer"},
 		{"caff", "caff", "Keep system awake utility"},
 		{"sshh", "sshh", "SSH config helper"},
 	}
-
-	content.WriteString(lipgloss.NewStyle().
-		Foreground(ColorTextMuted).
-		Italic(true).
-		Render("Select which utilities to install:\n\n"))
 
 	for i, util := range utilities {
 		focused := a.utilityIndex == i
@@ -802,11 +797,6 @@ func (a *App) renderConfigUtilities() string {
 			descStyle.Render(util.desc),
 		))
 	}
-
-	content.WriteString("\n")
-	content.WriteString(lipgloss.NewStyle().
-		Foreground(ColorTextMuted).
-		Render("These tools are installed from the tekierz/homebrew-tap."))
 
 	box := configBoxStyle.Width(55).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
