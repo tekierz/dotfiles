@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/ui"
 )
 
@@ -295,9 +296,34 @@ func showStatus() {
 // checkUpdates prints outdated packages (CLI mode)
 func checkUpdates() {
 	fmt.Println("Checking for updates...")
-	// TODO: Implement package manager integration
-	fmt.Println("Package update checking not yet implemented.")
-	fmt.Println("Run 'dotfiles update' for interactive mode.")
+
+	mgr := pkg.DetectManager()
+	if mgr == nil {
+		fmt.Println("No package manager detected.")
+		return
+	}
+
+	fmt.Printf("Using %s package manager\n\n", mgr.Name())
+
+	updates, err := pkg.CheckDotfilesUpdates()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error checking updates: %v\n", err)
+		return
+	}
+
+	if len(updates) == 0 {
+		fmt.Println("All packages are up to date!")
+		return
+	}
+
+	fmt.Printf("Found %d outdated package(s):\n\n", len(updates))
+	fmt.Printf("%-25s %-15s %-15s\n", "PACKAGE", "CURRENT", "LATEST")
+	fmt.Printf("%-25s %-15s %-15s\n", "-------", "-------", "------")
+	for _, p := range updates {
+		fmt.Printf("%-25s %-15s %-15s\n", p.Name, p.CurrentVersion, p.LatestVersion)
+	}
+	fmt.Println()
+	fmt.Println("Run 'dotfiles update' for interactive update selection.")
 }
 
 // listBackups prints available backups
