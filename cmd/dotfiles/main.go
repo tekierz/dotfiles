@@ -35,7 +35,11 @@ var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Launch installation wizard",
 	Run: func(cmd *cobra.Command, args []string) {
-		launchTUI(ui.ScreenWelcome)
+		if skipIntro {
+			launchTUI(ui.ScreenWelcome)
+		} else {
+			launchTUI(ui.ScreenAnimation)
+		}
 	},
 }
 

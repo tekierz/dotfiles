@@ -265,8 +265,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Global quit handler
+	// Global quit handlers
 	if key == "ctrl+c" {
+		return a, tea.Quit
+	}
+
+	// 'q' quits from any screen except during installation
+	if key == "q" && !a.installRunning {
 		return a, tea.Quit
 	}
 
@@ -279,8 +284,6 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case ScreenWelcome:
 		switch key {
-		case "q":
-			return a, tea.Quit
 		case "enter":
 			if a.deepDive {
 				a.screen = ScreenDeepDiveMenu
@@ -832,8 +835,10 @@ func sudoPromptCmd() tea.ExecCommand {
 func (a *App) SetStartScreen(screen Screen) {
 	a.startScreen = screen
 	a.screen = screen
+	// Only skip intro for non-installer screens
 	if screen != ScreenAnimation && screen != ScreenWelcome {
 		a.skipIntro = true
+		a.animationDone = true
 	}
 }
 
