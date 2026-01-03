@@ -20,6 +20,27 @@ const (
 	ScreenError
 )
 
+// Available themes
+var themes = []struct {
+	name  string
+	desc  string
+	color string
+}{
+	{"catppuccin-mocha", "Dark, warm pastels", "#89b4fa"},
+	{"catppuccin-latte", "Light, warm pastels", "#1e66f5"},
+	{"dracula", "Dark with vibrant purples", "#bd93f9"},
+	{"gruvbox-dark", "Retro warm browns", "#83a598"},
+	{"gruvbox-light", "Warm paper-like tones", "#076678"},
+	{"nord", "Arctic cool blues", "#88c0d0"},
+	{"tokyo-night", "Rich purples and blues", "#7aa2f7"},
+	{"solarized-dark", "Low contrast dark", "#268bd2"},
+	{"solarized-light", "Low contrast light", "#268bd2"},
+	{"monokai", "Classic vibrant", "#66d9ef"},
+	{"rose-pine", "Soft muted pinks", "#c4a7e7"},
+	{"one-dark", "Atom's dark theme", "#61afef"},
+	{"everforest", "Green nature inspired", "#a7c080"},
+}
+
 // App is the main application model
 type App struct {
 	screen        Screen
@@ -29,16 +50,22 @@ type App struct {
 	animationDone bool
 
 	// Animation state
-	animFrame   int
-	animTicker  *time.Ticker
+	animFrame  int
+	animTicker *time.Ticker
 
 	// User selections
-	theme       string
-	navStyle    string
-	deepDive    bool
+	themeIndex int
+	theme      string
+	navStyle   string
+	deepDive   bool
+
+	// Installation state
+	installStep    int
+	installOutput  []string
+	installRunning bool
 
 	// Error state
-	lastError   error
+	lastError error
 }
 
 // NewApp creates a new application instance
@@ -128,67 +155,101 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q":
-		if a.screen == ScreenWelcome {
+	key := msg.String()
+
+	// Global quit handler
+	if key == "ctrl+c" {
+		return a, tea.Quit
+	}
+
+	// Screen-specific key handling
+	switch a.screen {
+	case ScreenAnimation:
+		// Any key skips animation
+		a.screen = ScreenWelcome
+		return a, nil
+
+	case ScreenWelcome:
+		switch key {
+		case "q":
 			return a, tea.Quit
-		}
-		// Allow q to quit from welcome, but not other screens
-		if a.screen == ScreenAnimation {
-			a.screen = ScreenWelcome
-			return a, nil
-		}
-
-	case "enter":
-		return a.handleEnter()
-
-	case "tab":
-		if a.screen == ScreenWelcome {
+		case "enter":
+			a.screen = ScreenThemePicker
+		case "tab", "left", "right", "h", "l":
 			a.deepDive = !a.deepDive
 		}
 
-	case "left", "h":
-		if a.screen == ScreenWelcome {
-			a.deepDive = false
-		}
-
-	case "right", "l":
-		if a.screen == ScreenWelcome {
-			a.deepDive = true
-		}
-
-	case "esc":
-		// Skip animation
-		if a.screen == ScreenAnimation {
-			a.screen = ScreenWelcome
-			return a, nil
-		}
-		// Go back
-		if a.screen > ScreenWelcome {
-			a.screen--
-		}
-	}
-
-	return a, nil
-}
-
-func (a *App) handleEnter() (tea.Model, tea.Cmd) {
-	switch a.screen {
-	case ScreenAnimation:
-		a.screen = ScreenWelcome
-	case ScreenWelcome:
-		a.screen = ScreenThemePicker
 	case ScreenThemePicker:
-		a.screen = ScreenNavPicker
+		switch key {
+		case "up", "k":
+			if a.themeIndex > 0 {
+				a.themeIndex--
+				a.theme = themes[a.themeIndex].name
+			}
+		case "down", "j":
+			if a.themeIndex < len(themes)-1 {
+				a.themeIndex++
+				a.theme = themes[a.themeIndex].name
+			}
+		case "enter":
+			a.screen = ScreenNavPicker
+		case "esc":
+			a.screen = ScreenWelcome
+		}
+
 	case ScreenNavPicker:
-		a.screen = ScreenFileTree
+		switch key {
+		case "left", "right", "h", "l", "tab":
+			if a.navStyle == "emacs" {
+				a.navStyle = "vim"
+			} else {
+				a.navStyle = "emacs"
+			}
+		case "enter":
+			a.screen = ScreenFileTree
+		case "esc":
+			a.screen = ScreenThemePicker
+		}
+
 	case ScreenFileTree:
-		a.screen = ScreenProgress
+		switch key {
+		case "enter":
+			a.screen = ScreenProgress
+			// TODO: Start installation here
+		case "esc":
+			a.screen = ScreenNavPicker
+		}
+
 	case ScreenProgress:
-		a.screen = ScreenSummary
+		switch key {
+		case "enter":
+			// Only advance if installation is complete
+			if !a.installRunning {
+				a.screen = ScreenSummary
+			}
+		}
+
 	case ScreenSummary:
-		return a, tea.Quit
+		switch key {
+		case "enter", "q":
+			return a, tea.Quit
+		}
+
+	case ScreenError:
+		switch key {
+		case "r":
+			// Retry - go back to progress
+			a.screen = ScreenProgress
+		case "s":
+			// Skip - continue to summary
+			a.screen = ScreenSummary
+		case "q":
+			return a, tea.Quit
+		case "esc":
+			a.screen = ScreenFileTree
+		}
 	}
+
 	return a, nil
 }
 

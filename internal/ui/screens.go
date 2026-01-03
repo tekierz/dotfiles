@@ -115,44 +115,40 @@ func (a *App) renderWelcome() string {
 func (a *App) renderThemePicker() string {
 	title := TitleStyle.Render("Select Theme")
 
-	themes := []struct {
-		name  string
-		desc  string
-		color lipgloss.Color
-	}{
-		{"catppuccin-mocha", "Dark, warm pastels", lipgloss.Color("#89b4fa")},
-		{"catppuccin-latte", "Light, warm pastels", lipgloss.Color("#1e66f5")},
-		{"dracula", "Dark with vibrant purples", lipgloss.Color("#bd93f9")},
-		{"gruvbox-dark", "Retro warm browns", lipgloss.Color("#83a598")},
-		{"gruvbox-light", "Warm paper-like tones", lipgloss.Color("#076678")},
-		{"nord", "Arctic cool blues", lipgloss.Color("#88c0d0")},
-		{"tokyo-night", "Rich purples and blues", lipgloss.Color("#7aa2f7")},
-		{"solarized-dark", "Low contrast dark", lipgloss.Color("#268bd2")},
-		{"solarized-light", "Low contrast light", lipgloss.Color("#268bd2")},
-		{"monokai", "Classic vibrant", lipgloss.Color("#66d9ef")},
-		{"rose-pine", "Soft muted pinks", lipgloss.Color("#c4a7e7")},
-	}
-
 	var themeList strings.Builder
-	for _, t := range themes {
+	for i, t := range themes {
 		prefix := "  "
 		style := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if t.name == a.theme {
+		if i == a.themeIndex {
 			prefix = "▶ "
-			style = lipgloss.NewStyle().Foreground(t.color).Bold(true)
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(t.color)).Bold(true)
 		}
 		themeList.WriteString(style.Render(fmt.Sprintf("%s%-20s %s", prefix, t.name, t.desc)))
 		themeList.WriteString("\n")
 	}
 
-	// Preview box (placeholder)
+	// Preview box with color swatches
+	selectedTheme := themes[a.themeIndex]
+	previewColor := lipgloss.Color(selectedTheme.color)
+
 	preview := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorBorder).
-		Width(30).
-		Height(8).
+		BorderForeground(previewColor).
+		Width(32).
 		Padding(1).
-		Render(fmt.Sprintf("Preview: %s\n\n(Live preview coming soon)", a.theme))
+		Render(lipgloss.JoinVertical(
+			lipgloss.Left,
+			lipgloss.NewStyle().Foreground(previewColor).Bold(true).Render(selectedTheme.name),
+			"",
+			lipgloss.NewStyle().Foreground(previewColor).Render("████████████████████"),
+			"",
+			lipgloss.NewStyle().Foreground(ColorText).Render("  normal text"),
+			lipgloss.NewStyle().Foreground(previewColor).Render("  highlighted text"),
+			lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  muted text"),
+			"",
+			lipgloss.NewStyle().Foreground(ColorGreen).Render("  ✓ success"),
+			lipgloss.NewStyle().Foreground(ColorRed).Render("  ✗ error"),
+		))
 
 	content := lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -161,7 +157,7 @@ func (a *App) renderThemePicker() string {
 		preview,
 	)
 
-	help := HelpStyle.Render("[↑↓] Navigate    [ENTER] Select    [ESC] Back")
+	help := HelpStyle.Render("[↑↓/jk] Navigate    [ENTER] Select    [ESC] Back")
 
 	return lipgloss.Place(
 		a.width, a.height,
