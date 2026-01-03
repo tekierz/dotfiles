@@ -23,6 +23,18 @@ Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/De
 | **sshh** | Quick SSH connection manager |
 | **macmon** | macOS system monitor (macOS only) |
 
+### Disk & Network Analysis Tools
+
+| Tool | Description |
+|------|-------------|
+| **ncdu** | Interactive disk usage analyzer |
+| **duf** | Modern `df` replacement with colors |
+| **dust** | Intuitive `du` with visual bars |
+| **bandwhich** | Real-time bandwidth by process |
+| **gping** | Ping with a live graph |
+| **dog** | Modern DNS client (better `dig`) |
+| **trippy** | Visual traceroute + ping |
+
 ### macOS Quality-of-Life Apps (optional, macOS only)
 
 | App | Description |
@@ -98,6 +110,9 @@ chmod +x bin/dotfiles-setup
 | `--raspi` | Raspberry Pi mode (auto-detect model) |
 | `--raspi5` | Raspberry Pi 5 optimizations |
 | `--raspizero2` | Raspberry Pi Zero 2 (lightweight mode) |
+| `--restore [name]` | Restore configs from backup |
+| `--list-backups` | List available backup sessions |
+| `--no-backup` | Skip creating backups (not recommended) |
 | `-y, --yes` | Skip confirmation prompts |
 | `-h, --help` | Show help |
 
@@ -193,11 +208,27 @@ dotfiles user delete OldUser   # Remove a profile
 
 User profiles are stored in `~/.config/dotfiles/users/` and switching applies changes immediately.
 
+### Backup & Restore
+
+All existing configs are backed up before modification. Fully reversible installation:
+
+```bash
+# Restore to pre-installation state
+dotfiles-setup --restore
+
+# Or use the CLI post-install
+dotfiles backups              # List available backups
+dotfiles restore              # Restore most recent
+dotfiles restore 20240102_143052  # Restore specific backup
+```
+
+Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
+
 ### Custom Utilities
 
 | Command | Description |
 |---------|-------------|
-| `dotfiles` | Switch themes/navigation, show status |
+| `dotfiles` | Switch themes/navigation, manage backups |
 | `hk` | Hotkey reference cheatsheet |
 | `caff` | Toggle system sleep (like Caffeine) |
 | `sshh` | Quick SSH connection manager |
@@ -206,11 +237,25 @@ User profiles are stored in `~/.config/dotfiles/users/` and switching applies ch
 ### Shell Aliases
 
 ```bash
+# File listing (eza)
 ls      # eza with icons
 ll      # long format with git status
 la      # show hidden files
 lt      # tree view
+
+# Navigation
 cd      # zoxide (smart jump)
+
+# Disk analysis
+df      # duf (colorful disk free)
+du      # dust (visual disk usage)
+diskuse # ncdu (interactive analyzer)
+
+# Network analysis
+ping    # gping (graphical ping)
+dig     # dog (modern DNS)
+trace   # trippy (visual traceroute)
+bandwidth # bandwhich (bandwidth monitor)
 ```
 
 ## Configuration Files
