@@ -20,6 +20,16 @@ const (
 	ScreenProgress
 	ScreenSummary
 	ScreenError
+	// Deep dive screens
+	ScreenDeepDiveMenu
+	ScreenConfigGhostty
+	ScreenConfigTmux
+	ScreenConfigZsh
+	ScreenConfigNeovim
+	ScreenConfigGit
+	ScreenConfigYazi
+	ScreenConfigFzf
+	ScreenConfigMacApps
 )
 
 // Available themes
@@ -61,6 +71,10 @@ type App struct {
 	navStyle   string
 	deepDive   bool
 
+	// Deep dive state
+	deepDiveMenuIndex int
+	deepDiveConfig    *DeepDiveConfig
+
 	// Installation state
 	installStep     int
 	installOutput   []string
@@ -76,11 +90,12 @@ type App struct {
 // NewApp creates a new application instance
 func NewApp(skipIntro bool) *App {
 	app := &App{
-		skipIntro:     skipIntro,
-		theme:         "catppuccin-mocha",
-		navStyle:      "emacs",
-		runner:        runner.NewRunner(),
-		installOutput: make([]string, 0, 100),
+		skipIntro:      skipIntro,
+		theme:          "catppuccin-mocha",
+		navStyle:       "emacs",
+		runner:         runner.NewRunner(),
+		installOutput:  make([]string, 0, 100),
+		deepDiveConfig: NewDeepDiveConfig(),
 	}
 
 	if skipIntro {
@@ -218,7 +233,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "q":
 			return a, tea.Quit
 		case "enter":
-			a.screen = ScreenThemePicker
+			if a.deepDive {
+				a.screen = ScreenDeepDiveMenu
+			} else {
+				a.screen = ScreenThemePicker
+			}
 		case "tab", "left", "right", "h", "l":
 			a.deepDive = !a.deepDive
 		}
@@ -292,6 +311,40 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc":
 			a.screen = ScreenFileTree
 		}
+
+	// Deep dive menu navigation
+	case ScreenDeepDiveMenu:
+		menuItems := GetDeepDiveMenuItems()
+		maxIdx := len(menuItems) // +1 for "Continue" option
+		switch key {
+		case "up", "k":
+			if a.deepDiveMenuIndex > 0 {
+				a.deepDiveMenuIndex--
+			}
+		case "down", "j":
+			if a.deepDiveMenuIndex < maxIdx {
+				a.deepDiveMenuIndex++
+			}
+		case "enter":
+			if a.deepDiveMenuIndex == maxIdx {
+				// "Continue to Installation" selected
+				a.screen = ScreenThemePicker
+			} else {
+				// Navigate to specific config screen
+				a.screen = menuItems[a.deepDiveMenuIndex].Screen
+			}
+		case "esc":
+			a.screen = ScreenWelcome
+		}
+
+	// Config screens - all follow similar pattern
+	case ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh,
+		ScreenConfigNeovim, ScreenConfigGit, ScreenConfigYazi,
+		ScreenConfigFzf, ScreenConfigMacApps:
+		switch key {
+		case "enter", "esc":
+			a.screen = ScreenDeepDiveMenu
+		}
 	}
 
 	return a, nil
@@ -316,6 +369,25 @@ func (a *App) View() string {
 		return a.renderSummary()
 	case ScreenError:
 		return a.renderError()
+	// Deep dive screens
+	case ScreenDeepDiveMenu:
+		return a.renderDeepDiveMenu()
+	case ScreenConfigGhostty:
+		return a.renderConfigGhostty()
+	case ScreenConfigTmux:
+		return a.renderConfigTmux()
+	case ScreenConfigZsh:
+		return a.renderConfigZsh()
+	case ScreenConfigNeovim:
+		return a.renderConfigNeovim()
+	case ScreenConfigGit:
+		return a.renderConfigGit()
+	case ScreenConfigYazi:
+		return a.renderConfigYazi()
+	case ScreenConfigFzf:
+		return a.renderConfigFzf()
+	case ScreenConfigMacApps:
+		return a.renderConfigMacApps()
 	default:
 		return "Unknown screen"
 	}
