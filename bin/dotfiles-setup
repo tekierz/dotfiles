@@ -708,12 +708,12 @@ backup_file() {
         mkdir -p "$(dirname "$backup_path")"
         cp -p "$original" "$backup_path"
         echo "$original|$backup_path|yes" >> "$BACKUP_MANIFEST"
-        return 0
     else
         # Record that file didn't exist (for clean uninstall)
         echo "$original||no" >> "$BACKUP_MANIFEST"
-        return 1
     fi
+    # Always return success - recording "no file" is not an error
+    return 0
 }
 
 # Backup a directory before modification
@@ -727,11 +727,11 @@ backup_directory() {
         mkdir -p "$(dirname "$backup_path")"
         cp -rp "$original" "$backup_path"
         echo "$original|$backup_path|yes|directory" >> "$BACKUP_MANIFEST"
-        return 0
     else
         echo "$original||no|directory" >> "$BACKUP_MANIFEST"
-        return 1
     fi
+    # Always return success - recording "no directory" is not an error
+    return 0
 }
 
 # Safe write - backs up existing file before writing new content
