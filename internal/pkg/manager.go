@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"os"
 	"os/exec"
 	"runtime"
 )
@@ -128,13 +129,11 @@ func AllManagers() []PackageManager {
 // Helper functions
 
 func fileExists(path string) bool {
-	_, err := exec.LookPath(path)
-	if err == nil {
-		return true
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
 	}
-	// Also check as a regular file
-	cmd := exec.Command("test", "-f", path)
-	return cmd.Run() == nil
+	return !info.IsDir()
 }
 
 func commandExists(name string) bool {

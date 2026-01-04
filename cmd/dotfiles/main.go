@@ -3,11 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/tools"
 	"github.com/tekierz/dotfiles/internal/ui"
 )
 
@@ -294,8 +298,47 @@ func showStatus() {
 	fmt.Printf("Theme:      %s\n", cfg.Theme)
 	fmt.Printf("Navigation: %s\n", cfg.NavStyle)
 	fmt.Printf("Config dir: %s\n", config.ConfigDir())
+	fmt.Println()
 
-	// TODO: Show installed tools, outdated packages, etc.
+	// Show installed tools
+	registry := tools.NewRegistry()
+	installed := registry.Installed()
+	notInstalled := registry.NotInstalled()
+
+	fmt.Printf("Installed Tools: %d/%d\n", len(installed), registry.Count())
+	fmt.Println("─────────────────────────")
+
+	// Group by category
+	byCategory := make(map[tools.Category][]tools.Tool)
+	for _, t := range installed {
+		byCategory[t.Category()] = append(byCategory[t.Category()], t)
+	}
+
+	categories := []tools.Category{
+		tools.CategoryShell, tools.CategoryTerminal, tools.CategoryEditor,
+		tools.CategoryFile, tools.CategoryGit, tools.CategoryContainer,
+		tools.CategoryUtility, tools.CategoryApp,
+	}
+
+	for _, cat := range categories {
+		if catTools, ok := byCategory[cat]; ok && len(catTools) > 0 {
+			names := make([]string, len(catTools))
+			for i, t := range catTools {
+				names[i] = t.Name()
+			}
+			fmt.Printf("  %s: %s\n", strings.Title(string(cat)), strings.Join(names, ", "))
+		}
+	}
+
+	if len(notInstalled) > 0 {
+		fmt.Println()
+		fmt.Printf("Not Installed: %d tools\n", len(notInstalled))
+		names := make([]string, 0, len(notInstalled))
+		for _, t := range notInstalled {
+			names = append(names, t.Name())
+		}
+		fmt.Printf("  %s\n", strings.Join(names, ", "))
+	}
 }
 
 // checkUpdates prints outdated packages (CLI mode)
@@ -333,14 +376,141 @@ func checkUpdates() {
 
 // listBackups prints available backups
 func listBackups() {
-	fmt.Println("Available backups:")
-	// TODO: Read from ~/.config/dotfiles/backups/
-	fmt.Println("Backup listing not yet implemented.")
+	backupDir := filepath.Join(config.ConfigDir(), "backups")
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No backups found.")
+			fmt.Printf("Backup directory: %s\n", backupDir)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Error reading backups: %v\n", err)
+		return
+	}
+
+	// Filter for directories only (backups are stored in timestamped dirs)
+	var backups []os.DirEntry
+	for _, e := range entries {
+		if e.IsDir() {
+			backups = append(backups, e)
+		}
+	}
+
+	if len(backups) == 0 {
+		fmt.Println("No backups found.")
+		return
+	}
+
+	// Sort by name (timestamps sort chronologically)
+	sort.Slice(backups, func(i, j int) bool {
+		return backups[i].Name() > backups[j].Name() // Most recent first
+	})
+
+	fmt.Printf("Available backups (%d):\n", len(backups))
+	fmt.Println("─────────────────────────")
+
+	for _, b := range backups {
+		info, err := b.Info()
+		if err != nil {
+			fmt.Printf("  %s\n", b.Name())
+			continue
+		}
+
+		// Count files in backup
+		files, _ := os.ReadDir(filepath.Join(backupDir, b.Name()))
+		fileCount := 0
+		for _, f := range files {
+			if !f.IsDir() {
+				fileCount++
+			}
+		}
+
+		fmt.Printf("  %s  (%d files, %s)\n",
+			b.Name(),
+			fileCount,
+			info.ModTime().Format("Jan 02 15:04"))
+	}
+
+	fmt.Println()
+	fmt.Println("To restore: dotfiles restore <backup-name>")
 }
 
 // restoreBackup restores a specific backup
 func restoreBackup(name string) {
+	backupDir := filepath.Join(config.ConfigDir(), "backups", name)
+
+	info, err := os.Stat(backupDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Backup '%s' not found.\n", name)
+			fmt.Println("Run 'dotfiles backups' to see available backups.")
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Error accessing backup: %v\n", err)
+		return
+	}
+
+	if !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "'%s' is not a valid backup directory.\n", name)
+		return
+	}
+
+	// Read manifest if it exists
+	manifestPath := filepath.Join(backupDir, "manifest.txt")
+	manifest, _ := os.ReadFile(manifestPath)
+
 	fmt.Printf("Restoring backup: %s\n", name)
-	// TODO: Implement backup restore
-	fmt.Println("Backup restore not yet implemented.")
+	if len(manifest) > 0 {
+		fmt.Printf("Manifest:\n%s\n", string(manifest))
+	}
+
+	// Walk backup directory and restore files
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading backup: %v\n", err)
+		return
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
+		return
+	}
+
+	restored := 0
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == "manifest.txt" {
+			continue
+		}
+
+		srcPath := filepath.Join(backupDir, entry.Name())
+		// Backup files are named with underscores replacing slashes
+		// e.g., ".config_dotfiles_settings.json" -> ".config/dotfiles/settings.json"
+		relPath := strings.ReplaceAll(entry.Name(), "_", string(os.PathSeparator))
+		dstPath := filepath.Join(home, relPath)
+
+		// Ensure destination directory exists
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "  Error creating directory for %s: %v\n", relPath, err)
+			continue
+		}
+
+		// Read source and write to destination
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  Error reading %s: %v\n", entry.Name(), err)
+			continue
+		}
+
+		if err := os.WriteFile(dstPath, data, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "  Error writing %s: %v\n", relPath, err)
+			continue
+		}
+
+		fmt.Printf("  Restored: %s\n", relPath)
+		restored++
+	}
+
+	fmt.Printf("\nRestored %d files from backup.\n", restored)
 }
