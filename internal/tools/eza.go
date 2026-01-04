@@ -16,7 +16,7 @@ func NewEzaTool() *EzaTool {
 			id:          "eza",
 			name:        "eza",
 			description: "Modern replacement for ls",
-			icon:        "",
+			icon:        "󰙅",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"eza"},

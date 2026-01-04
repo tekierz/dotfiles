@@ -16,7 +16,7 @@ func NewDeltaTool() *DeltaTool {
 			id:          "delta",
 			name:        "Delta",
 			description: "Syntax-highlighting pager for git diffs",
-			icon:        "",
+			icon:        "󰘧",
 			category:    CategoryGit,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"git-delta"},

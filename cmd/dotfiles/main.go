@@ -112,8 +112,9 @@ Available tools: ghostty, tmux, zsh, neovim, git, yazi, fzf, apps, utilities`,
 
 // hotkeysCmd launches the hotkey viewer
 var hotkeysCmd = &cobra.Command{
-	Use:   "hotkeys",
-	Short: "View hotkey reference",
+	Use:     "hotkeys",
+	Aliases: []string{"hk"},
+	Short:   "View hotkey reference",
 	Run: func(cmd *cobra.Command, args []string) {
 		tool, _ := cmd.Flags().GetString("tool")
 		if tool != "" {

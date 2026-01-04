@@ -9,9 +9,10 @@ import (
 
 // GlobalConfig holds global dotfiles settings
 type GlobalConfig struct {
-	Theme      string `json:"theme"`
-	NavStyle   string `json:"nav_style"`
-	ActiveUser string `json:"active_user,omitempty"`
+	Theme             string `json:"theme"`
+	NavStyle          string `json:"nav_style"`
+	ActiveUser        string `json:"active_user,omitempty"`
+	DisableAnimations bool   `json:"disable_animations,omitempty"`
 }
 
 // DefaultGlobalConfig returns default global settings

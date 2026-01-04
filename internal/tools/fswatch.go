@@ -16,7 +16,7 @@ func NewFswatchTool() *FswatchTool {
 			id:          "fswatch",
 			name:        "fswatch",
 			description: "Cross-platform file change monitor",
-			icon:        "",
+			icon:        "󱄄",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"fswatch"},

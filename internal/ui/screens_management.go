@@ -16,11 +16,13 @@ import (
 func (a *App) renderMainMenu() string {
 	items := GetMainMenuItems()
 
+	maxLineW := maxInt(20, a.width-10)
+
 	title := TitleStyle.Render("Dotfiles Management")
 	subtitle := lipgloss.NewStyle().
 		Foreground(ColorTextMuted).
 		Italic(true).
-		Render("Terminal environment management platform")
+		Render(truncateVisible("Terminal environment management platform", maxLineW))
 
 	// Menu items
 	var menuLines []string
@@ -40,12 +42,12 @@ func (a *App) renderMainMenu() string {
 			item.Icon,
 			itemStyle.Render(item.Name),
 			descStyle.Render(item.Description))
-		menuLines = append(menuLines, line)
+		menuLines = append(menuLines, truncateVisible(line, maxLineW))
 	}
 
 	menu := strings.Join(menuLines, "\n")
 
-	help := HelpStyle.Render("↑↓ navigate • enter select • q quit")
+	help := HelpStyle.Render(truncateVisible("↑↓ navigate • enter select • q quit", maxLineW))
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
@@ -110,11 +112,14 @@ func (a *App) renderUpdate() string {
 
 	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("Found %d outdated package(s)", len(updates)))
 
+	boxOuterW := min(92, maxInt(44, a.width-8))
+	innerTextW := maxInt(20, boxOuterW-4) // border(2) + paddingX(2)
+
 	// Package list
 	var pkgLines []string
 	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
-	pkgLines = append(pkgLines, headerStyle.Render(fmt.Sprintf("%-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")))
-	pkgLines = append(pkgLines, headerStyle.Render(fmt.Sprintf("%-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))))
+	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("%-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")), innerTextW))
+	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("%-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
 
 	for i, p := range updates {
 		cursor := "  "
@@ -132,7 +137,7 @@ func (a *App) renderUpdate() string {
 			style.Render(p.Name),
 			versionStyle.Render(p.CurrentVersion),
 			newStyle.Render(p.LatestVersion))
-		pkgLines = append(pkgLines, line)
+		pkgLines = append(pkgLines, truncateVisible(line, innerTextW))
 	}
 
 	packageList := strings.Join(pkgLines, "\n")
@@ -141,6 +146,7 @@ func (a *App) renderUpdate() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorBorder).
 		Padding(0, 1).
+		Width(maxInt(1, boxOuterW-2)). // border adds 2
 		Render(packageList)
 
 	help := HelpStyle.Render("↑↓ navigate • enter update all • esc back • q quit")

@@ -20,7 +20,7 @@ func NewLazyGitTool() *LazyGitTool {
 			id:          "lazygit",
 			name:        "LazyGit",
 			description: "Simple terminal UI for Git commands",
-			icon:        "",
+			icon:        "󰊢",
 			category:    CategoryGit,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"lazygit"},

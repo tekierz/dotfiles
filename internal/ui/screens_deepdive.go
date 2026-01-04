@@ -24,11 +24,12 @@ var (
 	configBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBorder).
+			Background(ColorSurface).
 			Padding(1, 2)
 
 	activeOptionStyle = lipgloss.NewStyle().
 				Background(ColorCyan).
-				Foreground(lipgloss.Color("#000000")).
+				Foreground(ColorBg).
 				Padding(0, 1)
 
 	inactiveOptionStyle = lipgloss.NewStyle().
@@ -104,7 +105,7 @@ func (a *App) renderDeepDiveMenu() string {
 	menuList.WriteString(fmt.Sprintf("%s%s\n", continueCursor, continueStyle.Render("▶ Continue to Installation")))
 
 	// Wrap menu in a box
-	menuBox := configBoxStyle.Render(menuList.String())
+	menuBox := configBoxStyle.Width(a.deepDiveBoxWidth(64)).Render(menuList.String())
 
 	help := HelpStyle.Render("↑↓/jk navigate • enter select • esc back")
 

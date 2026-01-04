@@ -20,7 +20,7 @@ func NewYaziTool() *YaziTool {
 			id:          "yazi",
 			name:        "Yazi",
 			description: "Blazing fast terminal file manager",
-			icon:        "",
+			icon:        "󰉋",
 			category:    CategoryFile,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"yazi", "ffmpegthumbnailer", "unar", "jq", "poppler", "fd", "ripgrep", "fzf", "zoxide", "imagemagick"},

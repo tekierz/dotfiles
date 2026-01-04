@@ -20,7 +20,7 @@ func NewBtopTool() *BtopTool {
 			id:          "btop",
 			name:        "btop",
 			description: "Resource monitor with TUI",
-			icon:        "",
+			icon:        "󰄨",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"btop"},

@@ -20,7 +20,7 @@ func NewTmuxTool() *TmuxTool {
 			id:          "tmux",
 			name:        "Tmux",
 			description: "Terminal multiplexer",
-			icon:        "",
+			icon:        "",
 			category:    CategoryTerminal,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"tmux"},

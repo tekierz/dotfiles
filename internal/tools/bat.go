@@ -20,7 +20,7 @@ func NewBatTool() *BatTool {
 			id:          "bat",
 			name:        "bat",
 			description: "A cat clone with syntax highlighting",
-			icon:        "",
+			icon:        "󰭟",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"bat"},

@@ -20,7 +20,7 @@ func NewNeovimTool() *NeovimTool {
 			id:          "neovim",
 			name:        "Neovim",
 			description: "Hyperextensible Vim-based text editor",
-			icon:        "",
+			icon:        "",
 			category:    CategoryEditor,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"neovim"},

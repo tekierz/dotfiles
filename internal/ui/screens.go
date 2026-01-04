@@ -51,51 +51,79 @@ func (a *App) renderAnimation() string {
 	// Build animation frame line-by-line for consistent widths.
 	lines := make([]string, 0, contentH)
 
-	matrixChars := "01!@#$%^&*<>[]{}|;:~`"
-	scanY := 0
-	if rainH > 0 {
-		scanY = (a.animFrame / 2) % rainH
+	// Rain (matrix-style), but explicitly vertical and readable (not "glitch noise").
+	chars := []rune("01ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*")
+	headStyle := lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
+	midStyle := lipgloss.NewStyle().Foreground(ColorGreen)
+	tailStyle := lipgloss.NewStyle().Foreground(ColorGreen).Faint(true)
+	sparkStyle := lipgloss.NewStyle().Foreground(ColorNeonBlue).Bold(true)
+
+	hash32 := func(v uint32) uint32 {
+		// Tiny deterministic mixer (no RNG state, stable across frames).
+		v ^= v >> 16
+		v *= 0x7feb352d
+		v ^= v >> 15
+		v *= 0x846ca68b
+		v ^= v >> 16
+		return v
+	}
+
+	// Precompute per-column drop parameters.
+	type drop struct {
+		head   int
+		length int
+		color  int // 0 = green, 1 = cyan spark
+	}
+	drops := make([]drop, contentW)
+	for x := 0; x < contentW; x++ {
+		h := hash32(uint32(x*1337 + 42))
+		speed := 1 + int(h%3) // 1..3
+		length := 6 + int((h>>8)%10)
+		gap := 8 + int((h>>16)%10)
+		cycle := rainH + length + gap
+		head := (a.animFrame*speed + int(h%uint32(cycle))) % cycle
+		head -= length // allow entering from above
+
+		color := 0
+		if (h>>24)%11 == 0 {
+			color = 1
+		}
+
+		drops[x] = drop{head: head, length: length, color: color}
 	}
 
 	for y := 0; y < rainH; y++ {
 		var line strings.Builder
 		for x := 0; x < contentW; x++ {
-			seed := x*17 + y*31 + a.animFrame*7
-
-			// A subtle "scan band" that makes one row pop and feel more alive.
-			isScan := y == scanY
-
-			switch {
-			case seed%29 == 0 || (isScan && seed%7 == 0):
-				// Bright character
-				ch := matrixChars[seed%len(matrixChars)]
-				color := GradientCyber[(x+a.animFrame)%len(GradientCyber)]
-				style := lipgloss.NewStyle().Foreground(color)
-				if isScan || seed%11 == 0 {
-					style = style.Bold(true)
-				}
-				line.WriteString(style.Render(string(ch)))
-
-			case seed%13 == 0:
-				// Faint fill
-				color := GradientCyber[(x+seed)%len(GradientCyber)]
-				style := lipgloss.NewStyle().Foreground(color)
-				if !isScan {
-					style = style.Faint(true)
-				}
-				line.WriteString(style.Render("░"))
-
-			case seed%19 == 0:
-				// Tiny noise dot
-				style := lipgloss.NewStyle().Foreground(ColorBorder)
-				if isScan {
-					style = lipgloss.NewStyle().Foreground(ColorNeonBlue)
-				}
-				line.WriteString(style.Render("·"))
-
-			default:
-				line.WriteString(" ")
+			d := drops[x]
+			if y > d.head || d.head < 0 {
+				line.WriteByte(' ')
+				continue
 			}
+
+			dist := d.head - y // 0 at head, increases upward
+			if dist < 0 || dist >= d.length {
+				line.WriteByte(' ')
+				continue
+			}
+
+			// Pick a stable-ish character for this cell.
+			s := hash32(uint32(x*31 + y*97 + ((a.animFrame - dist) * 7)))
+			ch := chars[int(s)%len(chars)]
+
+			// Choose style by distance down the trail.
+			style := tailStyle
+			if dist == 0 {
+				if d.color == 1 {
+					style = sparkStyle
+				} else {
+					style = headStyle
+				}
+			} else if dist < d.length/3 {
+				style = midStyle
+			}
+
+			line.WriteString(style.Render(string(ch)))
 		}
 		lines = append(lines, line.String())
 	}
@@ -158,7 +186,7 @@ func (a *App) renderAnimation() string {
 
 	content := strings.Join(lines, "\n")
 
-	borderColor := GradientCyber[a.animFrame%len(GradientCyber)]
+	borderColor := GradientCyber[(a.animFrame/2)%len(GradientCyber)]
 	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
@@ -175,10 +203,13 @@ func (a *App) renderAnimation() string {
 // renderWelcome renders the welcome/main menu screen
 func (a *App) renderWelcome() string {
 	// ASCII Logo with gradient
-	logo := ASCIILogo()
+	// Keep the logo from overflowing on smaller terminals.
+	logoMaxW := maxInt(20, a.width-6)
+	logo := lipgloss.NewStyle().MaxWidth(logoMaxW).Render(ASCIILogo())
 
 	// Decorative border
-	topBorder := CyberBorder(60)
+	borderW := min(60, maxInt(24, a.width-8))
+	topBorder := CyberBorder(borderW)
 
 	// Status indicators with neon styling
 	statusContent := fmt.Sprintf(
@@ -234,22 +265,28 @@ func (a *App) renderWelcome() string {
 			Render("▶ DEEP DIVE\n  Customize all")
 	}
 
-	buttons := lipgloss.JoinHorizontal(lipgloss.Top, quickSetup, "  ", deepDive)
+	// Stack buttons vertically on narrower terminals.
+	var buttons string
+	if a.width < 78 {
+		buttons = lipgloss.JoinVertical(lipgloss.Center, quickSetup, "", deepDive)
+	} else {
+		buttons = lipgloss.JoinHorizontal(lipgloss.Top, quickSetup, "  ", deepDive)
+	}
 
 	// Help text with gradient
 	help := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
 		"←→ select • enter continue • q quit")
 
 	// Bottom border
-	bottomBorder := CyberBorder(60)
+	bottomBorder := CyberBorder(borderW)
 
 	// Compose the screen
 	content := lipgloss.JoinVertical(
 		lipgloss.Center,
 		topBorder,
 		logo,
-		statusContent,
-		tools,
+		truncateVisible(statusContent, borderW),
+		truncateVisible(tools, borderW),
 		"",
 		desc,
 		"",
@@ -275,6 +312,21 @@ func (a *App) renderWelcome() string {
 func (a *App) renderThemePicker() string {
 	title := TitleStyle.Render("Select Theme")
 
+	// Layout adapts based on terminal width:
+	// - wide: list + preview side-by-side
+	// - narrow: list only (preview below would overflow easily)
+	showPreview := a.width >= 86
+
+	previewOuterW := min(36, maxInt(24, a.width/3))
+	if !showPreview {
+		previewOuterW = 0
+	}
+
+	listW := maxInt(24, a.width-10)
+	if showPreview {
+		listW = maxInt(24, a.width-previewOuterW-12)
+	}
+
 	var themeList strings.Builder
 	for i, t := range themes {
 		prefix := "  "
@@ -283,39 +335,39 @@ func (a *App) renderThemePicker() string {
 			prefix = "▶ "
 			style = lipgloss.NewStyle().Foreground(lipgloss.Color(t.color)).Bold(true)
 		}
-		themeList.WriteString(style.Render(fmt.Sprintf("%s%-20s %s", prefix, t.name, t.desc)))
-		themeList.WriteString("\n")
+		line := style.Render(fmt.Sprintf("%s%-20s %s", prefix, t.name, t.desc))
+		themeList.WriteString(truncateVisible(line, listW))
+		themeList.WriteByte('\n')
 	}
 
-	// Preview box with color swatches
-	selectedTheme := themes[a.themeIndex]
-	previewColor := lipgloss.Color(selectedTheme.color)
+	content := themeList.String()
 
-	preview := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(previewColor).
-		Width(32).
-		Padding(1).
-		Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			lipgloss.NewStyle().Foreground(previewColor).Bold(true).Render(selectedTheme.name),
-			"",
-			lipgloss.NewStyle().Foreground(previewColor).Render("████████████████████"),
-			"",
-			lipgloss.NewStyle().Foreground(ColorText).Render("  normal text"),
-			lipgloss.NewStyle().Foreground(previewColor).Render("  highlighted text"),
-			lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  muted text"),
-			"",
-			lipgloss.NewStyle().Foreground(ColorGreen).Render("  ✓ success"),
-			lipgloss.NewStyle().Foreground(ColorRed).Render("  ✗ error"),
-		))
+	if showPreview {
+		// Preview box with color swatches
+		selectedTheme := themes[a.themeIndex]
+		previewColor := lipgloss.Color(selectedTheme.color)
 
-	content := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		themeList.String(),
-		"  ",
-		preview,
-	)
+		preview := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(previewColor).
+			Width(maxInt(1, previewOuterW-2)). // border adds 2
+			Padding(1).
+			Render(lipgloss.JoinVertical(
+				lipgloss.Left,
+				lipgloss.NewStyle().Foreground(previewColor).Bold(true).Render(selectedTheme.name),
+				"",
+				lipgloss.NewStyle().Foreground(previewColor).Render("████████████████████"),
+				"",
+				lipgloss.NewStyle().Foreground(ColorText).Render("  normal text"),
+				lipgloss.NewStyle().Foreground(previewColor).Render("  highlighted text"),
+				lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  muted text"),
+				"",
+				lipgloss.NewStyle().Foreground(ColorGreen).Render("  ✓ success"),
+				lipgloss.NewStyle().Foreground(ColorRed).Render("  ✗ error"),
+			))
+
+		content = lipgloss.JoinHorizontal(lipgloss.Top, content, "  ", preview)
+	}
 
 	help := HelpStyle.Render("[↑↓/jk] Navigate    [ENTER] Select    [ESC] Back")
 
@@ -369,6 +421,9 @@ func (a *App) renderNavPicker() string {
 	))
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, emacsBox, "  ", vimBox)
+	if a.width < 78 {
+		content = lipgloss.JoinVertical(lipgloss.Center, emacsBox, "", vimBox)
+	}
 
 	help := HelpStyle.Render("[←→] Select    [ENTER] Continue    [ESC] Back")
 
@@ -424,6 +479,10 @@ func (a *App) renderFileTree() string {
 		))
 
 	help := HelpStyle.Render("[ENTER] Start Installation    [ESC] Back")
+
+	// Prevent the tree from overflowing narrow terminals.
+	treeMaxW := maxInt(20, a.width-6)
+	tree = lipgloss.NewStyle().MaxWidth(treeMaxW).Render(tree)
 
 	return lipgloss.Place(
 		a.width, a.height,
@@ -570,6 +629,7 @@ func (a *App) renderSummary() string {
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("p10k configure"),
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("hk"),
 	))
+	summary = lipgloss.NewStyle().MaxWidth(maxInt(20, a.width-6)).Render(summary)
 
 	help := HelpStyle.Render("[ENTER] Exit")
 
@@ -601,6 +661,7 @@ func (a *App) renderError() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorRed).
 		Padding(1).
+		MaxWidth(maxInt(20, a.width-10)).
 		Render(errMsg)
 
 	options := lipgloss.JoinHorizontal(

@@ -20,7 +20,7 @@ func NewRipgrepTool() *RipgrepTool {
 			id:          "ripgrep",
 			name:        "ripgrep",
 			description: "Fast recursive grep alternative",
-			icon:        "",
+			icon:        "󰑐",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"ripgrep"},

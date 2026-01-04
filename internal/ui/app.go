@@ -13,7 +13,8 @@ import (
 
 const (
 	introAnimationFrames = 72
-	introAnimationTick   = 50 * time.Millisecond
+	introAnimationTick   = 70 * time.Millisecond
+	uiTick               = 80 * time.Millisecond
 )
 
 // Screen represents different screens in the wizard
@@ -91,6 +92,15 @@ var themes = []struct {
 	{"everforest", "Green nature inspired", "#a7c080"},
 }
 
+func (a *App) syncThemeIndex() {
+	for i, t := range themes {
+		if t.name == a.theme {
+			a.themeIndex = i
+			return
+		}
+	}
+}
+
 // App is the main application model
 type App struct {
 	screen        Screen
@@ -101,14 +111,21 @@ type App struct {
 	animationDone bool
 
 	// Animation state
-	animFrame  int
-	animTicker *time.Ticker
+	animFrame        int
+	animTicker       *time.Ticker
+	postIntroScreen  Screen // where to land after the intro animation
+	uiFrame          int    // global animation frame counter (manager widgets, spinners, etc.)
+	manageInstalling bool
+	manageInstallID  string
 
 	// User selections
 	themeIndex int
 	theme      string
 	navStyle   string
-	deepDive   bool
+	// animationsEnabled controls non-essential UI animations (headers/widgets).
+	// When false, we render static UI to reduce motion/jank and CPU usage.
+	animationsEnabled bool
+	deepDive          bool
 
 	// Deep dive state (installer)
 	deepDiveMenuIndex int
@@ -145,13 +162,17 @@ type App struct {
 	runner          *runner.Runner
 
 	// Management platform state (new)
-	mainMenuIndex  int    // Main menu cursor
-	manageIndex    int    // Manage screen cursor
-	updateIndex    int    // Update screen cursor
-	hotkeyFilter   string // Filter hotkeys by tool
-	hotkeyCursor   int    // Hotkeys screen cursor
-	hotkeyCategory int    // Current category in hotkeys
-	backupIndex    int    // Backup selection cursor
+	mainMenuIndex    int    // Main menu cursor
+	manageIndex      int    // Manage screen cursor
+	updateIndex      int    // Update screen cursor
+	hotkeyFilter     string // Filter hotkeys by tool
+	hotkeyCursor     int    // Hotkeys screen cursor
+	hotkeyCategory   int    // Current category in hotkeys
+	hotkeysPane      int    // 0 = categories, 1 = items
+	hotkeyCatScroll  int    // Category list scroll
+	hotkeyItemScroll int    // Item list scroll
+	hotkeysReturn    Screen // Screen to return to when leaving hotkeys
+	backupIndex      int    // Backup selection cursor
 
 	// Error state
 	lastError error
@@ -160,14 +181,17 @@ type App struct {
 // NewApp creates a new application instance
 func NewApp(skipIntro bool) *App {
 	app := &App{
-		skipIntro:      skipIntro,
-		theme:          "catppuccin-mocha",
-		navStyle:       "emacs",
-		runner:         runner.NewRunner(),
-		installOutput:  make([]string, 0, 100),
-		deepDiveConfig: NewDeepDiveConfig(),
-		manageConfig:   NewManageConfig(),
-		managePane:     0,
+		skipIntro:         skipIntro,
+		theme:             "catppuccin-mocha",
+		navStyle:          "emacs",
+		animationsEnabled: true,
+		runner:            runner.NewRunner(),
+		installOutput:     make([]string, 0, 100),
+		deepDiveConfig:    NewDeepDiveConfig(),
+		manageConfig:      NewManageConfig(),
+		managePane:        0,
+		postIntroScreen:   ScreenWelcome,
+		hotkeysReturn:     ScreenMainMenu,
 	}
 
 	// Best-effort: load persisted global settings (theme + nav) if available.
@@ -178,15 +202,11 @@ func NewApp(skipIntro bool) *App {
 		if cfg.NavStyle != "" {
 			app.navStyle = cfg.NavStyle
 		}
+		app.animationsEnabled = !cfg.DisableAnimations
 	}
 
 	// Keep the theme picker cursor in sync with the persisted theme.
-	for i, t := range themes {
-		if t.name == app.theme {
-			app.themeIndex = i
-			break
-		}
-	}
+	app.syncThemeIndex()
 
 	// Best-effort: load persisted management settings for deep-dive manager UI.
 	if cfg, err := config.LoadToolConfig("manage", NewManageConfig); err == nil && cfg != nil {
@@ -195,6 +215,7 @@ func NewApp(skipIntro bool) *App {
 
 	if skipIntro {
 		app.screen = ScreenWelcome
+		app.animationDone = true
 	} else {
 		app.screen = ScreenAnimation
 	}
@@ -204,17 +225,21 @@ func NewApp(skipIntro bool) *App {
 
 // Init initializes the application
 func (a *App) Init() tea.Cmd {
-	if a.screen == ScreenAnimation {
-		return tea.Batch(
-			tickAnimation(),
-			checkDurdraw(),
-		)
+	cmds := []tea.Cmd{}
+	if a.animationsEnabled {
+		cmds = append(cmds, tickUI())
 	}
-	return nil
+	if a.screen == ScreenAnimation {
+		cmds = append(cmds, tickAnimation(), checkDurdraw())
+	}
+	return tea.Batch(cmds...)
 }
 
 // tickMsg is sent on each animation frame
 type tickMsg time.Time
+
+// uiTickMsg is a global tick for small UI animations (spinners/widgets).
+type uiTickMsg time.Time
 
 // durdrawAvailableMsg indicates if durdraw is available
 type durdrawAvailableMsg bool
@@ -249,6 +274,12 @@ func tickAnimation() tea.Cmd {
 	})
 }
 
+func tickUI() tea.Cmd {
+	return tea.Tick(uiTick, func(t time.Time) tea.Msg {
+		return uiTickMsg(t)
+	})
+}
+
 func checkDurdraw() tea.Cmd {
 	return func() tea.Msg {
 		available := DetectDurdraw()
@@ -272,15 +303,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		if a.screen == ScreenAnimation {
+			// If we don't have a window size yet, don't advance frames. This prevents
+			// the intro from "fast-forwarding" on terminals that deliver WindowSizeMsg
+			// a little late.
+			if a.width == 0 || a.height == 0 {
+				return a, tickAnimation()
+			}
+
 			a.animFrame++
 			// Animation runs for a short burst and then transitions to the wizard.
 			if a.animFrame >= introAnimationFrames {
 				a.animationDone = true
-				a.screen = ScreenWelcome
+				a.screen = a.postIntroScreen
 				return a, nil
 			}
 			return a, tickAnimation()
 		}
+
+	case uiTickMsg:
+		if !a.animationsEnabled {
+			return a, nil
+		}
+		a.uiFrame++
+		return a, tickUI()
 
 	case durdrawAvailableMsg:
 		// Store durdraw availability if needed
@@ -288,7 +333,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case animationDoneMsg:
 		a.animationDone = true
-		a.screen = ScreenWelcome
+		a.screen = a.postIntroScreen
 		return a, nil
 
 	case sudoRequiredMsg:
@@ -341,6 +386,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.manageStatus = "Saved ✓"
 		}
 		return a, nil
+
+	case manageInstallDoneMsg:
+		a.manageInstalling = false
+		a.manageInstallID = ""
+		a.manageInstalledReady = false // refresh install status cache
+		if msg.err != nil {
+			a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
+		} else {
+			a.manageStatus = "Installed ✓"
+		}
+		return a, nil
 	}
 
 	return a, nil
@@ -350,6 +406,8 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch a.screen {
 	case ScreenManage:
 		return a.handleManageMouse(msg)
+	case ScreenHotkeys:
+		return a.handleHotkeysMouse(msg)
 	default:
 		return a, nil
 	}
@@ -372,7 +430,8 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch a.screen {
 	case ScreenAnimation:
 		// Any key skips animation
-		a.screen = ScreenWelcome
+		a.animationDone = true
+		a.screen = a.postIntroScreen
 		return a, nil
 
 	case ScreenWelcome:
@@ -963,32 +1022,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Hotkeys screen navigation
 	case ScreenHotkeys:
-		categories := GetHotkeyCategories()
-		switch key {
-		case "left", "h":
-			if a.hotkeyCategory > 0 {
-				a.hotkeyCategory--
-				a.hotkeyCursor = 0
-			}
-		case "right", "l":
-			if a.hotkeyCategory < len(categories)-1 {
-				a.hotkeyCategory++
-				a.hotkeyCursor = 0
-			}
-		case "up", "k":
-			if a.hotkeyCursor > 0 {
-				a.hotkeyCursor--
-			}
-		case "down", "j":
-			if a.hotkeyCategory < len(categories) {
-				maxIdx := len(categories[a.hotkeyCategory].Hotkeys) - 1
-				if a.hotkeyCursor < maxIdx {
-					a.hotkeyCursor++
-				}
-			}
-		case "esc":
-			a.screen = ScreenMainMenu
-		}
+		return a.handleHotkeysKey(msg)
 
 	// Manage screen navigation
 	case ScreenManage:
@@ -1132,7 +1166,7 @@ func (a *App) View() string {
 	case ScreenUpdate:
 		return a.renderUpdate()
 	case ScreenHotkeys:
-		return a.renderHotkeys()
+		return a.renderHotkeysDualPane()
 	case ScreenBackups:
 		return a.renderBackups()
 	default:
@@ -1268,12 +1302,37 @@ func sudoPromptCmd() tea.ExecCommand {
 // SetStartScreen sets the initial screen to display (for CLI routing)
 func (a *App) SetStartScreen(screen Screen) {
 	a.startScreen = screen
-	a.screen = screen
-	// Only skip intro for non-installer screens
-	if screen != ScreenAnimation && screen != ScreenWelcome {
-		a.skipIntro = true
-		a.animationDone = true
+	// Always land on the requested screen after the intro.
+	a.postIntroScreen = screen
+
+	// Starting explicitly at the animation means "intro → welcome".
+	if screen == ScreenAnimation {
+		a.postIntroScreen = ScreenWelcome
+		// If animations are disabled (reduce motion) or the caller requested
+		// skipping the intro, go straight to welcome.
+		if a.skipIntro || !a.animationsEnabled {
+			a.screen = ScreenWelcome
+			a.animationDone = true
+			return
+		}
+
+		a.screen = ScreenAnimation
+		a.animFrame = 0
+		a.animationDone = false
+		return
 	}
+
+	// If the caller requested skipping the intro, go straight to the screen.
+	if a.skipIntro || !a.animationsEnabled {
+		a.screen = screen
+		a.animationDone = true
+		return
+	}
+
+	// Default behavior: play the intro and then transition to the requested screen.
+	a.screen = ScreenAnimation
+	a.animFrame = 0
+	a.animationDone = false
 }
 
 // SetHotkeyFilter sets the tool filter for hotkeys screen
@@ -1313,37 +1372,37 @@ func GetMainMenuItems() []MainMenuItem {
 		{
 			Name:        "Install",
 			Description: "Full installation wizard",
-			Icon:        "",
+			Icon:        "󰆓",
 			Screen:      ScreenWelcome,
 		},
 		{
 			Name:        "Manage",
 			Description: "Configure installed tools",
-			Icon:        "",
+			Icon:        "󰒓",
 			Screen:      ScreenManage,
 		},
 		{
 			Name:        "Update",
 			Description: "Check and install updates",
-			Icon:        "",
+			Icon:        "󰚰",
 			Screen:      ScreenUpdate,
 		},
 		{
 			Name:        "Theme",
 			Description: "Change color theme",
-			Icon:        "",
+			Icon:        "󰔎",
 			Screen:      ScreenThemePicker,
 		},
 		{
 			Name:        "Hotkeys",
 			Description: "View keyboard shortcuts",
-			Icon:        "",
+			Icon:        "󰌌",
 			Screen:      ScreenHotkeys,
 		},
 		{
 			Name:        "Backups",
 			Description: "View and restore backups",
-			Icon:        "",
+			Icon:        "󰁯",
 			Screen:      ScreenBackups,
 		},
 	}

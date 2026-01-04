@@ -20,7 +20,7 @@ func NewZshTool() *ZshTool {
 			id:          "zsh",
 			name:        "Zsh",
 			description: "Z shell with plugins and customization",
-			icon:        "",
+			icon:        "",
 			category:    CategoryShell,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions"},

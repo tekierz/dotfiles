@@ -20,7 +20,7 @@ func NewGitTool() *GitTool {
 			id:          "git",
 			name:        "Git",
 			description: "Distributed version control system",
-			icon:        "",
+			icon:        "",
 			category:    CategoryGit,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"git"},

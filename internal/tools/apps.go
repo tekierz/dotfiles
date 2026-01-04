@@ -16,7 +16,7 @@ func NewZenBrowserTool() *ZenBrowserTool {
 			id:          "zen-browser",
 			name:        "Zen Browser",
 			description: "Privacy-focused browser based on Firefox",
-			icon:        "",
+			icon:        "󰖟",
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"zen-browser"},
@@ -39,7 +39,7 @@ func NewCursorTool() *CursorTool {
 			id:          "cursor",
 			name:        "Cursor",
 			description: "AI-first code editor",
-			icon:        "",
+			icon:        "󰦨",
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"cursor"},
@@ -62,7 +62,7 @@ func NewLMStudioTool() *LMStudioTool {
 			id:          "lm-studio",
 			name:        "LM Studio",
 			description: "Local LLM runner",
-			icon:        "",
+			icon:        "󰚩",
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"lm-studio"},
@@ -85,7 +85,7 @@ func NewOBSTool() *OBSTool {
 			id:          "obs",
 			name:        "OBS Studio",
 			description: "Streaming and recording software",
-			icon:        "",
+			icon:        "",
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"obs"},
@@ -109,7 +109,7 @@ func NewRectangleTool() *RectangleTool {
 			id:          "rectangle",
 			name:        "Rectangle",
 			description: "Window management for macOS",
-			icon:        "",
+			icon:        "󰍹",
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"rectangle"},
@@ -131,7 +131,7 @@ func NewRaycastTool() *RaycastTool {
 			id:          "raycast",
 			name:        "Raycast",
 			description: "Productivity launcher for macOS",
-			icon:        "",
+			icon:        "󰈸",
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"raycast"},
@@ -153,7 +153,7 @@ func NewIINATool() *IINATool {
 			id:          "iina",
 			name:        "IINA",
 			description: "Modern media player for macOS",
-			icon:        "",
+			icon:        "󰕼",
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"iina"},
@@ -175,7 +175,7 @@ func NewAppCleanerTool() *AppCleanerTool {
 			id:          "appcleaner",
 			name:        "AppCleaner",
 			description: "Thoroughly uninstall macOS apps",
-			icon:        "",
+			icon:        "󰃢",
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"appcleaner"},

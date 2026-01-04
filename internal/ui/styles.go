@@ -6,44 +6,45 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Cyberpunk color palette
+// Neon-seapunk color palette
 var (
-	// Primary neon colors
-	ColorCyan       = lipgloss.Color("#00ffff")
-	ColorMagenta    = lipgloss.Color("#ff00ff")
-	ColorNeonPink   = lipgloss.Color("#ff6ec7")
-	ColorNeonBlue   = lipgloss.Color("#00d4ff")
-	ColorNeonPurple = lipgloss.Color("#bf00ff")
-	ColorGreen      = lipgloss.Color("#39ff14")
-	ColorYellow     = lipgloss.Color("#ffff00")
-	ColorOrange     = lipgloss.Color("#ff6600")
-	ColorRed        = lipgloss.Color("#ff0040")
+	// Accents (aqua / hot pink / purple) with high-contrast but clean usage.
+	ColorCyan       = lipgloss.Color("#00F5D4") // seafoam neon
+	ColorNeonBlue   = lipgloss.Color("#00BBF9") // ocean neon
+	ColorMagenta    = lipgloss.Color("#F15BB5") // hot pink
+	ColorNeonPink   = lipgloss.Color("#FF5DA2") // softer pink highlight
+	ColorNeonPurple = lipgloss.Color("#9B5DE5") // electric purple
+	ColorGreen      = lipgloss.Color("#00F5A0") // mint success
+	ColorYellow     = lipgloss.Color("#FEE440") // neon sand
+	ColorOrange     = lipgloss.Color("#FF9F1C")
+	ColorRed        = lipgloss.Color("#FF4D6D")
 
 	// Gradient colors for smooth transitions
 	GradientCyan = []lipgloss.Color{
-		"#00ffff", "#00e5ff", "#00ccff", "#00b3ff", "#0099ff",
+		"#00F5D4", "#00E5FF", "#00BBF9", "#4EA8DE", "#5B7CFA",
 	}
 	GradientPink = []lipgloss.Color{
-		"#ff00ff", "#ff33cc", "#ff6699", "#ff9966", "#ffcc33",
+		"#F15BB5", "#FF5DA2", "#C77DFF", "#9B5DE5", "#5B7CFA",
 	}
 	GradientRainbow = []lipgloss.Color{
 		"#ff0000", "#ff7f00", "#ffff00", "#00ff00", "#00ffff", "#0000ff", "#8b00ff",
 	}
+	// Primary UI gradient used across borders, dividers, and logo accents.
 	GradientCyber = []lipgloss.Color{
-		"#00ffff", "#00e1ff", "#00c3ff", "#0099ff", "#006eff", "#0044ff", "#bf00ff",
+		"#00F5D4", "#00E5FF", "#00BBF9", "#4EA8DE", "#5B7CFA", "#9B5DE5", "#F15BB5",
 	}
 
-	// Background/surface colors
-	ColorBg      = lipgloss.Color("#0a0a0f")
-	ColorSurface = lipgloss.Color("#1a1a2e")
-	ColorOverlay = lipgloss.Color("#16213e")
-	ColorMuted   = lipgloss.Color("#4a4a6a")
-	ColorBorder  = lipgloss.Color("#2a2a4a")
+	// Background/surface colors (deep ocean).
+	ColorBg      = lipgloss.Color("#070B1A")
+	ColorSurface = lipgloss.Color("#0F1633")
+	ColorOverlay = lipgloss.Color("#172046")
+	ColorMuted   = lipgloss.Color("#3A466B")
+	ColorBorder  = lipgloss.Color("#25305A")
 
-	// Text colors
-	ColorText       = lipgloss.Color("#e0e0e0")
-	ColorTextMuted  = lipgloss.Color("#808090")
-	ColorTextBright = lipgloss.Color("#ffffff")
+	// Text colors (slightly cool for readability).
+	ColorText       = lipgloss.Color("#E6F1FF")
+	ColorTextMuted  = lipgloss.Color("#97A7C7")
+	ColorTextBright = lipgloss.Color("#FFFFFF")
 )
 
 // Spinner frames for animation
@@ -58,7 +59,8 @@ var (
 	ContainerStyle = lipgloss.NewStyle().
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorCyan)
+			BorderForeground(ColorBorder).
+			Background(ColorSurface)
 
 	// Title styles
 	TitleStyle = lipgloss.NewStyle().
@@ -74,12 +76,14 @@ var (
 	ButtonStyle = lipgloss.NewStyle().
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBorder)
+			BorderForeground(ColorBorder).
+			Background(ColorSurface)
 
 	ButtonActiveStyle = lipgloss.NewStyle().
 				Padding(0, 2).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(ColorCyan).
+				Background(ColorOverlay).
 				Foreground(ColorCyan).
 				Bold(true)
 
@@ -109,9 +113,20 @@ var (
 	// Accent box style
 	AccentBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
-			BorderForeground(ColorMagenta).
+			BorderForeground(ColorNeonPurple).
+			Background(ColorSurface).
 			Padding(0, 1)
 )
+
+// RenderBadge renders a compact pill badge.
+func RenderBadge(label string, fg, bg lipgloss.Color) string {
+	return lipgloss.NewStyle().
+		Foreground(fg).
+		Background(bg).
+		Bold(true).
+		Padding(0, 1).
+		Render(label)
+}
 
 // GradientText renders text with a horizontal gradient
 func GradientText(text string, colors []lipgloss.Color) string {
@@ -201,6 +216,98 @@ func ScanlineEffect(width int) string {
 		}
 	}
 	return line.String()
+}
+
+// ScanlineEffectAnimated returns a scanline decoration with a subtle animated
+// gradient shift. Useful for headers and separators.
+func ScanlineEffectAnimated(width int, frame int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	var line strings.Builder
+	for i := 0; i < width; i++ {
+		colorIdx := ((i + frame) * len(GradientCyber)) / width
+		colorIdx = colorIdx % len(GradientCyber)
+		style := lipgloss.NewStyle().Foreground(GradientCyber[colorIdx])
+		if (i+frame)%2 == 0 {
+			line.WriteString(style.Render("▀"))
+		} else {
+			line.WriteString(style.Render("▄"))
+		}
+	}
+	return line.String()
+}
+
+// TabSpec describes a single tab in a one-line tab bar.
+type TabSpec struct {
+	Label  string
+	Active bool
+}
+
+// RenderTabsBar renders a pill-style tab strip (single line).
+// It is designed to feel closer to the Lip Gloss demo-style UI (tabs + content).
+func RenderTabsBar(width int, tabs []TabSpec) string {
+	if width <= 0 {
+		return ""
+	}
+
+	activeBg := ColorCyan
+	activeFg := ColorBg
+	inactiveBg := ColorSurface
+	inactiveFg := ColorTextMuted
+
+	sep := lipgloss.NewStyle().Foreground(ColorBorder).Render(" ")
+	leftCap := ""
+	rightCap := ""
+
+	var parts []string
+	for _, t := range tabs {
+		bg := inactiveBg
+		fg := inactiveFg
+		bold := false
+		if t.Active {
+			bg = activeBg
+			fg = activeFg
+			bold = true
+		}
+
+		cap := lipgloss.NewStyle().Foreground(bg)
+		txt := lipgloss.NewStyle().Background(bg).Foreground(fg).Bold(bold).Padding(0, 1)
+		parts = append(parts, cap.Render(leftCap)+txt.Render(t.Label)+cap.Render(rightCap))
+	}
+
+	line := strings.Join(parts, sep)
+	// Ensure stable width for consistent layout/mouse mapping.
+	return lipgloss.NewStyle().Width(width).Render(line)
+}
+
+// ShimmerDivider renders a subtle divider with a moving highlight segment.
+// This is intentionally less "glitchy" than ScanlineEffectAnimated.
+func ShimmerDivider(width int, frame int, enabled bool) string {
+	if width <= 0 {
+		return ""
+	}
+
+	baseStyle := lipgloss.NewStyle().Foreground(ColorBorder).Faint(true)
+	if !enabled {
+		return baseStyle.Render(strings.Repeat("─", width))
+	}
+
+	seg := maxInt(6, width/10)
+	pos := frame % (width + seg)
+	pos -= seg
+
+	var sb strings.Builder
+	for i := 0; i < width; i++ {
+		if i >= pos && i < pos+seg {
+			color := GradientCyber[(i+frame)%len(GradientCyber)]
+			sb.WriteString(lipgloss.NewStyle().Foreground(color).Render("─"))
+			continue
+		}
+		sb.WriteString(baseStyle.Render("─"))
+	}
+	return sb.String()
 }
 
 // ProgressBar renders a progress bar with gradient

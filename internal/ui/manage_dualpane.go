@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -71,21 +73,30 @@ type manageField struct {
 
 // manageItem is a tool entry in the left pane.
 type manageItem struct {
-	id          string
-	name        string
-	icon        string
-	description string
-	installed   bool
+	id           string
+	name         string
+	icon         string
+	description  string
+	category     tools.Category
+	installed    bool
+	configurable bool
 }
 
 // manageSavedMsg is emitted after a save attempt.
 type manageSavedMsg struct{ err error }
+
+// manageInstallDoneMsg is emitted after attempting to install a tool/app.
+type manageInstallDoneMsg struct {
+	toolID string
+	err    error
+}
 
 func (a *App) saveManageConfigCmd() tea.Cmd {
 	// Capture by value (pointer is stable) and run file I/O in a command.
 	cfg := a.manageConfig
 	theme := a.theme
 	nav := a.navStyle
+	animationsEnabled := a.animationsEnabled
 	return func() tea.Msg {
 		if err := config.SaveToolConfig("manage", cfg); err != nil {
 			return manageSavedMsg{err: err}
@@ -98,12 +109,30 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 		}
 		g.Theme = theme
 		g.NavStyle = nav
+		g.DisableAnimations = !animationsEnabled
 
 		if err := config.SaveGlobalConfig(g); err != nil {
 			return manageSavedMsg{err: err}
 		}
 
 		return manageSavedMsg{err: nil}
+	}
+}
+
+func (a *App) installToolCmd(toolID string) tea.Cmd {
+	return func() tea.Msg {
+		reg := tools.NewRegistry()
+		t, ok := reg.Get(toolID)
+		if !ok {
+			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("unknown tool: %s", toolID)}
+		}
+
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
+		}
+
+		return manageInstallDoneMsg{toolID: toolID, err: t.Install(mgr)}
 	}
 }
 
@@ -213,6 +242,9 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case manageFieldOption:
 			if f.str != nil && len(f.options) > 0 {
 				*f.str = cycleStringOption(f.options, *f.str, dir > 0)
+				if f.key == "theme" {
+					a.syncThemeIndex()
+				}
 			}
 		case manageFieldNumber:
 			if f.n != nil {
@@ -264,6 +296,45 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s", "ctrl+s":
 		a.manageStatus = "Saving…"
 		return a, a.saveManageConfigCmd()
+
+	case "i":
+		// Install selected tool/app (settings pane only).
+		if a.managePane != managePaneSettings {
+			return a, nil
+		}
+		item := items[a.manageIndex]
+		if item.id == "global" {
+			a.manageStatus = "Select a tool/app to install"
+			return a, nil
+		}
+		if a.manageInstalling {
+			return a, nil
+		}
+		if item.installed {
+			a.manageStatus = "Already installed"
+			return a, nil
+		}
+
+		a.manageStatus = ""
+		a.manageInstalling = true
+		a.manageInstallID = item.id
+		return a, a.installToolCmd(item.id)
+
+	case "?":
+		// Jump to hotkeys/cheatsheet for the selected tool.
+		item := items[a.manageIndex]
+		a.hotkeyFilter = ""
+		if item.id != "global" {
+			a.hotkeyFilter = item.id
+		}
+		a.hotkeyCategory = 0
+		a.hotkeyCursor = 0
+		a.hotkeyCatScroll = 0
+		a.hotkeyItemScroll = 0
+		a.hotkeysPane = 0
+		a.hotkeysReturn = ScreenManage
+		a.screen = ScreenHotkeys
+		return a, nil
 	}
 
 	// Pane-specific navigation.
@@ -324,7 +395,12 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if f, ok := currentField(); ok {
 			switch f.kind {
 			case manageFieldToggle:
+				wasEnabled := a.animationsEnabled
 				toggleField()
+				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+					// Restart the UI tick when enabling animations.
+					return a, tickUI()
+				}
 			case manageFieldOption:
 				adjustField(1)
 			case manageFieldNumber:
@@ -338,7 +414,11 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if f, ok := currentField(); ok {
 			switch f.kind {
 			case manageFieldToggle:
+				wasEnabled := a.animationsEnabled
 				toggleField()
+				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+					return a, tickUI()
+				}
 			case manageFieldText:
 				startEditingField()
 			case manageFieldOption:
@@ -418,7 +498,7 @@ func (a *App) handleManageMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Click in right pane fields area: focus + edit/toggle/adjust.
-	if layout.inRightFields(m.X, m.Y) {
+	if layout.inRightList(m.X, m.Y) {
 		items := a.manageItems()
 		if len(items) == 0 {
 			return a, nil
@@ -429,7 +509,7 @@ func (a *App) handleManageMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		relY := m.Y - layout.rightFieldsY
+		relY := m.Y - layout.rightListY
 		fieldIdx := a.manageFieldsScroll + relY
 		if fieldIdx < 0 || fieldIdx >= len(fields) {
 			return a, nil
@@ -443,13 +523,21 @@ func (a *App) handleManageMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		switch f.kind {
 		case manageFieldToggle:
 			if f.b != nil {
+				wasEnabled := a.animationsEnabled
 				*f.b = !*f.b
+				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+					// Restart UI tick if animations were turned back on via mouse.
+					return a, tickUI()
+				}
 			}
 		case manageFieldOption:
 			// Click on left half cycles backward, right half cycles forward.
 			forward := m.X >= (layout.rightX + layout.rightW/2)
 			if f.str != nil && len(f.options) > 0 {
 				*f.str = cycleStringOption(f.options, *f.str, forward)
+				if f.key == "theme" {
+					a.syncThemeIndex()
+				}
 			}
 		case manageFieldNumber:
 			// Click on left half decrements, right half increments.
@@ -501,8 +589,12 @@ type manageLayout struct {
 	leftListY int
 	leftListH int
 
-	rightFieldsY int
-	rightFieldsH int
+	rightListY int
+	rightListH int
+
+	// Optional widget area (e.g., globe) in the bottom of the right pane.
+	rightGlobeY int
+	rightGlobeH int
 }
 
 func (l manageLayout) maxToolsScroll(itemsLen int) int {
@@ -510,7 +602,7 @@ func (l manageLayout) maxToolsScroll(itemsLen int) int {
 }
 
 func (l manageLayout) maxFieldsScroll(fieldsLen int) int {
-	return maxInt(0, fieldsLen-l.rightFieldsH)
+	return maxInt(0, fieldsLen-l.rightListH)
 }
 
 func (l manageLayout) inLeftList(x, y int) bool {
@@ -520,11 +612,11 @@ func (l manageLayout) inLeftList(x, y int) bool {
 	return y >= l.leftListY && y < l.leftListY+l.leftListH
 }
 
-func (l manageLayout) inRightFields(x, y int) bool {
+func (l manageLayout) inRightList(x, y int) bool {
 	if x < l.rightX || x >= l.rightX+l.rightW {
 		return false
 	}
-	return y >= l.rightFieldsY && y < l.rightFieldsY+l.rightFieldsH
+	return y >= l.rightListY && y < l.rightListY+l.rightListH
 }
 
 func (a *App) manageLayout() manageLayout {
@@ -564,8 +656,22 @@ func (a *App) manageLayout() manageLayout {
 	rightHeaderLines := 3
 	rightInnerY := bodyY + border + padY
 	rightInnerH := bodyH - (border * 2) - (padY * 2)
-	rightFieldsY := rightInnerY + rightHeaderLines
-	rightFieldsH := maxInt(1, rightInnerH-rightHeaderLines)
+	rightListY := rightInnerY + rightHeaderLines
+	rightFieldsH := maxInt(1, rightInnerH-rightHeaderLines) // total area under header
+
+	// Reserve space for a small animated widget (globe) when there's enough room.
+	rightListH := rightFieldsH
+	rightGlobeH := 0
+	rightGlobeY := 0
+	if a.animationsEnabled && rightW >= 56 && rightFieldsH >= 18 {
+		globeH := 10
+		if rightFieldsH >= 22 {
+			globeH = 12
+		}
+		rightGlobeH = globeH
+		rightListH = maxInt(1, rightFieldsH-rightGlobeH-1) // 1 line gap above globe
+		rightGlobeY = rightListY + rightListH + 1
+	}
 
 	return manageLayout{
 		w: a.width,
@@ -590,8 +696,11 @@ func (a *App) manageLayout() manageLayout {
 		leftListY: leftListY,
 		leftListH: leftListH,
 
-		rightFieldsY: rightFieldsY,
-		rightFieldsH: rightFieldsH,
+		rightListY: rightListY,
+		rightListH: rightListH,
+
+		rightGlobeY: rightGlobeY,
+		rightGlobeH: rightGlobeH,
 	}
 }
 
@@ -628,58 +737,133 @@ func (a *App) manageEnsureFieldsVisible(layout manageLayout, fieldsLen int) {
 
 	if a.configFieldIndex < a.manageFieldsScroll {
 		a.manageFieldsScroll = a.configFieldIndex
-	} else if a.configFieldIndex >= a.manageFieldsScroll+layout.rightFieldsH {
-		a.manageFieldsScroll = a.configFieldIndex - layout.rightFieldsH + 1
+	} else if a.configFieldIndex >= a.manageFieldsScroll+layout.rightListH {
+		a.manageFieldsScroll = a.configFieldIndex - layout.rightListH + 1
 	}
 	a.manageFieldsScroll = clampInt(a.manageFieldsScroll, 0, maxScroll)
 }
 
 func (a *App) manageItems() []manageItem {
 	reg := tools.NewRegistry()
-	base := getManageTools()
+	all := reg.All()
+	platform := pkg.DetectPlatform()
+
+	// Prefer a stable, human-friendly ordering (category → name).
+	categoryOrder := map[tools.Category]int{
+		tools.CategoryShell:     0,
+		tools.CategoryTerminal:  1,
+		tools.CategoryEditor:    2,
+		tools.CategoryFile:      3,
+		tools.CategoryGit:       4,
+		tools.CategoryContainer: 5,
+		tools.CategoryUtility:   6,
+		tools.CategoryApp:       7,
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		ci := categoryOrder[all[i].Category()]
+		cj := categoryOrder[all[j].Category()]
+		if ci != cj {
+			return ci < cj
+		}
+		return all[i].Name() < all[j].Name()
+	})
 
 	// Cache install status so we don't run package manager checks every render.
 	if a.manageInstalled == nil {
-		a.manageInstalled = make(map[string]bool, len(base))
+		a.manageInstalled = make(map[string]bool, len(all))
 	}
 	if !a.manageInstalledReady {
-		for _, mt := range base {
-			if t, ok := reg.Get(mt.id); ok {
-				a.manageInstalled[mt.id] = t.IsInstalled()
-			} else {
-				a.manageInstalled[mt.id] = false
-			}
+		for _, t := range all {
+			a.manageInstalled[t.ID()] = t.IsInstalled()
 		}
 		a.manageInstalledReady = true
 	}
 
-	// Add a global section at the top.
-	items := []manageItem{
-		{id: "global", name: "Global", icon: "󰒓", description: "UI + platform preferences", installed: true},
-	}
-
-	for _, mt := range base {
-		name := mt.name
-		desc := "Configure settings"
-		icon := mt.icon
-		installed := a.manageInstalled[mt.id]
-		if t, ok := reg.Get(mt.id); ok {
-			name = t.Name()
-			desc = t.Description()
-			if t.Icon() != "" {
-				icon = t.Icon()
+	// Filter by platform support: hide tools/apps that can't be installed on this
+	// OS, but keep anything already installed.
+	//
+	// This is especially important for GUI apps: don't show macOS-only apps on
+	// Linux and vice versa.
+	if platform != pkg.PlatformUnknown {
+		filtered := make([]tools.Tool, 0, len(all))
+		for _, t := range all {
+			installed := a.manageInstalled[t.ID()]
+			supported := toolHasPackagesForPlatform(t, platform)
+			if installed || supported {
+				filtered = append(filtered, t)
 			}
 		}
+		all = filtered
+	}
+
+	// Add a global section at the top.
+	items := []manageItem{
+		{
+			id:           "global",
+			name:         "Global",
+			icon:         "󰒓",
+			description:  "UI + platform preferences",
+			category:     "global",
+			installed:    true,
+			configurable: true,
+		},
+	}
+
+	for _, t := range all {
+		icon := t.Icon()
+		if icon == "" {
+			icon = fallbackToolIcon(t.ID(), t.Category())
+		}
+
 		items = append(items, manageItem{
-			id:          mt.id,
-			name:        name,
-			icon:        icon,
-			description: desc,
-			installed:   installed,
+			id:           t.ID(),
+			name:         t.Name(),
+			icon:         icon,
+			description:  t.Description(),
+			category:     t.Category(),
+			installed:    a.manageInstalled[t.ID()],
+			configurable: t.HasConfig(),
 		})
 	}
 
 	return items
+}
+
+func toolHasPackagesForPlatform(t tools.Tool, platform pkg.Platform) bool {
+	pkgs := t.Packages()[platform]
+	if len(pkgs) == 0 {
+		pkgs = t.Packages()["all"]
+	}
+	return len(pkgs) > 0
+}
+
+func fallbackToolIcon(id string, cat tools.Category) string {
+	// Reasonable defaults when a tool doesn't specify an icon.
+	// Prefer category icons so the UI stays visually consistent.
+	switch cat {
+	case tools.CategoryShell:
+		return ""
+	case tools.CategoryTerminal:
+		return ""
+	case tools.CategoryEditor:
+		return ""
+	case tools.CategoryFile:
+		return "󰉋"
+	case tools.CategoryGit:
+		return ""
+	case tools.CategoryContainer:
+		return ""
+	case tools.CategoryUtility:
+		return "󰘚"
+	case tools.CategoryApp:
+		return "󰏇"
+	}
+
+	// ID-based fallback (for unknown categories like "global").
+	if strings.Contains(id, "git") {
+		return ""
+	}
+	return "󰈚"
 }
 
 func (a *App) manageFieldsFor(itemID string) []manageField {
@@ -706,6 +890,13 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 				kind:        manageFieldOption,
 				str:         &a.navStyle,
 				options:     []string{"emacs", "vim"},
+			},
+			{
+				key:         "animations",
+				label:       "Animations",
+				description: "Enable animated UI elements (headers, globe, spinners)",
+				kind:        manageFieldToggle,
+				b:           &a.animationsEnabled,
 			},
 		}
 
@@ -861,27 +1052,47 @@ func (a *App) renderManageDualPane() string {
 }
 
 func (a *App) renderManageHeader(width int) string {
-	title := lipgloss.NewStyle().
-		Foreground(ColorCyan).
-		Bold(true).
-		Render("DOTFILES MANAGER")
-	sub := lipgloss.NewStyle().
-		Foreground(ColorTextMuted).
-		Render("Dual-pane config editor • Click, scroll, and tweak everything")
-	divider := ScanlineEffect(maxInt(0, width))
+	tabs := RenderTabsBar(width, []TabSpec{
+		{Label: "Manage", Active: true},
+		{Label: "Hotkeys", Active: false},
+		{Label: "Update", Active: false},
+		{Label: "Backups", Active: false},
+	})
+
+	subText := "Dual-pane config editor • Click, scroll, and tweak everything"
+	if a.animationsEnabled {
+		subText = AnimatedSpinnerDots(a.uiFrame/2) + " " + subText
+	}
+	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(subText, width))
+
+	divider := ShimmerDivider(maxInt(0, width), a.uiFrame, a.animationsEnabled)
 
 	// Keep this exactly 3 lines (see manageLayout.headerH).
-	return lipgloss.JoinVertical(lipgloss.Left, title, sub, divider)
+	return lipgloss.JoinVertical(lipgloss.Left, tabs, sub, divider)
 }
 
 func (a *App) renderManageFooter(width int, items []manageItem, fields []manageField) string {
 	// Hint line: short and consistent.
 	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
-		"Tab switch pane • ↑↓ move • ←→ adjust • Space toggle • Enter edit • S save • Esc back • q quit",
+		"Tab switch pane • ↑↓ move • ←→ adjust • Space toggle • Enter edit • I install • ? hotkeys • S save • Esc back • q quit",
 	)
 
 	// Status line: either save feedback, or focused field description.
 	statusText := a.manageStatus
+	if a.manageInstalling {
+		name := a.manageInstallID
+		for _, it := range items {
+			if it.id == a.manageInstallID {
+				name = it.name
+				break
+			}
+		}
+		if a.animationsEnabled {
+			statusText = fmt.Sprintf("%s Installing %s…", AnimatedSpinnerDots(a.uiFrame), name)
+		} else {
+			statusText = fmt.Sprintf("Installing %s…", name)
+		}
+	}
 	if statusText == "" && a.managePane == managePaneSettings && len(fields) > 0 {
 		idx := clampInt(a.configFieldIndex, 0, len(fields)-1)
 		if fields[idx].description != "" {
@@ -906,6 +1117,7 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
+		Background(ColorSurface).
 		Padding(1, 1).
 		// lipgloss applies borders after Width/Height, so subtract 2 to target an
 		// exact outer size for predictable layouts and mouse hit-testing.
@@ -926,6 +1138,7 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("%d installed • %d tools", installedCount, toolCount))
 
 	innerW := maxInt(0, layout.leftW-(layout.border*2)-(layout.padX*2))
+	tagStyle := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorOverlay).Padding(0, 1)
 
 	var lines []string
 	for i := a.manageToolsScroll; i < len(items) && len(lines) < layout.leftListH; i++ {
@@ -954,7 +1167,36 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 			icon += " "
 		}
 
-		line := fmt.Sprintf("%s%s %s%s", cursor, status, icon, nameStyle.Render(it.name))
+		// Right-aligned category tag (helps scanning without changing selection mapping).
+		cat := strings.ToUpper(string(it.category))
+		if it.id == "global" {
+			cat = "GLOBAL"
+		}
+		tag := tagStyle.Render(cat)
+
+		left := fmt.Sprintf("%s%s %s%s", cursor, status, icon, nameStyle.Render(it.name))
+		// Small visual hint that settings exist.
+		if it.id != "global" && it.configurable {
+			left += lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  ")
+		}
+
+		leftW := ansi.StringWidth(left)
+		tagW := ansi.StringWidth(tag)
+		// Keep at least 1 space between left content and tag.
+		availLeft := innerW - tagW - 1
+		if availLeft < 0 {
+			availLeft = 0
+		}
+		if leftW > availLeft {
+			left = truncateVisible(left, availLeft)
+			leftW = ansi.StringWidth(left)
+		}
+		spaces := innerW - leftW - tagW
+		if spaces < 1 {
+			spaces = 1
+		}
+
+		line := left + strings.Repeat(" ", spaces) + tag
 		lines = append(lines, truncateVisible(line, innerW))
 	}
 
@@ -982,6 +1224,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
+		Background(ColorSurface).
 		Padding(1, 1).
 		// lipgloss applies borders after Width/Height, so subtract 2 to target an
 		// exact outer size for predictable layouts and mouse hit-testing.
@@ -998,19 +1241,23 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	statusBadge := ""
 	if item.id != "global" {
 		if item.installed {
-			statusBadge = lipgloss.NewStyle().Foreground(ColorGreen).Render(" ● installed")
+			statusBadge = " " + RenderBadge("INSTALLED", ColorBg, ColorGreen)
 		} else {
-			statusBadge = lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" ○ not installed")
+			statusBadge = " " + RenderBadge("NOT INSTALLED", ColorText, ColorMuted)
 		}
 	}
-	meta := lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(item.name) +
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" — "+item.description) +
+	metaName := item.name
+	if item.icon != "" {
+		metaName = item.icon + " " + metaName
+	}
+	meta := lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(metaName) +
+		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description) +
 		statusBadge
 
 	innerW := maxInt(0, layout.rightW-(layout.border*2)-(layout.padX*2))
 
 	// Field list lines (fixed height for stable layout).
-	visibleFieldLines := layout.rightFieldsH
+	visibleFieldLines := layout.rightListH
 	fieldCapacity := visibleFieldLines
 	if a.manageEditing && a.manageEditField != nil && fieldCapacity > 0 {
 		// Reserve the first line for the editor, but keep overall height stable.
@@ -1018,10 +1265,46 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	}
 
 	var fieldLines []string
-	for i := a.manageFieldsScroll; i < len(fields) && len(fieldLines) < fieldCapacity; i++ {
-		f := fields[i]
-		focused := (a.managePane == managePaneSettings) && (i == a.configFieldIndex)
-		fieldLines = append(fieldLines, truncateVisible(renderManageFieldLine(f, focused), innerW))
+	if len(fields) == 0 {
+		// No explicit fields for this tool. Show a helpful placeholder plus an
+		// install hint.
+		msgStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		strong := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
+
+		if item.id == "global" {
+			fieldLines = append(fieldLines, msgStyle.Render("No global settings available."))
+		} else {
+			if item.configurable {
+				fieldLines = append(fieldLines, msgStyle.Render("No manager UI fields yet (tool has config)."))
+			} else {
+				fieldLines = append(fieldLines, msgStyle.Render("No configurable settings for this tool."))
+			}
+
+			if !item.installed {
+				fieldLines = append(fieldLines, strong.Render("Press I to install"))
+			} else {
+				fieldLines = append(fieldLines, msgStyle.Render("Installed — press S to save global prefs"))
+			}
+
+			// Show package names for this platform (best-effort).
+			if t, ok := tools.NewRegistry().Get(item.id); ok {
+				platform := pkg.DetectPlatform()
+				pkgs := t.Packages()[platform]
+				if len(pkgs) == 0 {
+					pkgs = t.Packages()["all"]
+				}
+				if len(pkgs) > 0 {
+					pkgLine := msgStyle.Render("Packages: ") + strong.Render(strings.Join(pkgs, ", "))
+					fieldLines = append(fieldLines, pkgLine)
+				}
+			}
+		}
+	} else {
+		for i := a.manageFieldsScroll; i < len(fields) && len(fieldLines) < fieldCapacity; i++ {
+			f := fields[i]
+			focused := (a.managePane == managePaneSettings) && (i == a.configFieldIndex)
+			fieldLines = append(fieldLines, truncateVisible(renderManageFieldLine(f, focused), innerW))
+		}
 	}
 	for len(fieldLines) < fieldCapacity {
 		fieldLines = append(fieldLines, "")
@@ -1035,12 +1318,31 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	}
 
 	// Exactly 3 header lines before the fields area (matches manageLayout.rightHeaderLines).
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
+	actionLine := ""
+	if item.id != "global" && !item.installed {
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
+	} else if item.id != "global" && len(fields) == 0 {
+		actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
+	}
+
+	contentLines := []string{
 		title,
 		truncateVisible(meta, innerW),
-		"",
+		truncateVisible(actionLine, innerW),
 		fieldsBlock,
+	}
+
+	// Optional animated widget area (globe) at the bottom.
+	if a.animationsEnabled && layout.rightGlobeH > 0 {
+		globeW := min(30, maxInt(20, innerW/2))
+		globe := RenderMiniGlobe(globeW, layout.rightGlobeH, a.uiFrame)
+		globePlaced := lipgloss.Place(innerW, layout.rightGlobeH, lipgloss.Right, lipgloss.Center, globe)
+		contentLines = append(contentLines, "", globePlaced)
+	}
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		contentLines...,
 	)
 
 	return panel.Render(content)
@@ -1083,16 +1385,14 @@ func renderManageFieldLine(f manageField, focused bool) string {
 		if f.str == nil || len(f.options) == 0 {
 			return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), valueStyle.Render("—"))
 		}
-
-		var parts []string
-		for _, opt := range f.options {
-			s := lipgloss.NewStyle().Foreground(ColorTextMuted)
-			if opt == *f.str {
-				s = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
-			}
-			parts = append(parts, s.Render(opt))
+		leftArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("◀")
+		rightArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("▶")
+		if focused {
+			leftArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("◀")
+			rightArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("▶")
 		}
-		return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), strings.Join(parts, " │ "))
+		val := valueStyle.Render(*f.str)
+		return fmt.Sprintf("%s%s %s %s %s", cursor, labelStyle.Render(f.label), leftArrow, val, rightArrow)
 
 	case manageFieldText:
 		if f.str == nil {

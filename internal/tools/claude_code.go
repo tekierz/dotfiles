@@ -16,7 +16,7 @@ func NewClaudeCodeTool() *ClaudeCodeTool {
 			id:          "claude-code",
 			name:        "Claude Code",
 			description: "AI-powered coding assistant",
-			icon:        "",
+			icon:        "󰚩",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				// npm package - installed via: npm install -g @anthropic-ai/claude-code

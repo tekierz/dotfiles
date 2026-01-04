@@ -16,7 +16,7 @@ func NewFzfTool() *FzfTool {
 			id:          "fzf",
 			name:        "fzf",
 			description: "Command-line fuzzy finder",
-			icon:        "",
+			icon:        "󰍉",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"fzf"},

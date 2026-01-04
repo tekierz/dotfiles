@@ -20,7 +20,7 @@ func NewLazyDockerTool() *LazyDockerTool {
 			id:          "lazydocker",
 			name:        "LazyDocker",
 			description: "Simple terminal UI for Docker",
-			icon:        "",
+			icon:        "",
 			category:    CategoryContainer,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"lazydocker"},

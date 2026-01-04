@@ -20,7 +20,7 @@ func NewGhosttyTool() *GhosttyTool {
 			id:          "ghostty",
 			name:        "Ghostty",
 			description: "GPU-accelerated terminal emulator",
-			icon:        "",
+			icon:        "󰆍",
 			category:    CategoryTerminal,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"ghostty"},

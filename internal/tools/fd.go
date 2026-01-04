@@ -16,7 +16,7 @@ func NewFdTool() *FdTool {
 			id:          "fd",
 			name:        "fd",
 			description: "Simple, fast find alternative",
-			icon:        "",
+			icon:        "󰈞",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"fd"},

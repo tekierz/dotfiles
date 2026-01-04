@@ -16,7 +16,7 @@ func NewZoxideTool() *ZoxideTool {
 			id:          "zoxide",
 			name:        "zoxide",
 			description: "Smarter cd command with learning",
-			icon:        "",
+			icon:        "󰄛",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"zoxide"},

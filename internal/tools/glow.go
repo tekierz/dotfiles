@@ -16,7 +16,7 @@ func NewGlowTool() *GlowTool {
 			id:          "glow",
 			name:        "Glow",
 			description: "Render markdown on the CLI",
-			icon:        "",
+			icon:        "󰈙",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"glow"},

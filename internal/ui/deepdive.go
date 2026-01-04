@@ -8,10 +8,10 @@ type DeepDiveConfig struct {
 	GhosttyTabBindings string
 
 	// Tmux settings
-	TmuxPrefix      string
-	TmuxSplitBinds  string
-	TmuxStatusBar   string
-	TmuxMouseMode   bool
+	TmuxPrefix     string
+	TmuxSplitBinds string
+	TmuxStatusBar  string
+	TmuxMouseMode  bool
 
 	// Zsh settings
 	ZshPromptStyle string
@@ -19,9 +19,9 @@ type DeepDiveConfig struct {
 	ZshAliases     map[string]bool
 
 	// Neovim settings
-	NeovimConfig   string
-	NeovimLSPs     []string
-	NeovimPlugins  []string
+	NeovimConfig  string
+	NeovimLSPs    []string
+	NeovimPlugins []string
 
 	// Git settings
 	GitDeltaSideBySide bool
@@ -59,10 +59,10 @@ type DeepDiveConfig struct {
 	LazyDockerMouseMode bool
 
 	// Btop settings
-	BtopTheme      string
-	BtopUpdateMs   int
-	BtopShowTemp   bool
-	BtopGraphType  string
+	BtopTheme     string
+	BtopUpdateMs  int
+	BtopShowTemp  bool
+	BtopGraphType string
 
 	// Glow settings
 	GlowPager string
@@ -92,11 +92,11 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"zsh-completions",
 		},
 		ZshAliases: map[string]bool{
-			"ll":    true,
-			"la":    true,
-			"gs":    true,
-			"gp":    true,
-			"gc":    true,
+			"ll":     true,
+			"la":     true,
+			"gs":     true,
+			"gp":     true,
+			"gc":     true,
 			"docker": true,
 		},
 
@@ -212,25 +212,25 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Name:        "Tmux",
 			Description: "Prefix key, splits, status bar, mouse",
 			Screen:      ScreenConfigTmux,
-			Icon:        "",
+			Icon:        "",
 		},
 		{
 			Name:        "Zsh",
 			Description: "Prompt style, plugins, aliases",
 			Screen:      ScreenConfigZsh,
-			Icon:        "",
+			Icon:        "",
 		},
 		{
 			Name:        "Neovim",
 			Description: "Config preset, LSP servers, plugins",
 			Screen:      ScreenConfigNeovim,
-			Icon:        "",
+			Icon:        "",
 		},
 		{
 			Name:        "Git",
 			Description: "Delta diff, default branch, aliases",
 			Screen:      ScreenConfigGit,
-			Icon:        "",
+			Icon:        "",
 		},
 		{
 			Name:        "Yazi",
@@ -242,49 +242,49 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Name:        "FZF",
 			Description: "Fuzzy finder preview, layout, height",
 			Screen:      ScreenConfigFzf,
-			Icon:        "",
+			Icon:        "󰍉",
 		},
 		{
 			Name:        "LazyGit",
 			Description: "Git UI theme, diff view, mouse mode",
 			Screen:      ScreenConfigLazyGit,
-			Icon:        "",
+			Icon:        "󰊢",
 		},
 		{
 			Name:        "LazyDocker",
 			Description: "Docker UI mouse mode",
 			Screen:      ScreenConfigLazyDocker,
-			Icon:        "",
+			Icon:        "",
 		},
 		{
 			Name:        "Btop",
 			Description: "System monitor theme, graphs, refresh",
 			Screen:      ScreenConfigBtop,
-			Icon:        "",
+			Icon:        "󰄨",
 		},
 		{
 			Name:        "Glow",
 			Description: "Markdown viewer style, pager, width",
 			Screen:      ScreenConfigGlow,
-			Icon:        "",
+			Icon:        "󰈙",
 		},
 		{
 			Name:        "GUI Apps",
 			Description: "Zen Browser, Cursor, LM Studio, OBS",
 			Screen:      ScreenConfigGUIApps,
-			Icon:        "",
+			Icon:        "󰏇",
 		},
 		{
 			Name:        "macOS Apps",
 			Description: "Rectangle, Raycast, and more",
 			Screen:      ScreenConfigMacApps,
-			Icon:        "",
+			Icon:        "",
 		},
 		{
 			Name:        "Utilities",
 			Description: "hk, caff, sshh helper tools",
 			Screen:      ScreenConfigUtilities,
-			Icon:        "",
+			Icon:        "󰘚",
 		},
 	}
 }
