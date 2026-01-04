@@ -13,107 +13,162 @@ func (a *App) renderAnimation() string {
 		return "Loading..."
 	}
 
-	// Fixed dimensions for consistent rendering
-	const rainWidth = 50
-	const rainHeight = 12
+	// Compute a stable "card" size that fits on the screen.
+	// We keep the content area fixed-size throughout the animation to avoid
+	// center-jitter as elements appear.
+	outerW := min(a.width-2, 90)
+	outerH := min(a.height-2, 22)
+	if outerW < 20 {
+		outerW = maxInt(0, a.width-2)
+	}
+	if outerH < 10 {
+		outerH = maxInt(0, a.height-2)
+	}
 
-	progress := float64(a.animFrame) / 30.0
+	// Border(2) + horizontal padding(4) = 6 columns of overhead.
+	// Border(2) + vertical padding(2)   = 4 rows of overhead.
+	contentW := maxInt(10, outerW-6)
+	contentH := maxInt(6, outerH-4)
 
-	// Build animation frame line by line for consistent widths
-	var lines []string
+	// Progress (0..1), clamped.
+	progress := float64(a.animFrame) / float64(introAnimationFrames)
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 1 {
+		progress = 1
+	}
 
-	// Matrix rain characters - ASCII only for consistent width
+	// Layout inside the card:
+	// - rainH lines of matrix noise
+	// - 1 blank line
+	// - 1 logo/banner line
+	// - 1 progress line
+	// - 1 hint line
+	const reservedLines = 4
+	rainH := maxInt(1, contentH-reservedLines)
+
+	// Build animation frame line-by-line for consistent widths.
+	lines := make([]string, 0, contentH)
+
 	matrixChars := "01!@#$%^&*<>[]{}|;:~`"
+	scanY := 0
+	if rainH > 0 {
+		scanY = (a.animFrame / 2) % rainH
+	}
 
-	for y := 0; y < rainHeight; y++ {
+	for y := 0; y < rainH; y++ {
 		var line strings.Builder
-		for x := 0; x < rainWidth; x++ {
-			// Seed based on position for stable patterns that shift with frame
-			seed := x*17 + y*31 + a.animFrame
+		for x := 0; x < contentW; x++ {
+			seed := x*17 + y*31 + a.animFrame*7
 
-			// Determine character and color
-			if seed%7 == 0 || (x+y+a.animFrame)%11 == 0 {
-				// Bright matrix character
-				char := matrixChars[seed%len(matrixChars)]
-				colorIdx := ((x + y + a.animFrame) * len(GradientRainbow)) / (rainWidth + rainHeight)
-				colorIdx = colorIdx % len(GradientRainbow)
-				style := lipgloss.NewStyle().Foreground(GradientRainbow[colorIdx])
-				line.WriteString(style.Render(string(char)))
-			} else if seed%13 == 0 {
-				// Dim background character
-				colorIdx := ((x + a.animFrame) * len(GradientCyber)) / rainWidth
-				colorIdx = colorIdx % len(GradientCyber)
-				style := lipgloss.NewStyle().Foreground(GradientCyber[colorIdx])
+			// A subtle "scan band" that makes one row pop and feel more alive.
+			isScan := y == scanY
+
+			switch {
+			case seed%29 == 0 || (isScan && seed%7 == 0):
+				// Bright character
+				ch := matrixChars[seed%len(matrixChars)]
+				color := GradientCyber[(x+a.animFrame)%len(GradientCyber)]
+				style := lipgloss.NewStyle().Foreground(color)
+				if isScan || seed%11 == 0 {
+					style = style.Bold(true)
+				}
+				line.WriteString(style.Render(string(ch)))
+
+			case seed%13 == 0:
+				// Faint fill
+				color := GradientCyber[(x+seed)%len(GradientCyber)]
+				style := lipgloss.NewStyle().Foreground(color)
+				if !isScan {
+					style = style.Faint(true)
+				}
 				line.WriteString(style.Render("░"))
-			} else if seed%19 == 0 {
-				// Occasional dim dot
+
+			case seed%19 == 0:
+				// Tiny noise dot
 				style := lipgloss.NewStyle().Foreground(ColorBorder)
+				if isScan {
+					style = lipgloss.NewStyle().Foreground(ColorNeonBlue)
+				}
 				line.WriteString(style.Render("·"))
-			} else {
+
+			default:
 				line.WriteString(" ")
 			}
 		}
 		lines = append(lines, line.String())
 	}
 
-	// Add logo reveal when animation is > 40% complete
-	if progress > 0.4 {
-		logoText := "D O T F I L E S"
-		logoRunes := []rune(logoText)
-		visibleCount := int(float64(len(logoRunes)) * (progress - 0.4) * 2.5)
-		if visibleCount > len(logoRunes) {
-			visibleCount = len(logoRunes)
-		}
+	// Blank spacer line (kept always to avoid layout jitter).
+	lines = append(lines, "")
 
-		var logoLine strings.Builder
-		// Center the logo
-		padding := (rainWidth - len(logoText) - 10) / 2
-		if padding < 0 {
-			padding = 0
-		}
-		logoLine.WriteString(strings.Repeat(" ", padding))
-		logoLine.WriteString(GradientText("░▒▓█ ", GradientCyber))
+	// Banner line: reveal "DOTFILES" smoothly, but keep constant width.
+	bannerText := "DOTFILES"
+	reveal := int(progress * float64(len([]rune(bannerText))+4))
+	if reveal < 0 {
+		reveal = 0
+	}
+	if reveal > len([]rune(bannerText)) {
+		reveal = len([]rune(bannerText))
+	}
 
-		// Reveal characters one by one
-		for i, r := range logoRunes {
-			if i < visibleCount {
-				colorIdx := (i * len(GradientRainbow)) / len(logoRunes)
-				style := lipgloss.NewStyle().Foreground(GradientRainbow[colorIdx]).Bold(true)
-				logoLine.WriteString(style.Render(string(r)))
-			} else {
-				logoLine.WriteString(" ")
-			}
+	var banner strings.Builder
+	runes := []rune(bannerText)
+	for i, r := range runes {
+		if i <= reveal {
+			banner.WriteRune(r)
+		} else {
+			banner.WriteRune(' ')
 		}
+	}
 
-		if visibleCount >= len(logoRunes) {
-			logoLine.WriteString(GradientText(" █▓▒░", []lipgloss.Color{
-				"#8b00ff", "#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff7f00", "#ff0000",
-			}))
-		}
+	bannerLine := lipgloss.Place(
+		contentW, 1,
+		lipgloss.Center, lipgloss.Center,
+		GradientText("░▒▓█ ", GradientCyber)+
+			lipgloss.NewStyle().Bold(true).Render(GradientText(banner.String(), GradientCyber))+
+			GradientText(" █▓▒░", []lipgloss.Color{"#bf00ff", "#0044ff", "#006eff", "#0099ff", "#00c3ff", "#00e1ff", "#00ffff"}),
+	)
+	lines = append(lines, bannerLine)
 
+	// Progress line (animated).
+	barW := min(40, maxInt(10, contentW-18))
+	bar := ProgressBarAnimated(progress, barW, a.animFrame)
+	pct := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("%3d%%", int(progress*100)))
+	progressLine := lipgloss.Place(
+		contentW, 1,
+		lipgloss.Center, lipgloss.Center,
+		AnimatedSpinnerDots(a.animFrame)+" "+bar+" "+pct,
+	)
+	lines = append(lines, progressLine)
+
+	// Hint line.
+	hint := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("[Press any key to skip]")
+	hintLine := lipgloss.Place(contentW, 1, lipgloss.Center, lipgloss.Center, hint)
+	lines = append(lines, hintLine)
+
+	// Ensure we always render exactly contentH lines (stability).
+	for len(lines) < contentH {
 		lines = append(lines, "")
-		lines = append(lines, logoLine.String())
+	}
+	if len(lines) > contentH {
+		lines = lines[:contentH]
 	}
 
 	content := strings.Join(lines, "\n")
 
-	// Pulsing border color
 	borderColor := GradientCyber[a.animFrame%len(GradientCyber)]
-	frame := lipgloss.NewStyle().
+	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(1, 2).
 		Render(content)
 
-	// Skip hint
-	hint := lipgloss.NewStyle().
-		Foreground(ColorTextMuted).
-		Render("\n  [Press any key to skip]")
-
 	return lipgloss.Place(
 		a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		frame+hint,
+		card,
 	)
 }
 
@@ -429,7 +484,8 @@ func (a *App) renderProgress() string {
 	if a.installComplete {
 		progressPercent = 1.0
 	}
-	progress := ProgressBar(progressPercent, 40)
+	progressW := min(50, maxInt(20, a.width-30))
+	progress := ProgressBar(progressPercent, progressW)
 
 	// Output panel - show real output
 	var outputLines string
@@ -449,8 +505,11 @@ func (a *App) renderProgress() string {
 	output := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorBorder).
-		Width(60).
-		Height(8).
+		// Keep the output panel responsive so it doesn't overflow smaller terminals.
+		// Note: Width/Height apply before borders in lipgloss, so subtract 2 to
+		// target an approximate outer size.
+		Width(maxInt(20, min(72, a.width-10)-2)).
+		Height(clampInt(a.height/4, 6, 10)).
 		Padding(0, 1).
 		Render(outputLines)
 

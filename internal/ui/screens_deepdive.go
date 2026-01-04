@@ -154,7 +154,7 @@ func (a *App) renderConfigGhostty() string {
 		tabFocused,
 	))
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • enter/esc save & back")
 
 	return lipgloss.Place(
@@ -209,7 +209,7 @@ func (a *App) renderConfigTmux() string {
 	content.WriteString(renderFieldLabel("Mouse Support", mouseFocused))
 	content.WriteString(renderToggle(cfg.TmuxMouseMode, mouseFocused))
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • enter/esc back")
 
 	return lipgloss.Place(
@@ -272,7 +272,7 @@ func (a *App) renderConfigZsh() string {
 		content.WriteString("\n")
 	}
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space/enter select • esc back")
 
 	return lipgloss.Place(
@@ -336,7 +336,7 @@ func (a *App) renderConfigNeovim() string {
 		content.WriteString("\n")
 	}
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space/enter select • esc back")
 
 	return lipgloss.Place(
@@ -384,7 +384,7 @@ func (a *App) renderConfigGit() string {
 		content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  " + alias + "\n"))
 	}
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
 
 	return lipgloss.Place(
@@ -428,7 +428,7 @@ func (a *App) renderConfigYazi() string {
 		previewFocused,
 	))
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
 
 	return lipgloss.Place(
@@ -467,7 +467,7 @@ func (a *App) renderConfigFzf() string {
 		layoutFocused,
 	))
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • space toggle • esc back")
 
 	return lipgloss.Place(
@@ -527,7 +527,7 @@ func (a *App) renderConfigMacApps() string {
 		))
 	}
 
-	box := configBoxStyle.Width(55).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
 
 	return lipgloss.Place(
@@ -798,7 +798,7 @@ func (a *App) renderConfigUtilities() string {
 		))
 	}
 
-	box := configBoxStyle.Width(55).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
 
 	return lipgloss.Place(
@@ -853,7 +853,7 @@ func (a *App) renderConfigCLITools() string {
 		))
 	}
 
-	box := configBoxStyle.Width(60).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(60)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
 
 	return lipgloss.Place(
@@ -907,7 +907,7 @@ func (a *App) renderConfigGUIApps() string {
 		))
 	}
 
-	box := configBoxStyle.Width(60).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(60)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
 
 	return lipgloss.Place(
@@ -943,7 +943,7 @@ func (a *App) renderConfigLazyGit() string {
 		a.configFieldIndex == 2,
 	))
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
 
 	return lipgloss.Place(
@@ -964,7 +964,7 @@ func (a *App) renderConfigLazyDocker() string {
 	content.WriteString(renderFieldLabel("Mouse Mode", true))
 	content.WriteString(renderToggle(cfg.LazyDockerMouseMode, true))
 
-	box := configBoxStyle.Width(50).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
 	help := HelpStyle.Render("space toggle • enter/esc save & back")
 
 	return lipgloss.Place(
@@ -1014,7 +1014,7 @@ func (a *App) renderConfigBtop() string {
 		a.configFieldIndex == 3,
 	))
 
-	box := configBoxStyle.Width(55).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • space toggle • esc back")
 
 	return lipgloss.Place(
@@ -1059,7 +1059,7 @@ func (a *App) renderConfigGlow() string {
 	}
 	content.WriteString(fmt.Sprintf("    ◀ %s ▶", widthStyle.Render(fmt.Sprintf("%d chars", cfg.GlowWidth))))
 
-	box := configBoxStyle.Width(55).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • esc back")
 
 	return lipgloss.Place(
@@ -1067,4 +1067,25 @@ func (a *App) renderConfigGlow() string {
 		lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
+}
+
+// deepDiveBoxWidth returns a responsive width for config boxes in the deep-dive
+// flow. The goal is to preserve the "tight" defaults on typical terminals while
+// scaling up on wider terminals and scaling down gracefully on narrow ones.
+func (a *App) deepDiveBoxWidth(preferred int) int {
+	if a.width <= 0 {
+		return preferred
+	}
+
+	// Grow with terminal width, but cap so screens don't feel excessively wide.
+	w := maxInt(preferred, a.width-30)
+	w = min(70, w)
+
+	// Ensure it fits with a small margin around the centered content.
+	w = min(w, a.width-6)
+	if w < 0 {
+		w = 0
+	}
+
+	return w
 }

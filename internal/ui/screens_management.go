@@ -16,27 +16,23 @@ import (
 func (a *App) renderMainMenu() string {
 	items := GetMainMenuItems()
 
-	// Title with gradient
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#89b4fa")).
-		Render("  Dotfiles Management")
-
+	title := TitleStyle.Render("Dotfiles Management")
 	subtitle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
+		Italic(true).
 		Render("Terminal environment management platform")
 
 	// Menu items
 	var menuLines []string
 	for i, item := range items {
 		cursor := "  "
-		itemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
-		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
+		itemStyle := lipgloss.NewStyle().Foreground(ColorText)
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 
 		if i == a.mainMenuIndex {
-			cursor = " "
-			itemStyle = itemStyle.Foreground(lipgloss.Color("#a6e3a1")).Bold(true)
-			descStyle = descStyle.Foreground(lipgloss.Color("#94e2d5"))
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
+			itemStyle = itemStyle.Foreground(ColorCyan).Bold(true)
+			descStyle = descStyle.Foreground(ColorText)
 		}
 
 		line := fmt.Sprintf("%s%s %s  %s",
@@ -49,18 +45,20 @@ func (a *App) renderMainMenu() string {
 
 	menu := strings.Join(menuLines, "\n")
 
-	// Footer hints
-	footer := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
-		Render("↑↓ Navigate • Enter Select • q Quit")
-
-	// Center everything
-	content := fmt.Sprintf("\n\n%s\n%s\n\n%s\n\n%s",
-		title, subtitle, menu, footer)
+	help := HelpStyle.Render("↑↓ navigate • enter select • q quit")
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		subtitle,
+		"",
+		menu,
+		"",
+		help,
+	)
 
 	return lipgloss.Place(a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		content)
+		ContainerStyle.Render(content))
 }
 
 // =====================================
@@ -76,57 +74,56 @@ type updatePackage struct {
 }
 
 func (a *App) renderUpdate() string {
-	// Title
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#89b4fa")).
-		Render("  Package Updates")
+	title := TitleStyle.Render("Package Updates")
 
 	// Get outdated packages
 	mgr := pkg.DetectManager()
 	if mgr == nil {
-		content := fmt.Sprintf("\n\n%s\n\n%s\n\n%s",
-			title,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8")).Render("No package manager detected"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086")).Render("q Quit • Esc Back"))
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, content)
+		body := lipgloss.NewStyle().Foreground(ColorRed).Render("No package manager detected")
+		help := HelpStyle.Render("esc back • q quit")
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
+			ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", help)))
 	}
 
 	updates, err := pkg.CheckDotfilesUpdates()
 	if err != nil {
-		content := fmt.Sprintf("\n\n%s\n\n%s\n\n%s",
-			title,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8")).Render(fmt.Sprintf("Error: %v", err)),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086")).Render("q Quit • Esc Back"))
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, content)
+		body := lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("Error: %v", err))
+		help := HelpStyle.Render("esc back • q quit")
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
+			ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", help)))
 	}
 
 	if len(updates) == 0 {
-		content := fmt.Sprintf("\n\n%s\n\n%s\n\n%s",
-			title,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render(" All packages are up to date!"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086")).Render("q Quit • Esc Back"))
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, content)
+		body := lipgloss.NewStyle().Foreground(ColorGreen).Render("All packages are up to date!")
+		help := HelpStyle.Render("esc back • q quit")
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
+			ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", help)))
 	}
 
-	subtitle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
-		Render(fmt.Sprintf("Found %d outdated package(s)", len(updates)))
+	// Clamp cursor to actual list length (rendering-only; avoids "lost" cursor).
+	if a.updateIndex < 0 {
+		a.updateIndex = 0
+	}
+	if a.updateIndex > len(updates)-1 {
+		a.updateIndex = len(updates) - 1
+	}
+
+	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("Found %d outdated package(s)", len(updates)))
 
 	// Package list
 	var pkgLines []string
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#89b4fa")).Bold(true)
-	pkgLines = append(pkgLines, headerStyle.Render(fmt.Sprintf("  %-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")))
-	pkgLines = append(pkgLines, headerStyle.Render(fmt.Sprintf("  %-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))))
+	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
+	pkgLines = append(pkgLines, headerStyle.Render(fmt.Sprintf("%-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")))
+	pkgLines = append(pkgLines, headerStyle.Render(fmt.Sprintf("%-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))))
 
 	for i, p := range updates {
 		cursor := "  "
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
-		versionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387"))
-		newStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1"))
+		style := lipgloss.NewStyle().Foreground(ColorText)
+		versionStyle := lipgloss.NewStyle().Foreground(ColorYellow)
+		newStyle := lipgloss.NewStyle().Foreground(ColorGreen)
 
 		if i == a.updateIndex {
-			cursor = " "
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
 			style = style.Bold(true)
 		}
 
@@ -140,17 +137,17 @@ func (a *App) renderUpdate() string {
 
 	packageList := strings.Join(pkgLines, "\n")
 
-	// Footer
-	footer := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
-		Render("↑↓ Navigate • Enter Update All • Esc Back • q Quit")
+	listBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder).
+		Padding(0, 1).
+		Render(packageList)
 
-	content := fmt.Sprintf("\n\n%s\n%s\n\n%s\n\n%s",
-		title, subtitle, packageList, footer)
-
+	help := HelpStyle.Render("↑↓ navigate • enter update all • esc back • q quit")
+	content := lipgloss.JoinVertical(lipgloss.Left, title, subtitle, "", listBox, "", help)
 	return lipgloss.Place(a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		content)
+		ContainerStyle.Render(content))
 }
 
 // =====================================
@@ -279,7 +276,7 @@ func (a *App) renderHotkeys() string {
 	if a.hotkeyFilter != "" {
 		var filtered []HotkeyCategory
 		for _, cat := range categories {
-			if strings.ToLower(cat.Name) == strings.ToLower(a.hotkeyFilter) {
+			if strings.EqualFold(cat.Name, a.hotkeyFilter) {
 				filtered = append(filtered, cat)
 			}
 		}
@@ -288,28 +285,20 @@ func (a *App) renderHotkeys() string {
 		}
 	}
 
-	// Title
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#89b4fa")).
-		Render("  Keyboard Shortcuts")
+	title := TitleStyle.Render("Keyboard Shortcuts")
 
 	if len(categories) == 0 {
-		content := fmt.Sprintf("\n\n%s\n\n%s",
-			title,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8")).Render("No hotkeys found"))
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, content)
+		body := lipgloss.NewStyle().Foreground(ColorRed).Render("No hotkeys found")
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
+			ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body)))
 	}
 
 	// Category tabs
 	var tabItems []string
 	for i, cat := range categories {
-		tabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
+		tabStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 		if i == a.hotkeyCategory {
-			tabStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#89b4fa")).
-				Bold(true).
-				Underline(true)
+			tabStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Underline(true)
 		}
 		tabItems = append(tabItems, tabStyle.Render(fmt.Sprintf(" %s %s ", cat.Icon, cat.Name)))
 	}
@@ -321,15 +310,15 @@ func (a *App) renderHotkeys() string {
 
 	for i, hk := range currentCat.Hotkeys {
 		keyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#f9e2af")).
+			Foreground(ColorYellow).
 			Bold(true).
 			Width(20)
-		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
+		descStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 		cursor := "  "
 		if i == a.hotkeyCursor {
-			cursor = " "
-			descStyle = descStyle.Foreground(lipgloss.Color("#a6e3a1"))
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
+			descStyle = descStyle.Foreground(ColorCyan)
 		}
 
 		line := fmt.Sprintf("%s%s %s",
@@ -341,17 +330,11 @@ func (a *App) renderHotkeys() string {
 
 	hotkeyList := strings.Join(hotkeyLines, "\n")
 
-	// Footer
-	footer := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
-		Render("←→ Categories • ↑↓ Scroll • Esc Back • q Quit")
-
-	content := fmt.Sprintf("\n\n%s\n\n%s\n\n%s\n\n%s",
-		title, tabs, hotkeyList, footer)
-
+	help := HelpStyle.Render("←→ categories • ↑↓ scroll • esc back • q quit")
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", tabs, "", hotkeyList, "", help)
 	return lipgloss.Place(a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		content)
+		ContainerStyle.Render(content))
 }
 
 // =====================================
@@ -443,24 +426,17 @@ func (a *App) renderManage() string {
 // =====================================
 
 func (a *App) renderBackups() string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#89b4fa")).
-		Render("  Backups")
+	title := TitleStyle.Render("Backups")
 
 	// TODO: Read actual backups from ~/.config/dotfiles/backups/
 	message := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("Backup management coming soon...\n\nUse CLI: dotfiles backups")
 
-	footer := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
-		Render("Esc Back • q Quit")
+	help := HelpStyle.Render("esc back • q quit")
 
-	content := fmt.Sprintf("\n\n%s\n\n%s\n\n%s",
-		title, message, footer)
-
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", message, "", help)
 	return lipgloss.Place(a.width, a.height,
 		lipgloss.Center, lipgloss.Center,
-		content)
+		ContainerStyle.Render(content))
 }

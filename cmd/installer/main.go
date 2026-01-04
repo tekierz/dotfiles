@@ -21,7 +21,7 @@ func main() {
 	app := ui.NewApp(skipIntro)
 
 	// Create and run the Bubble Tea program
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running installer: %v\n", err)

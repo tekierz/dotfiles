@@ -198,7 +198,7 @@ func launchTUI(screen ui.Screen) {
 	app := ui.NewApp(skipIntro)
 	app.SetStartScreen(screen)
 
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
@@ -218,7 +218,7 @@ func launchToolConfig(tool string) {
 
 	app.SetStartScreen(screen)
 
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
@@ -231,7 +231,7 @@ func launchHotkeysFiltered(tool string) {
 	app.SetStartScreen(ui.ScreenHotkeys)
 	app.SetHotkeyFilter(tool)
 
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)

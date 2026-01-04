@@ -1,12 +1,19 @@
 package ui
 
 import (
+	"fmt"
 	"io"
 	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/runner"
+)
+
+const (
+	introAnimationFrames = 72
+	introAnimationTick   = 50 * time.Millisecond
 )
 
 // Screen represents different screens in the wizard
@@ -69,6 +76,8 @@ var themes = []struct {
 }{
 	{"catppuccin-mocha", "Dark, warm pastels", "#89b4fa"},
 	{"catppuccin-latte", "Light, warm pastels", "#1e66f5"},
+	{"catppuccin-frappe", "Muted, cozy dark", "#8caaee"},
+	{"catppuccin-macchiato", "Dark, punchy contrast", "#8aadf4"},
 	{"dracula", "Dark with vibrant purples", "#bd93f9"},
 	{"gruvbox-dark", "Retro warm browns", "#83a598"},
 	{"gruvbox-light", "Warm paper-like tones", "#076678"},
@@ -112,6 +121,20 @@ type App struct {
 
 	// Management state (detailed config)
 	manageConfig *ManageConfig
+	managePane   int // 0 = tools pane, 1 = settings pane (ScreenManage)
+	// Cached install status for tools to avoid running package-manager checks every render.
+	manageInstalled      map[string]bool
+	manageInstalledReady bool
+	// Manage screen scrolling
+	manageToolsScroll  int
+	manageFieldsScroll int
+	// Inline editing state (used by ScreenManage)
+	manageEditing      bool
+	manageEditValue    string
+	manageEditCursor   int
+	manageEditField    *string
+	manageEditFieldKey string // human label for the field being edited
+	manageStatus       string // transient status line (save result, etc.)
 
 	// Installation state
 	installStep     int
@@ -122,13 +145,13 @@ type App struct {
 	runner          *runner.Runner
 
 	// Management platform state (new)
-	mainMenuIndex   int      // Main menu cursor
-	manageIndex     int      // Manage screen cursor
-	updateIndex     int      // Update screen cursor
-	hotkeyFilter    string   // Filter hotkeys by tool
-	hotkeyCursor    int      // Hotkeys screen cursor
-	hotkeyCategory  int      // Current category in hotkeys
-	backupIndex     int      // Backup selection cursor
+	mainMenuIndex  int    // Main menu cursor
+	manageIndex    int    // Manage screen cursor
+	updateIndex    int    // Update screen cursor
+	hotkeyFilter   string // Filter hotkeys by tool
+	hotkeyCursor   int    // Hotkeys screen cursor
+	hotkeyCategory int    // Current category in hotkeys
+	backupIndex    int    // Backup selection cursor
 
 	// Error state
 	lastError error
@@ -144,6 +167,30 @@ func NewApp(skipIntro bool) *App {
 		installOutput:  make([]string, 0, 100),
 		deepDiveConfig: NewDeepDiveConfig(),
 		manageConfig:   NewManageConfig(),
+		managePane:     0,
+	}
+
+	// Best-effort: load persisted global settings (theme + nav) if available.
+	if cfg, err := config.LoadGlobalConfig(); err == nil && cfg != nil {
+		if cfg.Theme != "" {
+			app.theme = cfg.Theme
+		}
+		if cfg.NavStyle != "" {
+			app.navStyle = cfg.NavStyle
+		}
+	}
+
+	// Keep the theme picker cursor in sync with the persisted theme.
+	for i, t := range themes {
+		if t.name == app.theme {
+			app.themeIndex = i
+			break
+		}
+	}
+
+	// Best-effort: load persisted management settings for deep-dive manager UI.
+	if cfg, err := config.LoadToolConfig("manage", NewManageConfig); err == nil && cfg != nil {
+		app.manageConfig = cfg
 	}
 
 	if skipIntro {
@@ -197,7 +244,7 @@ type sudoCachedMsg struct {
 }
 
 func tickAnimation() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(introAnimationTick, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
@@ -215,6 +262,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return a.handleKey(msg)
 
+	case tea.MouseMsg:
+		return a.handleMouse(msg)
+
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
@@ -223,8 +273,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		if a.screen == ScreenAnimation {
 			a.animFrame++
-			// Animation runs for about 30 frames (3 seconds)
-			if a.animFrame >= 30 {
+			// Animation runs for a short burst and then transitions to the wizard.
+			if a.animFrame >= introAnimationFrames {
 				a.animationDone = true
 				a.screen = ScreenWelcome
 				return a, nil
@@ -283,9 +333,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.screen = ScreenError
 		}
 		return a, nil
+
+	case manageSavedMsg:
+		if msg.err != nil {
+			a.manageStatus = fmt.Sprintf("Save failed: %v", msg.err)
+		} else {
+			a.manageStatus = "Saved ✓"
+		}
+		return a, nil
 	}
 
 	return a, nil
+}
+
+func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch a.screen {
+	case ScreenManage:
+		return a.handleManageMouse(msg)
+	default:
+		return a, nil
+	}
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -297,7 +364,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// 'q' quits from any screen except during installation
-	if key == "q" && !a.installRunning {
+	if key == "q" && !a.installRunning && !(a.screen == ScreenManage && a.manageEditing) {
 		return a, tea.Quit
 	}
 
@@ -925,24 +992,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Manage screen navigation
 	case ScreenManage:
-		manageTools := getManageTools()
-		switch key {
-		case "up", "k":
-			if a.manageIndex > 0 {
-				a.manageIndex--
-			}
-		case "down", "j":
-			if a.manageIndex < len(manageTools)-1 {
-				a.manageIndex++
-			}
-		case "enter":
-			if a.manageIndex < len(manageTools) {
-				a.configFieldIndex = 0
-				a.screen = manageTools[a.manageIndex].screen
-			}
-		case "esc":
-			a.screen = ScreenMainMenu
-		}
+		return a.handleManageKey(msg)
 
 	// Management config screens
 	case ScreenManageGhostty:
@@ -1056,7 +1106,7 @@ func (a *App) View() string {
 	case ScreenMainMenu:
 		return a.renderMainMenu()
 	case ScreenManage:
-		return a.renderManageDetailed()
+		return a.renderManageDualPane()
 	case ScreenManageGhostty:
 		return a.renderManageGhostty()
 	case ScreenManageTmux:
