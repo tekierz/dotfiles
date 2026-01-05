@@ -11,43 +11,43 @@ import (
 // ManageConfig holds detailed management configuration for all tools
 type ManageConfig struct {
 	// Ghostty detailed settings
-	GhosttyFontFamily     string
-	GhosttyFontSize       int
-	GhosttyOpacity        int
-	GhosttyBlurRadius     int
-	GhosstyCursorStyle    string
-	GhosttyScrollbackLines int
+	GhosttyFontFamily        string
+	GhosttyFontSize          int
+	GhosttyOpacity           int
+	GhosttyBlurRadius        int
+	GhosstyCursorStyle       string
+	GhosttyScrollbackLines   int
 	GhosttyWindowDecorations bool
-	GhosttyConfirmClose   bool
+	GhosttyConfirmClose      bool
 
 	// Tmux detailed settings
-	TmuxPrefix          string
-	TmuxBaseIndex       int
-	TmuxMouseMode       bool
-	TmuxStatusPosition  string
-	TmuxPaneBorderStyle string
-	TmuxHistoryLimit    int
-	TmuxEscapeTime      int
+	TmuxPrefix           string
+	TmuxBaseIndex        int
+	TmuxMouseMode        bool
+	TmuxStatusPosition   string
+	TmuxPaneBorderStyle  string
+	TmuxHistoryLimit     int
+	TmuxEscapeTime       int
 	TmuxAggressiveResize bool
 
 	// Zsh detailed settings
-	ZshHistorySize      int
+	ZshHistorySize       int
 	ZshHistoryIgnoreDups bool
-	ZshAutoCD           bool
-	ZshCorrection       bool
-	ZshCompletionMenu   bool
-	ZshSyntaxHighlight  bool
-	ZshAutosuggestions  bool
+	ZshAutoCD            bool
+	ZshCorrection        bool
+	ZshCompletionMenu    bool
+	ZshSyntaxHighlight   bool
+	ZshAutosuggestions   bool
 
 	// Neovim detailed settings
-	NeovimLineNumbers   string
-	NeovimRelativeNum   bool
-	NeovimTabWidth      int
-	NeovimExpandTab     bool
-	NeovimWrap          bool
-	NeovimCursorLine    bool
-	NeovimClipboard     string
-	NeovimUndoFile      bool
+	NeovimLineNumbers string
+	NeovimRelativeNum bool
+	NeovimTabWidth    int
+	NeovimExpandTab   bool
+	NeovimWrap        bool
+	NeovimCursorLine  bool
+	NeovimClipboard   string
+	NeovimUndoFile    bool
 
 	// Git detailed settings
 	GitDefaultBranch    string
@@ -59,57 +59,57 @@ type ManageConfig struct {
 	GitSignCommits      bool
 
 	// Yazi detailed settings
-	YaziShowHidden      bool
-	YaziSortBy          string
-	YaziSortReverse     bool
-	YaziLineMode        string
-	YaziScrollOff       int
+	YaziShowHidden  bool
+	YaziSortBy      string
+	YaziSortReverse bool
+	YaziLineMode    string
+	YaziScrollOff   int
 
 	// FZF detailed settings
-	FzfDefaultOpts      string
-	FzfHeight           int
-	FzfLayout           string
-	FzfBorderStyle      string
-	FzfPreview          bool
-	FzfPreviewWindow    string
+	FzfDefaultOpts   string
+	FzfHeight        int
+	FzfLayout        string
+	FzfBorderStyle   string
+	FzfPreview       bool
+	FzfPreviewWindow string
 
 	// LazyGit detailed settings
-	LazyGitSideBySide   bool
-	LazyGitPaging       string
-	LazyGitMouseMode    bool
-	LazyGitGuiTheme     string
+	LazyGitSideBySide bool
+	LazyGitPaging     string
+	LazyGitMouseMode  bool
+	LazyGitGuiTheme   string
 
 	// LazyDocker detailed settings
 	LazyDockerMouseMode bool
 	LazyDockerLogsTail  int
 
 	// Btop detailed settings
-	BtopTheme           string
-	BtopUpdateMs        int
-	BtopShowTemp        bool
-	BtopTempScale       string
-	BtopGraphSymbol     string
-	BtopShownBoxes      string
+	BtopTheme       string
+	BtopUpdateMs    int
+	BtopShowTemp    bool
+	BtopTempScale   string
+	BtopGraphSymbol string
+	BtopShownBoxes  string
 
 	// Glow detailed settings
-	GlowStyle           string
-	GlowPager           string
-	GlowWidth           int
-	GlowMouse           bool
+	GlowStyle string
+	GlowPager string
+	GlowWidth int
+	GlowMouse bool
 }
 
 // NewManageConfig creates a new management config with defaults
 func NewManageConfig() *ManageConfig {
 	return &ManageConfig{
 		// Ghostty
-		GhosttyFontFamily:      "JetBrainsMono Nerd Font",
-		GhosttyFontSize:        14,
-		GhosttyOpacity:         100,
-		GhosttyBlurRadius:      0,
-		GhosstyCursorStyle:     "block",
-		GhosttyScrollbackLines: 10000,
+		GhosttyFontFamily:        "JetBrainsMono Nerd Font",
+		GhosttyFontSize:          14,
+		GhosttyOpacity:           100,
+		GhosttyBlurRadius:        0,
+		GhosstyCursorStyle:       "block",
+		GhosttyScrollbackLines:   10000,
 		GhosttyWindowDecorations: true,
-		GhosttyConfirmClose:    true,
+		GhosttyConfirmClose:      true,
 
 		// Tmux
 		TmuxPrefix:           "C-a",

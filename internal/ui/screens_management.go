@@ -81,6 +81,19 @@ func (a *App) renderUpdate() string {
 
 	title := TitleStyle.Render("Package Updates")
 
+	// Check if we're running an update
+	if a.updateRunning {
+		spinnerText := a.updateStatus
+		if a.animationsEnabled {
+			spinnerText = AnimatedSpinnerDots(a.uiFrame) + " " + a.updateStatus
+		}
+		body := lipgloss.NewStyle().Foreground(ColorCyan).Render(spinnerText)
+		progressBar := ProgressBarAnimated(0.5, min(60, a.width-20), a.uiFrame)
+		help := HelpStyle.Render("updating... please wait")
+		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, progressBar, "", help)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, content)
+	}
+
 	// Check if we're still loading
 	if a.updateChecking {
 		spinnerText := "Checking for updates..."
@@ -128,7 +141,23 @@ func (a *App) renderUpdate() string {
 		a.updateIndex = len(updates) - 1
 	}
 
-	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("Found %d outdated package(s)", len(updates)))
+	// Build subtitle with selection count
+	selectedCount := len(a.updateSelected)
+	subtitleText := fmt.Sprintf("Found %d outdated package(s)", len(updates))
+	if selectedCount > 0 {
+		subtitleText += fmt.Sprintf(" • %d selected", selectedCount)
+	}
+	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(subtitleText)
+
+	// Show status message if any
+	var statusLine string
+	if a.updateStatus != "" {
+		statusStyle := lipgloss.NewStyle().Foreground(ColorGreen)
+		if strings.Contains(a.updateStatus, "failed") {
+			statusStyle = lipgloss.NewStyle().Foreground(ColorRed)
+		}
+		statusLine = statusStyle.Render(a.updateStatus)
+	}
 
 	boxOuterW := min(92, maxInt(44, a.width-8))
 	innerTextW := maxInt(20, boxOuterW-4) // border(2) + paddingX(2)
@@ -136,22 +165,30 @@ func (a *App) renderUpdate() string {
 	// Package list
 	var pkgLines []string
 	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
-	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("%-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")), innerTextW))
-	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("%-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
+	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")), innerTextW))
+	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
 
 	for i, p := range updates {
 		cursor := "  "
+		checkbox := "○"
 		style := lipgloss.NewStyle().Foreground(ColorText)
 		versionStyle := lipgloss.NewStyle().Foreground(ColorYellow)
 		newStyle := lipgloss.NewStyle().Foreground(ColorGreen)
+		checkStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+
+		if a.updateSelected[i] {
+			checkbox = "●"
+			checkStyle = lipgloss.NewStyle().Foreground(ColorCyan)
+		}
 
 		if i == a.updateIndex {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
 			style = style.Bold(true)
 		}
 
-		line := fmt.Sprintf("%s%-25s %s → %s",
+		line := fmt.Sprintf("%s%s %-25s %s → %s",
 			cursor,
+			checkStyle.Render(checkbox),
 			style.Render(p.Name),
 			versionStyle.Render(p.CurrentVersion),
 			newStyle.Render(p.LatestVersion))
@@ -167,8 +204,17 @@ func (a *App) renderUpdate() string {
 		Width(maxInt(1, boxOuterW-2)). // border adds 2
 		Render(packageList)
 
-	help := HelpStyle.Render("↑↓ navigate • enter update • r refresh • 1-4 switch tabs • esc menu • q quit")
-	content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, subtitle, "", listBox, "", help)
+	help := HelpStyle.Render("↑↓ navigate • space select • enter update • a update all • r refresh • esc menu")
+
+	// Build content with optional status line
+	var contentParts []string
+	contentParts = append(contentParts, tabBar, "", title, subtitle)
+	if statusLine != "" {
+		contentParts = append(contentParts, statusLine)
+	}
+	contentParts = append(contentParts, "", listBox, "", help)
+	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
+
 	return lipgloss.Place(a.width, a.height,
 		lipgloss.Center, lipgloss.Top,
 		content)

@@ -60,23 +60,43 @@ func Categories(navStyle string) []Category {
 		{
 			ID:   "tmux",
 			Name: "Tmux",
-			Icon: "",
+			Icon: "",
 			Items: []Item{
+				// Pane management
 				{"Prefix + |", "Split pane vertically"},
 				{"Prefix + -", "Split pane horizontally"},
 				{tmuxNav, "Navigate panes"},
 				{"Prefix + H/J/K/L", "Resize panes"},
+				{"Prefix + z", "Toggle pane zoom"},
+				{"Prefix + x", "Close current pane"},
+				{"Prefix + !", "Convert pane to window"},
+				{"Prefix + q", "Show pane numbers"},
+				{"Prefix + {/}", "Swap pane left/right"},
+				// Window management
 				{"Prefix + c", "New window"},
 				{"Prefix + n/p", "Next/previous window"},
-				{"Prefix + [", "Copy mode"},
-				{"Prefix + r", "Reload config"},
+				{"Prefix + 0-9", "Switch to window N"},
+				{"Prefix + w", "List windows"},
+				{"Prefix + ,", "Rename window"},
+				{"Prefix + &", "Close window"},
+				{"Prefix + l", "Last active window"},
+				// Session management
+				{"Prefix + s", "List sessions"},
+				{"Prefix + $", "Rename session"},
 				{"Prefix + d", "Detach session"},
+				{"Prefix + (", "Previous session"},
+				{"Prefix + )", "Next session"},
+				// Copy mode & misc
+				{"Prefix + [", "Copy mode"},
+				{"Prefix + ]", "Paste buffer"},
+				{"Prefix + r", "Reload config"},
+				{"Prefix + ?", "List keybindings"},
 			},
 		},
 		{
 			ID:   "zsh",
 			Name: zshTitle,
-			Icon: "",
+			Icon: "",
 			Items: []Item{
 				{"Ctrl-r", "Search command history"},
 				{"Ctrl-t", "Fuzzy find files (fzf)"},
@@ -129,7 +149,7 @@ func Categories(navStyle string) []Category {
 		{
 			ID:   "neovim",
 			Name: "Neovim",
-			Icon: "",
+			Icon: "",
 			Items: []Item{
 				{"i", "Insert mode"},
 				{"Esc", "Normal mode"},

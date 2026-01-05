@@ -60,7 +60,21 @@ func (a *App) renderDeepDiveMenu() string {
 	items := GetDeepDiveMenuItems()
 	var menuList strings.Builder
 
+	// Category header style
+	categoryStyle := lipgloss.NewStyle().
+		Foreground(ColorMagenta).
+		Bold(true).
+		MarginTop(1)
+
 	for i, item := range items {
+		// Render category header if this item starts a new category
+		if item.Category != "" {
+			if i > 0 {
+				menuList.WriteString("\n")
+			}
+			menuList.WriteString(categoryStyle.Render("  "+item.Category) + "\n")
+		}
+
 		isSelected := i == a.deepDiveMenuIndex
 
 		// Get install status for this item
@@ -95,7 +109,7 @@ func (a *App) renderDeepDiveMenu() string {
 			cursor,
 			statusDot,
 			iconStyle.Render(item.Icon),
-			nameStyle.Render(fmt.Sprintf("%-12s", item.Name)),
+			nameStyle.Render(fmt.Sprintf("%-14s", item.Name)),
 			descStyle.Render(item.Description),
 		))
 	}
@@ -127,11 +141,7 @@ func (a *App) renderDeepDiveMenu() string {
 		help,
 	)
 
-	return lipgloss.Place(
-		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
-		content,
-	)
+	return PlaceWithBackground(a.width, a.height, content)
 }
 
 // renderConfigGhostty renders the Ghostty configuration screen

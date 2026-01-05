@@ -211,46 +211,60 @@ type DeepDiveMenuItem struct {
 	Description string
 	Screen      Screen
 	Icon        string
+	Category    string // Category header (empty = same category as previous)
 }
 
 // GetDeepDiveMenuItems returns the menu items for deep dive configuration
+// Items are organized into logical categories for clarity
 func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 	return []DeepDiveMenuItem{
+		// Terminal & Shell - the foundation
 		{
 			Name:        "Ghostty",
 			Description: "Terminal font, opacity, keybindings",
 			Screen:      ScreenConfigGhostty,
 			Icon:        "󰆍",
+			Category:    "TERMINAL & SHELL",
 		},
 		{
 			Name:        "Tmux",
 			Description: "Prefix key, splits, status bar, mouse",
 			Screen:      ScreenConfigTmux,
-			Icon:        "",
+			Icon:        "",
 		},
 		{
 			Name:        "Zsh",
 			Description: "Prompt style, plugins, aliases",
 			Screen:      ScreenConfigZsh,
-			Icon:        "",
+			Icon:        "",
 		},
+		// Development - coding essentials
 		{
 			Name:        "Neovim",
 			Description: "Config preset, LSP servers, plugins",
 			Screen:      ScreenConfigNeovim,
-			Icon:        "",
+			Icon:        "",
+			Category:    "DEVELOPMENT",
 		},
 		{
 			Name:        "Git",
 			Description: "Delta diff, default branch, aliases",
 			Screen:      ScreenConfigGit,
-			Icon:        "",
+			Icon:        "",
 		},
+		{
+			Name:        "CLI Tools",
+			Description: "LazyGit, LazyDocker, btop, Glow, Claude",
+			Screen:      ScreenConfigCLITools,
+			Icon:        "",
+		},
+		// Files & Navigation
 		{
 			Name:        "Yazi",
 			Description: "File manager keymaps, preview settings",
 			Screen:      ScreenConfigYazi,
 			Icon:        "󰉋",
+			Category:    "FILES & NAVIGATION",
 		},
 		{
 			Name:        "FZF",
@@ -259,50 +273,28 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Icon:        "󰍉",
 		},
 		{
-			Name:        "LazyGit",
-			Description: "Git UI theme, diff view, mouse mode",
-			Screen:      ScreenConfigLazyGit,
-			Icon:        "󰊢",
-		},
-		{
-			Name:        "LazyDocker",
-			Description: "Docker UI mouse mode",
-			Screen:      ScreenConfigLazyDocker,
-			Icon:        "",
-		},
-		{
-			Name:        "Btop",
-			Description: "System monitor theme, graphs, refresh",
-			Screen:      ScreenConfigBtop,
-			Icon:        "󰄨",
-		},
-		{
-			Name:        "Glow",
-			Description: "Markdown viewer style, pager, width",
-			Screen:      ScreenConfigGlow,
-			Icon:        "󰈙",
-		},
-		{
 			Name:        "CLI Utilities",
 			Description: "bat, eza, zoxide, ripgrep, fd, delta",
 			Screen:      ScreenConfigCLIUtilities,
 			Icon:        "󰘳",
 		},
+		// Optional Apps
 		{
 			Name:        "GUI Apps",
 			Description: "Zen Browser, Cursor, LM Studio, OBS",
 			Screen:      ScreenConfigGUIApps,
 			Icon:        "󰏇",
+			Category:    "OPTIONAL APPS",
 		},
 		{
 			Name:        "macOS Apps",
-			Description: "Rectangle, Raycast, and more",
+			Description: "Rectangle, Raycast, Stats, more",
 			Screen:      ScreenConfigMacApps,
-			Icon:        "",
+			Icon:        "",
 		},
 		{
-			Name:        "Utilities",
-			Description: "hk, caff, sshh helper tools",
+			Name:        "Helper Scripts",
+			Description: "hk, caff, sshh utilities",
 			Screen:      ScreenConfigUtilities,
 			Icon:        "󰘚",
 		},

@@ -101,6 +101,7 @@ func (a *App) syncThemeIndex() {
 	for i, t := range themes {
 		if t.name == a.theme {
 			a.themeIndex = i
+			SetTheme(a.theme) // Apply theme colors for live preview
 			return
 		}
 	}
@@ -181,10 +182,13 @@ type App struct {
 	backupIndex      int    // Backup selection cursor
 
 	// Update screen async state
-	updateChecking  bool         // Currently checking for updates
-	updateCheckDone bool         // Check completed (use cached results)
+	updateChecking  bool          // Currently checking for updates
+	updateCheckDone bool          // Check completed (use cached results)
 	updateResults   []pkg.Package // Cached update results
-	updateError     error        // Error from update check
+	updateError     error         // Error from update check
+	updateRunning   bool          // Currently running an update operation
+	updateStatus    string        // Status message for current update operation
+	updateSelected  map[int]bool  // Selected packages for batch update
 
 	// Error state
 	lastError error
@@ -204,6 +208,7 @@ func NewApp(skipIntro bool) *App {
 		managePane:        0,
 		postIntroScreen:   ScreenWelcome,
 		hotkeysReturn:     ScreenMainMenu,
+		updateSelected:    make(map[int]bool),
 	}
 
 	// Best-effort: load persisted global settings (theme + nav) if available.
@@ -247,6 +252,11 @@ func (a *App) Init() tea.Cmd {
 	if a.screen == ScreenAnimation {
 		cmds = append(cmds, tickAnimation(), checkDurdraw())
 	}
+	// Start update check if starting directly on Update screen
+	if a.screen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
+		a.updateChecking = true
+		cmds = append(cmds, checkUpdatesCmd())
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -289,6 +299,12 @@ type updateCheckDoneMsg struct {
 	err     error
 }
 
+// updateRunDoneMsg indicates an update operation completed
+type updateRunDoneMsg struct {
+	results []pkg.UpdateResult
+	err     error
+}
+
 func tickAnimation() tea.Cmd {
 	return tea.Tick(introAnimationTick, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -313,6 +329,22 @@ func checkUpdatesCmd() tea.Cmd {
 	return func() tea.Msg {
 		updates, err := pkg.CheckDotfilesUpdates()
 		return updateCheckDoneMsg{updates: updates, err: err}
+	}
+}
+
+// runUpdateCmd updates specific packages
+func runUpdateCmd(packages []pkg.Package) tea.Cmd {
+	return func() tea.Msg {
+		results := pkg.UpdatePackages(packages)
+		return updateRunDoneMsg{results: results}
+	}
+}
+
+// runUpdateAllCmd updates all outdated packages
+func runUpdateAllCmd() tea.Cmd {
+	return func() tea.Msg {
+		err := pkg.UpdateAllPackages()
+		return updateRunDoneMsg{err: err}
 	}
 }
 
@@ -344,6 +376,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.animFrame >= introAnimationFrames {
 				a.animationDone = true
 				a.screen = a.postIntroScreen
+				// Trigger update check if transitioning to Update screen
+				if a.postIntroScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
+					a.updateChecking = true
+					return a, checkUpdatesCmd()
+				}
 				return a, nil
 			}
 			return a, tickAnimation()
@@ -363,6 +400,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case animationDoneMsg:
 		a.animationDone = true
 		a.screen = a.postIntroScreen
+		// Trigger update check if transitioning to Update screen
+		if a.postIntroScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
+			a.updateChecking = true
+			return a, checkUpdatesCmd()
+		}
 		return a, nil
 
 	case sudoRequiredMsg:
@@ -432,6 +474,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updateCheckDone = true
 		a.updateResults = msg.updates
 		a.updateError = msg.err
+		return a, nil
+
+	case updateRunDoneMsg:
+		a.updateRunning = false
+		if msg.err != nil {
+			a.updateStatus = fmt.Sprintf("Update failed: %v", msg.err)
+		} else {
+			// Count successes and failures
+			successes := 0
+			failures := 0
+			for _, r := range msg.results {
+				if r.Success {
+					successes++
+				} else {
+					failures++
+				}
+			}
+			if failures > 0 {
+				a.updateStatus = fmt.Sprintf("Updated %d, failed %d", successes, failures)
+			} else if successes > 0 {
+				a.updateStatus = fmt.Sprintf("Updated %d package(s) ✓", successes)
+			} else {
+				a.updateStatus = "Update complete ✓"
+			}
+			// Clear selections and refresh the package list
+			a.updateSelected = make(map[int]bool)
+			a.updateCheckDone = false
+			a.updateChecking = true
+			return a, checkUpdatesCmd()
+		}
 		return a, nil
 	}
 
@@ -538,6 +610,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Any key skips animation
 		a.animationDone = true
 		a.screen = a.postIntroScreen
+		// Trigger update check if transitioning to Update screen
+		if a.postIntroScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
+			a.updateChecking = true
+			return a, checkUpdatesCmd()
+		}
 		return a, nil
 
 	case ScreenWelcome:
@@ -1142,6 +1219,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.updateChecking = true
 			return a, checkUpdatesCmd()
 		}
+		// Don't allow actions while update is running
+		if a.updateRunning {
+			return a, nil
+		}
 		// Handle tab navigation first
 		if handled, cmd := a.handleTabNavigationWithCmd(key); handled {
 			return a, cmd
@@ -1153,11 +1234,47 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "down", "j":
 			a.updateIndex++
+		case " ": // Toggle selection for batch update
+			if len(a.updateResults) > 0 && a.updateIndex < len(a.updateResults) {
+				if a.updateSelected[a.updateIndex] {
+					delete(a.updateSelected, a.updateIndex)
+				} else {
+					a.updateSelected[a.updateIndex] = true
+				}
+			}
+		case "enter": // Update selected or current package
+			if len(a.updateResults) > 0 && !a.updateChecking {
+				var packagesToUpdate []pkg.Package
+				if len(a.updateSelected) > 0 {
+					// Update selected packages
+					for idx := range a.updateSelected {
+						if idx < len(a.updateResults) {
+							packagesToUpdate = append(packagesToUpdate, a.updateResults[idx])
+						}
+					}
+				} else if a.updateIndex < len(a.updateResults) {
+					// Update current package
+					packagesToUpdate = append(packagesToUpdate, a.updateResults[a.updateIndex])
+				}
+				if len(packagesToUpdate) > 0 {
+					a.updateRunning = true
+					a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
+					return a, runUpdateCmd(packagesToUpdate)
+				}
+			}
+		case "a": // Update all packages
+			if len(a.updateResults) > 0 && !a.updateChecking {
+				a.updateRunning = true
+				a.updateStatus = "Updating all packages..."
+				return a, runUpdateAllCmd()
+			}
 		case "r": // Refresh updates
 			a.updateCheckDone = false
 			a.updateChecking = true
 			a.updateResults = nil
 			a.updateError = nil
+			a.updateStatus = ""
+			a.updateSelected = make(map[int]bool)
 			return a, checkUpdatesCmd()
 		case "esc":
 			a.screen = ScreenMainMenu

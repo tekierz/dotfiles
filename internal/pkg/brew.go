@@ -105,9 +105,9 @@ func (b *BrewManager) CheckOutdated() ([]Package, error) {
 
 	var outdated struct {
 		Formulae []struct {
-			Name               string `json:"name"`
-			InstalledVersions  []string `json:"installed_versions"`
-			CurrentVersion     string `json:"current_version"`
+			Name              string   `json:"name"`
+			InstalledVersions []string `json:"installed_versions"`
+			CurrentVersion    string   `json:"current_version"`
 		} `json:"formulae"`
 		Casks []struct {
 			Name             string `json:"name"`

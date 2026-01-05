@@ -545,7 +545,6 @@ func ScanlineEffectAnimated(width int, frame int) string {
 	return line.String()
 }
 
-
 // ShimmerDivider renders a subtle divider with a moving highlight segment.
 // This is intentionally less "glitchy" than ScanlineEffectAnimated.
 func ShimmerDivider(width int, frame int, enabled bool) string {
@@ -745,4 +744,18 @@ func RenderTabBar(activeScreen Screen, width int) string {
 	line := strings.Join(parts, sep)
 	// Left-align for consistent mouse hit detection
 	return lipgloss.NewStyle().Width(width).Render(line)
+}
+
+// PlaceWithBackground centers content within a full-screen area with the app's background color.
+// This prevents the terminal's default background from showing through.
+func PlaceWithBackground(width, height int, content string) string {
+	// First center the content
+	centered := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+
+	// Then apply the background color to the entire area
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Background(ColorBg).
+		Render(centered)
 }

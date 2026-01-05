@@ -193,11 +193,7 @@ func (a *App) renderAnimation() string {
 		Padding(1, 2).
 		Render(content)
 
-	return lipgloss.Place(
-		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
-		card,
-	)
+	return PlaceWithBackground(a.width, a.height, card)
 }
 
 // renderWelcome renders the welcome/main menu screen
@@ -301,11 +297,7 @@ func (a *App) renderWelcome() string {
 		Padding(1, 2).
 		Render(content)
 
-	return lipgloss.Place(
-		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
-		container,
-	)
+	return PlaceWithBackground(a.width, a.height, container)
 }
 
 // renderThemePicker renders the theme selection screen
@@ -594,11 +586,7 @@ func (a *App) renderProgress() string {
 		help,
 	)
 
-	return lipgloss.Place(
-		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(content),
-	)
+	return PlaceWithBackground(a.width, a.height, ContainerStyle.Render(content))
 }
 
 // renderSummary renders the post-installation summary
