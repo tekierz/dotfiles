@@ -365,8 +365,7 @@ var (
 	ContainerStyle = lipgloss.NewStyle().
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBorder).
-			Background(ColorSurface)
+			BorderForeground(ColorBorder)
 
 	// Title styles
 	TitleStyle = lipgloss.NewStyle().
@@ -742,8 +741,8 @@ func RenderTabBar(activeScreen Screen, width int) string {
 	}
 
 	line := strings.Join(parts, sep)
-	// Left-align for consistent mouse hit detection, with background to prevent transparency
-	return lipgloss.NewStyle().Width(width).Background(ColorBg).Render(line)
+	// Left-align for consistent mouse hit detection
+	return lipgloss.NewStyle().Width(width).Render(line)
 }
 
 // PlaceWithBackground centers content within a full-screen area with the app's background color.

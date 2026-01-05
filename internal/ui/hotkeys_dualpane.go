@@ -400,24 +400,11 @@ func (a *App) renderHotkeysDualPane() string {
 	left := a.renderHotkeysCategoriesPanel(layout, cats)
 	right := a.renderHotkeysItemsPanel(layout, cats)
 
-	// Create gap filler with background color to prevent transparency
-	gapFiller := lipgloss.NewStyle().
-		Background(ColorBg).
-		Height(layout.bodyH).
-		Width(layout.gap).
-		Render(strings.Repeat(" ", layout.gap))
-
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, gapFiller, right)
-
-	// Ensure the overall view fills the screen with background color
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", layout.gap), right)
 	view := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 
-	// Apply full background color to the entire view
-	return lipgloss.NewStyle().
-		Width(a.width).
-		Height(a.height).
-		Background(ColorBg).
-		Render(view)
+	// Let terminal background show through - don't force opaque background
+	return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, view)
 }
 
 func (a *App) renderHotkeysHeader(width int) string {
@@ -427,15 +414,14 @@ func (a *App) renderHotkeysHeader(width int) string {
 	if a.animationsEnabled {
 		subText = AnimatedSpinnerDots(a.uiFrame/2) + " " + subText
 	}
-	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorBg).Width(width).Render(truncateVisible(subText, width))
+	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(subText, width))
 
 	divider := ShimmerDivider(maxInt(0, width), a.uiFrame, a.animationsEnabled)
-	header := lipgloss.JoinVertical(lipgloss.Left, tabs, sub, divider)
-	return lipgloss.NewStyle().Background(ColorBg).Width(width).Render(header)
+	return lipgloss.JoinVertical(lipgloss.Left, tabs, sub, divider)
 }
 
 func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
-	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorBg).Width(width).Render(
+	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
 		"Tab switch pane • ↑↓ move • Click select • Esc back • q quit",
 	)
 
@@ -450,9 +436,8 @@ func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 	if statusText == "" {
 		statusText = " "
 	}
-	status := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorBg).Width(width).Render(truncateVisible(statusText, width))
-	footer := lipgloss.JoinVertical(lipgloss.Left, hints, status)
-	return lipgloss.NewStyle().Background(ColorBg).Width(width).Render(footer)
+	status := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(statusText, width))
+	return lipgloss.JoinVertical(lipgloss.Left, hints, status)
 }
 
 func (a *App) renderHotkeysCategoriesPanel(layout hotkeysLayout, cats []hotkeys.Category) string {
@@ -464,7 +449,6 @@ func (a *App) renderHotkeysCategoriesPanel(layout hotkeysLayout, cats []hotkeys.
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Background(ColorSurface).
 		Padding(1, 1).
 		Width(maxInt(1, layout.leftW-2)).
 		Height(maxInt(1, layout.bodyH-2))
@@ -525,7 +509,6 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Background(ColorSurface).
 		Padding(1, 1).
 		Width(maxInt(1, layout.rightW-2)).
 		Height(maxInt(1, layout.bodyH-2))

@@ -24,7 +24,6 @@ var (
 	configBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBorder).
-			Background(ColorSurface).
 			Padding(1, 2)
 
 	activeOptionStyle = lipgloss.NewStyle().
