@@ -258,13 +258,13 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Screen:      ScreenConfigCLITools,
 			Icon:        "",
 		},
-		// Files & Navigation
+		// Quality of Life tools
 		{
 			Name:        "Yazi",
 			Description: "File manager keymaps, preview settings",
 			Screen:      ScreenConfigYazi,
 			Icon:        "󰉋",
-			Category:    "FILES & NAVIGATION",
+			Category:    "QUALITY OF LIFE",
 		},
 		{
 			Name:        "FZF",

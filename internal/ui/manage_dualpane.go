@@ -1054,12 +1054,20 @@ func (a *App) renderManageDualPane() string {
 
 	left := a.renderManageToolsPanel(layout, items)
 	right := a.renderManageSettingsPanel(layout, items, fields)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", layout.gap), right)
 
-	// Ensure the overall string is exactly terminal height. This helps avoid visual "jitter".
+	// Create gap filler with background color to prevent transparency
+	gapFiller := lipgloss.NewStyle().
+		Background(ColorBg).
+		Height(layout.bodyH).
+		Width(layout.gap).
+		Render(strings.Repeat(" ", layout.gap))
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, gapFiller, right)
+
+	// Ensure the overall view fills the screen with background color
 	view := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 
-	// Apply full background color to prevent terminal transparency from showing through
+	// Apply full background color to the entire view
 	return lipgloss.NewStyle().
 		Width(a.width).
 		Height(a.height).
@@ -1074,17 +1082,18 @@ func (a *App) renderManageHeader(width int) string {
 	if a.animationsEnabled {
 		subText = AnimatedSpinnerDots(a.uiFrame/2) + " " + subText
 	}
-	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(subText, width))
+	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorBg).Width(width).Render(truncateVisible(subText, width))
 
 	divider := ShimmerDivider(maxInt(0, width), a.uiFrame, a.animationsEnabled)
 
 	// Keep this exactly 3 lines (see manageLayout.headerH).
-	return lipgloss.JoinVertical(lipgloss.Left, tabs, sub, divider)
+	header := lipgloss.JoinVertical(lipgloss.Left, tabs, sub, divider)
+	return lipgloss.NewStyle().Background(ColorBg).Width(width).Render(header)
 }
 
 func (a *App) renderManageFooter(width int, items []manageItem, fields []manageField) string {
 	// Hint line: short and consistent.
-	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
+	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorBg).Width(width).Render(
 		"Tab switch pane • ↑↓ move • ←→ adjust • Space toggle • Enter edit • I install • ? hotkeys • S save • Esc back • q quit",
 	)
 
@@ -1114,10 +1123,11 @@ func (a *App) renderManageFooter(width int, items []manageItem, fields []manageF
 	if statusText == "" {
 		statusText = " "
 	}
-	status := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(statusText, width))
+	status := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorBg).Width(width).Render(truncateVisible(statusText, width))
 
 	// Keep this exactly 2 lines (see manageLayout.footerH).
-	return lipgloss.JoinVertical(lipgloss.Left, hints, status)
+	footer := lipgloss.JoinVertical(lipgloss.Left, hints, status)
+	return lipgloss.NewStyle().Background(ColorBg).Width(width).Render(footer)
 }
 
 func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) string {

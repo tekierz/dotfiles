@@ -742,8 +742,8 @@ func RenderTabBar(activeScreen Screen, width int) string {
 	}
 
 	line := strings.Join(parts, sep)
-	// Left-align for consistent mouse hit detection
-	return lipgloss.NewStyle().Width(width).Render(line)
+	// Left-align for consistent mouse hit detection, with background to prevent transparency
+	return lipgloss.NewStyle().Width(width).Background(ColorBg).Render(line)
 }
 
 // PlaceWithBackground centers content within a full-screen area with the app's background color.
