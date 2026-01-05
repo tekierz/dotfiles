@@ -269,14 +269,14 @@ func (p *PacmanManager) InstallStreaming(ctx context.Context, packages ...string
 	}
 
 	if p.useParu {
-		// paru needs additional flags to run non-interactively
-		// Use sudo wrapper to ensure cached credentials work without TTY
+		// paru should NOT be run with sudo - it handles sudo internally
+		// Running with sudo causes permission issues with AUR builds
 		args := []string{"-S", "--noconfirm", "--needed", "--skipreview", "--noprovides", "--removemake"}
 		args = append(args, packages...)
-		return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+		return runner.RunStreaming(ctx, p.pacmanPath, args...)
 	}
 
-	// pacman with sudo
+	// pacman needs sudo
 	args := []string{"-S", "--noconfirm", "--needed"}
 	args = append(args, packages...)
 	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
@@ -289,12 +289,13 @@ func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string)
 	}
 
 	if p.useParu {
-		// Use sudo wrapper to ensure cached credentials work without TTY
+		// paru should NOT be run with sudo - it handles sudo internally
 		args := []string{"-S", "--noconfirm", "--skipreview", "--noprovides"}
 		args = append(args, packages...)
-		return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+		return runner.RunStreaming(ctx, p.pacmanPath, args...)
 	}
 
+	// pacman needs sudo
 	args := []string{"-S", "--noconfirm"}
 	args = append(args, packages...)
 	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
@@ -303,8 +304,8 @@ func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string)
 // UpdateAllStreaming updates all packages with real-time output streaming
 func (p *PacmanManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
 	if p.useParu {
-		// Use sudo wrapper to ensure cached credentials work without TTY
-		return runner.RunStreamingWithSudo(ctx, p.pacmanPath, "-Syu", "--noconfirm", "--skipreview", "--noprovides")
+		// paru should NOT be run with sudo - it handles sudo internally
+		return runner.RunStreaming(ctx, p.pacmanPath, "-Syu", "--noconfirm", "--skipreview", "--noprovides")
 	}
 	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, "-Syu", "--noconfirm")
 }

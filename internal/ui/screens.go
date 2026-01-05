@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -503,6 +504,10 @@ func (a *App) renderFileTree() string {
 			}
 		}
 	}
+
+	// Sort for stable display order (prevents flickering from map iteration)
+	sort.Strings(toInstall)
+	sort.Strings(alreadyInstalled)
 
 	// Packages to install section
 	if len(toInstall) > 0 {

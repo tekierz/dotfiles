@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -290,7 +291,8 @@ type installOutputMsg struct {
 
 // installDoneMsg indicates installation completed
 type installDoneMsg struct {
-	err error
+	err     error
+	context string // last few lines of output for error context
 }
 
 // installStartMsg triggers installation start
@@ -501,7 +503,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.installRunning = false
 		a.installComplete = true
 		if msg.err != nil {
-			a.lastError = msg.err
+			// Include context in error message for better debugging
+			if msg.context != "" {
+				a.lastError = fmt.Errorf("%v\n\nOutput:\n%s", msg.err, msg.context)
+			} else {
+				a.lastError = msg.err
+			}
 			a.screen = ScreenError
 		}
 		return a, nil
@@ -1750,7 +1757,17 @@ func (a *App) startInstallation() tea.Cmd {
 			a.installOutput = append(a.installOutput, "  ✓ Utilities installed to ~/.local/bin")
 		}
 
-		return installDoneMsg{err: lastErr}
+		// Build context from last few output lines for error display
+		var context string
+		if lastErr != nil && len(a.installOutput) > 0 {
+			start := 0
+			if len(a.installOutput) > 8 {
+				start = len(a.installOutput) - 8
+			}
+			context = strings.Join(a.installOutput[start:], "\n")
+		}
+
+		return installDoneMsg{err: lastErr, context: context}
 	}
 }
 
@@ -1786,6 +1803,9 @@ func installUtilities(utilities map[string]bool) error {
 
 	// Copy the binary to ~/.local/bin/dotfiles
 	destPath := filepath.Join(binDir, "dotfiles")
+	// Remove existing binary first to avoid "text file busy" error
+	// (Linux allows deleting a running binary, but not overwriting it)
+	_ = os.Remove(destPath)
 	if err := copyFile(execPath, destPath); err != nil {
 		return fmt.Errorf("cannot copy binary: %w", err)
 	}

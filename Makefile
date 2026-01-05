@@ -7,7 +7,7 @@ SETUP_SCRIPT = bin/dotfiles-setup
 
 # Go build flags
 LDFLAGS = -s -w
-VERSION = 2.0.0-dev
+VERSION = 2.0.1
 
 # Build the main dotfiles CLI (new)
 build:

@@ -17,7 +17,7 @@ import (
 
 var (
 	skipIntro bool
-	version   = "2.0.0-dev"
+	version   = "2.0.1"
 )
 
 // rootCmd is the base command
