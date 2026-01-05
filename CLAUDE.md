@@ -4,69 +4,110 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is **dotfiles-setup**: a cross-platform terminal environment setup script (~3,200 lines of bash) that creates a consistent terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. It installs and configures zsh, tmux, Ghostty, neovim, yazi, and other terminal tools with unified theming.
+This is **dotfiles**: a cross-platform terminal environment management platform that creates a consistent terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. It includes:
+
+- **Go TUI Application** (`cmd/dotfiles/`) - Interactive installer and management platform using Bubble Tea
+- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,200 lines of bash)
+
+The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 20+ other terminal tools with unified theming.
 
 ## Repository Structure
 
 ```
-bin/dotfiles-setup          # Main setup script (all logic is here)
-bin/dotfiles-setup.ps1      # PowerShell variant (not maintained)
-Formula/dotfiles-setup.rb   # Homebrew formula for distribution
-docs/tools.md               # Detailed tool reference
-README.md                   # User documentation
+cmd/
+  dotfiles/              # Go CLI entry point (Cobra + Bubble Tea)
+internal/
+  config/                # Configuration loading/saving (JSON)
+  hotkeys/               # Hotkey definitions for tools
+  pkg/                   # Package manager abstraction (brew/pacman/apt)
+  runner/                # Bash script execution
+  tools/                 # Tool registry (27+ tools)
+  ui/                    # Bubble Tea TUI (~7,600 lines)
+bin/
+  dotfiles               # Built Go binary
+  dotfiles-setup         # Legacy bash script
+docs/
+  tools.md               # Detailed tool reference
+Formula/
+  dotfiles-setup.rb      # Homebrew formula
+```
+
+## Go Application Architecture
+
+### Key Packages
+
+| Package | Purpose |
+|---------|---------|
+| `internal/ui/` | Bubble Tea TUI (Model-Update-View pattern) |
+| `internal/tools/` | Tool registry with 27+ tools |
+| `internal/pkg/` | Package manager abstraction |
+| `internal/config/` | JSON configuration management |
+| `internal/hotkeys/` | Hotkey definitions |
+
+### Screen Navigation
+
+The TUI uses screen-based navigation with 46 screens:
+- Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
+- Management: MainMenu, Manage, Update, Hotkeys, Backups
+- Config: Per-tool configuration screens
+
+### Styling
+
+Neon-seapunk color palette defined in `internal/ui/styles.go`:
+- Primary: `#00F5D4` (cyan), `#F15BB5` (magenta)
+- Background: `#070B1A` (deep ocean)
+
+## CLI Commands
+
+```bash
+dotfiles                # Launch TUI main menu
+dotfiles install        # Launch TUI installer
+dotfiles manage         # Launch TUI management
+dotfiles hotkeys        # Launch TUI hotkey viewer
+dotfiles status         # Print status (CLI)
+dotfiles backups        # List backups (CLI)
+dotfiles restore <name> # Restore backup (CLI)
+dotfiles theme --list   # List themes (CLI)
+dotfiles update         # Check for updates
 ```
 
 ## Key Concepts
 
-- **13 themes** with dynamic color loading via `load_theme_colors()` - all tools share unified colors
-- **Two navigation styles**: emacs (default, beginner-friendly) and vim
-- **Multi-user profiles**: stored in `~/.config/dotfiles/users/`, each with theme/nav preferences
-- **Platform detection**: macOS (Homebrew), Arch (pacman/paru), Debian (apt), Raspberry Pi (optimized)
-- **CLI interface**: `dotfiles` command for theme switching, user management, status
-- **Backup & restore**: all existing configs backed up before modification, fully reversible
+- **13 themes** with unified colors across all tools
+- **Two navigation styles**: emacs (default) and vim
+- **Platform detection**: macOS (Homebrew), Arch (pacman/paru), Debian (apt)
+- **Tool registry**: Interface-based tool definitions with platform-specific packages
+- **Backup & restore**: Timestamped backups in `~/.config/dotfiles/backups/`
 
-## Backup System
+## Development
 
-The script creates timestamped backups in `~/.config/dotfiles/backups/` before modifying any config file:
+### Building
 
 ```bash
-dotfiles-setup --list-backups    # List available backups
-dotfiles-setup --restore         # Restore most recent backup
-dotfiles-setup --restore <name>  # Restore specific backup
-dotfiles-setup --no-backup       # Skip backups (not recommended)
-
-# Post-install via CLI:
-dotfiles backups                 # List backups
-dotfiles restore                 # Restore from backup
+make build          # Build Go binary to bin/dotfiles
+make clean          # Clean build artifacts
+go build ./...      # Compile check
+go vet ./...        # Static analysis
 ```
 
-Each backup session contains:
-- Copies of all modified files with original permissions preserved
-- A manifest file tracking what existed before installation
-- Files that didn't exist are recorded so they can be removed on restore
+### Adding New Tools
 
-## Working with the Setup Script
+1. Create `internal/tools/newtool.go` implementing `Tool` interface
+2. Register in `internal/tools/registry.go`
+3. Add deep dive config screen if needed
 
-The main script at `bin/dotfiles-setup` contains:
-- Theme definitions (color variables for each of 13 themes)
-- Platform-specific installation functions
-- Configuration file generation (zshrc, tmux.conf, ghostty config, etc.)
-- User profile management
-- Desktop environment shortcut configuration
+### Adding New Screens
 
-When modifying:
-- Test changes on multiple platforms when touching platform-specific code
-- Preserve backward compatibility with existing user configurations
-- The script uses `set -euo pipefail` - handle errors appropriately
-- Use `safe_read_setting()` for reading config files - never use `source` on user-editable files
-- Use `backup_file()` before overwriting any existing config
+1. Add Screen constant in `internal/ui/app.go`
+2. Add case in `View()` method
+3. Add key handling in `Update()` method
+4. Create render function
 
 ## Security Considerations
 
-- **Never use `source` on user profiles** - use `safe_read_setting()` to extract specific values
-- **Validate all user input** - `validate_username()` prevents path traversal
+- **Never use `source` on user profiles** - use `safe_read_setting()` in bash
+- **Validate all user input** in config parsing
 - **File permissions**: config directories get 700, settings files get 600
-- **Theme validation**: themes are checked against whitelist before use
 
 ## Git Commit Rules
 

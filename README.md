@@ -274,6 +274,31 @@ After running, configs are placed in:
 | `~/.config/dotfiles/users/` | User profile settings |
 | `~/.sshh` | SSH hosts for sshh |
 
+## Interactive TUI (New!)
+
+The new interactive TUI provides a visual interface for installation and management:
+
+```bash
+# Build from source
+make build
+
+# Launch the TUI
+./bin/dotfiles              # Main menu
+./bin/dotfiles install      # Installer wizard
+./bin/dotfiles manage       # Tool configuration
+./bin/dotfiles hotkeys      # Hotkey reference
+./bin/dotfiles update       # Check for updates
+```
+
+### CLI Commands
+
+```bash
+dotfiles status             # Show installed tools and theme
+dotfiles backups            # List available backups
+dotfiles restore <name>     # Restore from backup
+dotfiles theme --list       # List available themes
+```
+
 ## Post-Install
 
 1. Restart your terminal or `source ~/.zshrc`
