@@ -2,9 +2,12 @@ package pkg
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/tekierz/dotfiles/internal/runner"
 )
 
 // PacmanManager implements PackageManager for Arch Linux (pacman/paru)
@@ -250,4 +253,58 @@ func (p *PacmanManager) ListInstalled() ([]Package, error) {
 	}
 
 	return packages, nil
+}
+
+// NeedsSudo returns true for both pacman and paru since they need sudo for package installation
+func (p *PacmanManager) NeedsSudo() bool {
+	// Both pacman and paru need sudo to be cached. paru handles calling sudo internally,
+	// but still requires credentials to be cached or a terminal for prompting.
+	return true
+}
+
+// InstallStreaming installs packages with real-time output streaming
+func (p *PacmanManager) InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
+	if len(packages) == 0 {
+		return nil, fmt.Errorf("no packages specified")
+	}
+
+	if p.useParu {
+		// paru needs additional flags to run non-interactively
+		// Use sudo wrapper to ensure cached credentials work without TTY
+		args := []string{"-S", "--noconfirm", "--needed", "--skipreview", "--noprovides", "--removemake"}
+		args = append(args, packages...)
+		return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+	}
+
+	// pacman with sudo
+	args := []string{"-S", "--noconfirm", "--needed"}
+	args = append(args, packages...)
+	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+}
+
+// UpdateStreaming updates packages with real-time output streaming
+func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
+	if len(packages) == 0 {
+		return nil, fmt.Errorf("no packages specified")
+	}
+
+	if p.useParu {
+		// Use sudo wrapper to ensure cached credentials work without TTY
+		args := []string{"-S", "--noconfirm", "--skipreview", "--noprovides"}
+		args = append(args, packages...)
+		return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+	}
+
+	args := []string{"-S", "--noconfirm"}
+	args = append(args, packages...)
+	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+}
+
+// UpdateAllStreaming updates all packages with real-time output streaming
+func (p *PacmanManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
+	if p.useParu {
+		// Use sudo wrapper to ensure cached credentials work without TTY
+		return runner.RunStreamingWithSudo(ctx, p.pacmanPath, "-Syu", "--noconfirm", "--skipreview", "--noprovides")
+	}
+	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, "-Syu", "--noconfirm")
 }

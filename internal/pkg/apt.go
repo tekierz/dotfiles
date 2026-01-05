@@ -2,9 +2,12 @@ package pkg
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/tekierz/dotfiles/internal/runner"
 )
 
 // AptManager implements PackageManager for Debian/Ubuntu
@@ -215,4 +218,39 @@ func (a *AptManager) ListInstalled() ([]Package, error) {
 	}
 
 	return packages, nil
+}
+
+// NeedsSudo returns true for apt (requires sudo for package operations)
+func (a *AptManager) NeedsSudo() bool {
+	return true
+}
+
+// InstallStreaming installs packages with real-time output streaming
+func (a *AptManager) InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
+	if len(packages) == 0 {
+		return nil, fmt.Errorf("no packages specified")
+	}
+
+	args := []string{"install", "-y"}
+	args = append(args, packages...)
+	return runner.RunStreamingWithSudo(ctx, a.aptPath, args...)
+}
+
+// UpdateStreaming updates packages with real-time output streaming
+func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
+	if len(packages) == 0 {
+		return nil, fmt.Errorf("no packages specified")
+	}
+
+	args := []string{"install", "-y"}
+	args = append(args, packages...)
+	return runner.RunStreamingWithSudo(ctx, a.aptPath, args...)
+}
+
+// UpdateAllStreaming updates all packages with real-time output streaming
+// This runs apt update && apt upgrade -y
+func (a *AptManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
+	// Run both update and upgrade in a single bash command for streaming
+	script := fmt.Sprintf("sudo %s update && sudo %s upgrade -y", a.aptPath, a.aptPath)
+	return runner.RunStreaming(ctx, "bash", "-c", script)
 }

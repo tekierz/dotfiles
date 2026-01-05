@@ -677,13 +677,15 @@ func StatusDot(status string) string {
 	switch status {
 	case "done", "complete", "success":
 		return lipgloss.NewStyle().Foreground(ColorGreen).Render("●")
+	case "installed":
+		return lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("●")
 	case "running", "active", "in_progress":
 		return lipgloss.NewStyle().Foreground(ColorCyan).Render("●")
 	case "pending", "waiting":
 		return lipgloss.NewStyle().Foreground(ColorTextMuted).Render("○")
 	case "error", "failed":
 		return lipgloss.NewStyle().Foreground(ColorRed).Render("●")
-	case "warning":
+	case "warning", "partial":
 		return lipgloss.NewStyle().Foreground(ColorYellow).Render("●")
 	default:
 		return lipgloss.NewStyle().Foreground(ColorTextMuted).Render("○")

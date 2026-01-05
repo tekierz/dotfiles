@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,6 +14,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
+	"github.com/tekierz/dotfiles/internal/scripts"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -190,6 +194,11 @@ type App struct {
 	updateStatus    string        // Status message for current update operation
 	updateSelected  map[int]bool  // Selected packages for batch update
 
+	// Install/Update log streaming state
+	installLogs          []string // Circular buffer of log lines (max 500)
+	installLogScroll     int      // Scroll position in log buffer (0 = bottom)
+	installLogAutoScroll bool     // Auto-scroll to bottom during active install
+
 	// Error state
 	lastError error
 }
@@ -197,18 +206,20 @@ type App struct {
 // NewApp creates a new application instance
 func NewApp(skipIntro bool) *App {
 	app := &App{
-		skipIntro:         skipIntro,
-		theme:             "catppuccin-mocha",
-		navStyle:          "emacs",
-		animationsEnabled: true,
-		runner:            runner.NewRunner(),
-		installOutput:     make([]string, 0, 100),
-		deepDiveConfig:    NewDeepDiveConfig(),
-		manageConfig:      NewManageConfig(),
-		managePane:        0,
-		postIntroScreen:   ScreenWelcome,
-		hotkeysReturn:     ScreenMainMenu,
-		updateSelected:    make(map[int]bool),
+		skipIntro:            skipIntro,
+		theme:                "catppuccin-mocha",
+		navStyle:             "emacs",
+		animationsEnabled:    true,
+		runner:               runner.NewRunner(),
+		installOutput:        make([]string, 0, 100),
+		deepDiveConfig:       NewDeepDiveConfig(),
+		manageConfig:         NewManageConfig(),
+		managePane:           0,
+		postIntroScreen:      ScreenWelcome,
+		hotkeysReturn:        ScreenMainMenu,
+		updateSelected:       make(map[int]bool),
+		installLogs:          make([]string, 0, 500),
+		installLogAutoScroll: true,
 	}
 
 	// Best-effort: load persisted global settings (theme + nav) if available.
@@ -305,6 +316,33 @@ type updateRunDoneMsg struct {
 	err     error
 }
 
+// installLogMsg carries a single log line from streaming install/update
+type installLogMsg struct {
+	line string
+}
+
+// manageSudoRequiredMsg indicates sudo is needed before manage install
+type manageSudoRequiredMsg struct {
+	toolID string
+}
+
+// updateSudoRequiredMsg indicates sudo is needed before update
+type updateSudoRequiredMsg struct {
+	packages []pkg.Package
+	all      bool
+}
+
+// manageStartInstallMsg triggers streaming install after sudo is cached
+type manageStartInstallMsg struct {
+	toolID string
+}
+
+// updateStartMsg triggers streaming update after sudo is cached
+type updateStartMsg struct {
+	packages []pkg.Package
+	all      bool
+}
+
 func tickAnimation() tea.Cmd {
 	return tea.Tick(introAnimationTick, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -345,6 +383,24 @@ func runUpdateAllCmd() tea.Cmd {
 	return func() tea.Msg {
 		err := pkg.UpdateAllPackages()
 		return updateRunDoneMsg{err: err}
+	}
+}
+
+// checkSudoAndUpdateCmd checks if sudo is needed and either prompts or starts update
+func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
+	return func() tea.Msg {
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return updateRunDoneMsg{err: fmt.Errorf("no package manager detected")}
+		}
+
+		// Check if sudo is needed and not cached
+		if mgr.NeedsSudo() && !runner.CheckSudoCached() {
+			return updateSudoRequiredMsg{packages: packages, all: all}
+		}
+
+		// Sudo not needed or already cached - start streaming update
+		return updateStartMsg{packages: packages, all: all}
 	}
 }
 
@@ -478,6 +534,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case updateRunDoneMsg:
 		a.updateRunning = false
+		a.installLogAutoScroll = false // Allow user to scroll through logs
 		if msg.err != nil {
 			a.updateStatus = fmt.Sprintf("Update failed: %v", msg.err)
 		} else {
@@ -505,9 +562,123 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, checkUpdatesCmd()
 		}
 		return a, nil
+
+	case installLogMsg:
+		a.appendInstallLog(msg.line)
+		return a, nil
+
+	case manageSudoRequiredMsg:
+		// Need to prompt for sudo before manage install
+		return a, tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
+			if err != nil {
+				return manageInstallDoneMsg{toolID: msg.toolID, err: err}
+			}
+			// Sudo cached, now start the streaming install
+			return manageStartInstallMsg{toolID: msg.toolID}
+		})
+
+	case updateSudoRequiredMsg:
+		// Need to prompt for sudo before update
+		return a, tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
+			if err != nil {
+				return updateRunDoneMsg{err: err}
+			}
+			// Sudo cached, now start the streaming update
+			return updateStartMsg{packages: msg.packages, all: msg.all}
+		})
+
+	case manageStartInstallMsg:
+		// Start the streaming install (sudo already cached)
+		a.clearInstallLogs()
+		a.manageInstalling = true
+		a.manageInstallID = msg.toolID
+		return a, a.streamingInstallToolCmd(msg.toolID)
+
+	case updateStartMsg:
+		// Start the streaming update (sudo already cached)
+		a.clearInstallLogs()
+		a.updateRunning = true
+		if msg.all {
+			return a, a.streamingUpdateAllCmd()
+		}
+		return a, a.streamingUpdateCmd(msg.packages)
+
+	case manageInstallWithLogsMsg:
+		// Install completed with logs
+		a.manageInstalling = false
+		a.installLogAutoScroll = false
+		// Append all logs
+		for _, line := range msg.logs {
+			a.appendInstallLog(line)
+		}
+		// Update install status
+		if msg.err != nil {
+			a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
+		} else {
+			a.manageStatus = "Installed successfully ✓"
+			// Refresh install status cache
+			a.manageInstalledReady = false
+		}
+		return a, nil
+
+	case updateWithLogsMsg:
+		// Update completed with logs
+		a.updateRunning = false
+		a.installLogAutoScroll = false
+		// Append all logs
+		for _, line := range msg.logs {
+			a.appendInstallLog(line)
+		}
+		// Process results
+		if msg.err != nil {
+			a.updateStatus = fmt.Sprintf("Update failed: %v", msg.err)
+		} else {
+			successes := 0
+			failures := 0
+			for _, r := range msg.results {
+				if r.Success {
+					successes++
+				} else {
+					failures++
+				}
+			}
+			if failures > 0 {
+				a.updateStatus = fmt.Sprintf("Updated %d, failed %d", successes, failures)
+			} else if successes > 0 {
+				a.updateStatus = fmt.Sprintf("Updated %d package(s) ✓", successes)
+			} else {
+				a.updateStatus = "Update complete ✓"
+			}
+			// Clear selections and refresh the package list
+			a.updateSelected = make(map[int]bool)
+			a.updateCheckDone = false
+			a.updateChecking = true
+			return a, checkUpdatesCmd()
+		}
+		return a, nil
 	}
 
 	return a, nil
+}
+
+// appendInstallLog adds a line to the install log buffer (max 500 lines)
+func (a *App) appendInstallLog(line string) {
+	const maxLogLines = 500
+	a.installLogs = append(a.installLogs, line)
+	if len(a.installLogs) > maxLogLines {
+		a.installLogs = a.installLogs[len(a.installLogs)-maxLogLines:]
+	}
+	// Auto-scroll to bottom if enabled
+	if a.installLogAutoScroll {
+		a.installLogScroll = 0 // 0 = bottom in our scroll model
+	}
+}
+
+// clearInstallLogs clears the log buffer and resets scroll
+func (a *App) clearInstallLogs() {
+	a.installLogs = make([]string, 0, 500)
+	a.installLogScroll = 0
+	a.installLogAutoScroll = true
 }
 
 func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -703,7 +874,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Deep dive menu navigation
 	case ScreenDeepDiveMenu:
-		menuItems := GetDeepDiveMenuItems()
+		menuItems := GetFilteredDeepDiveMenuItems()
 		maxIdx := len(menuItems) // +1 for "Continue" option
 		switch key {
 		case "up", "k":
@@ -985,7 +1156,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case " ":
 			app := apps[a.macAppIndex]
-			a.deepDiveConfig.MacApps[app] = !a.deepDiveConfig.MacApps[app]
+			// Don't allow toggling if already installed
+			if !a.manageInstalled[app] {
+				a.deepDiveConfig.MacApps[app] = !a.deepDiveConfig.MacApps[app]
+			}
 		case "esc", "enter":
 			a.macAppIndex = 0
 			a.screen = ScreenDeepDiveMenu
@@ -1005,7 +1179,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case " ":
 			util := utilities[a.utilityIndex]
-			a.deepDiveConfig.Utilities[util] = !a.deepDiveConfig.Utilities[util]
+			// Don't allow toggling if already installed
+			if !a.manageInstalled[util] {
+				a.deepDiveConfig.Utilities[util] = !a.deepDiveConfig.Utilities[util]
+			}
 		case "esc", "enter":
 			a.utilityIndex = 0
 			a.screen = ScreenDeepDiveMenu
@@ -1025,7 +1202,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case " ":
 			tool := tools[a.cliToolIndex]
-			a.deepDiveConfig.CLITools[tool] = !a.deepDiveConfig.CLITools[tool]
+			// Don't allow toggling if already installed
+			if !a.manageInstalled[tool] {
+				a.deepDiveConfig.CLITools[tool] = !a.deepDiveConfig.CLITools[tool]
+			}
 		case "esc", "enter":
 			a.cliToolIndex = 0
 			a.screen = ScreenDeepDiveMenu
@@ -1045,7 +1225,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case " ":
 			app := apps[a.guiAppIndex]
-			a.deepDiveConfig.GUIApps[app] = !a.deepDiveConfig.GUIApps[app]
+			// Don't allow toggling if already installed
+			if !a.manageInstalled[app] {
+				a.deepDiveConfig.GUIApps[app] = !a.deepDiveConfig.GUIApps[app]
+			}
 		case "esc", "enter":
 			a.guiAppIndex = 0
 			a.screen = ScreenDeepDiveMenu
@@ -1065,7 +1248,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case " ":
 			util := utilities[a.cliUtilityIndex]
-			a.deepDiveConfig.CLIUtilities[util] = !a.deepDiveConfig.CLIUtilities[util]
+			// Don't allow toggling if already installed
+			if !a.manageInstalled[util] {
+				a.deepDiveConfig.CLIUtilities[util] = !a.deepDiveConfig.CLIUtilities[util]
+			}
 		case "esc", "enter":
 			a.cliUtilityIndex = 0
 			a.screen = ScreenDeepDiveMenu
@@ -1243,7 +1429,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "enter": // Update selected or current package
-			if len(a.updateResults) > 0 && !a.updateChecking {
+			if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
 				var packagesToUpdate []pkg.Package
 				if len(a.updateSelected) > 0 {
 					// Update selected packages
@@ -1257,16 +1443,16 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					packagesToUpdate = append(packagesToUpdate, a.updateResults[a.updateIndex])
 				}
 				if len(packagesToUpdate) > 0 {
-					a.updateRunning = true
+					a.clearInstallLogs()
 					a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
-					return a, runUpdateCmd(packagesToUpdate)
+					return a, checkSudoAndUpdateCmd(packagesToUpdate, false)
 				}
 			}
 		case "a": // Update all packages
-			if len(a.updateResults) > 0 && !a.updateChecking {
-				a.updateRunning = true
+			if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
+				a.clearInstallLogs()
 				a.updateStatus = "Updating all packages..."
-				return a, runUpdateAllCmd()
+				return a, checkSudoAndUpdateCmd(nil, true)
 			}
 		case "r": // Refresh updates
 			a.updateCheckDone = false
@@ -1275,7 +1461,29 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.updateError = nil
 			a.updateStatus = ""
 			a.updateSelected = make(map[int]bool)
+			a.clearInstallLogs()
 			return a, checkUpdatesCmd()
+		case "c", "C": // Clear logs
+			if !a.updateRunning && len(a.installLogs) > 0 {
+				a.clearInstallLogs()
+				a.updateStatus = "Logs cleared"
+			}
+		case "pgup", "ctrl+u": // Scroll logs up
+			if len(a.installLogs) > 0 {
+				a.installLogScroll += 10
+				maxScroll := CalculateMaxLogScroll(len(a.installLogs), a.height-14)
+				if a.installLogScroll > maxScroll {
+					a.installLogScroll = maxScroll
+				}
+				a.installLogAutoScroll = false
+			}
+		case "pgdown", "ctrl+d": // Scroll logs down
+			if len(a.installLogs) > 0 {
+				a.installLogScroll -= 10
+				if a.installLogScroll < 0 {
+					a.installLogScroll = 0
+				}
+			}
 		case "esc":
 			a.screen = ScreenMainMenu
 		}
@@ -1440,7 +1648,7 @@ func (a *App) View() string {
 	}
 }
 
-// startInstallation begins the installation process
+// startInstallation begins the installation process using the Go-based package manager
 func (a *App) startInstallation() tea.Cmd {
 	if a.installRunning {
 		return nil
@@ -1450,51 +1658,218 @@ func (a *App) startInstallation() tea.Cmd {
 	a.installStep = 0
 	a.installOutput = []string{}
 
-	// Configure the runner with user selections
-	a.runner.Theme = a.theme
-	a.runner.NavStyle = a.navStyle
+	// Collect all selected tools from deep dive config
+	selectedTools := a.collectSelectedTools()
 
 	return func() tea.Msg {
-		cmd, stdout, stderr, err := a.runner.RunSetup()
-		if err != nil {
-			return installDoneMsg{err: err}
-		}
-		a.installCmd = cmd
-
-		// Create channels for output
-		outputCh := make(chan runner.OutputLine, 100)
-
-		// Start goroutines to read output
-		go runner.StreamOutput(stdout, outputCh, "stdout")
-		go runner.StreamOutput(stderr, outputCh, "stderr")
-
-		// Wait for command to complete
-		go func() {
-			waitErr := cmd.Wait()
-			close(outputCh)
-			// Note: We can't easily send tea.Msg from here
-			// The UI will detect completion via installRunning flag
-			if waitErr != nil {
-				a.lastError = waitErr
-			}
-			a.installRunning = false
-			a.installComplete = true
-		}()
-
-		// Read output in this goroutine and return
-		// Note: This is a simplified version - full async would need more work
-		for line := range outputCh {
-			a.installOutput = append(a.installOutput, line.Text)
-			if len(a.installOutput) > 20 {
-				a.installOutput = a.installOutput[len(a.installOutput)-20:]
-			}
-			if line.Type == runner.OutputStep {
-				a.installStep++
-			}
+		if len(selectedTools) == 0 {
+			a.installOutput = append(a.installOutput, "No tools selected for installation")
+			return installDoneMsg{err: nil}
 		}
 
-		return installDoneMsg{err: nil}
+		// Detect package manager
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return installDoneMsg{err: fmt.Errorf("no package manager detected")}
+		}
+
+		platform := pkg.DetectPlatform()
+		reg := tools.NewRegistry()
+
+		a.installOutput = append(a.installOutput, fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
+
+		var lastErr error
+		successCount := 0
+		for _, toolID := range selectedTools {
+			a.installStep++
+			a.installOutput = append(a.installOutput, fmt.Sprintf("▶ Installing %s...", toolID))
+
+			t, ok := reg.Get(toolID)
+			if !ok {
+				a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
+				continue
+			}
+
+			// Skip if already installed
+			if t.IsInstalled() {
+				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✓ %s already installed", toolID))
+				successCount++
+				continue
+			}
+
+			// Get packages for this platform
+			pkgs := t.Packages()[platform]
+			if len(pkgs) == 0 {
+				pkgs = t.Packages()["all"]
+			}
+			if len(pkgs) == 0 {
+				a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
+				continue
+			}
+
+			// Install using streaming command
+			ctx := context.Background()
+			cmd, err := mgr.InstallStreaming(ctx, pkgs...)
+			if err != nil {
+				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✗ Failed to start install: %v", err))
+				lastErr = err
+				continue
+			}
+
+			// Collect output
+			for line := range cmd.Output {
+				// Keep last 20 lines for display
+				if len(a.installOutput) > 20 {
+					a.installOutput = a.installOutput[len(a.installOutput)-20:]
+				}
+				a.installOutput = append(a.installOutput, "  "+line)
+			}
+
+			if err := cmd.Wait(); err != nil {
+				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
+				lastErr = err
+			} else {
+				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✓ %s installed successfully", toolID))
+				successCount++
+			}
+		}
+
+		if successCount == len(selectedTools) {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("\n✓ All %d tools installed successfully!", successCount))
+		} else {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("\n✓ Installed %d/%d tools", successCount, len(selectedTools)))
+		}
+
+		// Install dotfiles binary and utilities to ~/.local/bin
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Installing dotfiles utilities...")
+		if err := installUtilities(a.deepDiveConfig.Utilities); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to install utilities: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ Utilities installed to ~/.local/bin")
+		}
+
+		return installDoneMsg{err: lastErr}
 	}
+}
+
+// installUtilities copies the dotfiles binary and shell utilities to ~/.local/bin
+func installUtilities(utilities map[string]bool) error {
+	home := os.Getenv("HOME")
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+	}
+
+	binDir := filepath.Join(home, ".local", "bin")
+
+	// Create ~/.local/bin if it doesn't exist
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return fmt.Errorf("cannot create %s: %w", binDir, err)
+	}
+
+	// Get the path to the currently running executable
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot get executable path: %w", err)
+	}
+
+	// Resolve any symlinks to get the real path
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return fmt.Errorf("cannot resolve executable path: %w", err)
+	}
+
+	// Copy the binary to ~/.local/bin/dotfiles
+	destPath := filepath.Join(binDir, "dotfiles")
+	if err := copyFile(execPath, destPath); err != nil {
+		return fmt.Errorf("cannot copy binary: %w", err)
+	}
+
+	// Make it executable
+	if err := os.Chmod(destPath, 0755); err != nil {
+		return fmt.Errorf("cannot set permissions: %w", err)
+	}
+
+	// Install selected utility scripts
+	for name, enabled := range utilities {
+		if !enabled {
+			continue
+		}
+		script := scripts.GetScript(name)
+		if script == "" {
+			continue
+		}
+		scriptPath := filepath.Join(binDir, name)
+		if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+			return fmt.Errorf("cannot write %s: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
+}
+
+// collectSelectedTools gathers all tool IDs selected in deep dive config
+func (a *App) collectSelectedTools() []string {
+	// Ensure we have install status cached
+	a.ensureInstallCache()
+
+	var selected []string
+
+	// CLI Tools (lazygit, lazydocker, btop, glow, claude-code)
+	for id, enabled := range a.deepDiveConfig.CLITools {
+		if enabled && !a.manageInstalled[id] {
+			selected = append(selected, id)
+		}
+	}
+
+	// GUI Apps (zen-browser, cursor, lm-studio, obs)
+	for id, enabled := range a.deepDiveConfig.GUIApps {
+		if enabled && !a.manageInstalled[id] {
+			selected = append(selected, id)
+		}
+	}
+
+	// CLI Utilities (bat, eza, zoxide, ripgrep, fd, delta, fswatch)
+	for id, enabled := range a.deepDiveConfig.CLIUtilities {
+		if enabled && !a.manageInstalled[id] {
+			selected = append(selected, id)
+		}
+	}
+
+	// Note: Utilities (hk, caff, sshh) are shell scripts handled by installUtilities()
+	// They don't go through the package manager
+
+	// macOS Apps (rectangle, raycast, stats, etc.)
+	for id, enabled := range a.deepDiveConfig.MacApps {
+		if enabled && !a.manageInstalled[id] {
+			selected = append(selected, id)
+		}
+	}
+
+	return selected
 }
 
 // handleManageNavigation handles common navigation for management config screens
@@ -1605,12 +1980,145 @@ func sudoPromptCmd() tea.ExecCommand {
 		echo "│  privileges to install system packages.    │"
 		echo "└────────────────────────────────────────────┘"
 		echo ""
-		sudo -v
-		echo ""
-		echo "Press any key to continue..."
-		read -n 1
+		if sudo -v; then
+			echo ""
+			echo "✓ Authentication successful"
+			echo ""
+			echo "Press any key to continue..."
+			read -n 1
+			exit 0
+		else
+			echo ""
+			echo "✗ Authentication failed"
+			echo ""
+			echo "Press any key to return to the TUI..."
+			read -n 1
+			exit 1
+		fi
 	`)
 	return execCommand{cmd}
+}
+
+// manageInstallWithLogsMsg carries install result with collected logs
+type manageInstallWithLogsMsg struct {
+	toolID string
+	logs   []string
+	err    error
+}
+
+// updateWithLogsMsg carries update result with collected logs
+type updateWithLogsMsg struct {
+	logs    []string
+	results []pkg.UpdateResult
+	err     error
+}
+
+// streamingInstallToolCmd returns a command that installs a tool with output collection
+func (a *App) streamingInstallToolCmd(toolID string) tea.Cmd {
+	return func() tea.Msg {
+		reg := tools.NewRegistry()
+		t, ok := reg.Get(toolID)
+		if !ok {
+			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("unknown tool: %s", toolID)}
+		}
+
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
+		}
+
+		// Get packages for this platform
+		platform := pkg.DetectPlatform()
+		pkgs := t.Packages()[platform]
+		if len(pkgs) == 0 {
+			pkgs = t.Packages()["all"]
+		}
+		if len(pkgs) == 0 {
+			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no packages defined for %s", toolID)}
+		}
+
+		// Start streaming install
+		ctx := context.Background()
+		cmd, err := mgr.InstallStreaming(ctx, pkgs...)
+		if err != nil {
+			return manageInstallWithLogsMsg{toolID: toolID, err: err}
+		}
+
+		// Collect all output
+		var logs []string
+		for line := range cmd.Output {
+			logs = append(logs, line)
+		}
+
+		// Wait for completion
+		err = cmd.Wait()
+		return manageInstallWithLogsMsg{toolID: toolID, logs: logs, err: err}
+	}
+}
+
+// streamingUpdateCmd returns a command that updates packages with output collection
+func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
+	return func() tea.Msg {
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return updateWithLogsMsg{err: fmt.Errorf("no package manager detected")}
+		}
+
+		var pkgNames []string
+		for _, p := range packages {
+			pkgNames = append(pkgNames, p.Name)
+		}
+
+		ctx := context.Background()
+		cmd, err := mgr.UpdateStreaming(ctx, pkgNames...)
+		if err != nil {
+			return updateWithLogsMsg{err: err}
+		}
+
+		// Collect all output
+		var logs []string
+		for line := range cmd.Output {
+			logs = append(logs, line)
+		}
+
+		err = cmd.Wait()
+
+		// Build results
+		var results []pkg.UpdateResult
+		for _, p := range packages {
+			results = append(results, pkg.UpdateResult{
+				Package: p,
+				Success: err == nil,
+				Error:   err,
+			})
+		}
+		return updateWithLogsMsg{logs: logs, results: results, err: err}
+	}
+}
+
+// streamingUpdateAllCmd returns a command that updates all packages with output collection
+func (a *App) streamingUpdateAllCmd() tea.Cmd {
+	return func() tea.Msg {
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return updateWithLogsMsg{err: fmt.Errorf("no package manager detected")}
+		}
+
+		ctx := context.Background()
+		cmd, err := mgr.UpdateAllStreaming(ctx)
+		if err != nil {
+			return updateWithLogsMsg{err: err}
+		}
+
+		// Collect all output
+		var logs []string
+		for line := range cmd.Output {
+			logs = append(logs, line)
+		}
+
+		err = cmd.Wait()
+		return updateWithLogsMsg{logs: logs, err: err}
+	}
 }
 
 // SetStartScreen sets the initial screen to display (for CLI routing)
@@ -1740,7 +2248,7 @@ var ScreenToolIDs = map[Screen][]string{
 	ScreenConfigGUIApps:      {"zen-browser", "cursor", "lm-studio", "obs"},
 	ScreenConfigMacApps:      {"rectangle", "raycast", "iina", "appcleaner"},
 	ScreenConfigCLITools:     {"lazygit", "lazydocker", "btop", "glow", "claude-code"},
-	ScreenConfigUtilities:    {}, // hk, caff, sshh are not in registry
+	ScreenConfigUtilities:    {"hk", "caff", "sshh"}, // shell scripts, not package manager installs
 }
 
 // ensureInstallCache populates the install status cache if not already done
@@ -1753,17 +2261,31 @@ func (a *App) ensureInstallCache() {
 	all := reg.All()
 
 	if a.manageInstalled == nil {
-		a.manageInstalled = make(map[string]bool, len(all))
+		a.manageInstalled = make(map[string]bool, len(all)+3) // +3 for utilities
 	}
 
 	for _, t := range all {
 		a.manageInstalled[t.ID()] = t.IsInstalled()
 	}
+
+	// Check utility scripts in ~/.local/bin
+	home := os.Getenv("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home != "" {
+		binDir := filepath.Join(home, ".local", "bin")
+		for _, util := range []string{"hk", "caff", "sshh"} {
+			_, err := os.Stat(filepath.Join(binDir, util))
+			a.manageInstalled[util] = err == nil
+		}
+	}
+
 	a.manageInstalledReady = true
 }
 
 // getDeepDiveItemStatus returns the install status for a deep dive menu item
-// Returns "success" if installed, "warning" if partially installed (groups), "pending" if not
+// Returns "installed" (blue) if all installed, "partial" (yellow) if partially installed, "pending" (grey) if not
 func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 	toolIDs, ok := ScreenToolIDs[item.Screen]
 	if !ok || len(toolIDs) == 0 {
@@ -1779,9 +2301,9 @@ func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 	}
 
 	if installedCount == len(toolIDs) {
-		return "success" // All installed
+		return "installed" // All installed (blue)
 	} else if installedCount > 0 {
-		return "warning" // Partially installed (for groups)
+		return "partial" // Partially installed (yellow)
 	}
-	return "pending" // None installed
+	return "pending" // None installed (grey)
 }

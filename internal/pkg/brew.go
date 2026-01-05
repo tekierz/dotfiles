@@ -2,10 +2,13 @@ package pkg
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/tekierz/dotfiles/internal/runner"
 )
 
 // BrewManager implements PackageManager for Homebrew
@@ -210,4 +213,34 @@ func (b *BrewManager) ListInstalled() ([]Package, error) {
 	}
 
 	return packages, nil
+}
+
+// NeedsSudo returns false for Homebrew (doesn't require sudo)
+func (b *BrewManager) NeedsSudo() bool {
+	return false
+}
+
+// InstallStreaming installs packages with real-time output streaming
+func (b *BrewManager) InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
+	if len(packages) == 0 {
+		return nil, fmt.Errorf("no packages specified")
+	}
+
+	args := append([]string{"install"}, packages...)
+	return runner.RunStreaming(ctx, b.brewPath, args...)
+}
+
+// UpdateStreaming updates packages with real-time output streaming
+func (b *BrewManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
+	if len(packages) == 0 {
+		return nil, fmt.Errorf("no packages specified")
+	}
+
+	args := append([]string{"upgrade"}, packages...)
+	return runner.RunStreaming(ctx, b.brewPath, args...)
+}
+
+// UpdateAllStreaming updates all packages with real-time output streaming
+func (b *BrewManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
+	return runner.RunStreaming(ctx, b.brewPath, "upgrade")
 }

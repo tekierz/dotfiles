@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"os/exec"
+
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
@@ -27,4 +29,10 @@ func NewClaudeCodeTool() *ClaudeCodeTool {
 			configPaths: []string{},
 		},
 	}
+}
+
+// IsInstalled checks if claude command is available (npm global install)
+func (t *ClaudeCodeTool) IsInstalled() bool {
+	_, err := exec.LookPath("claude")
+	return err == nil
 }

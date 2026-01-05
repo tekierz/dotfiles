@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
 // Focused field styles
@@ -36,6 +37,33 @@ var (
 				Padding(0, 1)
 )
 
+// GetFilteredDeepDiveMenuItems returns deep dive menu items filtered for the current platform
+func GetFilteredDeepDiveMenuItems() []DeepDiveMenuItem {
+	platform := pkg.DetectPlatform()
+	allItems := GetDeepDiveMenuItems()
+
+	var filtered []DeepDiveMenuItem
+	for _, item := range allItems {
+		// If item has no platform restriction, include it
+		if item.Platform == "" {
+			filtered = append(filtered, item)
+			continue
+		}
+		// If item is for macos, only include on macOS
+		if item.Platform == "macos" && platform == pkg.PlatformMacOS {
+			filtered = append(filtered, item)
+			continue
+		}
+		// If item is for linux, only include on Linux (arch or debian)
+		if item.Platform == "linux" && (platform == pkg.PlatformArch || platform == pkg.PlatformDebian) {
+			filtered = append(filtered, item)
+			continue
+		}
+	}
+
+	return filtered
+}
+
 // renderDeepDiveMenu renders the deep dive tool selection menu
 func (a *App) renderDeepDiveMenu() string {
 	// Ensure install status is cached for status indicators
@@ -56,7 +84,7 @@ func (a *App) renderDeepDiveMenu() string {
 		Italic(true).
 		Render("Customize each tool before installation")
 
-	items := GetDeepDiveMenuItems()
+	items := GetFilteredDeepDiveMenuItems()
 	var menuList strings.Builder
 
 	// Category header style
@@ -497,6 +525,9 @@ func (a *App) renderConfigFzf() string {
 
 // renderConfigMacApps renders the macOS apps selection screen
 func (a *App) renderConfigMacApps() string {
+	// Ensure install status is cached
+	a.ensureInstallCache()
+
 	title := renderConfigTitle("", "macOS Apps", "Optional productivity applications")
 
 	cfg := a.deepDiveConfig
@@ -522,31 +553,43 @@ func (a *App) renderConfigMacApps() string {
 	for i, app := range apps {
 		focused := a.macAppIndex == i
 		enabled := cfg.MacApps[app.id]
+		installed := a.manageInstalled[app.id]
 
 		cursor := "  "
-		if focused {
+		if focused && !installed {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		} else if focused && installed {
+			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
-		checkbox := renderCheckboxInline(enabled, focused)
+		checkbox := renderCheckboxInlineWithInstallState(enabled, focused, installed)
 
 		nameStyle := unfocusedStyle
 		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if focused {
+		if installed {
+			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
+			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		} else if focused {
 			nameStyle = focusedStyle
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+		suffix := ""
+		if installed {
+			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-16s", app.name)),
+			suffix,
 			descStyle.Render(app.desc),
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
-	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(65)).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
 
 	return lipgloss.Place(
 		a.width, a.height,
@@ -773,8 +816,34 @@ func renderCheckboxInline(checked, focused bool) string {
 	return boxStyle.Render(box)
 }
 
+// renderCheckboxInlineWithInstallState renders a checkbox with install status awareness
+// - installed: shows yellow checkbox (already installed, can update), item is not selectable
+// - not installed: normal checkbox behavior (green when checked)
+func renderCheckboxInlineWithInstallState(checked, focused, installed bool) string {
+	if installed {
+		// Already installed - show yellow filled checkbox, not selectable
+		boxStyle := lipgloss.NewStyle().Foreground(ColorYellow)
+		return boxStyle.Render("☑")
+	}
+
+	// Not installed - normal checkbox
+	box := "☐"
+	boxStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	if checked {
+		box = "☑"
+		boxStyle = lipgloss.NewStyle().Foreground(ColorGreen)
+	}
+	if focused {
+		boxStyle = lipgloss.NewStyle().Foreground(ColorCyan)
+	}
+	return boxStyle.Render(box)
+}
+
 // renderConfigUtilities renders the utilities selection screen
 func (a *App) renderConfigUtilities() string {
+	// Ensure install status is cached
+	a.ensureInstallCache()
+
 	title := renderConfigTitle("", "Utilities", "Helper tools from tekierz/homebrew-tap")
 
 	cfg := a.deepDiveConfig
@@ -793,31 +862,43 @@ func (a *App) renderConfigUtilities() string {
 	for i, util := range utilities {
 		focused := a.utilityIndex == i
 		enabled := cfg.Utilities[util.id]
+		installed := a.manageInstalled[util.id]
 
 		cursor := "  "
-		if focused {
+		if focused && !installed {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		} else if focused && installed {
+			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
-		checkbox := renderCheckboxInline(enabled, focused)
+		checkbox := renderCheckboxInlineWithInstallState(enabled, focused, installed)
 
 		nameStyle := unfocusedStyle
 		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if focused {
+		if installed {
+			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
+			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		} else if focused {
 			nameStyle = focusedStyle
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+		suffix := ""
+		if installed {
+			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-8s", util.name)),
+			suffix,
 			descStyle.Render(util.desc),
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
-	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(60)).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
 
 	return lipgloss.Place(
 		a.width, a.height,
@@ -828,6 +909,9 @@ func (a *App) renderConfigUtilities() string {
 
 // renderConfigCLITools renders the CLI tools selection screen
 func (a *App) renderConfigCLITools() string {
+	// Ensure install status is cached
+	a.ensureInstallCache()
+
 	title := renderConfigTitle("", "CLI Tools", "Terminal-based productivity tools")
 
 	cfg := a.deepDiveConfig
@@ -848,31 +932,44 @@ func (a *App) renderConfigCLITools() string {
 	for i, tool := range tools {
 		focused := a.cliToolIndex == i
 		enabled := cfg.CLITools[tool.id]
+		installed := a.manageInstalled[tool.id]
 
 		cursor := "  "
-		if focused {
+		if focused && !installed {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		} else if focused && installed {
+			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
-		checkbox := renderCheckboxInline(enabled, focused)
+		checkbox := renderCheckboxInlineWithInstallState(enabled, focused, installed)
 
 		nameStyle := unfocusedStyle
 		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if focused {
+		if installed {
+			// Installed items show in yellow with "installed" suffix
+			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
+			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		} else if focused {
 			nameStyle = focusedStyle
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+		suffix := ""
+		if installed {
+			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-14s", tool.name)),
+			suffix,
 			descStyle.Render(tool.desc),
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(60)).Render(content.String())
-	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(70)).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
 
 	return lipgloss.Place(
 		a.width, a.height,
@@ -883,6 +980,9 @@ func (a *App) renderConfigCLITools() string {
 
 // renderConfigCLIUtilities renders the CLI utilities selection screen
 func (a *App) renderConfigCLIUtilities() string {
+	// Ensure install status is cached
+	a.ensureInstallCache()
+
 	title := renderConfigTitle("󰘳", "CLI Utilities", "Essential command-line replacements")
 
 	cfg := a.deepDiveConfig
@@ -905,31 +1005,43 @@ func (a *App) renderConfigCLIUtilities() string {
 	for i, util := range utilities {
 		focused := a.cliUtilityIndex == i
 		enabled := cfg.CLIUtilities[util.id]
+		installed := a.manageInstalled[util.id]
 
 		cursor := "  "
-		if focused {
+		if focused && !installed {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		} else if focused && installed {
+			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
-		checkbox := renderCheckboxInline(enabled, focused)
+		checkbox := renderCheckboxInlineWithInstallState(enabled, focused, installed)
 
 		nameStyle := unfocusedStyle
 		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if focused {
+		if installed {
+			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
+			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		} else if focused {
 			nameStyle = focusedStyle
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+		suffix := ""
+		if installed {
+			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-10s", util.name)),
+			suffix,
 			descStyle.Render(util.desc),
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
-	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(65)).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
 
 	return lipgloss.Place(
 		a.width, a.height,
@@ -940,6 +1052,9 @@ func (a *App) renderConfigCLIUtilities() string {
 
 // renderConfigGUIApps renders the GUI apps selection screen
 func (a *App) renderConfigGUIApps() string {
+	// Ensure install status is cached
+	a.ensureInstallCache()
+
 	title := renderConfigTitle("", "GUI Apps", "Desktop applications (cross-platform)")
 
 	cfg := a.deepDiveConfig
@@ -959,31 +1074,43 @@ func (a *App) renderConfigGUIApps() string {
 	for i, app := range apps {
 		focused := a.guiAppIndex == i
 		enabled := cfg.GUIApps[app.id]
+		installed := a.manageInstalled[app.id]
 
 		cursor := "  "
-		if focused {
+		if focused && !installed {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		} else if focused && installed {
+			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
-		checkbox := renderCheckboxInline(enabled, focused)
+		checkbox := renderCheckboxInlineWithInstallState(enabled, focused, installed)
 
 		nameStyle := unfocusedStyle
 		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if focused {
+		if installed {
+			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
+			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		} else if focused {
 			nameStyle = focusedStyle
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+		suffix := ""
+		if installed {
+			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-14s", app.name)),
+			suffix,
 			descStyle.Render(app.desc),
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(60)).Render(content.String())
-	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(70)).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
 
 	return lipgloss.Place(
 		a.width, a.height,

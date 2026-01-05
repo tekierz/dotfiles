@@ -2,11 +2,13 @@ package runner
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // OutputLine represents a line of output from the bash script
@@ -280,4 +282,101 @@ func (r *Runner) ListBackups() ([]string, error) {
 	}
 
 	return backups, nil
+}
+
+// StreamingCmd wraps an exec.Cmd with real-time output streaming
+type StreamingCmd struct {
+	Cmd    *exec.Cmd
+	Output <-chan string
+	Done   <-chan error
+	cancel context.CancelFunc
+}
+
+// Cancel stops the running command
+func (s *StreamingCmd) Cancel() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+}
+
+// Wait blocks until the command completes and returns the error (if any)
+func (s *StreamingCmd) Wait() error {
+	return <-s.Done
+}
+
+// RunStreaming executes a command and streams output line-by-line
+// Returns a StreamingCmd that provides channels for output and completion
+func RunStreaming(ctx context.Context, name string, args ...string) (*StreamingCmd, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = os.Environ()
+	// Connect stdin to /dev/null to prevent commands from hanging waiting for input
+	cmd.Stdin = nil
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		stdout.Close()
+		cancel()
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		stdout.Close()
+		stderr.Close()
+		cancel()
+		return nil, fmt.Errorf("start command: %w", err)
+	}
+
+	outputCh := make(chan string, 100)
+	doneCh := make(chan error, 1)
+
+	// Stream stdout and stderr concurrently
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	streamPipe := func(pipe io.ReadCloser) {
+		defer wg.Done()
+		defer pipe.Close()
+		scanner := bufio.NewScanner(pipe)
+		// Increase buffer size for long lines (package manager output can be verbose)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			select {
+			case outputCh <- scanner.Text():
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+
+	go streamPipe(stdout)
+	go streamPipe(stderr)
+
+	// Wait for command to finish and close channels
+	go func() {
+		wg.Wait()
+		close(outputCh)
+		doneCh <- cmd.Wait()
+		close(doneCh)
+	}()
+
+	return &StreamingCmd{
+		Cmd:    cmd,
+		Output: outputCh,
+		Done:   doneCh,
+		cancel: cancel,
+	}, nil
+}
+
+// RunStreamingWithSudo executes a command with sudo and streams output
+// The sudo credentials should be cached before calling this function
+func RunStreamingWithSudo(ctx context.Context, name string, args ...string) (*StreamingCmd, error) {
+	sudoArgs := append([]string{name}, args...)
+	return RunStreaming(ctx, "sudo", sudoArgs...)
 }

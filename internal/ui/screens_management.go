@@ -81,17 +81,9 @@ func (a *App) renderUpdate() string {
 
 	title := TitleStyle.Render("Package Updates")
 
-	// Check if we're running an update
-	if a.updateRunning {
-		spinnerText := a.updateStatus
-		if a.animationsEnabled {
-			spinnerText = AnimatedSpinnerDots(a.uiFrame) + " " + a.updateStatus
-		}
-		body := lipgloss.NewStyle().Foreground(ColorCyan).Render(spinnerText)
-		progressBar := ProgressBarAnimated(0.5, min(60, a.width-20), a.uiFrame)
-		help := HelpStyle.Render("updating... please wait")
-		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, progressBar, "", help)
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, content)
+	// Check if we're running an update or have logs to show
+	if a.updateRunning || len(a.installLogs) > 0 {
+		return a.renderUpdateWithLogs(tabBar, title)
 	}
 
 	// Check if we're still loading
@@ -218,6 +210,104 @@ func (a *App) renderUpdate() string {
 	return lipgloss.Place(a.width, a.height,
 		lipgloss.Center, lipgloss.Top,
 		content)
+}
+
+// renderUpdateWithLogs renders the update screen with log panel
+func (a *App) renderUpdateWithLogs(tabBar, title string) string {
+	// Build title with status
+	var statusTitle string
+	if a.updateRunning {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		if !a.animationsEnabled {
+			spinner = "..."
+		}
+		statusTitle = fmt.Sprintf("UPDATING %s", spinner)
+	} else {
+		statusTitle = "UPDATE LOG"
+	}
+
+	logPanelTitle := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render(statusTitle)
+
+	// Calculate log panel dimensions
+	panelW := min(100, a.width-4)
+	panelH := a.height - 10 // Leave room for header/footer
+
+	// Calculate visible log range
+	innerHeight := maxInt(1, panelH-4)
+	totalLines := len(a.installLogs)
+
+	var logLines []string
+	if totalLines == 0 {
+		if a.updateRunning {
+			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Waiting for output..."))
+		} else {
+			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No logs"))
+		}
+	} else {
+		// Calculate range (scroll from bottom)
+		endIdx := totalLines - a.installLogScroll
+		if endIdx > totalLines {
+			endIdx = totalLines
+		}
+		if endIdx < 0 {
+			endIdx = 0
+		}
+		startIdx := endIdx - innerHeight
+		if startIdx < 0 {
+			startIdx = 0
+		}
+
+		innerWidth := panelW - 4
+		for i := startIdx; i < endIdx; i++ {
+			line := a.installLogs[i]
+			if lipgloss.Width(line) > innerWidth {
+				line = truncateVisible(line, innerWidth)
+			}
+			logLines = append(logLines, line)
+		}
+	}
+
+	// Pad to fill height
+	for len(logLines) < innerHeight {
+		logLines = append([]string{""}, logLines...)
+	}
+
+	// Build log box
+	borderColor := ColorCyan
+	if !a.updateRunning {
+		borderColor = ColorBorder
+	}
+
+	logBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(0, 1).
+		Width(maxInt(1, panelW-2)).
+		Height(maxInt(1, panelH-2)).
+		Render(lipgloss.JoinVertical(lipgloss.Left, logPanelTitle, "", strings.Join(logLines, "\n")))
+
+	// Status line
+	var statusLine string
+	if a.updateStatus != "" {
+		statusStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if strings.Contains(a.updateStatus, "failed") {
+			statusStyle = lipgloss.NewStyle().Foreground(ColorRed)
+		} else if strings.Contains(a.updateStatus, "✓") {
+			statusStyle = lipgloss.NewStyle().Foreground(ColorGreen)
+		}
+		statusLine = statusStyle.Render(a.updateStatus)
+	}
+
+	// Help text
+	var help string
+	if a.updateRunning {
+		help = HelpStyle.Render("updating... please wait")
+	} else {
+		help = HelpStyle.Render("c clear logs • pgup/pgdn scroll • r refresh • esc menu")
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, statusLine, "", logBox, "", help)
+	return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, content)
 }
 
 // =====================================

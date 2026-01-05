@@ -1,9 +1,12 @@
 package pkg
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"runtime"
+
+	"github.com/tekierz/dotfiles/internal/runner"
 )
 
 // Package represents a package with version info
@@ -50,6 +53,18 @@ type PackageManager interface {
 
 	// ListInstalled returns all installed packages
 	ListInstalled() ([]Package, error)
+
+	// NeedsSudo returns true if package operations require elevated privileges
+	NeedsSudo() bool
+
+	// InstallStreaming installs packages with real-time output streaming
+	InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error)
+
+	// UpdateStreaming updates packages with real-time output streaming
+	UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error)
+
+	// UpdateAllStreaming updates all packages with real-time output streaming
+	UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error)
 }
 
 // Platform represents the current operating system

@@ -212,6 +212,7 @@ type DeepDiveMenuItem struct {
 	Screen      Screen
 	Icon        string
 	Category    string // Category header (empty = same category as previous)
+	Platform    string // Platform filter: "macos", "linux", or "" for all
 }
 
 // GetDeepDiveMenuItems returns the menu items for deep dive configuration
@@ -291,6 +292,7 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Description: "Rectangle, Raycast, Stats, more",
 			Screen:      ScreenConfigMacApps,
 			Icon:        "",
+			Platform:    "macos",
 		},
 		{
 			Name:        "Helper Scripts",

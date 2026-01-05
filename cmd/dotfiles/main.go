@@ -300,12 +300,12 @@ func showStatus() {
 	fmt.Printf("Config dir: %s\n", config.ConfigDir())
 	fmt.Println()
 
-	// Show installed tools
+	// Show installed tools (filtered by platform)
 	registry := tools.NewRegistry()
 	installed := registry.Installed()
-	notInstalled := registry.NotInstalled()
+	notInstalled := registry.NotInstalledForPlatform()
 
-	fmt.Printf("Installed Tools: %d/%d\n", len(installed), registry.Count())
+	fmt.Printf("Installed Tools: %d/%d\n", len(installed), registry.CountForPlatform())
 	fmt.Println("─────────────────────────")
 
 	// Group by category
@@ -320,11 +320,24 @@ func showStatus() {
 		tools.CategoryUtility, tools.CategoryApp,
 	}
 
+	// Get current platform for package details
+	platform := pkg.DetectPlatform()
+
 	for _, cat := range categories {
 		if catTools, ok := byCategory[cat]; ok && len(catTools) > 0 {
-			names := make([]string, len(catTools))
-			for i, t := range catTools {
-				names[i] = t.Name()
+			names := make([]string, 0, len(catTools))
+			for _, t := range catTools {
+				// For tools with multiple packages (like zsh), show them
+				pkgs := t.Packages()[platform]
+				if len(pkgs) == 0 {
+					pkgs = t.Packages()["all"]
+				}
+				if len(pkgs) > 1 {
+					// Show tool name with package count
+					names = append(names, fmt.Sprintf("%s (+%d pkgs)", t.Name(), len(pkgs)-1))
+				} else {
+					names = append(names, t.Name())
+				}
 			}
 			fmt.Printf("  %s: %s\n", strings.Title(string(cat)), strings.Join(names, ", "))
 		}

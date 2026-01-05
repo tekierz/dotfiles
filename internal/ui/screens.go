@@ -433,41 +433,179 @@ func (a *App) renderNavPicker() string {
 	)
 }
 
-// renderFileTree renders the files that will be modified
+// renderFileTree renders the files that will be modified and packages to be installed
 func (a *App) renderFileTree() string {
-	title := TitleStyle.Render("Files to be Modified")
+	title := TitleStyle.Render("Installation Summary")
 
-	// File tree with color coding
-	tree := lipgloss.NewStyle().Foreground(ColorText).Render(`
-  ~/.config/
-  ├── `) + lipgloss.NewStyle().Foreground(ColorGreen).Render("dotfiles/") + lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" (new)") + `
-  │   ├── settings
-  │   └── backups/
-  ├── ` + lipgloss.NewStyle().Foreground(ColorGreen).Render("ghostty/") + `
-  │   ├── config
-  │   └── themes/dotfiles-theme
-  ├── ` + lipgloss.NewStyle().Foreground(ColorGreen).Render("yazi/") + `
-  │   ├── yazi.toml
-  │   ├── keymap.toml
-  │   └── theme.toml
-  ├── ` + lipgloss.NewStyle().Foreground(ColorGreen).Render("bat/") + `
-  │   └── config
-  └── ` + lipgloss.NewStyle().Foreground(ColorGreen).Render("nvim/") + lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" (Kickstart.nvim)") + `
+	cfg := a.deepDiveConfig
+	newStyle := lipgloss.NewStyle().Foreground(ColorGreen)
+	modStyle := lipgloss.NewStyle().Foreground(ColorYellow)
+	mutedStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	textStyle := lipgloss.NewStyle().Foreground(ColorText)
+	pkgStyle := lipgloss.NewStyle().Foreground(ColorCyan)
 
-  ~/
-  ├── ` + lipgloss.NewStyle().Foreground(ColorYellow).Render(".zshrc") + lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" (backed up)") + `
-  ├── ` + lipgloss.NewStyle().Foreground(ColorYellow).Render(".tmux.conf") + lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" (backed up)") + `
-  ├── ` + lipgloss.NewStyle().Foreground(ColorYellow).Render(".gitconfig") + lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" (backed up)") + `
-  └── .local/bin/
-      ├── ` + lipgloss.NewStyle().Foreground(ColorGreen).Render("hk") + `
-      ├── ` + lipgloss.NewStyle().Foreground(ColorGreen).Render("caff") + `
-      └── ` + lipgloss.NewStyle().Foreground(ColorGreen).Render("dotfiles") + `
-`
+	var lines []string
 
-	legend := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
-		fmt.Sprintf("  %s New    %s Modified (backed up)",
-			lipgloss.NewStyle().Foreground(ColorGreen).Render("●"),
-			lipgloss.NewStyle().Foreground(ColorYellow).Render("●"),
+	// Ensure install cache is populated
+	a.ensureInstallCache()
+
+	// Collect selected and already installed tools
+	var toInstall []string
+	var alreadyInstalled []string
+
+	// CLI Tools
+	for id, enabled := range cfg.CLITools {
+		if enabled {
+			if a.manageInstalled[id] {
+				alreadyInstalled = append(alreadyInstalled, id)
+			} else {
+				toInstall = append(toInstall, id)
+			}
+		}
+	}
+	// GUI Apps
+	for id, enabled := range cfg.GUIApps {
+		if enabled {
+			if a.manageInstalled[id] {
+				alreadyInstalled = append(alreadyInstalled, id)
+			} else {
+				toInstall = append(toInstall, id)
+			}
+		}
+	}
+	// CLI Utilities
+	for id, enabled := range cfg.CLIUtilities {
+		if enabled {
+			if a.manageInstalled[id] {
+				alreadyInstalled = append(alreadyInstalled, id)
+			} else {
+				toInstall = append(toInstall, id)
+			}
+		}
+	}
+	// Utilities
+	for id, enabled := range cfg.Utilities {
+		if enabled {
+			if a.manageInstalled[id] {
+				alreadyInstalled = append(alreadyInstalled, id)
+			} else {
+				toInstall = append(toInstall, id)
+			}
+		}
+	}
+	// macOS Apps
+	for id, enabled := range cfg.MacApps {
+		if enabled {
+			if a.manageInstalled[id] {
+				alreadyInstalled = append(alreadyInstalled, id)
+			} else {
+				toInstall = append(toInstall, id)
+			}
+		}
+	}
+
+	// Packages to install section
+	if len(toInstall) > 0 {
+		lines = append(lines, textStyle.Render("  Packages to Install:"))
+		for i, toolID := range toInstall {
+			prefix := "├──"
+			if i == len(toInstall)-1 {
+				prefix = "└──"
+			}
+			lines = append(lines, textStyle.Render("  "+prefix+" ")+pkgStyle.Render(toolID))
+		}
+		lines = append(lines, "")
+	}
+
+	// Already installed section
+	if len(alreadyInstalled) > 0 {
+		lines = append(lines, mutedStyle.Render("  Already Installed (skipped):"))
+		for i, toolID := range alreadyInstalled {
+			prefix := "├──"
+			if i == len(alreadyInstalled)-1 {
+				prefix = "└──"
+			}
+			lines = append(lines, textStyle.Render("  "+prefix+" ")+mutedStyle.Render(toolID+" ✓"))
+		}
+		lines = append(lines, "")
+	}
+
+	// ~/.config/ section
+	lines = append(lines, textStyle.Render("  Files to be Modified:"))
+	lines = append(lines, textStyle.Render("  ~/.config/"))
+	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("dotfiles/")+mutedStyle.Render(" (new)"))
+	lines = append(lines, textStyle.Render("  │   ├── settings"))
+	lines = append(lines, textStyle.Render("  │   └── backups/"))
+
+	// Ghostty
+	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("ghostty/"))
+	lines = append(lines, textStyle.Render("  │   ├── config"))
+	lines = append(lines, textStyle.Render("  │   └── themes/dotfiles-theme"))
+
+	// Yazi
+	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("yazi/"))
+	lines = append(lines, textStyle.Render("  │   ├── yazi.toml"))
+	lines = append(lines, textStyle.Render("  │   ├── keymap.toml"))
+	lines = append(lines, textStyle.Render("  │   └── theme.toml"))
+
+	// Bat (if CLI utilities include bat)
+	if cfg.CLIUtilities["bat"] {
+		lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("bat/"))
+		lines = append(lines, textStyle.Render("  │   └── config"))
+	}
+
+	// Neovim with config type
+	nvimNote := ""
+	switch cfg.NeovimConfig {
+	case "kickstart":
+		nvimNote = " (Kickstart.nvim)"
+	case "lazyvim":
+		nvimNote = " (LazyVim)"
+	case "nvchad":
+		nvimNote = " (NvChad)"
+	case "custom":
+		nvimNote = " (unchanged)"
+	}
+	lines = append(lines, textStyle.Render("  └── ")+newStyle.Render("nvim/")+mutedStyle.Render(nvimNote))
+
+	// ~/ section
+	lines = append(lines, "")
+	lines = append(lines, textStyle.Render("  ~/"))
+	lines = append(lines, textStyle.Render("  ├── ")+modStyle.Render(".zshrc")+mutedStyle.Render(" (backed up)"))
+	lines = append(lines, textStyle.Render("  ├── ")+modStyle.Render(".tmux.conf")+mutedStyle.Render(" (backed up)"))
+	lines = append(lines, textStyle.Render("  ├── ")+modStyle.Render(".gitconfig")+mutedStyle.Render(" (backed up)"))
+
+	// ~/.local/bin/ utilities - only show enabled ones
+	var binFiles []string
+	if cfg.Utilities["hk"] {
+		binFiles = append(binFiles, "hk")
+	}
+	if cfg.Utilities["caff"] {
+		binFiles = append(binFiles, "caff")
+	}
+	if cfg.Utilities["sshh"] {
+		binFiles = append(binFiles, "sshh")
+	}
+	binFiles = append(binFiles, "dotfiles") // Always installed
+
+	if len(binFiles) > 0 {
+		lines = append(lines, textStyle.Render("  └── .local/bin/"))
+		for i, f := range binFiles {
+			prefix := "├──"
+			if i == len(binFiles)-1 {
+				prefix = "└──"
+			}
+			lines = append(lines, textStyle.Render("      "+prefix+" ")+newStyle.Render(f))
+		}
+	}
+
+	tree := strings.Join(lines, "\n")
+
+	legend := mutedStyle.Render(
+		fmt.Sprintf("  %s New    %s Modified    %s Package",
+			newStyle.Render("●"),
+			modStyle.Render("●"),
+			pkgStyle.Render("●"),
 		))
 
 	help := HelpStyle.Render("[ENTER] Start Installation    [ESC] Back")

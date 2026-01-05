@@ -129,6 +129,46 @@ func (r *Registry) NotInstalled() []Tool {
 	return tools
 }
 
+// NotInstalledForPlatform returns tools that are not installed and available for current platform
+func (r *Registry) NotInstalledForPlatform() []Tool {
+	platform := pkg.DetectPlatform()
+	var tools []Tool
+	for _, t := range r.tools {
+		// Check if tool has packages for this platform (or "all")
+		pkgs := t.Packages()[platform]
+		if len(pkgs) == 0 {
+			pkgs = t.Packages()["all"]
+		}
+		// Skip tools with no packages for this platform
+		if len(pkgs) == 0 {
+			continue
+		}
+		if !t.IsInstalled() {
+			tools = append(tools, t)
+		}
+	}
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name() < tools[j].Name()
+	})
+	return tools
+}
+
+// CountForPlatform returns the number of tools available for the current platform
+func (r *Registry) CountForPlatform() int {
+	platform := pkg.DetectPlatform()
+	count := 0
+	for _, t := range r.tools {
+		pkgs := t.Packages()[platform]
+		if len(pkgs) == 0 {
+			pkgs = t.Packages()["all"]
+		}
+		if len(pkgs) > 0 {
+			count++
+		}
+	}
+	return count
+}
+
 // Configurable returns tools that have configuration options
 func (r *Registry) Configurable() []Tool {
 	var tools []Tool

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -133,6 +134,24 @@ func (a *App) installToolCmd(toolID string) tea.Cmd {
 		}
 
 		return manageInstallDoneMsg{toolID: toolID, err: t.Install(mgr)}
+	}
+}
+
+// checkSudoAndInstallCmd checks if sudo is needed and either prompts or starts install
+func (a *App) checkSudoAndInstallCmd(toolID string) tea.Cmd {
+	return func() tea.Msg {
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
+		}
+
+		// Check if sudo is needed and not cached
+		if mgr.NeedsSudo() && !runner.CheckSudoCached() {
+			return manageSudoRequiredMsg{toolID: toolID}
+		}
+
+		// Sudo not needed or already cached - start streaming install
+		return manageStartInstallMsg{toolID: toolID}
 	}
 }
 
@@ -320,10 +339,12 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Clear logs and start install flow (will check sudo first)
+		a.clearInstallLogs()
 		a.manageStatus = ""
 		a.manageInstalling = true
 		a.manageInstallID = item.id
-		return a, a.installToolCmd(item.id)
+		return a, a.checkSudoAndInstallCmd(item.id)
 
 	case "?":
 		// Jump to hotkeys/cheatsheet for the selected tool.
@@ -339,6 +360,36 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.hotkeysPane = 0
 		a.hotkeysReturn = ScreenManage
 		a.screen = ScreenHotkeys
+		return a, nil
+
+	case "c", "C":
+		// Clear install logs (only when not installing)
+		if !a.manageInstalling && len(a.installLogs) > 0 {
+			a.clearInstallLogs()
+			a.manageStatus = "Logs cleared"
+		}
+		return a, nil
+
+	case "pgup", "ctrl+u":
+		// Scroll logs up (when viewing logs)
+		if len(a.installLogs) > 0 {
+			a.installLogScroll += 10
+			maxScroll := CalculateMaxLogScroll(len(a.installLogs), layout.bodyH-6)
+			if a.installLogScroll > maxScroll {
+				a.installLogScroll = maxScroll
+			}
+			a.installLogAutoScroll = false
+		}
+		return a, nil
+
+	case "pgdown", "ctrl+d":
+		// Scroll logs down (when viewing logs)
+		if len(a.installLogs) > 0 {
+			a.installLogScroll -= 10
+			if a.installLogScroll < 0 {
+				a.installLogScroll = 0
+			}
+		}
 		return a, nil
 	}
 
@@ -1226,6 +1277,12 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	if a.managePane == managePaneSettings {
 		borderColor = ColorCyan
 	}
+
+	// If installing, show log panel instead of settings
+	if a.manageInstalling || len(a.installLogs) > 0 {
+		return a.renderManageLogPanel(layout, items)
+	}
+
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
@@ -1522,4 +1579,130 @@ func truncatePlain(s string, width int) string {
 		return "…"
 	}
 	return string(r[:width-1]) + "…"
+}
+
+// renderManageLogPanel renders the log panel when installing/updating
+func (a *App) renderManageLogPanel(layout manageLayout, items []manageItem) string {
+	borderColor := ColorCyan
+	if !a.manageInstalling {
+		borderColor = ColorBorder
+	}
+
+	// Get the tool name for the title
+	toolName := "Install"
+	for _, it := range items {
+		if it.id == a.manageInstallID {
+			toolName = it.name
+			break
+		}
+	}
+
+	// Calculate panel dimensions
+	panelW := layout.rightW
+	panelH := layout.bodyH
+
+	// Build title with status
+	var title string
+	if a.manageInstalling {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		if !a.animationsEnabled {
+			spinner = "..."
+		}
+		title = fmt.Sprintf("INSTALLING %s %s", strings.ToUpper(toolName), spinner)
+	} else {
+		title = fmt.Sprintf("INSTALL LOG: %s", strings.ToUpper(toolName))
+	}
+
+	// Use the LogPanel component
+	logPanel := RenderLogPanel(
+		a.installLogs,
+		panelW,
+		panelH,
+		a.installLogScroll,
+		title,
+		a.managePane == managePaneSettings,
+	)
+
+	// Add scroll hint and clear hint at bottom if logs exist
+	if len(a.installLogs) > 0 && !a.manageInstalling {
+		hintStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		clearHint := hintStyle.Render("Press C to clear logs • ↑↓ to scroll")
+		logPanel = lipgloss.JoinVertical(lipgloss.Left, logPanel, clearHint)
+	}
+
+	// Override with simple styled panel to match layout
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 1).
+		Width(maxInt(1, layout.rightW-2)).
+		Height(maxInt(1, layout.bodyH-2))
+
+	// Build content
+	innerWidth := maxInt(0, layout.rightW-4)
+	innerHeight := maxInt(0, layout.bodyH-6)
+
+	// Title line
+	titleStyle := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true)
+	titleLine := titleStyle.Render(title)
+
+	// Calculate visible log range
+	visibleLines := innerHeight
+	totalLines := len(a.installLogs)
+
+	var logLines []string
+	if totalLines == 0 {
+		// Empty state
+		if a.manageInstalling {
+			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Waiting for output..."))
+		} else {
+			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No logs"))
+		}
+	} else {
+		// Calculate range (scroll from bottom)
+		endIdx := totalLines - a.installLogScroll
+		if endIdx > totalLines {
+			endIdx = totalLines
+		}
+		if endIdx < 0 {
+			endIdx = 0
+		}
+		startIdx := endIdx - visibleLines
+		if startIdx < 0 {
+			startIdx = 0
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			line := a.installLogs[i]
+			if lipgloss.Width(line) > innerWidth {
+				line = truncateVisible(line, innerWidth)
+			}
+			logLines = append(logLines, line)
+		}
+	}
+
+	// Pad to fill height
+	for len(logLines) < visibleLines {
+		logLines = append([]string{""}, logLines...)
+	}
+
+	// Footer with hints
+	var footerText string
+	if a.manageInstalling {
+		footerText = "Installing..."
+	} else if len(a.installLogs) > 0 {
+		footerText = "C: clear • ↑↓: scroll"
+	}
+	footer := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(footerText)
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		titleLine,
+		"",
+		strings.Join(logLines, "\n"),
+		"",
+		footer,
+	)
+
+	return panel.Render(content)
 }
