@@ -402,10 +402,13 @@ func (a *App) renderHotkeysDualPane() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", layout.gap), right)
 
 	view := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	if lipgloss.Height(view) < a.height {
-		view += strings.Repeat("\n", a.height-lipgloss.Height(view))
-	}
-	return view
+
+	// Apply full background color to prevent terminal transparency from showing through
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Height(a.height).
+		Background(ColorBg).
+		Render(view)
 }
 
 func (a *App) renderHotkeysHeader(width int) string {

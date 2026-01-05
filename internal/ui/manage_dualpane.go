@@ -1058,10 +1058,13 @@ func (a *App) renderManageDualPane() string {
 
 	// Ensure the overall string is exactly terminal height. This helps avoid visual "jitter".
 	view := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	if lipgloss.Height(view) < a.height {
-		view += strings.Repeat("\n", a.height-lipgloss.Height(view))
-	}
-	return view
+
+	// Apply full background color to prevent terminal transparency from showing through
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Height(a.height).
+		Background(ColorBg).
+		Render(view)
 }
 
 func (a *App) renderManageHeader(width int) string {
