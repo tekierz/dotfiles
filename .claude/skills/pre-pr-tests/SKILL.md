@@ -1,11 +1,30 @@
 ---
 name: pre-pr-tests
-description: Generates comprehensive pre-PR test checklist for dotfiles TUI. Use before merging feature branches to main, when running tests, creating test plans, or doing QA. Includes manual tests, automatic tests, security checks, performance tests, and aesthetic review.
+description: Generates comprehensive pre-PR test checklist for dotfiles TUI. Use before merging feature branches to main, when running tests, creating test plans, or doing QA. Includes manual tests, automatic tests, security checks, performance tests, aesthetic review, and cross-repo compatibility with sshh and homebrew-tap.
 ---
 
 # Pre-PR Testing Checklist for Dotfiles TUI
 
 Run these tests before merging any feature branch to main.
+
+## Related Repositories
+
+These repos are interconnected and may need updates together:
+
+| Repo | Location | Purpose |
+|------|----------|---------|
+| **dotfiles** | `~/projects/dotfiles` | Main project (this repo) |
+| **sshh** | `~/projects/sshh` | SSH connection manager utility |
+| **homebrew-tap** | `~/projects/homebrew-tap` | Homebrew formulas for distribution |
+
+### Integration Flow
+```
+dotfiles-setup (bash script)
+    └── installs sshh via: brew install tekierz/tap/sshh
+                                    │
+homebrew-tap/Formula/sshh.rb ───────┘
+    └── SHA256 hash points to: github.com/tekierz/sshh/archive/refs/tags/v*.tar.gz
+```
 
 ---
 
@@ -240,6 +259,134 @@ Manual review of these areas:
 
 ---
 
+## Cross-Repository Compatibility Tests
+
+### Automated Cross-Repo Check Script
+
+Run this from `~/projects/`:
+
+```bash
+#!/bin/bash
+echo "=== CROSS-REPO COMPATIBILITY CHECK ==="
+cd ~/projects
+
+# 1. Check all repos exist
+echo -e "\n[1/6] Checking repositories..."
+for repo in dotfiles sshh homebrew-tap; do
+    if [ -d "$repo" ]; then
+        echo "  $repo: EXISTS"
+    else
+        echo "  $repo: MISSING - Clone from github.com/tekierz/$repo"
+        exit 1
+    fi
+done
+
+# 2. Check git status of all repos
+echo -e "\n[2/6] Git status..."
+for repo in dotfiles sshh homebrew-tap; do
+    DIRTY=$(git -C $repo status --porcelain 2>/dev/null | wc -l)
+    BRANCH=$(git -C $repo branch --show-current 2>/dev/null)
+    if [ "$DIRTY" -gt 0 ]; then
+        echo "  $repo ($BRANCH): $DIRTY uncommitted changes"
+    else
+        echo "  $repo ($BRANCH): clean"
+    fi
+done
+
+# 3. Version check
+echo -e "\n[3/6] Version numbers..."
+DOTFILES_VER=$(grep -m1 'VERSION=' dotfiles/bin/dotfiles-setup 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+SSHH_VER=$(grep -m1 'VERSION=' sshh/bin/sshh 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+TAP_DOTFILES_VER=$(grep -m1 'version' homebrew-tap/Formula/dotfiles-setup.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+TAP_SSHH_VER=$(grep -m1 'version' homebrew-tap/Formula/sshh.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+echo "  dotfiles script: v$DOTFILES_VER"
+echo "  sshh script: v$SSHH_VER"
+echo "  homebrew-tap dotfiles formula: v$TAP_DOTFILES_VER"
+echo "  homebrew-tap sshh formula: v$TAP_SSHH_VER"
+
+# 4. Check sshh installation reference in dotfiles
+echo -e "\n[4/6] Integration references..."
+if grep -q "tekierz/tap/sshh" dotfiles/bin/dotfiles-setup 2>/dev/null; then
+    echo "  dotfiles -> sshh tap reference: FOUND"
+else
+    echo "  dotfiles -> sshh tap reference: MISSING"
+fi
+
+# 5. Check SHA256 hashes are present (can't verify without release)
+echo -e "\n[5/6] Homebrew formula SHA256 hashes..."
+DOTFILES_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/dotfiles-setup.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
+SSHH_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/sshh.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
+echo "  dotfiles-setup: ${DOTFILES_SHA:0:16}..."
+echo "  sshh: ${SSHH_SHA:0:16}..."
+
+# 6. Check for breaking changes in sshh config format
+echo -e "\n[6/6] sshh config format compatibility..."
+if grep -q "pipe-delimited" sshh/README.md 2>/dev/null || grep -q '|' sshh/bin/sshh 2>/dev/null; then
+    echo "  Config format: pipe-delimited (Name|user@host|port|key)"
+fi
+
+echo -e "\n=== CROSS-REPO CHECK COMPLETE ==="
+```
+
+### Manual Cross-Repo Compatibility Checklist
+
+**When updating dotfiles:**
+
+- [ ] Check if sshh installation command changed
+- [ ] Verify `brew install tekierz/tap/sshh` still works
+- [ ] Check DeepDive utilities screen includes sshh toggle
+- [ ] Verify sshh appears in `dotfiles status` output
+
+**When updating sshh:**
+
+- [ ] Update version number in `bin/sshh`
+- [ ] Create new git tag: `git tag v1.x.x && git push --tags`
+- [ ] Update homebrew-tap SHA256 hash (see below)
+- [ ] Test installation: `brew reinstall sshh`
+
+**When updating homebrew-tap:**
+
+After pushing changes to dotfiles or sshh:
+
+```bash
+# 1. Get new SHA256 for dotfiles-setup
+curl -sL https://github.com/tekierz/dotfiles/archive/refs/tags/v1.0.1.tar.gz | sha256sum
+
+# 2. Get new SHA256 for sshh
+curl -sL https://github.com/tekierz/sshh/archive/refs/tags/v1.1.0.tar.gz | sha256sum
+
+# 3. Update formulas in homebrew-tap
+# Edit: ~/projects/homebrew-tap/Formula/dotfiles-setup.rb
+# Edit: ~/projects/homebrew-tap/Formula/sshh.rb
+
+# 4. Commit and push
+cd ~/projects/homebrew-tap
+git add -A && git commit -m "Update SHA256 for [package] v[version]"
+git push
+```
+
+### Key Files to Check
+
+| Change Type | Files to Update |
+|-------------|-----------------|
+| sshh version bump | `sshh/bin/sshh`, `homebrew-tap/Formula/sshh.rb` |
+| dotfiles version bump | `dotfiles/bin/dotfiles-setup`, `homebrew-tap/Formula/dotfiles-setup.rb` |
+| sshh install method | `dotfiles/bin/dotfiles-setup` (grep for "sshh") |
+| Tool registry | `dotfiles/internal/tools/registry.go`, `dotfiles/internal/ui/deepdive.go` |
+
+### Breaking Change Detection
+
+Watch for these breaking changes:
+
+| Component | Breaking Change | Impact |
+|-----------|-----------------|--------|
+| sshh config format | Change from pipe-delimited | Users lose saved hosts |
+| sshh CLI flags | Changed/removed flags | dotfiles install scripts break |
+| Homebrew formula URL | Changed repo structure | `brew install` fails |
+| dotfiles utilities | Removed sshh reference | sshh not installed on macOS |
+
+---
+
 ## Pre-Merge Checklist
 
 Before creating PR:
@@ -254,6 +401,8 @@ Before creating PR:
 - [ ] Documentation is updated
 - [ ] Commit messages are clean
 - [ ] Branch is rebased on main (if needed)
+- [ ] Cross-repo compatibility verified
+- [ ] homebrew-tap SHA256 hashes updated (if needed)
 
 ---
 
@@ -282,4 +431,18 @@ gofmt -l ./internal ./cmd
 # Security Grep
 grep -rn "password" --include="*.go" ./internal ./cmd
 grep -rn "exec.Command" --include="*.go" ./internal ./cmd
+
+# Cross-Repo Commands (run from ~/projects/)
+cd ~/projects
+git -C dotfiles status
+git -C sshh status
+git -C homebrew-tap status
+
+# Check versions
+grep VERSION dotfiles/bin/dotfiles-setup
+grep VERSION sshh/bin/sshh
+grep version homebrew-tap/Formula/*.rb
+
+# Test sshh independently
+~/projects/sshh/bin/sshh --help
 ```
