@@ -7,8 +7,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 const (
@@ -50,6 +53,7 @@ const (
 	// Additional config screens
 	ScreenConfigCLITools
 	ScreenConfigGUIApps
+	ScreenConfigCLIUtilities // bat, eza, zoxide, ripgrep, fd, delta, fswatch
 	// Individual CLI tool config screens (installer)
 	ScreenConfigLazyGit
 	ScreenConfigLazyDocker
@@ -90,6 +94,7 @@ var themes = []struct {
 	{"rose-pine", "Soft muted pinks", "#c4a7e7"},
 	{"one-dark", "Atom's dark theme", "#61afef"},
 	{"everforest", "Green nature inspired", "#a7c080"},
+	{"neon-seapunk", "Neon cyberpunk vibes", "#00F5D4"},
 }
 
 func (a *App) syncThemeIndex() {
@@ -135,6 +140,7 @@ type App struct {
 	utilityIndex      int // Currently focused utility
 	cliToolIndex      int // Currently focused CLI tool
 	guiAppIndex       int // Currently focused GUI app
+	cliUtilityIndex   int // Currently focused CLI utility (bat, eza, etc.)
 
 	// Management state (detailed config)
 	manageConfig *ManageConfig
@@ -174,6 +180,12 @@ type App struct {
 	hotkeysReturn    Screen // Screen to return to when leaving hotkeys
 	backupIndex      int    // Backup selection cursor
 
+	// Update screen async state
+	updateChecking  bool         // Currently checking for updates
+	updateCheckDone bool         // Check completed (use cached results)
+	updateResults   []pkg.Package // Cached update results
+	updateError     error        // Error from update check
+
 	// Error state
 	lastError error
 }
@@ -207,6 +219,9 @@ func NewApp(skipIntro bool) *App {
 
 	// Keep the theme picker cursor in sync with the persisted theme.
 	app.syncThemeIndex()
+
+	// Apply the theme colors to the UI
+	SetTheme(app.theme)
 
 	// Best-effort: load persisted management settings for deep-dive manager UI.
 	if cfg, err := config.LoadToolConfig("manage", NewManageConfig); err == nil && cfg != nil {
@@ -268,6 +283,12 @@ type sudoCachedMsg struct {
 	err error
 }
 
+// updateCheckDoneMsg indicates the async update check completed
+type updateCheckDoneMsg struct {
+	updates []pkg.Package
+	err     error
+}
+
 func tickAnimation() tea.Cmd {
 	return tea.Tick(introAnimationTick, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -284,6 +305,14 @@ func checkDurdraw() tea.Cmd {
 	return func() tea.Msg {
 		available := DetectDurdraw()
 		return durdrawAvailableMsg(available)
+	}
+}
+
+// checkUpdatesCmd starts an async update check
+func checkUpdatesCmd() tea.Cmd {
+	return func() tea.Msg {
+		updates, err := pkg.CheckDotfilesUpdates()
+		return updateCheckDoneMsg{updates: updates, err: err}
 	}
 }
 
@@ -397,6 +426,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.manageStatus = "Installed ✓"
 		}
 		return a, nil
+
+	case updateCheckDoneMsg:
+		a.updateChecking = false
+		a.updateCheckDone = true
+		a.updateResults = msg.updates
+		a.updateError = msg.err
+		return a, nil
 	}
 
 	return a, nil
@@ -408,9 +444,79 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a.handleManageMouse(msg)
 	case ScreenHotkeys:
 		return a.handleHotkeysMouse(msg)
+	case ScreenUpdate, ScreenBackups:
+		return a.handleTabBarMouse(msg)
 	default:
 		return a, nil
 	}
+}
+
+// handleTabBarMouse handles mouse clicks on the tab bar for screens that use it
+func (a *App) handleTabBarMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	// Only handle left clicks
+	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
+		return a, nil
+	}
+
+	// Tab bar is at Y=0 (first line)
+	if m.Y != 0 {
+		return a, nil
+	}
+
+	// Check if click is on a tab
+	if screen, cmd := a.detectTabClick(m.X); screen != 0 {
+		a.screen = screen
+		return a, cmd
+	}
+
+	return a, nil
+}
+
+// detectTabClick determines which tab was clicked based on X position
+// Returns the target screen and any command to run, or (0, nil) if no tab clicked
+func (a *App) detectTabClick(x int) (Screen, tea.Cmd) {
+	tabs := GetManagementTabs()
+	if len(tabs) == 0 {
+		return 0, nil
+	}
+
+	// All screens now use unified RenderTabBar format: "N 󰒓 Name" with Padding(0,1)
+	var tabWidths []int
+	for i, tab := range tabs {
+		content := fmt.Sprintf("%d %s %s", i+1, tab.Icon, tab.Name)
+		// Padding(0, 1) = 1 space each side = 2 total
+		width := lipgloss.Width(content) + 2
+		tabWidths = append(tabWidths, width)
+	}
+
+	// Tab bar is left-aligned (Width renders left-aligned by default)
+	// Account for 1-char separator " " between tabs
+	currentX := 0
+	for i, tab := range tabs {
+		endX := currentX + tabWidths[i]
+
+		if x >= currentX && x < endX {
+			// Don't switch if already on this screen
+			if tab.Screen == a.screen {
+				return 0, nil
+			}
+
+			// Start async update check when switching to Update screen
+			if tab.Screen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
+				a.updateChecking = true
+				return tab.Screen, checkUpdatesCmd()
+			}
+
+			return tab.Screen, nil
+		}
+
+		// Move past tab width + separator (1 char)
+		currentX = endX + 1
+	}
+
+	return 0, nil
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -452,11 +558,13 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if a.themeIndex > 0 {
 				a.themeIndex--
 				a.theme = themes[a.themeIndex].name
+				SetTheme(a.theme) // Apply theme immediately for live preview
 			}
 		case "down", "j":
 			if a.themeIndex < len(themes)-1 {
 				a.themeIndex++
 				a.theme = themes[a.themeIndex].name
+				SetTheme(a.theme) // Apply theme immediately for live preview
 			}
 		case "enter":
 			a.screen = ScreenNavPicker
@@ -866,6 +974,26 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.screen = ScreenDeepDiveMenu
 		}
 
+	// CLI Utilities config (bat, eza, zoxide, ripgrep, fd, delta, fswatch)
+	case ScreenConfigCLIUtilities:
+		utilities := []string{"bat", "eza", "zoxide", "ripgrep", "fd", "delta", "fswatch"}
+		switch key {
+		case "up", "k":
+			if a.cliUtilityIndex > 0 {
+				a.cliUtilityIndex--
+			}
+		case "down", "j":
+			if a.cliUtilityIndex < len(utilities)-1 {
+				a.cliUtilityIndex++
+			}
+		case " ":
+			util := utilities[a.cliUtilityIndex]
+			a.deepDiveConfig.CLIUtilities[util] = !a.deepDiveConfig.CLIUtilities[util]
+		case "esc", "enter":
+			a.cliUtilityIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
 	// LazyGit config
 	case ScreenConfigLazyGit:
 		switch key {
@@ -1009,6 +1137,15 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Update screen navigation
 	case ScreenUpdate:
+		// Start async update check if not already running or done
+		if !a.updateChecking && !a.updateCheckDone {
+			a.updateChecking = true
+			return a, checkUpdatesCmd()
+		}
+		// Handle tab navigation first
+		if handled, cmd := a.handleTabNavigationWithCmd(key); handled {
+			return a, cmd
+		}
 		switch key {
 		case "up", "k":
 			if a.updateIndex > 0 {
@@ -1016,6 +1153,12 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "down", "j":
 			a.updateIndex++
+		case "r": // Refresh updates
+			a.updateCheckDone = false
+			a.updateChecking = true
+			a.updateResults = nil
+			a.updateError = nil
+			return a, checkUpdatesCmd()
 		case "esc":
 			a.screen = ScreenMainMenu
 		}
@@ -1075,6 +1218,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Backups screen navigation
 	case ScreenBackups:
+		// Handle tab navigation first
+		if handled, cmd := a.handleTabNavigationWithCmd(key); handled {
+			return a, cmd
+		}
 		switch key {
 		case "esc":
 			a.screen = ScreenMainMenu
@@ -1136,6 +1283,8 @@ func (a *App) View() string {
 		return a.renderConfigBtop()
 	case ScreenConfigGlow:
 		return a.renderConfigGlow()
+	case ScreenConfigCLIUtilities:
+		return a.renderConfigCLIUtilities()
 	// Management platform screens
 	case ScreenMainMenu:
 		return a.renderMainMenu()
@@ -1246,6 +1395,54 @@ func (a *App) handleManageNavigation(key string, maxFields int, backScreen Scree
 		a.configFieldIndex = 0
 		a.screen = backScreen
 	}
+}
+
+// handleTabNavigation handles number key shortcuts for tab navigation
+// Returns (handled, command) - command may be nil even if handled
+func (a *App) handleTabNavigationWithCmd(key string) (bool, tea.Cmd) {
+	tabs := GetManagementTabs()
+	var targetScreen Screen
+	switch key {
+	case "1":
+		if len(tabs) > 0 {
+			targetScreen = tabs[0].Screen
+		}
+	case "2":
+		if len(tabs) > 1 {
+			targetScreen = tabs[1].Screen
+		}
+	case "3":
+		if len(tabs) > 2 {
+			targetScreen = tabs[2].Screen
+		}
+	case "4":
+		if len(tabs) > 3 {
+			targetScreen = tabs[3].Screen
+		}
+	default:
+		return false, nil
+	}
+
+	if targetScreen == 0 {
+		return false, nil
+	}
+
+	a.screen = targetScreen
+
+	// Start async operations when switching to certain screens
+	if targetScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
+		a.updateChecking = true
+		return true, checkUpdatesCmd()
+	}
+
+	return true, nil
+}
+
+// handleTabNavigation handles number key shortcuts for tab navigation
+// Returns true if the key was handled
+func (a *App) handleTabNavigation(key string) bool {
+	handled, _ := a.handleTabNavigationWithCmd(key)
+	return handled
 }
 
 // cycleOption cycles through options forward or backward
@@ -1406,4 +1603,68 @@ func GetMainMenuItems() []MainMenuItem {
 			Screen:      ScreenBackups,
 		},
 	}
+}
+
+// ScreenToolIDs maps deep dive screens to their corresponding tool IDs
+// This is the single source of truth for screen-to-tool mapping
+var ScreenToolIDs = map[Screen][]string{
+	ScreenConfigGhostty:      {"ghostty"},
+	ScreenConfigTmux:         {"tmux"},
+	ScreenConfigZsh:          {"zsh"},
+	ScreenConfigNeovim:       {"neovim"},
+	ScreenConfigGit:          {"git"},
+	ScreenConfigYazi:         {"yazi"},
+	ScreenConfigFzf:          {"fzf"},
+	ScreenConfigLazyGit:      {"lazygit"},
+	ScreenConfigLazyDocker:   {"lazydocker"},
+	ScreenConfigBtop:         {"btop"},
+	ScreenConfigGlow:         {"glow"},
+	ScreenConfigCLIUtilities: {"bat", "eza", "zoxide", "ripgrep", "fd", "delta", "fswatch"},
+	ScreenConfigGUIApps:      {"zen-browser", "cursor", "lm-studio", "obs"},
+	ScreenConfigMacApps:      {"rectangle", "raycast", "iina", "appcleaner"},
+	ScreenConfigCLITools:     {"lazygit", "lazydocker", "btop", "glow", "claude-code"},
+	ScreenConfigUtilities:    {}, // hk, caff, sshh are not in registry
+}
+
+// ensureInstallCache populates the install status cache if not already done
+func (a *App) ensureInstallCache() {
+	if a.manageInstalledReady {
+		return
+	}
+
+	reg := tools.NewRegistry()
+	all := reg.All()
+
+	if a.manageInstalled == nil {
+		a.manageInstalled = make(map[string]bool, len(all))
+	}
+
+	for _, t := range all {
+		a.manageInstalled[t.ID()] = t.IsInstalled()
+	}
+	a.manageInstalledReady = true
+}
+
+// getDeepDiveItemStatus returns the install status for a deep dive menu item
+// Returns "success" if installed, "warning" if partially installed (groups), "pending" if not
+func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
+	toolIDs, ok := ScreenToolIDs[item.Screen]
+	if !ok || len(toolIDs) == 0 {
+		// No tool mapping (e.g., utilities) - show as pending
+		return "pending"
+	}
+
+	installedCount := 0
+	for _, id := range toolIDs {
+		if a.manageInstalled[id] {
+			installedCount++
+		}
+	}
+
+	if installedCount == len(toolIDs) {
+		return "success" // All installed
+	} else if installedCount > 0 {
+		return "warning" // Partially installed (for groups)
+	}
+	return "pending" // None installed
 }

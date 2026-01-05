@@ -76,30 +76,48 @@ type updatePackage struct {
 }
 
 func (a *App) renderUpdate() string {
+	// Tab bar at top
+	tabBar := RenderTabBar(ScreenUpdate, a.width)
+
 	title := TitleStyle.Render("Package Updates")
 
-	// Get outdated packages
+	// Check if we're still loading
+	if a.updateChecking {
+		spinnerText := "Checking for updates..."
+		if a.animationsEnabled {
+			spinnerText = AnimatedSpinnerDots(a.uiFrame) + " Checking for updates..."
+		}
+		body := lipgloss.NewStyle().Foreground(ColorCyan).Render(spinnerText)
+		progressBar := ProgressBarAnimated(0.5, min(60, a.width-20), a.uiFrame)
+		help := HelpStyle.Render("1-4 switch tabs • esc menu • q quit")
+		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, progressBar, "", help)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, content)
+	}
+
+	// Check for errors
+	if a.updateError != nil {
+		body := lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("Error: %v", a.updateError))
+		help := HelpStyle.Render("r refresh • 1-4 switch tabs • esc menu • q quit")
+		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, "", help)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, content)
+	}
+
+	// Check if no package manager detected (results will be nil with no error)
 	mgr := pkg.DetectManager()
 	if mgr == nil {
 		body := lipgloss.NewStyle().Foreground(ColorRed).Render("No package manager detected")
-		help := HelpStyle.Render("esc back • q quit")
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
-			ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", help)))
+		help := HelpStyle.Render("1-4 switch tabs • esc menu • q quit")
+		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, "", help)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, content)
 	}
 
-	updates, err := pkg.CheckDotfilesUpdates()
-	if err != nil {
-		body := lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("Error: %v", err))
-		help := HelpStyle.Render("esc back • q quit")
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
-			ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", help)))
-	}
+	updates := a.updateResults
 
 	if len(updates) == 0 {
 		body := lipgloss.NewStyle().Foreground(ColorGreen).Render("All packages are up to date!")
-		help := HelpStyle.Render("esc back • q quit")
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
-			ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", help)))
+		help := HelpStyle.Render("r refresh • 1-4 switch tabs • esc menu • q quit")
+		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, "", help)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, content)
 	}
 
 	// Clamp cursor to actual list length (rendering-only; avoids "lost" cursor).
@@ -149,199 +167,19 @@ func (a *App) renderUpdate() string {
 		Width(maxInt(1, boxOuterW-2)). // border adds 2
 		Render(packageList)
 
-	help := HelpStyle.Render("↑↓ navigate • enter update all • esc back • q quit")
-	content := lipgloss.JoinVertical(lipgloss.Left, title, subtitle, "", listBox, "", help)
+	help := HelpStyle.Render("↑↓ navigate • enter update • r refresh • 1-4 switch tabs • esc menu • q quit")
+	content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, subtitle, "", listBox, "", help)
 	return lipgloss.Place(a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(content))
+		lipgloss.Center, lipgloss.Top,
+		content)
 }
 
 // =====================================
-// Hotkeys Screen
+// Hotkeys Screen (uses internal/hotkeys package)
 // =====================================
 
-// HotkeyCategory holds hotkeys for a tool
-type HotkeyCategory struct {
-	Name    string
-	Icon    string
-	Hotkeys []Hotkey
-}
-
-// Hotkey represents a single keyboard shortcut
-type Hotkey struct {
-	Keys        string
-	Description string
-}
-
-// GetHotkeyCategories returns all hotkey categories
-func GetHotkeyCategories() []HotkeyCategory {
-	return []HotkeyCategory{
-		{
-			Name: "Tmux",
-			Icon: "",
-			Hotkeys: []Hotkey{
-				{"Prefix + |", "Split pane vertically"},
-				{"Prefix + -", "Split pane horizontally"},
-				{"Prefix + h/j/k/l", "Navigate panes"},
-				{"Prefix + H/J/K/L", "Resize panes"},
-				{"Prefix + z", "Toggle pane zoom"},
-				{"Prefix + c", "New window"},
-				{"Prefix + n/p", "Next/previous window"},
-				{"Prefix + d", "Detach session"},
-				{"Prefix + [", "Enter copy mode"},
-				{"Prefix + r", "Reload config"},
-			},
-		},
-		{
-			Name: "Zsh",
-			Icon: "",
-			Hotkeys: []Hotkey{
-				{"Ctrl+R", "Search command history"},
-				{"Ctrl+T", "Fuzzy find files (fzf)"},
-				{"Alt+C", "Fuzzy cd to directory"},
-				{"Ctrl+G", "Fuzzy find git files"},
-				{"Tab", "Autocomplete"},
-				{"Ctrl+A/E", "Beginning/end of line"},
-				{"Ctrl+U/K", "Delete to start/end"},
-				{"Ctrl+W", "Delete word backwards"},
-				{"Alt+.", "Insert last argument"},
-				{"!!", "Repeat last command"},
-			},
-		},
-		{
-			Name: "Neovim",
-			Icon: "",
-			Hotkeys: []Hotkey{
-				{"Space", "Leader key"},
-				{"<Leader>ff", "Find files"},
-				{"<Leader>fg", "Live grep"},
-				{"<Leader>fb", "Browse buffers"},
-				{"<Leader>e", "File explorer"},
-				{"gd", "Go to definition"},
-				{"K", "Hover documentation"},
-				{"<Leader>ca", "Code actions"},
-				{"<Leader>rn", "Rename symbol"},
-				{"[d / ]d", "Prev/next diagnostic"},
-			},
-		},
-		{
-			Name: "Yazi",
-			Icon: "",
-			Hotkeys: []Hotkey{
-				{"h/l", "Parent/enter directory"},
-				{"j/k", "Move up/down"},
-				{"gg/G", "First/last item"},
-				{"Space", "Toggle selection"},
-				{"y", "Yank (copy)"},
-				{"d", "Cut"},
-				{"p", "Paste"},
-				{"a", "Create file"},
-				{"r", "Rename"},
-				{"/", "Search"},
-			},
-		},
-		{
-			Name: "Ghostty",
-			Icon: "",
-			Hotkeys: []Hotkey{
-				{"Cmd+T", "New tab"},
-				{"Cmd+W", "Close tab"},
-				{"Cmd+Shift+[/]", "Prev/next tab"},
-				{"Cmd+D", "Split vertical"},
-				{"Cmd+Shift+D", "Split horizontal"},
-				{"Cmd+]/[", "Next/prev pane"},
-				{"Cmd++/-", "Increase/decrease font"},
-				{"Cmd+0", "Reset font size"},
-				{"Cmd+Shift+Enter", "Toggle fullscreen"},
-				{"Cmd+,", "Open config"},
-			},
-		},
-		{
-			Name: "LazyGit",
-			Icon: "",
-			Hotkeys: []Hotkey{
-				{"Space", "Stage/unstage file"},
-				{"c", "Commit"},
-				{"P", "Push"},
-				{"p", "Pull"},
-				{"b", "Branches menu"},
-				{"m", "Merge"},
-				{"r", "Rebase"},
-				{"/", "Search"},
-				{"?", "Help"},
-				{"q", "Quit"},
-			},
-		},
-	}
-}
-
-func (a *App) renderHotkeys() string {
-	categories := GetHotkeyCategories()
-
-	// Filter if specified
-	if a.hotkeyFilter != "" {
-		var filtered []HotkeyCategory
-		for _, cat := range categories {
-			if strings.EqualFold(cat.Name, a.hotkeyFilter) {
-				filtered = append(filtered, cat)
-			}
-		}
-		if len(filtered) > 0 {
-			categories = filtered
-		}
-	}
-
-	title := TitleStyle.Render("Keyboard Shortcuts")
-
-	if len(categories) == 0 {
-		body := lipgloss.NewStyle().Foreground(ColorRed).Render("No hotkeys found")
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
-			ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body)))
-	}
-
-	// Category tabs
-	var tabItems []string
-	for i, cat := range categories {
-		tabStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if i == a.hotkeyCategory {
-			tabStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Underline(true)
-		}
-		tabItems = append(tabItems, tabStyle.Render(fmt.Sprintf(" %s %s ", cat.Icon, cat.Name)))
-	}
-	tabs := strings.Join(tabItems, "│")
-
-	// Current category hotkeys
-	currentCat := categories[a.hotkeyCategory]
-	var hotkeyLines []string
-
-	for i, hk := range currentCat.Hotkeys {
-		keyStyle := lipgloss.NewStyle().
-			Foreground(ColorYellow).
-			Bold(true).
-			Width(20)
-		descStyle := lipgloss.NewStyle().Foreground(ColorText)
-
-		cursor := "  "
-		if i == a.hotkeyCursor {
-			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
-			descStyle = descStyle.Foreground(ColorCyan)
-		}
-
-		line := fmt.Sprintf("%s%s %s",
-			cursor,
-			keyStyle.Render(hk.Keys),
-			descStyle.Render(hk.Description))
-		hotkeyLines = append(hotkeyLines, line)
-	}
-
-	hotkeyList := strings.Join(hotkeyLines, "\n")
-
-	help := HelpStyle.Render("←→ categories • ↑↓ scroll • esc back • q quit")
-	content := lipgloss.JoinVertical(lipgloss.Left, title, "", tabs, "", hotkeyList, "", help)
-	return lipgloss.Place(a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(content))
-}
+// Note: Hotkey definitions are now in internal/hotkeys/hotkeys.go
+// This screen renders the dual-pane hotkeys viewer from hotkeys_dualpane.go
 
 // =====================================
 // Manage Screen
@@ -432,6 +270,9 @@ func (a *App) renderManage() string {
 // =====================================
 
 func (a *App) renderBackups() string {
+	// Tab bar at top
+	tabBar := RenderTabBar(ScreenBackups, a.width)
+
 	title := TitleStyle.Render("Backups")
 
 	// TODO: Read actual backups from ~/.config/dotfiles/backups/
@@ -439,10 +280,10 @@ func (a *App) renderBackups() string {
 		Foreground(ColorTextMuted).
 		Render("Backup management coming soon...\n\nUse CLI: dotfiles backups")
 
-	help := HelpStyle.Render("esc back • q quit")
+	help := HelpStyle.Render("1-4 switch tabs • esc menu • q quit")
 
-	content := lipgloss.JoinVertical(lipgloss.Left, title, "", message, "", help)
+	content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", message, "", help)
 	return lipgloss.Place(a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(content))
+		lipgloss.Center, lipgloss.Top,
+		content)
 }

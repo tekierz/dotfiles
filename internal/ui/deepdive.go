@@ -50,6 +50,9 @@ type DeepDiveConfig struct {
 	// GUI Apps install flags
 	GUIApps map[string]bool
 
+	// CLI Utilities install flags (bat, eza, zoxide, ripgrep, fd, delta, fswatch)
+	CLIUtilities map[string]bool
+
 	// LazyGit settings
 	LazyGitSideBySide bool
 	LazyGitMouseMode  bool
@@ -170,6 +173,17 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"obs":         false,
 		},
 
+		// CLI Utilities defaults (commonly useful tools enabled by default)
+		CLIUtilities: map[string]bool{
+			"bat":     true,  // cat replacement with syntax highlighting
+			"eza":     true,  // ls replacement
+			"zoxide":  true,  // cd replacement
+			"ripgrep": true,  // grep replacement
+			"fd":      true,  // find replacement
+			"delta":   true,  // git diff viewer
+			"fswatch": false, // file watcher (optional)
+		},
+
 		// LazyGit defaults
 		LazyGitSideBySide: true,
 		LazyGitMouseMode:  true,
@@ -267,6 +281,12 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 			Description: "Markdown viewer style, pager, width",
 			Screen:      ScreenConfigGlow,
 			Icon:        "󰈙",
+		},
+		{
+			Name:        "CLI Utilities",
+			Description: "bat, eza, zoxide, ripgrep, fd, delta",
+			Screen:      ScreenConfigCLIUtilities,
+			Icon:        "󰘳",
 		},
 		{
 			Name:        "GUI Apps",

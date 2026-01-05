@@ -255,6 +255,7 @@ var AvailableThemes = []string{
 	"rose-pine",
 	"everforest",
 	"one-dark",
+	"neon-seapunk",
 }
 
 // IsValidTheme checks if a theme name is valid

@@ -275,6 +275,11 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.manageStartEditing(f)
 	}
 
+	// Handle tab navigation first (1-4 keys)
+	if handled, cmd := a.handleTabNavigationWithCmd(key); handled {
+		return a, cmd
+	}
+
 	switch key {
 	// Global navigation.
 	case "esc":
@@ -446,6 +451,14 @@ func (a *App) handleManageMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Nothing to do if we don't have a valid layout yet.
 	if a.width <= 0 || a.height <= 0 {
 		return a, nil
+	}
+
+	// Handle tab bar clicks (Y=0 is the tab bar line)
+	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+		if screen, cmd := a.detectTabClick(m.X); screen != 0 {
+			a.screen = screen
+			return a, cmd
+		}
 	}
 
 	layout := a.manageLayout()
@@ -1052,12 +1065,7 @@ func (a *App) renderManageDualPane() string {
 }
 
 func (a *App) renderManageHeader(width int) string {
-	tabs := RenderTabsBar(width, []TabSpec{
-		{Label: "Manage", Active: true},
-		{Label: "Hotkeys", Active: false},
-		{Label: "Update", Active: false},
-		{Label: "Backups", Active: false},
-	})
+	tabs := RenderTabBar(ScreenManage, width)
 
 	subText := "Dual-pane config editor • Click, scroll, and tweak everything"
 	if a.animationsEnabled {

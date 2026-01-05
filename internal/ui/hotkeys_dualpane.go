@@ -205,6 +205,11 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxScroll)
 	}
 
+	// Handle tab navigation first (1-4 keys)
+	if handled, cmd := a.handleTabNavigationWithCmd(key); handled {
+		return a, cmd
+	}
+
 	switch key {
 	case "esc":
 		a.hotkeyFilter = ""
@@ -273,6 +278,14 @@ func (a *App) handleHotkeysMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m := tea.MouseEvent(msg)
 	if a.width <= 0 || a.height <= 0 {
 		return a, nil
+	}
+
+	// Handle tab bar clicks (Y=0 is the tab bar line)
+	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+		if screen, cmd := a.detectTabClick(m.X); screen != 0 {
+			a.screen = screen
+			return a, cmd
+		}
 	}
 
 	layout := a.hotkeysLayout()
@@ -396,12 +409,7 @@ func (a *App) renderHotkeysDualPane() string {
 }
 
 func (a *App) renderHotkeysHeader(width int) string {
-	tabs := RenderTabsBar(width, []TabSpec{
-		{Label: "Manage", Active: false},
-		{Label: "Hotkeys", Active: true},
-		{Label: "Update", Active: false},
-		{Label: "Backups", Active: false},
-	})
+	tabs := RenderTabBar(ScreenHotkeys, width)
 
 	subText := "Cheatsheets + keybindings (matches manager)"
 	if a.animationsEnabled {

@@ -39,6 +39,9 @@ var (
 
 // renderDeepDiveMenu renders the deep dive tool selection menu
 func (a *App) renderDeepDiveMenu() string {
+	// Ensure install status is cached for status indicators
+	a.ensureInstallCache()
+
 	// Title with decorative border
 	titleBox := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
@@ -59,6 +62,10 @@ func (a *App) renderDeepDiveMenu() string {
 
 	for i, item := range items {
 		isSelected := i == a.deepDiveMenuIndex
+
+		// Get install status for this item
+		installStatus := a.getDeepDiveItemStatus(item)
+		statusDot := StatusDot(installStatus)
 
 		// Icon
 		iconStyle := unfocusedStyle
@@ -84,8 +91,9 @@ func (a *App) renderDeepDiveMenu() string {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
 		}
 
-		menuList.WriteString(fmt.Sprintf("%s%s %s  %s\n",
+		menuList.WriteString(fmt.Sprintf("%s%s %s %s  %s\n",
 			cursor,
+			statusDot,
 			iconStyle.Render(item.Icon),
 			nameStyle.Render(fmt.Sprintf("%-12s", item.Name)),
 			descStyle.Render(item.Description),
@@ -855,6 +863,63 @@ func (a *App) renderConfigCLITools() string {
 	}
 
 	box := configBoxStyle.Width(a.deepDiveBoxWidth(60)).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}
+
+// renderConfigCLIUtilities renders the CLI utilities selection screen
+func (a *App) renderConfigCLIUtilities() string {
+	title := renderConfigTitle("󰘳", "CLI Utilities", "Essential command-line replacements")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	utilities := []struct {
+		id   string
+		name string
+		desc string
+	}{
+		{"bat", "bat", "cat with syntax highlighting"},
+		{"eza", "eza", "Modern ls replacement"},
+		{"zoxide", "zoxide", "Smarter cd command"},
+		{"ripgrep", "ripgrep", "Fast grep replacement"},
+		{"fd", "fd", "Fast find replacement"},
+		{"delta", "delta", "Beautiful git diffs"},
+		{"fswatch", "fswatch", "File system watcher"},
+	}
+
+	for i, util := range utilities {
+		focused := a.cliUtilityIndex == i
+		enabled := cfg.CLIUtilities[util.id]
+
+		cursor := "  "
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		}
+
+		checkbox := renderCheckboxInline(enabled, focused)
+
+		nameStyle := unfocusedStyle
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if focused {
+			nameStyle = focusedStyle
+			descStyle = lipgloss.NewStyle().Foreground(ColorText)
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s %s\n",
+			cursor,
+			checkbox,
+			nameStyle.Render(fmt.Sprintf("%-10s", util.name)),
+			descStyle.Render(util.desc),
+		))
+	}
+
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back")
 
 	return lipgloss.Place(
