@@ -74,3 +74,45 @@ Dual-pane layouts support mouse:
 - `zone.Mark()` for clickable regions
 - `zone.Get()` in Update() for hit detection
 - See `manage_dualpane.go` for implementation
+
+## Async Patterns
+
+Long-running operations use Bubble Tea's message-based async pattern:
+
+### Install Cache Loading
+
+```go
+// State fields in App
+installCacheLoading  bool           // Currently loading
+manageInstalledReady bool           // Cache ready
+manageInstalled      map[string]bool // Cached results
+
+// Command
+func loadInstallCacheCmd() tea.Cmd  // Async loader with batch queries
+
+// Message
+type installCacheDoneMsg struct {
+    installed map[string]bool
+}
+
+// Trigger
+if cmd := a.startInstallCacheLoad(); cmd != nil {
+    return a, cmd
+}
+```
+
+### Loading State in Render
+
+```go
+if a.installCacheLoading {
+    spinner := AnimatedSpinnerDots(a.uiFrame)
+    loadingText := fmt.Sprintf("%s Loading installation status...", spinner)
+    return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, loadingText)
+}
+```
+
+### Performance
+
+- Uses batch package manager queries (`brew list --versions` instead of per-package)
+- Reduces ~27 subprocess calls to 1
+- Shows loading spinner during cache population

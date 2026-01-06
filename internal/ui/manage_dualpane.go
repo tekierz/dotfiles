@@ -832,15 +832,10 @@ func (a *App) manageItems() []manageItem {
 		return all[i].Name() < all[j].Name()
 	})
 
-	// Cache install status so we don't run package manager checks every render.
+	// Install cache should be populated asynchronously via startInstallCacheLoad().
+	// If not ready yet, initialize empty map to avoid nil panics during loading.
 	if a.manageInstalled == nil {
 		a.manageInstalled = make(map[string]bool, len(all))
-	}
-	if !a.manageInstalledReady {
-		for _, t := range all {
-			a.manageInstalled[t.ID()] = t.IsInstalled()
-		}
-		a.manageInstalledReady = true
 	}
 
 	// Filter by platform support: hide tools/apps that can't be installed on this
@@ -1080,6 +1075,21 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 func (a *App) renderManageDualPane() string {
 	if a.width == 0 || a.height == 0 {
 		return "Loading..."
+	}
+
+	// Show loading state if cache is being populated
+	if a.installCacheLoading {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		loadingStyle := lipgloss.NewStyle().
+			Foreground(ColorCyan).
+			Bold(true)
+		loadingText := loadingStyle.Render(fmt.Sprintf("%s Loading installation status...", spinner))
+
+		return lipgloss.Place(
+			a.width, a.height,
+			lipgloss.Center, lipgloss.Center,
+			loadingText,
+		)
 	}
 
 	layout := a.manageLayout()

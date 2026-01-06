@@ -1,8 +1,41 @@
-# dotfiles-setup
+# dotfiles
 
-A cross-platform terminal environment setup script with **13 customizable themes**.
+A cross-platform terminal environment management platform with **16 customizable themes**.
 
-Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Windows (via WSL). Switch themes anytime with the `dotfiles` command.
+Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Windows (via WSL). Features an interactive TUI for installation and configuration, or use CLI commands directly.
+
+## Quick Start
+
+### Homebrew (Recommended)
+
+```bash
+brew tap tekierz/tap
+brew install dotfiles
+dotfiles
+```
+
+### Manual Installation
+
+```bash
+git clone https://github.com/tekierz/dotfiles.git
+cd dotfiles
+make build
+./bin/dotfiles
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `dotfiles` | Launch main menu TUI |
+| `dotfiles install` | Run installation wizard |
+| `dotfiles manage` | Configure installed tools |
+| `dotfiles hotkeys` | View keybindings cheatsheet |
+| `dotfiles update` | Check for package updates |
+| `dotfiles status` | Show current configuration |
+| `dotfiles theme --list` | List available themes |
+| `dotfiles backups` | List configuration backups |
+| `dotfiles restore <name>` | Restore from backup |
 
 ## What It Installs & Configures
 
@@ -64,66 +97,26 @@ Optimized configurations for different Pi models:
 
 Raspberry Pi installs via apt + manual builds for modern tools not in repos.
 
-## Installation
-
-### Quick Install (Recommended)
-
-```bash
-# macOS/Linux
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash
-
-# With all macOS apps
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --macos-apps
-
-# Raspberry Pi
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --raspi
-
-# Raspberry Pi Zero 2 (lightweight)
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --raspizero2
-```
-
-### Homebrew
-
-```bash
-brew tap tekierz/tap
-brew install dotfiles-setup
-dotfiles-setup
-```
-
-### Manual
-
-```bash
-git clone https://github.com/tekierz/dotfiles.git
-cd dotfiles
-chmod +x bin/dotfiles-setup
-./bin/dotfiles-setup
-```
-
-### Command Line Options
-
-| Option | Description |
-|--------|-------------|
-| `--theme <name>` | Set color theme (default: catppuccin-mocha) |
-| `--emacs` | Emacs/Mac-style navigation (default, beginner-friendly) |
-| `--vim` | Vim-style navigation (hjkl everywhere) |
-| `--macos-apps` | Install all optional macOS quality-of-life apps |
-| `--raspi` | Raspberry Pi mode (auto-detect model) |
-| `--raspi5` | Raspberry Pi 5 optimizations |
-| `--raspizero2` | Raspberry Pi Zero 2 (lightweight mode) |
-| `--restore [name]` | Restore configs from backup |
-| `--list-backups` | List available backup sessions |
-| `--no-backup` | Skip creating backups (not recommended) |
-| `-y, --yes` | Skip confirmation prompts |
-| `-h, --help` | Show help |
-
 ## Features
+
+### Interactive TUI
+
+The TUI provides a visual interface for all operations:
+
+- **Installation wizard** with deep-dive configuration for each tool
+- **Dual-pane management** for configuring installed tools
+- **Hotkey reference** with searchable keybindings
+- **Package updates** with streaming logs
+- **Theme switching** with live preview
+- **Mouse and keyboard** navigation
 
 ### Themes
 
-All tools share a unified color scheme. Choose from 13 themes during install or switch anytime:
+All tools share a unified color scheme. Choose from 16 themes:
 
 | Theme | Description |
 |-------|-------------|
+| `neon-seapunk` | Cyberpunk neon vibes |
 | `catppuccin-mocha` | Warm dark theme (default) |
 | `catppuccin-macchiato` | Medium-dark variant |
 | `catppuccin-frappe` | Muted dark variant |
@@ -137,13 +130,15 @@ All tools share a unified color scheme. Choose from 13 themes during install or 
 | `solarized-light` | Precision light theme |
 | `monokai` | Sublime Text classic |
 | `rose-pine` | Soft, muted dark theme |
+| `one-dark` | Atom's dark theme |
+| `everforest` | Green nature inspired |
 
 **Switch themes anytime:**
 
 ```bash
 dotfiles theme dracula      # Switch to Dracula
 dotfiles theme nord         # Switch to Nord
-dotfiles list-themes        # Show all themes
+dotfiles theme --list       # Show all themes
 dotfiles status             # Show current settings
 ```
 
@@ -157,7 +152,7 @@ Themes apply consistently across:
 
 ### Navigation Styles
 
-Choose between two navigation styles with `--emacs` (default) or `--vim`:
+Choose between two navigation styles:
 
 #### Emacs/Mac Style (default, beginner-friendly)
 
@@ -188,35 +183,11 @@ dotfiles user TimPike          # Switch to TimPike (creates profile if new)
 dotfiles users                 # List all user profiles
 ```
 
-**Create user profiles:**
-
-```bash
-# Interactive setup (guided theme/nav selection)
-dotfiles user add Caitlyn
-
-# Or specify options directly
-dotfiles user add EvanGB --theme nord --nav vim
-dotfiles user add KCMarsh --theme dracula --nav emacs
-```
-
-**Manage profiles:**
-
-```bash
-dotfiles users                 # List all profiles with active marker
-dotfiles user delete OldUser   # Remove a profile
-```
-
-User profiles are stored in `~/.config/dotfiles/users/` and switching applies changes immediately.
-
 ### Backup & Restore
 
 All existing configs are backed up before modification. Fully reversible installation:
 
 ```bash
-# Restore to pre-installation state
-dotfiles-setup --restore
-
-# Or use the CLI post-install
 dotfiles backups              # List available backups
 dotfiles restore              # Restore most recent
 dotfiles restore 20240102_143052  # Restore specific backup
@@ -228,7 +199,7 @@ Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
 
 | Command | Description |
 |---------|-------------|
-| `dotfiles` | Switch themes/navigation, manage backups |
+| `dotfiles` | Main management interface |
 | `hk` | Hotkey reference cheatsheet |
 | `caff` | Toggle system sleep (like Caffeine) |
 | `sshh` | Quick SSH connection manager |
@@ -274,29 +245,19 @@ After running, configs are placed in:
 | `~/.config/dotfiles/users/` | User profile settings |
 | `~/.sshh` | SSH hosts for sshh |
 
-## Interactive TUI (New!)
+## Legacy Bash Script
 
-The new interactive TUI provides a visual interface for installation and management:
-
-```bash
-# Build from source
-make build
-
-# Launch the TUI
-./bin/dotfiles              # Main menu
-./bin/dotfiles install      # Installer wizard
-./bin/dotfiles manage       # Tool configuration
-./bin/dotfiles hotkeys      # Hotkey reference
-./bin/dotfiles update       # Check for updates
-```
-
-### CLI Commands
+The original bash setup script is still available for direct installation:
 
 ```bash
-dotfiles status             # Show installed tools and theme
-dotfiles backups            # List available backups
-dotfiles restore <name>     # Restore from backup
-dotfiles theme --list       # List available themes
+# Quick install via curl
+curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash
+
+# With all macOS apps
+curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --macos-apps
+
+# Raspberry Pi
+curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --raspi
 ```
 
 ## Post-Install
@@ -305,7 +266,7 @@ dotfiles theme --list       # List available themes
 2. Run `tmux` to start tmux
 3. Run `nvim` to install plugins
 4. Run `p10k configure` to customize prompt
-5. Run `hk` to see all hotkeys
+5. Run `dotfiles hotkeys` to see all hotkeys
 6. Run `dotfiles status` to see current theme/navigation
 7. Run `sshh edit` to add SSH hosts
 
@@ -314,10 +275,6 @@ dotfiles theme --list       # List available themes
 - **macOS**: Homebrew (installed automatically)
 - **Arch Linux**: pacman, paru (for AUR)
 - **Debian/Ubuntu**: apt (some tools need Homebrew)
-
-## Screenshots
-
-![Terminal](https://raw.githubusercontent.com/tekierz/dotfiles/main/screenshots/terminal.png)
 
 ## License
 

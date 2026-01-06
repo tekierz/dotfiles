@@ -21,16 +21,26 @@ internal/
   hotkeys/               # Hotkey definitions for tools
   pkg/                   # Package manager abstraction (brew/pacman/apt)
   runner/                # Bash script execution
+  scripts/               # Embedded utility scripts (hk, caff, sshh)
   tools/                 # Tool registry (27+ tools)
-  ui/                    # Bubble Tea TUI (~7,600 lines)
+  ui/                    # Bubble Tea TUI (~8,000 lines)
 bin/
   dotfiles               # Built Go binary
   dotfiles-setup         # Legacy bash script
 docs/
   tools.md               # Detailed tool reference
-Formula/
-  dotfiles-setup.rb      # Homebrew formula
 ```
+
+## Homebrew Distribution
+
+The project is distributed via a single Homebrew formula:
+
+```bash
+brew tap tekierz/tap
+brew install dotfiles
+```
+
+The formula is maintained in the separate [homebrew-tap](https://github.com/tekierz/homebrew-tap) repository.
 
 ## Go Application Architecture
 
@@ -43,6 +53,7 @@ Formula/
 | `internal/pkg/` | Package manager abstraction |
 | `internal/config/` | JSON configuration management |
 | `internal/hotkeys/` | Hotkey definitions |
+| `internal/scripts/` | Embedded shell scripts |
 
 ### Screen Navigation
 
@@ -50,6 +61,20 @@ The TUI uses screen-based navigation with 46 screens:
 - Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
 - Management: MainMenu, Manage, Update, Hotkeys, Backups
 - Config: Per-tool configuration screens
+
+### Async Patterns
+
+The TUI uses Bubble Tea's message-based async pattern for long-running operations:
+
+**Install Cache Loading** (`internal/ui/app.go`):
+- `loadInstallCacheCmd()` - Async command to check all tool installation status
+- Uses batch package manager queries (`brew list --versions`) for performance
+- Shows loading spinner while cache populates
+- State: `installCacheLoading`, `manageInstalledReady`, `manageInstalled`
+
+**Update Checking**:
+- `checkUpdatesCmd()` - Async command to check for outdated packages
+- State: `updateChecking`, `updateCheckDone`, `updateResults`
 
 ### Styling
 
@@ -73,11 +98,12 @@ dotfiles update         # Check for updates
 
 ## Key Concepts
 
-- **13 themes** with unified colors across all tools
+- **16 themes** with unified colors across all tools
 - **Two navigation styles**: emacs (default) and vim
 - **Platform detection**: macOS (Homebrew), Arch (pacman/paru), Debian (apt)
 - **Tool registry**: Interface-based tool definitions with platform-specific packages
 - **Backup & restore**: Timestamped backups in `~/.config/dotfiles/backups/`
+- **Legacy cleanup**: `cleanupOldInstallations()` removes old dotfiles-tui/dotfiles-setup binaries
 
 ## Development
 
@@ -102,6 +128,13 @@ go vet ./...        # Static analysis
 2. Add case in `View()` method
 3. Add key handling in `Update()` method
 4. Create render function
+
+### Performance Considerations
+
+- Use async loading for operations that involve subprocess calls
+- Batch package manager queries where possible (e.g., `brew list` once vs per-package)
+- Cache results in App struct with `*Ready` flags
+- Show loading spinners during async operations
 
 ## Security Considerations
 

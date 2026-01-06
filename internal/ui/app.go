@@ -154,6 +154,7 @@ type App struct {
 	// Cached install status for tools to avoid running package-manager checks every render.
 	manageInstalled      map[string]bool
 	manageInstalledReady bool
+	installCacheLoading  bool // Currently loading cache asynchronously
 	// Manage screen scrolling
 	manageToolsScroll  int
 	manageFieldsScroll int
@@ -312,6 +313,11 @@ type updateCheckDoneMsg struct {
 	err     error
 }
 
+// installCacheDoneMsg indicates the async install cache loading completed
+type installCacheDoneMsg struct {
+	installed map[string]bool
+}
+
 // updateRunDoneMsg indicates an update operation completed
 type updateRunDoneMsg struct {
 	results []pkg.UpdateResult
@@ -369,6 +375,64 @@ func checkUpdatesCmd() tea.Cmd {
 	return func() tea.Msg {
 		updates, err := pkg.CheckDotfilesUpdates()
 		return updateCheckDoneMsg{updates: updates, err: err}
+	}
+}
+
+// loadInstallCacheCmd loads installation status for all tools asynchronously
+// This uses batch checking where supported (brew list --versions) for better performance
+func loadInstallCacheCmd() tea.Cmd {
+	return func() tea.Msg {
+		reg := tools.NewRegistry()
+		all := reg.All()
+		installed := make(map[string]bool, len(all)+3)
+
+		// Try batch checking first (much faster than individual checks)
+		mgr := pkg.DetectManager()
+		platform := pkg.DetectPlatform()
+
+		var installedPkgs map[string]bool
+		if mgr != nil {
+			// Get all installed packages in one call
+			pkgList, err := mgr.ListInstalled()
+			if err == nil {
+				installedPkgs = make(map[string]bool, len(pkgList))
+				for _, p := range pkgList {
+					installedPkgs[p.Name] = true
+				}
+			}
+		}
+
+		// Check each tool
+		for _, t := range all {
+			if installedPkgs != nil {
+				// Use batch result - check if primary package is installed
+				pkgs := t.Packages()[platform]
+				if len(pkgs) == 0 {
+					pkgs = t.Packages()["all"]
+				}
+				if len(pkgs) > 0 {
+					installed[t.ID()] = installedPkgs[pkgs[0]]
+				}
+			} else {
+				// Fallback to individual checks (slow path)
+				installed[t.ID()] = t.IsInstalled()
+			}
+		}
+
+		// Check utility scripts in ~/.local/bin (always fast - just file existence)
+		home := os.Getenv("HOME")
+		if home == "" {
+			home, _ = os.UserHomeDir()
+		}
+		if home != "" {
+			binDir := filepath.Join(home, ".local", "bin")
+			for _, util := range []string{"hk", "caff", "sshh"} {
+				_, err := os.Stat(filepath.Join(binDir, util))
+				installed[util] = err == nil
+			}
+		}
+
+		return installCacheDoneMsg{installed: installed}
 	}
 }
 
@@ -537,6 +601,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updateCheckDone = true
 		a.updateResults = msg.updates
 		a.updateError = msg.err
+		return a, nil
+
+	case installCacheDoneMsg:
+		a.manageInstalled = msg.installed
+		a.manageInstalledReady = true
+		a.installCacheLoading = false
 		return a, nil
 
 	case updateRunDoneMsg:
@@ -800,6 +870,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if a.deepDive {
 				a.screen = ScreenDeepDiveMenu
+				// Start async install cache load for deep dive menu
+				if cmd := a.startInstallCacheLoad(); cmd != nil {
+					return a, cmd
+				}
 			} else {
 				a.screen = ScreenThemePicker
 			}
@@ -1402,7 +1476,14 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.mainMenuIndex++
 			}
 		case "enter":
-			a.screen = items[a.mainMenuIndex].Screen
+			targetScreen := items[a.mainMenuIndex].Screen
+			a.screen = targetScreen
+			// Start async install cache for screens that need it
+			if targetScreen == ScreenManage {
+				if cmd := a.startInstallCacheLoad(); cmd != nil {
+					return a, cmd
+				}
+			}
 		}
 
 	// Update screen navigation
@@ -1789,6 +1870,9 @@ func installUtilities(utilities map[string]bool) error {
 		return fmt.Errorf("cannot create %s: %w", binDir, err)
 	}
 
+	// Clean up legacy binaries from previous installations
+	cleanupOldInstallations()
+
 	// Get the path to the currently running executable
 	execPath, err := os.Executable()
 	if err != nil {
@@ -1849,6 +1933,38 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(destFile, sourceFile)
 	return err
+}
+
+// cleanupOldInstallations removes legacy binaries from previous installations.
+// This handles the transition from separate dotfiles-tui/dotfiles-setup to unified dotfiles.
+func cleanupOldInstallations() (removed []string) {
+	home := os.Getenv("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home == "" {
+		return nil
+	}
+
+	// Locations where old binaries might exist
+	locations := []string{
+		filepath.Join(home, ".local", "bin", "dotfiles-tui"),
+		filepath.Join(home, ".local", "bin", "dotfiles-setup"),
+		"/usr/local/bin/dotfiles-tui",
+		"/usr/local/bin/dotfiles-setup",
+	}
+
+	for _, path := range locations {
+		if _, err := os.Stat(path); err == nil {
+			// Binary exists, try to remove it
+			if err := os.Remove(path); err == nil {
+				removed = append(removed, filepath.Base(path))
+			}
+			// Silently ignore removal errors (permission issues, etc.)
+		}
+	}
+
+	return removed
 }
 
 // collectSelectedTools gathers all tool IDs selected in deep dive config
@@ -1945,6 +2061,12 @@ func (a *App) handleTabNavigationWithCmd(key string) (bool, tea.Cmd) {
 	if targetScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
 		a.updateChecking = true
 		return true, checkUpdatesCmd()
+	}
+
+	if targetScreen == ScreenManage {
+		if cmd := a.startInstallCacheLoad(); cmd != nil {
+			return true, cmd
+		}
 	}
 
 	return true, nil
@@ -2271,7 +2393,9 @@ var ScreenToolIDs = map[Screen][]string{
 	ScreenConfigUtilities:    {"hk", "caff", "sshh"}, // shell scripts, not package manager installs
 }
 
-// ensureInstallCache populates the install status cache if not already done
+// ensureInstallCache populates the install status cache if not already done.
+// This is kept for synchronous contexts (like collectSelectedTools before install).
+// For UI rendering, use startInstallCacheLoad() and check installCacheLoading.
 func (a *App) ensureInstallCache() {
 	if a.manageInstalledReady {
 		return
@@ -2284,8 +2408,33 @@ func (a *App) ensureInstallCache() {
 		a.manageInstalled = make(map[string]bool, len(all)+3) // +3 for utilities
 	}
 
+	// Try batch checking first (much faster)
+	mgr := pkg.DetectManager()
+	platform := pkg.DetectPlatform()
+
+	var installedPkgs map[string]bool
+	if mgr != nil {
+		pkgList, err := mgr.ListInstalled()
+		if err == nil {
+			installedPkgs = make(map[string]bool, len(pkgList))
+			for _, p := range pkgList {
+				installedPkgs[p.Name] = true
+			}
+		}
+	}
+
 	for _, t := range all {
-		a.manageInstalled[t.ID()] = t.IsInstalled()
+		if installedPkgs != nil {
+			pkgs := t.Packages()[platform]
+			if len(pkgs) == 0 {
+				pkgs = t.Packages()["all"]
+			}
+			if len(pkgs) > 0 {
+				a.manageInstalled[t.ID()] = installedPkgs[pkgs[0]]
+			}
+		} else {
+			a.manageInstalled[t.ID()] = t.IsInstalled()
+		}
 	}
 
 	// Check utility scripts in ~/.local/bin
@@ -2302,6 +2451,21 @@ func (a *App) ensureInstallCache() {
 	}
 
 	a.manageInstalledReady = true
+}
+
+// startInstallCacheLoad begins async cache loading if not already loading or ready.
+// Returns a command to start loading, or nil if cache is ready/loading.
+func (a *App) startInstallCacheLoad() tea.Cmd {
+	if a.manageInstalledReady || a.installCacheLoading {
+		return nil
+	}
+	a.installCacheLoading = true
+	return loadInstallCacheCmd()
+}
+
+// isInstallCacheReady returns true if the cache is ready, false if loading or not started
+func (a *App) isInstallCacheReady() bool {
+	return a.manageInstalledReady
 }
 
 // getDeepDiveItemStatus returns the install status for a deep dive menu item

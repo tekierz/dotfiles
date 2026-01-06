@@ -66,8 +66,20 @@ func GetFilteredDeepDiveMenuItems() []DeepDiveMenuItem {
 
 // renderDeepDiveMenu renders the deep dive tool selection menu
 func (a *App) renderDeepDiveMenu() string {
-	// Ensure install status is cached for status indicators
-	a.ensureInstallCache()
+	// Show loading state if cache is being populated
+	if a.installCacheLoading {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		loadingStyle := lipgloss.NewStyle().
+			Foreground(ColorCyan).
+			Bold(true)
+		loadingText := loadingStyle.Render(fmt.Sprintf("%s Loading installation status...", spinner))
+
+		return lipgloss.Place(
+			a.width, a.height,
+			lipgloss.Center, lipgloss.Center,
+			loadingText,
+		)
+	}
 
 	// Title with decorative border
 	titleBox := lipgloss.NewStyle().
