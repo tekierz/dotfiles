@@ -981,6 +981,14 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "history", label: "History Limit", description: "Scrollback lines per pane", kind: manageFieldNumber, n: &cfg.TmuxHistoryLimit, min: 1000, max: 200000, step: 1000, unit: " lines"},
 			{key: "escape", label: "Escape Time", description: "Escape timing for key chords", kind: manageFieldNumber, n: &cfg.TmuxEscapeTime, min: 0, max: 1000, step: 5, unit: "ms"},
 			{key: "resize", label: "Aggressive Resize", description: "Aggressively resize panes on window changes", kind: manageFieldToggle, b: &cfg.TmuxAggressiveResize},
+			// TPM (Plugin Manager) settings
+			{key: "tpm_enabled", label: "TPM Enabled", description: "Enable Tmux Plugin Manager", kind: manageFieldToggle, b: &cfg.TmuxTPMEnabled},
+			{key: "plugin_sensible", label: "tmux-sensible", description: "Sensible default settings", kind: manageFieldToggle, b: &cfg.TmuxPluginSensible},
+			{key: "plugin_resurrect", label: "tmux-resurrect", description: "Save and restore sessions", kind: manageFieldToggle, b: &cfg.TmuxPluginResurrect},
+			{key: "plugin_continuum", label: "tmux-continuum", description: "Automatic session saving", kind: manageFieldToggle, b: &cfg.TmuxPluginContinuum},
+			{key: "plugin_yank", label: "tmux-yank", description: "Enhanced clipboard support", kind: manageFieldToggle, b: &cfg.TmuxPluginYank},
+			{key: "continuum_save", label: "Auto-save Interval", description: "Minutes between auto-saves", kind: manageFieldNumber, n: &cfg.TmuxContinuumSaveMin, min: 5, max: 60, step: 5, unit: " min"},
+			{key: "continuum_restore", label: "Auto-restore", description: "Restore sessions on tmux start", kind: manageFieldToggle, b: &cfg.TmuxContinuumRestore},
 		}
 
 	case "zsh":

@@ -1034,13 +1034,30 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Tmux config
 	case ScreenConfigTmux:
+		// Calculate max field based on TPM state
+		maxField := 4 // Fields 0-4 (prefix, splits, status, mouse, TPM toggle)
+		if a.deepDiveConfig.TmuxTPMEnabled {
+			maxField = 8 // + plugin toggles (5-8)
+			if a.deepDiveConfig.TmuxPluginContinuum {
+				maxField = 9 // + continuum interval
+			}
+		}
+
 		switch key {
 		case "up", "k":
 			if a.configFieldIndex > 0 {
 				a.configFieldIndex--
+				// Skip hidden fields when TPM is disabled
+				if !a.deepDiveConfig.TmuxTPMEnabled && a.configFieldIndex > 4 {
+					a.configFieldIndex = 4
+				}
+				// Skip interval field when continuum is disabled
+				if a.deepDiveConfig.TmuxTPMEnabled && !a.deepDiveConfig.TmuxPluginContinuum && a.configFieldIndex == 9 {
+					a.configFieldIndex = 8
+				}
 			}
 		case "down", "j":
-			if a.configFieldIndex < 3 {
+			if a.configFieldIndex < maxField {
 				a.configFieldIndex++
 			}
 		case "left", "right", "h", "l":
@@ -1060,10 +1077,33 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else {
 					a.deepDiveConfig.TmuxStatusBar = "top"
 				}
+			case 9: // Continuum interval
+				if a.deepDiveConfig.TmuxTPMEnabled && a.deepDiveConfig.TmuxPluginContinuum {
+					if key == "right" || key == "l" {
+						if a.deepDiveConfig.TmuxContinuumSaveMin < 60 {
+							a.deepDiveConfig.TmuxContinuumSaveMin += 5
+						}
+					} else {
+						if a.deepDiveConfig.TmuxContinuumSaveMin > 5 {
+							a.deepDiveConfig.TmuxContinuumSaveMin -= 5
+						}
+					}
+				}
 			}
 		case " ":
-			if a.configFieldIndex == 3 {
+			switch a.configFieldIndex {
+			case 3: // Mouse mode
 				a.deepDiveConfig.TmuxMouseMode = !a.deepDiveConfig.TmuxMouseMode
+			case 4: // TPM enabled
+				a.deepDiveConfig.TmuxTPMEnabled = !a.deepDiveConfig.TmuxTPMEnabled
+			case 5: // tmux-sensible
+				a.deepDiveConfig.TmuxPluginSensible = !a.deepDiveConfig.TmuxPluginSensible
+			case 6: // tmux-resurrect
+				a.deepDiveConfig.TmuxPluginResurrect = !a.deepDiveConfig.TmuxPluginResurrect
+			case 7: // tmux-continuum
+				a.deepDiveConfig.TmuxPluginContinuum = !a.deepDiveConfig.TmuxPluginContinuum
+			case 8: // tmux-yank
+				a.deepDiveConfig.TmuxPluginYank = !a.deepDiveConfig.TmuxPluginYank
 			}
 		case "esc", "enter":
 			a.configFieldIndex = 0
@@ -1836,6 +1876,35 @@ func (a *App) startInstallation() tea.Cmd {
 			lastErr = err
 		} else {
 			a.installOutput = append(a.installOutput, "  ✓ Utilities installed to ~/.local/bin")
+		}
+
+		// Configure tmux with TPM plugins
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring tmux...")
+		tmuxCfg := tools.TmuxConfig{
+			Prefix:           a.deepDiveConfig.TmuxPrefix,
+			SplitBinds:       a.deepDiveConfig.TmuxSplitBinds,
+			StatusBar:        a.deepDiveConfig.TmuxStatusBar,
+			MouseMode:        a.deepDiveConfig.TmuxMouseMode,
+			TPMEnabled:       a.deepDiveConfig.TmuxTPMEnabled,
+			PluginSensible:   a.deepDiveConfig.TmuxPluginSensible,
+			PluginResurrect:  a.deepDiveConfig.TmuxPluginResurrect,
+			PluginContinuum:  a.deepDiveConfig.TmuxPluginContinuum,
+			PluginYank:       a.deepDiveConfig.TmuxPluginYank,
+			ContinuumSaveMin: a.deepDiveConfig.TmuxContinuumSaveMin,
+		}
+		if err := tools.SetupTPM(tmuxCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure tmux: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ Tmux configured with ~/.tmux.conf")
+			if tmuxCfg.TPMEnabled {
+				if tools.IsTPMInstalled() {
+					a.installOutput = append(a.installOutput, "  ✓ TPM plugins ready (run prefix+I in tmux to install)")
+				} else {
+					a.installOutput = append(a.installOutput, "  ⚠ TPM installed but plugins pending")
+				}
+			}
 		}
 
 		// Build context from last few output lines for error display

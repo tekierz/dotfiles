@@ -13,6 +13,14 @@ type DeepDiveConfig struct {
 	TmuxStatusBar  string
 	TmuxMouseMode  bool
 
+	// Tmux TPM (Plugin Manager) settings
+	TmuxTPMEnabled       bool
+	TmuxPluginSensible   bool
+	TmuxPluginResurrect  bool
+	TmuxPluginContinuum  bool
+	TmuxPluginYank       bool
+	TmuxContinuumSaveMin int // 5-60 minutes
+
 	// Zsh settings
 	ZshPromptStyle string
 	ZshPlugins     []string
@@ -86,6 +94,14 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		TmuxSplitBinds: "pipes", // | and -
 		TmuxStatusBar:  "bottom",
 		TmuxMouseMode:  true,
+
+		// Tmux TPM defaults
+		TmuxTPMEnabled:       true,
+		TmuxPluginSensible:   true,
+		TmuxPluginResurrect:  true,
+		TmuxPluginContinuum:  false, // Opt-in for auto-save
+		TmuxPluginYank:       true,
+		TmuxContinuumSaveMin: 15,
 
 		// Zsh defaults
 		ZshPromptStyle: "p10k",
@@ -229,7 +245,7 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		},
 		{
 			Name:        "Tmux",
-			Description: "Prefix key, splits, status bar, mouse",
+			Description: "Prefix key, splits, mouse, TPM plugins",
 			Screen:      ScreenConfigTmux,
 			Icon:        "",
 		},

@@ -30,6 +30,15 @@ type ManageConfig struct {
 	TmuxEscapeTime       int
 	TmuxAggressiveResize bool
 
+	// Tmux TPM settings
+	TmuxTPMEnabled       bool
+	TmuxPluginSensible   bool
+	TmuxPluginResurrect  bool
+	TmuxPluginContinuum  bool
+	TmuxPluginYank       bool
+	TmuxContinuumSaveMin int
+	TmuxContinuumRestore bool
+
 	// Zsh detailed settings
 	ZshHistorySize       int
 	ZshHistoryIgnoreDups bool
@@ -120,6 +129,15 @@ func NewManageConfig() *ManageConfig {
 		TmuxHistoryLimit:     50000,
 		TmuxEscapeTime:       10,
 		TmuxAggressiveResize: true,
+
+		// Tmux TPM
+		TmuxTPMEnabled:       true,
+		TmuxPluginSensible:   true,
+		TmuxPluginResurrect:  true,
+		TmuxPluginContinuum:  false,
+		TmuxPluginYank:       true,
+		TmuxContinuumSaveMin: 15,
+		TmuxContinuumRestore: true,
 
 		// Zsh
 		ZshHistorySize:       10000,

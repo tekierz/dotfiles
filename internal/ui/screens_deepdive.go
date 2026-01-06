@@ -267,7 +267,62 @@ func (a *App) renderConfigTmux() string {
 	content.WriteString(renderFieldLabel("Mouse Support", mouseFocused))
 	content.WriteString(renderToggle(cfg.TmuxMouseMode, mouseFocused))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	// TPM section
+	content.WriteString("\n\n")
+	content.WriteString(sectionHeaderStyle.Render("TPM Plugins"))
+	content.WriteString("\n\n")
+
+	// TPM Enable toggle (field 4)
+	tpmFocused := a.configFieldIndex == 4
+	content.WriteString(renderFieldLabel("Enable TPM", tpmFocused))
+	content.WriteString(renderToggle(cfg.TmuxTPMEnabled, tpmFocused))
+
+	// Plugin checkboxes (fields 5-8) - only if TPM enabled
+	if cfg.TmuxTPMEnabled {
+		content.WriteString("\n\n")
+
+		// tmux-sensible (field 5)
+		sensibleFocused := a.configFieldIndex == 5
+		content.WriteString(renderCheckbox("tmux-sensible", cfg.TmuxPluginSensible, sensibleFocused))
+		if sensibleFocused {
+			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Sensible defaults"))
+		}
+		content.WriteString("\n")
+
+		// tmux-resurrect (field 6)
+		resurrectFocused := a.configFieldIndex == 6
+		content.WriteString(renderCheckbox("tmux-resurrect", cfg.TmuxPluginResurrect, resurrectFocused))
+		if resurrectFocused {
+			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Session save/restore"))
+		}
+		content.WriteString("\n")
+
+		// tmux-continuum (field 7)
+		continuumFocused := a.configFieldIndex == 7
+		content.WriteString(renderCheckbox("tmux-continuum", cfg.TmuxPluginContinuum, continuumFocused))
+		if continuumFocused {
+			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Auto-save sessions"))
+		}
+		content.WriteString("\n")
+
+		// tmux-yank (field 8)
+		yankFocused := a.configFieldIndex == 8
+		content.WriteString(renderCheckbox("tmux-yank", cfg.TmuxPluginYank, yankFocused))
+		if yankFocused {
+			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Clipboard integration"))
+		}
+
+		// Continuum interval (field 9) - only if continuum enabled
+		if cfg.TmuxPluginContinuum {
+			content.WriteString("\n\n")
+			intervalFocused := a.configFieldIndex == 9
+			content.WriteString(renderFieldLabel("Auto-save Interval", intervalFocused))
+			content.WriteString(renderNumberControl(cfg.TmuxContinuumSaveMin, 5, 60, intervalFocused))
+			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" min"))
+		}
+	}
+
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • enter/esc back")
 
 	return lipgloss.Place(
