@@ -36,6 +36,7 @@ make build
 | `dotfiles theme --list` | List available themes |
 | `dotfiles backups` | List configuration backups |
 | `dotfiles restore <name>` | Restore from backup |
+| `dotfiles uninstall` | Remove dotfiles and restore original config |
 
 ## What It Installs & Configures
 

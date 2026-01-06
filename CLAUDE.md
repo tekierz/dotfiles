@@ -94,6 +94,7 @@ dotfiles backups        # List backups (CLI)
 dotfiles restore <name> # Restore backup (CLI)
 dotfiles theme --list   # List themes (CLI)
 dotfiles update         # Check for updates
+dotfiles uninstall      # Remove dotfiles and restore config
 ```
 
 ## Key Concepts

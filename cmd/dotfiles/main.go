@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -171,12 +172,43 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// uninstallCmd removes dotfiles and restores original config
+var uninstallCmd = &cobra.Command{
+	Use:   "uninstall",
+	Short: "Remove dotfiles and restore original configuration",
+	Long: `Uninstall dotfiles completely and restore your original configuration.
+
+This will:
+  - Restore configuration files from backup (if available)
+  - Remove dotfiles binaries from ~/.local/bin
+  - Remove utility scripts (hk, caff, sshh)
+  - Remove dotfiles configuration directory
+
+Use --keep-config to preserve the ~/.config/dotfiles directory.
+Use --keep-binaries to preserve installed binaries.
+Use --no-restore to skip restoring backups.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		keepConfig, _ := cmd.Flags().GetBool("keep-config")
+		keepBinaries, _ := cmd.Flags().GetBool("keep-binaries")
+		noRestore, _ := cmd.Flags().GetBool("no-restore")
+		force, _ := cmd.Flags().GetBool("force")
+
+		runUninstall(keepConfig, keepBinaries, noRestore, force)
+	},
+}
+
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().BoolVar(&skipIntro, "skip-intro", false, "Skip intro animation")
 
 	// Hotkeys flags
 	hotkeysCmd.Flags().String("tool", "", "Filter hotkeys by tool (tmux, zsh, neovim, etc.)")
+
+	// Uninstall flags
+	uninstallCmd.Flags().Bool("keep-config", false, "Keep ~/.config/dotfiles directory")
+	uninstallCmd.Flags().Bool("keep-binaries", false, "Keep installed binaries")
+	uninstallCmd.Flags().Bool("no-restore", false, "Skip restoring backups")
+	uninstallCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
 
 	// Add subcommands
 	rootCmd.AddCommand(installCmd)
@@ -189,6 +221,7 @@ func init() {
 	rootCmd.AddCommand(backupsCmd)
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(uninstallCmd)
 }
 
 func main() {
@@ -526,4 +559,143 @@ func restoreBackup(name string) {
 	}
 
 	fmt.Printf("\nRestored %d files from backup.\n", restored)
+}
+
+// runUninstall removes dotfiles and optionally restores original configuration
+func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	configDir := config.ConfigDir()
+
+	// Show what will be done
+	fmt.Println("Dotfiles Uninstaller")
+	fmt.Println("====================")
+	fmt.Println()
+	fmt.Println("This will:")
+
+	if !noRestore {
+		fmt.Println("  • Restore configuration files from latest backup (if available)")
+	}
+	if !keepBinaries {
+		fmt.Println("  • Remove dotfiles binaries (dotfiles, dotfiles-tui, dotfiles-setup)")
+		fmt.Println("  • Remove utility scripts (hk, caff, y)")
+	}
+	if !keepConfig {
+		fmt.Printf("  • Remove configuration directory (%s)\n", configDir)
+	}
+	fmt.Println()
+
+	// Prompt for confirmation unless --force
+	if !force {
+		fmt.Print("Continue with uninstall? [y/N]: ")
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Uninstall cancelled.")
+			return
+		}
+		fmt.Println()
+	}
+
+	// Restore from latest backup
+	if !noRestore {
+		fmt.Println("Checking for backups...")
+		backupDir := filepath.Join(configDir, "backups")
+		if entries, err := os.ReadDir(backupDir); err == nil && len(entries) > 0 {
+			// Find most recent backup (directories sorted by timestamp)
+			var latestBackup string
+			for _, e := range entries {
+				if e.IsDir() {
+					if latestBackup == "" || e.Name() > latestBackup {
+						latestBackup = e.Name()
+					}
+				}
+			}
+			if latestBackup != "" {
+				fmt.Printf("Restoring from backup: %s\n", latestBackup)
+				restoreBackup(latestBackup)
+				fmt.Println()
+			}
+		} else {
+			fmt.Println("No backups found to restore.")
+			fmt.Println()
+		}
+	}
+
+	// Remove binaries
+	if !keepBinaries {
+		fmt.Println("Removing binaries...")
+
+		// Binaries to remove
+		binaries := []string{
+			"dotfiles",
+			"dotfiles-tui",
+			"dotfiles-setup",
+			"hk",
+			"caff",
+			"y",
+		}
+
+		// Locations to check
+		locations := []string{
+			filepath.Join(home, ".local", "bin"),
+			"/usr/local/bin",
+		}
+
+		removed := 0
+		for _, loc := range locations {
+			for _, bin := range binaries {
+				binPath := filepath.Join(loc, bin)
+				if _, err := os.Stat(binPath); err == nil {
+					if err := os.Remove(binPath); err != nil {
+						fmt.Fprintf(os.Stderr, "  Warning: Could not remove %s: %v\n", binPath, err)
+					} else {
+						fmt.Printf("  Removed: %s\n", binPath)
+						removed++
+					}
+				}
+			}
+		}
+
+		if removed == 0 {
+			fmt.Println("  No binaries found to remove.")
+		}
+		fmt.Println()
+	}
+
+	// Remove config directory
+	if !keepConfig {
+		fmt.Printf("Removing configuration directory: %s\n", configDir)
+		if _, err := os.Stat(configDir); err == nil {
+			if err := os.RemoveAll(configDir); err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: Could not remove config directory: %v\n", err)
+			} else {
+				fmt.Println("  Configuration directory removed.")
+			}
+		} else {
+			fmt.Println("  Configuration directory not found.")
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("Uninstall complete!")
+	fmt.Println()
+	fmt.Println("Note: The following may still need manual cleanup:")
+	fmt.Println("  • Shell configuration (~/.zshrc, ~/.bashrc)")
+	fmt.Println("  • Tmux configuration (~/.tmux.conf)")
+	fmt.Println("  • Ghostty configuration (~/.config/ghostty)")
+	fmt.Println("  • Neovim configuration (~/.config/nvim)")
+	fmt.Println("  • Installed packages (use your package manager)")
+	fmt.Println()
+	fmt.Println("To completely remove dotfiles from Homebrew:")
+	fmt.Println("  brew uninstall tekierz/tap/dotfiles")
 }
