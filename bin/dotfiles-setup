@@ -1916,6 +1916,22 @@ setup_utilities() {
     if [[ "$NAV_STYLE" == "vim" ]]; then
         cat > ~/.local/bin/hk << 'HK_VIM_EOF'
 #!/usr/bin/env bash
+#
+# hk - Hotkey reference
+#
+# Prefer the new TUI (dotfiles hotkeys) when available; fall back to the static
+# table below for environments without the Go binary.
+#
+
+tool="${1:-}"
+if command -v dotfiles >/dev/null 2>&1; then
+  if [[ -n "$tool" ]]; then
+    dotfiles hotkeys --skip-intro --tool "$tool" && exit 0
+  else
+    dotfiles hotkeys --skip-intro && exit 0
+  fi
+fi
+
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                         HOTKEY REFERENCE (vim style)                         ║
@@ -2041,6 +2057,22 @@ HK_VIM_EOF
     else
         cat > ~/.local/bin/hk << 'HK_EMACS_EOF'
 #!/usr/bin/env bash
+#
+# hk - Hotkey reference
+#
+# Prefer the new TUI (dotfiles hotkeys) when available; fall back to the static
+# table below for environments without the Go binary.
+#
+
+tool="${1:-}"
+if command -v dotfiles >/dev/null 2>&1; then
+  if [[ -n "$tool" ]]; then
+    dotfiles hotkeys --skip-intro --tool "$tool" && exit 0
+  else
+    dotfiles hotkeys --skip-intro && exit 0
+  fi
+fi
+
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                      HOTKEY REFERENCE (emacs/Mac style)                      ║
