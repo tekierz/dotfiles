@@ -122,6 +122,9 @@ type App struct {
 	height        int
 	animationDone bool
 
+	// Screen manager for migrated screens (nil during transition)
+	screenMgr *ScreenManager
+
 	// Animation state
 	animFrame        int
 	animTicker       *time.Ticker
@@ -217,8 +220,25 @@ type App struct {
 	lastError error
 }
 
+// AppOption configures optional App parameters
+type AppOption func(*App)
+
+// WithScreenFactory sets the screen factory for the ScreenManager
+func WithScreenFactory(factory ScreenFactory) AppOption {
+	return func(a *App) {
+		if factory != nil {
+			deps := NewDependencies()
+			ctx := NewScreenContext(deps)
+			ctx.Theme = a.theme
+			ctx.NavStyle = a.navStyle
+			ctx.AnimationsEnabled = a.animationsEnabled
+			a.screenMgr = NewScreenManager(ctx, factory)
+		}
+	}
+}
+
 // NewApp creates a new application instance
-func NewApp(skipIntro bool) *App {
+func NewApp(skipIntro bool, opts ...AppOption) *App {
 	app := &App{
 		skipIntro:            skipIntro,
 		theme:                "catppuccin-mocha",
@@ -263,6 +283,11 @@ func NewApp(skipIntro bool) *App {
 		app.animationDone = true
 	} else {
 		app.screen = ScreenAnimation
+	}
+
+	// Apply options (e.g., screen factory)
+	for _, opt := range opts {
+		opt(app)
 	}
 
 	return app
@@ -484,17 +509,33 @@ func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
 
 // Update handles messages
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle window resize for screen manager
+	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		a.width = wsm.Width
+		a.height = wsm.Height
+		if a.screenMgr != nil {
+			a.screenMgr.SetSize(wsm.Width, wsm.Height)
+		}
+		return a, nil
+	}
+
+	// Delegate to screen manager for navigation messages and migrated screens
+	if a.screenMgr != nil {
+		if cmd, handled := a.screenMgr.Update(msg); handled {
+			// Sync legacy screen field with manager's current legacy screen
+			if a.screenMgr.IsLegacyMode() {
+				a.screen = a.screenMgr.LegacyScreen()
+			}
+			return a, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return a.handleKey(msg)
 
 	case tea.MouseMsg:
 		return a.handleMouse(msg)
-
-	case tea.WindowSizeMsg:
-		a.width = msg.Width
-		a.height = msg.Height
-		return a, nil
 
 	case tickMsg:
 		if a.screen == ScreenAnimation {
@@ -525,6 +566,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.uiFrame++
+		if a.screenMgr != nil {
+			a.screenMgr.IncrementUIFrame()
+		}
 		return a, tickUI()
 
 	case durdrawAvailableMsg:
@@ -1746,6 +1790,13 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // View renders the UI
 func (a *App) View() string {
+	// Try screen manager for migrated screens first
+	if a.screenMgr != nil && !a.screenMgr.IsLegacyMode() {
+		if view := a.screenMgr.View(); view != "" {
+			return view
+		}
+	}
+
 	switch a.screen {
 	case ScreenAnimation:
 		return a.renderAnimation()
