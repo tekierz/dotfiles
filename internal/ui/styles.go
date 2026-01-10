@@ -703,6 +703,7 @@ type ManagementTab struct {
 func GetManagementTabs() []ManagementTab {
 	return []ManagementTab{
 		{Name: "Manage", Icon: "󰒓", Screen: ScreenManage},
+		{Name: "Users", Icon: "󰀄", Screen: ScreenUsers},
 		{Name: "Hotkeys", Icon: "󰌌", Screen: ScreenHotkeys},
 		{Name: "Update", Icon: "󰚰", Screen: ScreenUpdate},
 		{Name: "Backups", Icon: "󰁯", Screen: ScreenBackups},

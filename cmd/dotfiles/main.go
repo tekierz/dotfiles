@@ -28,7 +28,10 @@ var rootCmd = &cobra.Command{
 	Long: `Dotfiles is a unified terminal environment management platform.
 
 It provides installation, configuration, and updates for your terminal
-tools including zsh, tmux, neovim, yazi, ghostty, and more.`,
+tools including zsh, tmux, neovim, yazi, ghostty, and more.
+
+Quick user switch:
+  dotfiles --<Username>    Switch to user profile (e.g., dotfiles --Pratik)`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Default: launch TUI main menu
 		launchTUI(ui.ScreenMainMenu)
@@ -172,6 +175,75 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// userCmd handles user operations
+var userCmd = &cobra.Command{
+	Use:   "user [name]",
+	Short: "Switch to or manage user profile",
+	Long: `Switch to a user profile or manage user profiles.
+
+Without arguments, shows the current active user.
+With a name argument, switches to that user (creates if doesn't exist).
+
+Examples:
+  dotfiles user              # Show current user
+  dotfiles user Pratik       # Switch to Pratik (prompts to create if new)
+  dotfiles user add Alice    # Create new user Alice
+  dotfiles user delete Bob   # Delete user Bob`,
+	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) == 0 {
+			showCurrentUser()
+			return
+		}
+		switchToUser(args[0])
+	},
+}
+
+// userAddCmd creates a new user profile
+var userAddCmd = &cobra.Command{
+	Use:   "add <name>",
+	Short: "Create new user profile",
+	Long: `Create a new user profile with optional settings.
+
+If no flags are provided, uses default settings.
+Use flags to customize the profile:
+  --theme     Theme name (e.g., catppuccin-mocha, dracula)
+  --nav       Navigation style: emacs or vim
+  --keyboard  Keyboard style: macos or linux
+
+Examples:
+  dotfiles user add Alice
+  dotfiles user add Bob --theme dracula --nav vim
+  dotfiles user add Carol --keyboard macos`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		theme, _ := cmd.Flags().GetString("theme")
+		nav, _ := cmd.Flags().GetString("nav")
+		keyboard, _ := cmd.Flags().GetString("keyboard")
+		addUser(args[0], theme, nav, keyboard)
+	},
+}
+
+// userDeleteCmd deletes a user profile
+var userDeleteCmd = &cobra.Command{
+	Use:     "delete <name>",
+	Aliases: []string{"rm", "remove"},
+	Short:   "Delete user profile",
+	Args:    cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		force, _ := cmd.Flags().GetBool("force")
+		deleteUser(args[0], force)
+	},
+}
+
+// usersCmd lists all users
+var usersCmd = &cobra.Command{
+	Use:   "users",
+	Short: "List all user profiles",
+	Run: func(cmd *cobra.Command, args []string) {
+		listUsers()
+	},
+}
+
 // uninstallCmd removes dotfiles and restores original config
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
@@ -210,6 +282,16 @@ func init() {
 	uninstallCmd.Flags().Bool("no-restore", false, "Skip restoring backups")
 	uninstallCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
 
+	// User command flags
+	userAddCmd.Flags().String("theme", "", "Theme name (e.g., catppuccin-mocha)")
+	userAddCmd.Flags().String("nav", "", "Navigation style: emacs or vim")
+	userAddCmd.Flags().String("keyboard", "", "Keyboard style: macos or linux")
+	userDeleteCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
+
+	// User subcommands
+	userCmd.AddCommand(userAddCmd)
+	userCmd.AddCommand(userDeleteCmd)
+
 	// Add subcommands
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(manageCmd)
@@ -222,9 +304,33 @@ func init() {
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(uninstallCmd)
+	rootCmd.AddCommand(userCmd)
+	rootCmd.AddCommand(usersCmd)
 }
 
 func main() {
+	// Handle --<Username> quick switch before Cobra parses flags
+	// This allows "dotfiles --Alice" to work as a quick user switch
+	if len(os.Args) == 2 {
+		arg := os.Args[1]
+		if strings.HasPrefix(arg, "--") && len(arg) > 2 && !strings.Contains(arg, "=") {
+			username := arg[2:]
+			// Skip if it's a known flag or looks like a help request
+			if username != "help" && username != "version" && username != "skip-intro" {
+				if config.ValidateUsername(username) == nil && config.UserExists(username) {
+					switchToUser(username)
+					return
+				}
+				// If username is valid but doesn't exist, show helpful message
+				if config.ValidateUsername(username) == nil {
+					fmt.Printf("User %q does not exist.\n", username)
+					fmt.Println("Create with: dotfiles user add", username)
+					return
+				}
+			}
+		}
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -328,6 +434,9 @@ func showStatus() {
 
 	fmt.Println("Dotfiles Status")
 	fmt.Println("===============")
+	if cfg.ActiveUser != "" {
+		fmt.Printf("User:       %s\n", cfg.ActiveUser)
+	}
 	fmt.Printf("Theme:      %s\n", cfg.Theme)
 	fmt.Printf("Navigation: %s\n", cfg.NavStyle)
 	fmt.Printf("Config dir: %s\n", config.ConfigDir())
@@ -698,4 +807,240 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 	fmt.Println()
 	fmt.Println("To completely remove dotfiles from Homebrew:")
 	fmt.Println("  brew uninstall tekierz/tap/dotfiles")
+}
+
+// showCurrentUser displays the current active user
+func showCurrentUser() {
+	profile, err := config.GetActiveUser()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting active user: %v\n", err)
+		os.Exit(1)
+	}
+
+	if profile == nil {
+		fmt.Println("No active user profile.")
+		fmt.Println()
+		fmt.Println("Create a user profile with:")
+		fmt.Println("  dotfiles user add <name>")
+		return
+	}
+
+	fmt.Printf("Active User: %s\n", profile.Name)
+	fmt.Printf("  Theme:    %s\n", profile.Theme)
+	fmt.Printf("  Nav:      %s\n", profile.NavStyle)
+	fmt.Printf("  Keyboard: %s\n", profile.KeyboardStyle)
+}
+
+// switchToUser switches to a user profile, prompting to create if it doesn't exist
+func switchToUser(name string) {
+	if err := config.ValidateUsername(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if !config.UserExists(name) {
+		fmt.Printf("User %q does not exist.\n", name)
+		fmt.Print("Create new user profile? [y/N]: ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Cancelled.")
+			return
+		}
+
+		// Create with defaults
+		addUser(name, "", "", "")
+		return
+	}
+
+	profile, err := config.LoadUserProfile(name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading user profile: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := config.ApplyUserProfile(profile); err != nil {
+		fmt.Fprintf(os.Stderr, "Error applying user profile: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Switched to user: %s\n", profile.Name)
+	fmt.Printf("  Theme:    %s\n", profile.Theme)
+	fmt.Printf("  Nav:      %s\n", profile.NavStyle)
+	fmt.Printf("  Keyboard: %s\n", profile.KeyboardStyle)
+	fmt.Println()
+	fmt.Println("Run 'dotfiles install' to apply theme changes to all tools.")
+}
+
+// addUser creates a new user profile
+func addUser(name, theme, nav, keyboard string) {
+	if err := config.ValidateUsername(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if config.UserExists(name) {
+		fmt.Printf("User %q already exists.\n", name)
+		fmt.Print("Overwrite existing profile? [y/N]: ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Cancelled.")
+			return
+		}
+	}
+
+	profile := config.DefaultUserProfile(name)
+
+	// Apply provided settings
+	if theme != "" {
+		if !config.IsValidTheme(theme) {
+			fmt.Fprintf(os.Stderr, "Invalid theme: %s\n", theme)
+			fmt.Println("Available themes:")
+			for _, t := range config.AvailableThemes {
+				fmt.Printf("  %s\n", t)
+			}
+			os.Exit(1)
+		}
+		profile.Theme = theme
+	}
+
+	if nav != "" {
+		if !config.IsValidNavStyle(nav) {
+			fmt.Fprintf(os.Stderr, "Invalid nav style: %s\n", nav)
+			fmt.Println("Valid options: emacs, vim")
+			os.Exit(1)
+		}
+		profile.NavStyle = nav
+	}
+
+	if keyboard != "" {
+		if !config.IsValidKeyboardStyle(keyboard) {
+			fmt.Fprintf(os.Stderr, "Invalid keyboard style: %s\n", keyboard)
+			fmt.Println("Valid options: macos, linux")
+			os.Exit(1)
+		}
+		profile.KeyboardStyle = keyboard
+	}
+
+	if err := config.SaveUserProfile(profile); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving user profile: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Created user profile: %s\n", profile.Name)
+	fmt.Printf("  Theme:    %s\n", profile.Theme)
+	fmt.Printf("  Nav:      %s\n", profile.NavStyle)
+	fmt.Printf("  Keyboard: %s\n", profile.KeyboardStyle)
+	fmt.Println()
+	fmt.Printf("Switch to this user with: dotfiles user %s\n", name)
+}
+
+// deleteUser removes a user profile
+func deleteUser(name string, force bool) {
+	if err := config.ValidateUsername(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if !config.UserExists(name) {
+		fmt.Fprintf(os.Stderr, "User %q does not exist.\n", name)
+		os.Exit(1)
+	}
+
+	// Check if this is the active user
+	activeProfile, _ := config.GetActiveUser()
+	isActive := activeProfile != nil && activeProfile.Name == name
+
+	if isActive {
+		fmt.Printf("Warning: %q is the currently active user.\n", name)
+	}
+
+	if !force {
+		fmt.Printf("Delete user profile %q? [y/N]: ", name)
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Cancelled.")
+			return
+		}
+	}
+
+	if err := config.DeleteUserProfile(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error deleting user profile: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Clear active user if we deleted them
+	if isActive {
+		if err := config.ClearActiveUser(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Could not clear active user: %v\n", err)
+		}
+	}
+
+	fmt.Printf("Deleted user profile: %s\n", name)
+}
+
+// listUsers displays all user profiles
+func listUsers() {
+	users, err := config.ListUserProfiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing users: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(users) == 0 {
+		fmt.Println("No user profiles found.")
+		fmt.Println()
+		fmt.Println("Create a user profile with:")
+		fmt.Println("  dotfiles user add <name>")
+		return
+	}
+
+	// Get active user for marking
+	activeProfile, _ := config.GetActiveUser()
+	activeName := ""
+	if activeProfile != nil {
+		activeName = activeProfile.Name
+	}
+
+	fmt.Printf("User Profiles (%d):\n", len(users))
+	fmt.Println("─────────────────────────")
+
+	for _, name := range users {
+		profile, err := config.LoadUserProfile(name)
+		if err != nil {
+			fmt.Printf("  %s (error loading)\n", name)
+			continue
+		}
+
+		marker := "○"
+		if name == activeName {
+			marker = "●"
+		}
+
+		fmt.Printf("  %s %s\n", marker, profile.Name)
+		fmt.Printf("      Theme: %s, Nav: %s, Keyboard: %s\n",
+			profile.Theme, profile.NavStyle, profile.KeyboardStyle)
+	}
+
+	fmt.Println()
+	fmt.Println("● = active user")
 }

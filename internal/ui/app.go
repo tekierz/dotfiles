@@ -54,6 +54,7 @@ const (
 	ScreenUpdate
 	ScreenHotkeys
 	ScreenBackups
+	ScreenUsers
 	ScreenConfigApps
 	// Additional config screens
 	ScreenConfigCLITools
@@ -186,6 +187,17 @@ type App struct {
 	hotkeyItemScroll int    // Item list scroll
 	hotkeysReturn    Screen // Screen to return to when leaving hotkeys
 	backupIndex      int    // Backup selection cursor
+
+	// Users screen state
+	usersItems      []userItem // Cached user list
+	usersIndex      int        // Selected user index
+	usersPane       int        // 0 = list pane, 1 = settings pane
+	usersFieldIndex int        // Selected field in settings pane
+	usersLoaded     bool       // Whether users have been loaded
+	usersCreating   bool       // In "new user" input mode
+	usersDeleting   bool       // In "confirm delete" mode
+	usersNewName    string     // New user name being typed
+	usersStatus     string     // Status message
 
 	// Update screen async state
 	updateChecking  bool          // Currently checking for updates
@@ -603,6 +615,48 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updateError = msg.err
 		return a, nil
 
+	case userLoadedMsg:
+		if msg.err != nil {
+			a.usersStatus = fmt.Sprintf("Load failed: %v", msg.err)
+		} else {
+			a.usersItems = msg.users
+			a.usersStatus = ""
+		}
+		return a, nil
+
+	case userSavedMsg:
+		if msg.err != nil {
+			a.usersStatus = fmt.Sprintf("Save failed: %v", msg.err)
+		} else {
+			a.usersStatus = fmt.Sprintf("Saved %s ✓", msg.name)
+			// Reload user list
+			return a, loadUsersCmd()
+		}
+		return a, nil
+
+	case userDeletedMsg:
+		if msg.err != nil {
+			a.usersStatus = fmt.Sprintf("Delete failed: %v", msg.err)
+		} else {
+			a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
+			// Reload user list and adjust index
+			if a.usersIndex > 0 {
+				a.usersIndex--
+			}
+			return a, loadUsersCmd()
+		}
+		return a, nil
+
+	case userSwitchedMsg:
+		if msg.err != nil {
+			a.usersStatus = fmt.Sprintf("Switch failed: %v", msg.err)
+		} else {
+			a.usersStatus = fmt.Sprintf("Switched to %s ✓", msg.name)
+			// Reload user list to update active indicator
+			return a, loadUsersCmd()
+		}
+		return a, nil
+
 	case installCacheDoneMsg:
 		a.manageInstalled = msg.installed
 		a.manageInstalledReady = true
@@ -764,6 +818,8 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a.handleManageMouse(msg)
 	case ScreenHotkeys:
 		return a.handleHotkeysMouse(msg)
+	case ScreenUsers:
+		return a.handleUsersMouse(msg)
 	case ScreenUpdate, ScreenBackups:
 		return a.handleTabBarMouse(msg)
 	default:
@@ -1669,6 +1725,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		maxFields := 3
 		a.handleManageNavigation(key, maxFields, ScreenManage)
 
+	// Users screen navigation
+	case ScreenUsers:
+		return a.handleUsersKey(msg)
+
 	// Backups screen navigation
 	case ScreenBackups:
 		// Handle tab navigation first
@@ -1769,6 +1829,8 @@ func (a *App) View() string {
 		return a.renderUpdate()
 	case ScreenHotkeys:
 		return a.renderHotkeysDualPane()
+	case ScreenUsers:
+		return a.renderUsersDualPane()
 	case ScreenBackups:
 		return a.renderBackups()
 	default:
@@ -2136,6 +2198,11 @@ func (a *App) handleTabNavigationWithCmd(key string) (bool, tea.Cmd) {
 		if cmd := a.startInstallCacheLoad(); cmd != nil {
 			return true, cmd
 		}
+	}
+
+	if targetScreen == ScreenUsers && !a.usersLoaded {
+		a.usersLoaded = true
+		return true, loadUsersCmd()
 	}
 
 	return true, nil
