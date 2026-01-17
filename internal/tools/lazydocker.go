@@ -30,6 +30,7 @@ func NewLazyDockerTool() *LazyDockerTool {
 			configPaths: []string{
 				filepath.Join(home, ".config", "lazydocker", "config.yml"),
 			},
+			heavyTool: true, // Skip on low-memory systems (Pi Zero 2)
 		},
 	}
 }

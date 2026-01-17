@@ -241,6 +241,75 @@ func (r *Registry) CountForPlatform() int {
 	return count
 }
 
+// IsLightweightMode returns true if running on a low-memory system (< 1GB RAM)
+// where heavy tools should be skipped.
+func (r *Registry) IsLightweightMode() bool {
+	return pkg.IsLowMemorySystem(1024)
+}
+
+// AllForSystem returns all tools appropriate for the current system.
+// On low-memory systems (< 1GB), heavy tools are excluded.
+func (r *Registry) AllForSystem() []Tool {
+	lightweight := r.IsLightweightMode()
+	var tools []Tool
+	for _, t := range r.tools {
+		if lightweight && t.IsHeavy() {
+			continue
+		}
+		tools = append(tools, t)
+	}
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name() < tools[j].Name()
+	})
+	return tools
+}
+
+// NotInstalledForSystem returns tools not installed and appropriate for the system.
+// On low-memory systems (< 1GB), heavy tools are excluded.
+func (r *Registry) NotInstalledForSystem() []Tool {
+	r.ensureCache()
+
+	platform := pkg.DetectPlatform()
+	lightweight := r.IsLightweightMode()
+	var tools []Tool
+	for _, t := range r.tools {
+		// Skip heavy tools on low-memory systems
+		if lightweight && t.IsHeavy() {
+			continue
+		}
+		// Check if tool has packages for this platform (or "all")
+		pkgs := t.Packages()[platform]
+		if len(pkgs) == 0 {
+			pkgs = t.Packages()["all"]
+		}
+		// Skip tools with no packages for this platform
+		if len(pkgs) == 0 {
+			continue
+		}
+		if !r.isInstalledCached(t.ID()) {
+			tools = append(tools, t)
+		}
+	}
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name() < tools[j].Name()
+	})
+	return tools
+}
+
+// HeavyTools returns all tools marked as resource-heavy
+func (r *Registry) HeavyTools() []Tool {
+	var tools []Tool
+	for _, t := range r.tools {
+		if t.IsHeavy() {
+			tools = append(tools, t)
+		}
+	}
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name() < tools[j].Name()
+	})
+	return tools
+}
+
 // Configurable returns tools that have configuration options
 func (r *Registry) Configurable() []Tool {
 	var tools []Tool

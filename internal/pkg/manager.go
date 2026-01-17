@@ -1,10 +1,13 @@
 package pkg
 
 import (
+	"bufio"
 	"context"
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/tekierz/dotfiles/internal/runner"
@@ -86,6 +89,7 @@ const (
 	PlatformMacOS   Platform = "macos"
 	PlatformArch    Platform = "arch"
 	PlatformDebian  Platform = "debian"
+	PlatformPi      Platform = "pi" // Raspberry Pi (uses Debian packages)
 	PlatformUnknown Platform = "unknown"
 )
 
@@ -103,6 +107,10 @@ func detectPlatformImpl() Platform {
 	case "darwin":
 		return PlatformMacOS
 	case "linux":
+		// Check for Raspberry Pi first (it also has /etc/debian_version)
+		if isRaspberryPi() {
+			return PlatformPi
+		}
 		// Check for Arch
 		if fileExists("/etc/arch-release") || fileExists("/etc/cachyos-release") {
 			return PlatformArch
@@ -140,7 +148,8 @@ func detectManagerImpl() PackageManager {
 		if pacman := NewPacmanManager(false); pacman.IsAvailable() {
 			return pacman
 		}
-	case PlatformDebian:
+	case PlatformDebian, PlatformPi:
+		// Raspberry Pi uses apt like Debian
 		if apt := NewAptManager(); apt.IsAvailable() {
 			return apt
 		}
@@ -182,4 +191,84 @@ func fileExists(path string) bool {
 func commandExists(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+// isRaspberryPi detects if running on a Raspberry Pi by checking device tree model
+func isRaspberryPi() bool {
+	// Check device tree model (most reliable method)
+	if data, err := os.ReadFile("/sys/firmware/devicetree/base/model"); err == nil {
+		model := strings.ToLower(string(data))
+		if strings.Contains(model, "raspberry pi") {
+			return true
+		}
+	}
+
+	// Fallback: check /proc/cpuinfo for Raspberry Pi
+	if f, err := os.Open("/proc/cpuinfo"); err == nil {
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.ToLower(scanner.Text())
+			if strings.Contains(line, "raspberry pi") {
+				return true
+			}
+			// Check for BCM2835/BCM2836/BCM2837/BCM2711/BCM2712 (Pi SoCs)
+			if strings.HasPrefix(line, "hardware") && strings.Contains(line, "bcm2") {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// Cached memory detection
+var (
+	cachedTotalMemoryMB     int
+	cachedTotalMemoryMBOnce sync.Once
+)
+
+// GetTotalMemoryMB returns the total system memory in MB (cached after first call)
+func GetTotalMemoryMB() int {
+	cachedTotalMemoryMBOnce.Do(func() {
+		cachedTotalMemoryMB = getTotalMemoryMBImpl()
+	})
+	return cachedTotalMemoryMB
+}
+
+// getTotalMemoryMBImpl reads total memory from /proc/meminfo
+func getTotalMemoryMBImpl() int {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "MemTotal:") {
+			// Format: "MemTotal:       16384000 kB"
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				kb, err := strconv.Atoi(fields[1])
+				if err == nil {
+					return kb / 1024 // Convert to MB
+				}
+			}
+			break
+		}
+	}
+
+	return 0
+}
+
+// IsLowMemorySystem returns true if system has less than threshold MB of RAM.
+// Default threshold is 1024 MB (1 GB). This is useful for Raspberry Pi Zero 2 (512MB)
+// and similar constrained devices.
+func IsLowMemorySystem(thresholdMB int) bool {
+	if thresholdMB <= 0 {
+		thresholdMB = 1024 // Default 1GB threshold
+	}
+	return GetTotalMemoryMB() > 0 && GetTotalMemoryMB() < thresholdMB
 }

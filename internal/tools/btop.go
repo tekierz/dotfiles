@@ -30,6 +30,7 @@ func NewBtopTool() *BtopTool {
 			configPaths: []string{
 				filepath.Join(home, ".config", "btop", "btop.conf"),
 			},
+			heavyTool: true, // Skip on low-memory systems (Pi Zero 2)
 		},
 	}
 }

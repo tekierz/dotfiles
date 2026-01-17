@@ -37,6 +37,9 @@ type Tool interface {
 	HasConfig() bool                    // Whether this tool has configurable options
 	GenerateConfig(theme string) string // Generate config content for a theme
 	ApplyConfig(theme string) error     // Write config to disk
+
+	// Resource requirements
+	IsHeavy() bool // Whether this tool requires significant resources (skip on low-memory systems)
 }
 
 // BaseTool provides common functionality for tools
@@ -48,6 +51,7 @@ type BaseTool struct {
 	category    Category
 	packages    map[pkg.Platform][]string
 	configPaths []string
+	heavyTool   bool // If true, tool is skipped on low-memory systems (e.g., Pi Zero 2)
 }
 
 func (t *BaseTool) ID() string          { return t.id }
@@ -66,6 +70,10 @@ func (t *BaseTool) ConfigPaths() []string {
 
 func (t *BaseTool) HasConfig() bool {
 	return len(t.configPaths) > 0
+}
+
+func (t *BaseTool) IsHeavy() bool {
+	return t.heavyTool
 }
 
 func (t *BaseTool) IsInstalled() bool {

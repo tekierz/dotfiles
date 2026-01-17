@@ -31,6 +31,7 @@ func NewYaziTool() *YaziTool {
 				filepath.Join(home, ".config", "yazi", "keymap.toml"),
 				filepath.Join(home, ".config", "yazi", "theme.toml"),
 			},
+			heavyTool: true, // Skip on low-memory systems (Pi Zero 2)
 		},
 	}
 }
