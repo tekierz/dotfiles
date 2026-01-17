@@ -322,7 +322,7 @@ func (a *App) renderUpdateWithLogs(tabBar, title string) string {
 // =====================================
 
 func (a *App) renderManage() string {
-	registry := tools.NewRegistry()
+	registry := tools.GetRegistry()
 
 	// Title
 	title := lipgloss.NewStyle().

@@ -2,19 +2,45 @@ package tools
 
 import (
 	"sort"
+	"sync"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+)
+
+// Global singleton registry with sync.Once for thread-safe lazy initialization.
+// This avoids creating new registries and registering all 27 tools each time
+// NewRegistry() would otherwise be called (15+ times across the codebase).
+var (
+	globalRegistry     *Registry
+	globalRegistryOnce sync.Once
 )
 
 // Registry holds all registered tools
 type Registry struct {
 	tools map[string]Tool
+
+	// installedCache caches IsInstalled() results to avoid repeated subprocess calls.
+	// Key is tool ID, value is installation status.
+	installedCache map[string]bool
+	cachePopulated bool
+	cacheMu        sync.RWMutex
 }
 
-// NewRegistry creates a new tool registry with all tools registered
+// GetRegistry returns the global singleton registry.
+// Use this for normal operations. Use NewRegistry() only for tests that need fresh registries.
+func GetRegistry() *Registry {
+	globalRegistryOnce.Do(func() {
+		globalRegistry = NewRegistry()
+	})
+	return globalRegistry
+}
+
+// NewRegistry creates a new tool registry with all tools registered.
+// Use GetRegistry() for normal operations. This is primarily for tests that need fresh registries.
 func NewRegistry() *Registry {
 	r := &Registry{
-		tools: make(map[string]Tool),
+		tools:          make(map[string]Tool),
+		installedCache: make(map[string]bool),
 	}
 
 	// Register all tools
@@ -101,11 +127,53 @@ func (r *Registry) ByCategory(cat Category) []Tool {
 	return tools
 }
 
-// Installed returns all installed tools
+// ensureCache populates the installed cache if not already done
+func (r *Registry) ensureCache() {
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+
+	if r.cachePopulated {
+		return
+	}
+
+	for _, t := range r.tools {
+		r.installedCache[t.ID()] = t.IsInstalled()
+	}
+	r.cachePopulated = true
+}
+
+// isInstalledCached returns cached installation status for a tool
+func (r *Registry) isInstalledCached(id string) bool {
+	r.cacheMu.RLock()
+	defer r.cacheMu.RUnlock()
+	return r.installedCache[id]
+}
+
+// RefreshCache invalidates and repopulates the installed cache
+func (r *Registry) RefreshCache() {
+	r.cacheMu.Lock()
+	r.cachePopulated = false
+	r.installedCache = make(map[string]bool)
+	r.cacheMu.Unlock()
+
+	r.ensureCache()
+}
+
+// InvalidateCache clears the cache without repopulating
+func (r *Registry) InvalidateCache() {
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+	r.cachePopulated = false
+	r.installedCache = make(map[string]bool)
+}
+
+// Installed returns all installed tools (uses cache)
 func (r *Registry) Installed() []Tool {
+	r.ensureCache()
+
 	var tools []Tool
 	for _, t := range r.tools {
-		if t.IsInstalled() {
+		if r.isInstalledCached(t.ID()) {
 			tools = append(tools, t)
 		}
 	}
@@ -115,11 +183,13 @@ func (r *Registry) Installed() []Tool {
 	return tools
 }
 
-// NotInstalled returns tools that are not installed
+// NotInstalled returns tools that are not installed (uses cache)
 func (r *Registry) NotInstalled() []Tool {
+	r.ensureCache()
+
 	var tools []Tool
 	for _, t := range r.tools {
-		if !t.IsInstalled() {
+		if !r.isInstalledCached(t.ID()) {
 			tools = append(tools, t)
 		}
 	}
@@ -129,8 +199,10 @@ func (r *Registry) NotInstalled() []Tool {
 	return tools
 }
 
-// NotInstalledForPlatform returns tools that are not installed and available for current platform
+// NotInstalledForPlatform returns tools that are not installed and available for current platform (uses cache)
 func (r *Registry) NotInstalledForPlatform() []Tool {
+	r.ensureCache()
+
 	platform := pkg.DetectPlatform()
 	var tools []Tool
 	for _, t := range r.tools {
@@ -143,7 +215,7 @@ func (r *Registry) NotInstalledForPlatform() []Tool {
 		if len(pkgs) == 0 {
 			continue
 		}
-		if !t.IsInstalled() {
+		if !r.isInstalledCached(t.ID()) {
 			tools = append(tools, t)
 		}
 	}
@@ -190,6 +262,8 @@ func (r *Registry) InstallAll(mgr pkg.PackageManager) error {
 			return err
 		}
 	}
+	// Invalidate cache after installations
+	r.InvalidateCache()
 	return nil
 }
 
@@ -200,6 +274,8 @@ func (r *Registry) InstallByCategory(mgr pkg.PackageManager, cat Category) error
 			return err
 		}
 	}
+	// Invalidate cache after installations
+	r.InvalidateCache()
 	return nil
 }
 
@@ -231,11 +307,16 @@ func (r *Registry) Count() int {
 	return len(r.tools)
 }
 
-// InstalledCount returns the number of installed tools
+// InstalledCount returns the number of installed tools (uses cache)
 func (r *Registry) InstalledCount() int {
+	r.ensureCache()
+
+	r.cacheMu.RLock()
+	defer r.cacheMu.RUnlock()
+
 	count := 0
-	for _, t := range r.tools {
-		if t.IsInstalled() {
+	for _, installed := range r.installedCache {
+		if installed {
 			count++
 		}
 	}

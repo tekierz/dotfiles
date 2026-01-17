@@ -24,11 +24,21 @@ func DefaultGlobalConfig() *GlobalConfig {
 }
 
 // ConfigDir returns the dotfiles config directory path
+// Returns empty string if HOME is not set and XDG_CONFIG_HOME is not available
 func ConfigDir() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "dotfiles")
+		return filepath.Clean(filepath.Join(xdg, "dotfiles"))
 	}
-	return filepath.Join(os.Getenv("HOME"), ".config", "dotfiles")
+	home := os.Getenv("HOME")
+	if home == "" {
+		// Fallback: try to get home directory from os.UserHomeDir
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil || home == "" {
+			return ""
+		}
+	}
+	return filepath.Clean(filepath.Join(home, ".config", "dotfiles"))
 }
 
 // ToolsDir returns the per-tool config directory path

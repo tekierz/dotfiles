@@ -419,7 +419,7 @@ func checkUpdatesCmd() tea.Cmd {
 // This uses batch checking where supported (brew list --versions) for better performance
 func loadInstallCacheCmd() tea.Cmd {
 	return func() tea.Msg {
-		reg := tools.NewRegistry()
+		reg := tools.GetRegistry()
 		all := reg.All()
 		installed := make(map[string]bool, len(all)+3)
 
@@ -609,9 +609,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case installOutputMsg:
 		a.installOutput = append(a.installOutput, msg.line.Text)
-		// Keep only the last 20 lines for display
-		if len(a.installOutput) > 20 {
-			a.installOutput = a.installOutput[len(a.installOutput)-20:]
+		// Keep only the last 20 lines for display (using copy to avoid memory leak)
+		const maxOutputLines = 20
+		if len(a.installOutput) > maxOutputLines {
+			copy(a.installOutput, a.installOutput[len(a.installOutput)-maxOutputLines:])
+			a.installOutput = a.installOutput[:maxOutputLines]
 		}
 		// Update step based on output type
 		if msg.line.Type == runner.OutputStep {
@@ -840,8 +842,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) appendInstallLog(line string) {
 	const maxLogLines = 500
 	a.installLogs = append(a.installLogs, line)
+	// Use copy to avoid memory leak from reslicing
 	if len(a.installLogs) > maxLogLines {
-		a.installLogs = a.installLogs[len(a.installLogs)-maxLogLines:]
+		copy(a.installLogs, a.installLogs[len(a.installLogs)-maxLogLines:])
+		a.installLogs = a.installLogs[:maxLogLines]
 	}
 	// Auto-scroll to bottom if enabled
 	if a.installLogAutoScroll {
@@ -1915,7 +1919,7 @@ func (a *App) startInstallation() tea.Cmd {
 		}
 
 		platform := pkg.DetectPlatform()
-		reg := tools.NewRegistry()
+		reg := tools.GetRegistry()
 
 		a.installOutput = append(a.installOutput, fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
 
@@ -1959,11 +1963,13 @@ func (a *App) startInstallation() tea.Cmd {
 
 			// Collect output
 			for line := range cmd.Output {
-				// Keep last 20 lines for display
-				if len(a.installOutput) > 20 {
-					a.installOutput = a.installOutput[len(a.installOutput)-20:]
-				}
 				a.installOutput = append(a.installOutput, "  "+line)
+				// Keep last 20 lines for display (using copy to avoid memory leak)
+				const maxOutputLines = 20
+				if len(a.installOutput) > maxOutputLines {
+					copy(a.installOutput, a.installOutput[len(a.installOutput)-maxOutputLines:])
+					a.installOutput = a.installOutput[:maxOutputLines]
+				}
 			}
 
 			if err := cmd.Wait(); err != nil {
@@ -2345,7 +2351,7 @@ type updateWithLogsMsg struct {
 // streamingInstallToolCmd returns a command that installs a tool with output collection
 func (a *App) streamingInstallToolCmd(toolID string) tea.Cmd {
 	return func() tea.Msg {
-		reg := tools.NewRegistry()
+		reg := tools.GetRegistry()
 		t, ok := reg.Get(toolID)
 		if !ok {
 			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("unknown tool: %s", toolID)}
@@ -2588,7 +2594,7 @@ func (a *App) ensureInstallCache() {
 		return
 	}
 
-	reg := tools.NewRegistry()
+	reg := tools.GetRegistry()
 	all := reg.All()
 
 	if a.manageInstalled == nil {

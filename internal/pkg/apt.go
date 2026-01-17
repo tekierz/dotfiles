@@ -193,7 +193,38 @@ func (a *AptManager) Search(query string) ([]Package, error) {
 	return packages, nil
 }
 
+// getInstalledVersions returns a map of all installed package names to their versions
+// using a single dpkg-query command instead of individual dpkg -s calls per package.
+// This eliminates the N+1 query problem that caused 5-25 second startup delays.
+func (a *AptManager) getInstalledVersions() (map[string]string, error) {
+	cmd := exec.Command("dpkg-query", "-W", "-f=${Package}\t${Version}\n")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	versions := make(map[string]string)
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	for _, line := range lines {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 {
+			versions[parts[0]] = parts[1]
+		}
+	}
+
+	return versions, nil
+}
+
 func (a *AptManager) ListInstalled() ([]Package, error) {
+	// Get all versions in a single batch query (avoids N+1 problem)
+	versions, err := a.getInstalledVersions()
+	if err != nil {
+		return nil, err
+	}
+
+	// Get list of installed packages
 	cmd := exec.Command("dpkg", "--get-selections")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -208,7 +239,8 @@ func (a *AptManager) ListInstalled() ([]Package, error) {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 && parts[1] == "install" {
 			name := parts[0]
-			version, _ := a.GetVersion(name)
+			// Look up version from pre-fetched map instead of individual GetVersion call
+			version := versions[name]
 			packages = append(packages, Package{
 				Name:           name,
 				CurrentVersion: version,
@@ -248,9 +280,17 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 }
 
 // UpdateAllStreaming updates all packages with real-time output streaming
-// This runs apt update && apt upgrade -y
+// This runs apt update && apt upgrade -y sequentially without shell injection risk
 func (a *AptManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
-	// Run both update and upgrade in a single bash command for streaming
-	script := fmt.Sprintf("sudo %s update && sudo %s upgrade -y", a.aptPath, a.aptPath)
-	return runner.RunStreaming(ctx, "bash", "-c", script)
+	// Run update first using safe exec.Command (no shell interpolation)
+	updateCmd, err := runner.RunStreamingWithSudo(ctx, a.aptPath, "update")
+	if err != nil {
+		return nil, fmt.Errorf("apt update failed: %w", err)
+	}
+	// Wait for update to complete before running upgrade
+	if err := updateCmd.Wait(); err != nil {
+		return nil, fmt.Errorf("apt update failed: %w", err)
+	}
+	// Then run upgrade using safe exec.Command
+	return runner.RunStreamingWithSudo(ctx, a.aptPath, "upgrade", "-y")
 }

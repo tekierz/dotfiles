@@ -450,7 +450,7 @@ func showStatus() {
 	fmt.Println()
 
 	// Show installed tools (filtered by platform)
-	registry := tools.NewRegistry()
+	registry := tools.GetRegistry()
 	installed := registry.Installed()
 	notInstalled := registry.NotInstalledForPlatform()
 
@@ -650,7 +650,16 @@ func restoreBackup(name string) {
 		// Backup files are named with underscores replacing slashes
 		// e.g., ".config_dotfiles_settings.json" -> ".config/dotfiles/settings.json"
 		relPath := strings.ReplaceAll(entry.Name(), "_", string(os.PathSeparator))
-		dstPath := filepath.Join(home, relPath)
+		dstPath := filepath.Clean(filepath.Join(home, relPath))
+
+		// Security: Prevent path traversal attacks. A malicious backup file named
+		// ".._.._etc_passwd" would be converted to "../../etc/passwd", allowing
+		// arbitrary file overwrites outside the home directory. We validate that
+		// the final destination path stays within the user's home directory.
+		if !strings.HasPrefix(dstPath, home+string(os.PathSeparator)) && dstPath != home {
+			fmt.Fprintf(os.Stderr, "  Warning: Skipping %s - path traversal detected\n", entry.Name())
+			continue
+		}
 
 		// Ensure destination directory exists
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {

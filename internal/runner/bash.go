@@ -75,22 +75,6 @@ func CacheSudoCredentials() error {
 	return cmd.Run()
 }
 
-// KeepSudoAlive starts a background goroutine that keeps sudo credentials fresh
-func KeepSudoAlive(stop chan struct{}) {
-	go func() {
-		ticker := exec.Command("bash", "-c", `
-			while true; do
-				sudo -n true 2>/dev/null
-				sleep 50
-			done
-		`)
-		ticker.Start()
-		<-stop
-		if ticker.Process != nil {
-			ticker.Process.Kill()
-		}
-	}()
-}
 
 // DetectOS runs the detect_os function and returns the result
 func (r *Runner) DetectOS() (string, error) {

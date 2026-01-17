@@ -235,7 +235,7 @@ func getManageTools() []manageTool {
 
 // renderManageDetailed renders the detailed manage screen with tool selection
 func (a *App) renderManageDetailed() string {
-	registry := tools.NewRegistry()
+	registry := tools.GetRegistry()
 	manageTools := getManageTools()
 
 	// Title

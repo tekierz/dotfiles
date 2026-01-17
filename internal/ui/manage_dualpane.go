@@ -122,7 +122,7 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 
 func (a *App) installToolCmd(toolID string) tea.Cmd {
 	return func() tea.Msg {
-		reg := tools.NewRegistry()
+		reg := tools.GetRegistry()
 		t, ok := reg.Get(toolID)
 		if !ok {
 			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("unknown tool: %s", toolID)}
@@ -808,7 +808,7 @@ func (a *App) manageEnsureFieldsVisible(layout manageLayout, fieldsLen int) {
 }
 
 func (a *App) manageItems() []manageItem {
-	reg := tools.NewRegistry()
+	reg := tools.GetRegistry()
 	all := reg.All()
 	platform := pkg.DetectPlatform()
 
@@ -1366,7 +1366,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 			}
 
 			// Show package names for this platform (best-effort).
-			if t, ok := tools.NewRegistry().Get(item.id); ok {
+			if t, ok := tools.GetRegistry().Get(item.id); ok {
 				platform := pkg.DetectPlatform()
 				pkgs := t.Packages()[platform]
 				if len(pkgs) == 0 {

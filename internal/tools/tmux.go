@@ -72,7 +72,7 @@ func InstallTPM() error {
 
 	// Create parent directory
 	pluginsDir := filepath.Dir(tpmPath)
-	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+	if err := os.MkdirAll(pluginsDir, 0700); err != nil {
 		return fmt.Errorf("failed to create plugins directory: %w", err)
 	}
 
@@ -241,7 +241,7 @@ func WriteTmuxConfig(cfg TmuxConfig, theme string) error {
 	configPath := filepath.Join(home, ".tmux.conf")
 	content := GenerateTmuxConfig(cfg, theme)
 
-	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("failed to write tmux.conf: %w", err)
 	}
 

@@ -5,8 +5,20 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sync"
 
 	"github.com/tekierz/dotfiles/internal/runner"
+)
+
+// Cached platform and manager detection using sync.Once for thread-safe lazy initialization.
+// This avoids redundant file I/O and exec.LookPath() calls when DetectPlatform() and
+// DetectManager() are called multiple times (e.g., once per tool during registry operations).
+var (
+	cachedPlatform     Platform
+	cachedPlatformOnce sync.Once
+
+	cachedManager     PackageManager
+	cachedManagerOnce sync.Once
 )
 
 // Package represents a package with version info
@@ -77,8 +89,16 @@ const (
 	PlatformUnknown Platform = "unknown"
 )
 
-// DetectPlatform detects the current platform
+// DetectPlatform detects the current platform (cached after first call)
 func DetectPlatform() Platform {
+	cachedPlatformOnce.Do(func() {
+		cachedPlatform = detectPlatformImpl()
+	})
+	return cachedPlatform
+}
+
+// detectPlatformImpl performs the actual platform detection
+func detectPlatformImpl() Platform {
 	switch runtime.GOOS {
 	case "darwin":
 		return PlatformMacOS
@@ -95,8 +115,16 @@ func DetectPlatform() Platform {
 	return PlatformUnknown
 }
 
-// DetectManager returns the appropriate package manager for the current system
+// DetectManager returns the appropriate package manager for the current system (cached after first call)
 func DetectManager() PackageManager {
+	cachedManagerOnce.Do(func() {
+		cachedManager = detectManagerImpl()
+	})
+	return cachedManager
+}
+
+// detectManagerImpl performs the actual package manager detection
+func detectManagerImpl() PackageManager {
 	platform := DetectPlatform()
 
 	switch platform {
