@@ -75,7 +75,6 @@ func CacheSudoCredentials() error {
 	return cmd.Run()
 }
 
-
 // DetectOS runs the detect_os function and returns the result
 func (r *Runner) DetectOS() (string, error) {
 	cmd := exec.Command("bash", "-c", fmt.Sprintf(`

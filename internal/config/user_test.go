@@ -9,8 +9,8 @@ import (
 
 func TestValidateUsername(t *testing.T) {
 	tests := []struct {
-		name    string
-		valid   bool
+		name  string
+		valid bool
 	}{
 		// Valid names
 		{"alice", true},
@@ -23,14 +23,14 @@ func TestValidateUsername(t *testing.T) {
 		{strings.Repeat("a", 32), true}, // max length
 
 		// Invalid names
-		{"", false},                       // empty
-		{"123user", false},                // starts with number
-		{"_user", false},                  // starts with underscore
-		{"-user", false},                  // starts with hyphen
-		{"user@name", false},              // invalid char
-		{"user.name", false},              // invalid char
-		{"user name", false},              // space
-		{strings.Repeat("a", 33), false},  // too long
+		{"", false},                      // empty
+		{"123user", false},               // starts with number
+		{"_user", false},                 // starts with underscore
+		{"-user", false},                 // starts with hyphen
+		{"user@name", false},             // invalid char
+		{"user.name", false},             // invalid char
+		{"user name", false},             // space
+		{strings.Repeat("a", 33), false}, // too long
 	}
 
 	for _, tt := range tests {

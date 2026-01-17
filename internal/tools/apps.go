@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,11 +39,18 @@ func (t *ZenBrowserTool) IsInstalled() bool {
 	if _, err := exec.LookPath("zen-browser"); err == nil {
 		return true
 	}
-	// Check flatpak (Linux)
-	if isFlatpakInstalled("io.github.nicothin.zen_browser", "zen") {
+	if _, err := exec.LookPath("zen"); err == nil {
 		return true
 	}
-	// Check desktop entry (Linux)
+	// Check flatpak (Linux) - multiple possible IDs
+	if isFlatpakInstalled("io.github.nicothin.zen_browser", "io.github.nicothined.zen_browser", "app.zen_browser.zen", "zen") {
+		return true
+	}
+	// Check AppImage (Linux)
+	if hasAppImage("zen", "zen-browser", "ZenBrowser") {
+		return true
+	}
+	// Check desktop entry (Linux) - also checks Exec= field
 	if hasDesktopEntry("zen-browser", "zen") {
 		return true
 	}
@@ -82,7 +90,11 @@ func (t *CursorTool) IsInstalled() bool {
 	if _, err := exec.LookPath("cursor"); err == nil {
 		return true
 	}
-	// Check desktop entry (Linux)
+	// Check AppImage (Linux) - Cursor distributes as AppImage
+	if hasAppImage("cursor", "Cursor") {
+		return true
+	}
+	// Check desktop entry (Linux) - also checks Exec= field for AppImage entries
 	if hasDesktopEntry("cursor", "Cursor") {
 		return true
 	}
@@ -124,7 +136,22 @@ func (t *LMStudioTool) IsInstalled() bool {
 	if _, err := exec.LookPath("lmstudio"); err == nil {
 		return true
 	}
-	// Check desktop entry (Linux)
+	// Check common install locations (Linux)
+	commonPaths := []string{
+		"/usr/bin/lmstudio",
+		"/opt/lm-studio/lm-studio",
+		"/opt/LM Studio/lm-studio",
+	}
+	for _, p := range commonPaths {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	// Check AppImage (Linux)
+	if hasAppImage("lmstudio", "lm-studio", "LM-Studio", "LM Studio") {
+		return true
+	}
+	// Check desktop entry (Linux) - also checks Exec= field
 	if hasDesktopEntry("lmstudio", "lm-studio", "LM Studio", "LM-Studio") {
 		return true
 	}
@@ -281,18 +308,22 @@ func isFlatpakInstalled(appIDs ...string) bool {
 	return false
 }
 
-// hasDesktopEntry checks if a .desktop file exists for the app (Linux only)
+// hasDesktopEntry checks if a .desktop file exists for the app (Linux only).
+// It checks both the filename AND the Exec= field content for AppImage entries
+// like "appimagekit_xxx-Cursor.desktop".
 func hasDesktopEntry(names ...string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
 
-	// Common locations for .desktop files
+	// Common locations for .desktop files, including flatpak exports
 	searchPaths := []string{
 		filepath.Join(home, ".local", "share", "applications"),
+		filepath.Join(home, ".local", "share", "flatpak", "exports", "share", "applications"),
 		"/usr/share/applications",
 		"/usr/local/share/applications",
+		"/var/lib/flatpak/exports/share/applications",
 	}
 
 	for _, searchPath := range searchPaths {
@@ -301,12 +332,94 @@ func hasDesktopEntry(names ...string) bool {
 			continue
 		}
 		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".desktop") {
-				entryLower := strings.ToLower(entry.Name())
-				for _, name := range names {
-					if strings.Contains(entryLower, strings.ToLower(name)) {
-						return true
-					}
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".desktop") {
+				continue
+			}
+
+			entryLower := strings.ToLower(entry.Name())
+
+			// First check: filename match (e.g., "cursor.desktop", "zen-browser.desktop")
+			for _, name := range names {
+				if strings.Contains(entryLower, strings.ToLower(name)) {
+					return true
+				}
+			}
+
+			// Second check: read Exec= field for AppImage entries
+			// AppImage desktop entries often have names like "appimagekit_xxx-Cursor.desktop"
+			// but the Exec= field contains the actual AppImage path
+			if strings.Contains(entryLower, "appimage") {
+				desktopPath := filepath.Join(searchPath, entry.Name())
+				if hasDesktopEntryExec(desktopPath, names...) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// hasDesktopEntryExec reads a .desktop file and checks if its Exec= line
+// contains any of the given names.
+func hasDesktopEntryExec(path string, names ...string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "Exec=") {
+			execValue := strings.ToLower(line[5:])
+			for _, name := range names {
+				if strings.Contains(execValue, strings.ToLower(name)) {
+					return true
+				}
+			}
+			// Only one Exec= line matters
+			return false
+		}
+	}
+	return false
+}
+
+// hasAppImage checks if an AppImage exists in common locations (Linux only)
+func hasAppImage(patterns ...string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+
+	// Common locations for AppImages
+	searchPaths := []string{
+		filepath.Join(home, "Applications"),
+		filepath.Join(home, ".local", "bin"),
+		"/opt",
+		"/usr/local/bin",
+	}
+
+	for _, searchPath := range searchPaths {
+		entries, err := os.ReadDir(searchPath)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+
+			entryLower := strings.ToLower(entry.Name())
+
+			// Check if it's an AppImage file matching any pattern
+			for _, pattern := range patterns {
+				patternLower := strings.ToLower(pattern)
+				// Match AppImage files (e.g., "Cursor-0.45.11-x86_64.AppImage")
+				if strings.Contains(entryLower, patternLower) &&
+					(strings.HasSuffix(entryLower, ".appimage") ||
+						strings.Contains(entryLower, "appimage")) {
+					return true
 				}
 			}
 		}

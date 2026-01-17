@@ -3,15 +3,22 @@ package ui
 // DeepDiveConfig holds all deep dive configuration options
 type DeepDiveConfig struct {
 	// Ghostty settings
-	GhosttyFontSize    int
-	GhosttyOpacity     int // 0-100
-	GhosttyTabBindings string
+	GhosttyFontSize        int
+	GhosttyOpacity         int // 0-100
+	GhosttyTabBindings     string
+	GhosttyFontFamily      string // Font family name
+	GhosttyBlurRadius      int    // 0-100 (blur behind window)
+	GhosttyScrollbackLines int    // Number of scrollback lines
+	GhostyCursorStyle      string // block, bar, underline
 
 	// Tmux settings
-	TmuxPrefix     string
-	TmuxSplitBinds string
-	TmuxStatusBar  string
-	TmuxMouseMode  bool
+	TmuxPrefix       string
+	TmuxSplitBinds   string
+	TmuxStatusBar    string
+	TmuxMouseMode    bool
+	TmuxHistoryLimit int // Scrollback buffer size
+	TmuxEscapeTime   int // Escape key delay in ms
+	TmuxBaseIndex    int // Starting index for windows/panes
 
 	// Tmux TPM (Plugin Manager) settings
 	TmuxTPMEnabled       bool
@@ -22,19 +29,30 @@ type DeepDiveConfig struct {
 	TmuxContinuumSaveMin int // 5-60 minutes
 
 	// Zsh settings
-	ZshPromptStyle string
-	ZshPlugins     []string
-	ZshAliases     map[string]bool
+	ZshPromptStyle     string
+	ZshPlugins         []string
+	ZshAliases         map[string]bool
+	ZshHistorySize     int  // History file size
+	ZshAutoCD          bool // Auto cd into directories
+	ZshSyntaxHighlight bool // Enable syntax highlighting
+	ZshAutosuggestions bool // Enable autosuggestions
 
 	// Neovim settings
-	NeovimConfig  string
-	NeovimLSPs    []string
-	NeovimPlugins []string
+	NeovimConfig     string
+	NeovimLSPs       []string
+	NeovimPlugins    []string
+	NeovimTabWidth   int    // Tab width (2, 4, 8)
+	NeovimWrap       bool   // Line wrapping
+	NeovimCursorLine bool   // Highlight current line
+	NeovimClipboard  string // Clipboard integration (unnamedplus, unnamed, none)
 
 	// Git settings
-	GitDeltaSideBySide bool
-	GitDefaultBranch   string
-	GitAliases         []string
+	GitDeltaSideBySide  bool
+	GitDefaultBranch    string
+	GitAliases          []string
+	GitPullRebase       bool   // Rebase on pull
+	GitSignCommits      bool   // GPG sign commits
+	GitCredentialHelper string // Credential helper (cache, store, osxkeychain)
 
 	// Yazi settings
 	YaziKeymap      string
@@ -85,15 +103,22 @@ type DeepDiveConfig struct {
 func NewDeepDiveConfig() *DeepDiveConfig {
 	return &DeepDiveConfig{
 		// Ghostty defaults
-		GhosttyFontSize:    14,
-		GhosttyOpacity:     100,
-		GhosttyTabBindings: "super",
+		GhosttyFontSize:        14,
+		GhosttyOpacity:         100,
+		GhosttyTabBindings:     "super",
+		GhosttyFontFamily:      "JetBrains Mono",
+		GhosttyBlurRadius:      0,
+		GhosttyScrollbackLines: 10000,
+		GhostyCursorStyle:      "block",
 
 		// Tmux defaults
-		TmuxPrefix:     "ctrl-a",
-		TmuxSplitBinds: "pipes", // | and -
-		TmuxStatusBar:  "bottom",
-		TmuxMouseMode:  true,
+		TmuxPrefix:       "ctrl-a",
+		TmuxSplitBinds:   "pipes", // | and -
+		TmuxStatusBar:    "bottom",
+		TmuxMouseMode:    true,
+		TmuxHistoryLimit: 50000,
+		TmuxEscapeTime:   10,
+		TmuxBaseIndex:    1,
 
 		// Tmux TPM defaults
 		TmuxTPMEnabled:       true,
@@ -118,6 +143,10 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"gc":     true,
 			"docker": true,
 		},
+		ZshHistorySize:     10000,
+		ZshAutoCD:          true,
+		ZshSyntaxHighlight: true,
+		ZshAutosuggestions: true,
 
 		// Neovim defaults
 		NeovimConfig: "kickstart",
@@ -133,6 +162,10 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"lsp",
 			"cmp",
 		},
+		NeovimTabWidth:   4,
+		NeovimWrap:       false,
+		NeovimCursorLine: true,
+		NeovimClipboard:  "unnamedplus",
 
 		// Git defaults
 		GitDeltaSideBySide: true,
@@ -140,6 +173,9 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GitAliases: []string{
 			"st", "co", "br", "ci", "lg",
 		},
+		GitPullRebase:       true,
+		GitSignCommits:      false,
+		GitCredentialHelper: "cache",
 
 		// Yazi defaults
 		YaziKeymap:      "vim",

@@ -299,6 +299,7 @@ func updateDynamicColors() {
 	ColorBg = CurrentPalette.Bg
 	ColorSurface = CurrentPalette.Surface
 	ColorOverlay = CurrentPalette.Overlay
+	ColorMuted = CurrentPalette.Border // Use border color as muted background
 	ColorBorder = CurrentPalette.Border
 	ColorText = CurrentPalette.Text
 	ColorTextMuted = CurrentPalette.TextMuted
@@ -310,6 +311,63 @@ func updateDynamicColors() {
 		CurrentPalette.Info,
 		CurrentPalette.AccentAlt,
 	}
+
+	// Update all styles with new colors
+	updateStyles()
+}
+
+// updateStyles recreates all styles with current theme colors
+func updateStyles() {
+	ContainerStyle = lipgloss.NewStyle().
+		Padding(1, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder)
+
+	TitleStyle = lipgloss.NewStyle().
+		Foreground(ColorCyan).
+		Bold(true).
+		Padding(0, 1)
+
+	LogoStyle = lipgloss.NewStyle().
+		Foreground(ColorNeonPink).
+		Bold(true)
+
+	ButtonStyle = lipgloss.NewStyle().
+		Padding(0, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder)
+
+	ButtonActiveStyle = lipgloss.NewStyle().
+		Padding(0, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorCyan).
+		Foreground(ColorCyan).
+		Bold(true)
+
+	ButtonGlowStyle = lipgloss.NewStyle().
+		Padding(0, 2).
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(ColorNeonPink).
+		Foreground(ColorNeonPink).
+		Bold(true)
+
+	StatusReadyStyle = lipgloss.NewStyle().
+		Foreground(ColorGreen)
+
+	StatusPendingStyle = lipgloss.NewStyle().
+		Foreground(ColorYellow)
+
+	StatusErrorStyle = lipgloss.NewStyle().
+		Foreground(ColorRed)
+
+	HelpStyle = lipgloss.NewStyle().
+		Foreground(ColorTextMuted).
+		Padding(1, 0)
+
+	AccentBoxStyle = lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(ColorNeonPurple).
+		Padding(0, 1)
 }
 
 // Legacy color variables (updated by SetTheme via updateDynamicColors)
@@ -359,7 +417,7 @@ var SpinnerDotsFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯"
 var SpinnerBlockFrames = []string{"▖", "▘", "▝", "▗"}
 var SpinnerPulseFrames = []string{"█", "▓", "▒", "░", "▒", "▓"}
 
-// Styles
+// Styles - no explicit backgrounds to respect terminal transparency
 var (
 	// Container styles
 	ContainerStyle = lipgloss.NewStyle().
@@ -381,14 +439,12 @@ var (
 	ButtonStyle = lipgloss.NewStyle().
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBorder).
-			Background(ColorSurface)
+			BorderForeground(ColorBorder)
 
 	ButtonActiveStyle = lipgloss.NewStyle().
 				Padding(0, 2).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(ColorCyan).
-				Background(ColorOverlay).
 				Foreground(ColorCyan).
 				Bold(true)
 
@@ -419,7 +475,6 @@ var (
 	AccentBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(ColorNeonPurple).
-			Background(ColorSurface).
 			Padding(0, 1)
 )
 
@@ -748,16 +803,9 @@ func RenderTabBar(activeScreen Screen, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(line)
 }
 
-// PlaceWithBackground centers content within a full-screen area with the app's background color.
-// This prevents the terminal's default background from showing through.
+// PlaceWithBackground centers content within a full-screen area.
+// Does not set an explicit background to respect terminal transparency.
 func PlaceWithBackground(width, height int, content string) string {
-	// First center the content
-	centered := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
-
-	// Then apply the background color to the entire area
-	return lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		Background(ColorBg).
-		Render(centered)
+	// Center the content without forcing a background color
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }

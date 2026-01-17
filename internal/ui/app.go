@@ -307,6 +307,12 @@ func (a *App) Init() tea.Cmd {
 		a.updateChecking = true
 		cmds = append(cmds, checkUpdatesCmd())
 	}
+	// Start install cache loading if starting directly on Manage or Hotkeys screen
+	if a.screen == ScreenManage || a.screen == ScreenHotkeys {
+		if cmd := a.startInstallCacheLoad(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -441,6 +447,7 @@ func loadInstallCacheCmd() tea.Cmd {
 
 		// Check each tool
 		for _, t := range all {
+			found := false
 			if installedPkgs != nil {
 				// Use batch result - check if primary package is installed
 				pkgs := t.Packages()[platform]
@@ -448,10 +455,15 @@ func loadInstallCacheCmd() tea.Cmd {
 					pkgs = t.Packages()["all"]
 				}
 				if len(pkgs) > 0 {
-					installed[t.ID()] = installedPkgs[pkgs[0]]
+					if installedPkgs[pkgs[0]] {
+						installed[t.ID()] = true
+						found = true
+					}
 				}
-			} else {
-				// Fallback to individual checks (slow path)
+			}
+			// Fall back to IsInstalled() for tools not found via package manager
+			// (e.g., flatpaks, AppImages, direct binaries)
+			if !found {
 				installed[t.ID()] = t.IsInstalled()
 			}
 		}
@@ -870,6 +882,22 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a.handleUsersMouse(msg)
 	case ScreenUpdate, ScreenBackups:
 		return a.handleTabBarMouse(msg)
+	case ScreenWelcome:
+		return a.handleWelcomeMouse(msg)
+	case ScreenThemePicker:
+		return a.handleThemePickerMouse(msg)
+	case ScreenNavPicker:
+		return a.handleNavPickerMouse(msg)
+	case ScreenDeepDiveMenu:
+		return a.handleDeepDiveMenuMouse(msg)
+	case ScreenFileTree, ScreenSummary:
+		return a.handleSummaryMouse(msg)
+	case ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh, ScreenConfigNeovim,
+		ScreenConfigGit, ScreenConfigYazi, ScreenConfigFzf, ScreenConfigUtilities,
+		ScreenConfigMacApps, ScreenConfigApps, ScreenConfigCLITools, ScreenConfigGUIApps,
+		ScreenConfigCLIUtilities, ScreenConfigLazyGit, ScreenConfigLazyDocker,
+		ScreenConfigBtop, ScreenConfigGlow:
+		return a.handleConfigScreenMouse(msg)
 	default:
 		return a, nil
 	}
@@ -1083,6 +1111,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	// Ghostty config
+	// Fields: 0=font family, 1=font size, 2=opacity, 3=blur, 4=scrollback, 5=cursor style, 6=tab bindings
 	case ScreenConfigGhostty:
 		switch key {
 		case "up", "k":
@@ -1090,46 +1119,66 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.configFieldIndex--
 			}
 		case "down", "j":
-			if a.configFieldIndex < 2 {
+			if a.configFieldIndex < 6 {
 				a.configFieldIndex++
 			}
 		case "left", "h":
 			switch a.configFieldIndex {
-			case 0: // Font size
+			case 0: // Font family
+				opts := []string{"JetBrains Mono", "Fira Code", "Hack", "Menlo", "Monaco"}
+				a.deepDiveConfig.GhosttyFontFamily = cycleOption(opts, a.deepDiveConfig.GhosttyFontFamily, false)
+			case 1: // Font size
 				if a.deepDiveConfig.GhosttyFontSize > 8 {
 					a.deepDiveConfig.GhosttyFontSize--
 				}
-			case 1: // Opacity
+			case 2: // Opacity
 				if a.deepDiveConfig.GhosttyOpacity > 0 {
 					a.deepDiveConfig.GhosttyOpacity -= 5
 				}
-			case 2: // Tab bindings
-				opts := []string{"super", "ctrl", "alt"}
-				for i, o := range opts {
-					if o == a.deepDiveConfig.GhosttyTabBindings && i > 0 {
-						a.deepDiveConfig.GhosttyTabBindings = opts[i-1]
-						break
-					}
+			case 3: // Blur radius
+				if a.deepDiveConfig.GhosttyBlurRadius > 0 {
+					a.deepDiveConfig.GhosttyBlurRadius -= 5
 				}
+			case 4: // Scrollback lines
+				opts := []string{"1000", "5000", "10000", "50000", "100000"}
+				current := fmt.Sprintf("%d", a.deepDiveConfig.GhosttyScrollbackLines)
+				result := cycleOption(opts, current, false)
+				a.deepDiveConfig.GhosttyScrollbackLines = atoi(result, 10000)
+			case 5: // Cursor style
+				opts := []string{"block", "bar", "underline"}
+				a.deepDiveConfig.GhostyCursorStyle = cycleOption(opts, a.deepDiveConfig.GhostyCursorStyle, false)
+			case 6: // Tab bindings
+				opts := []string{"super", "ctrl", "alt"}
+				a.deepDiveConfig.GhosttyTabBindings = cycleOption(opts, a.deepDiveConfig.GhosttyTabBindings, false)
 			}
 		case "right", "l":
 			switch a.configFieldIndex {
-			case 0:
+			case 0: // Font family
+				opts := []string{"JetBrains Mono", "Fira Code", "Hack", "Menlo", "Monaco"}
+				a.deepDiveConfig.GhosttyFontFamily = cycleOption(opts, a.deepDiveConfig.GhosttyFontFamily, true)
+			case 1: // Font size
 				if a.deepDiveConfig.GhosttyFontSize < 32 {
 					a.deepDiveConfig.GhosttyFontSize++
 				}
-			case 1:
+			case 2: // Opacity
 				if a.deepDiveConfig.GhosttyOpacity < 100 {
 					a.deepDiveConfig.GhosttyOpacity += 5
 				}
-			case 2:
-				opts := []string{"super", "ctrl", "alt"}
-				for i, o := range opts {
-					if o == a.deepDiveConfig.GhosttyTabBindings && i < len(opts)-1 {
-						a.deepDiveConfig.GhosttyTabBindings = opts[i+1]
-						break
-					}
+			case 3: // Blur radius
+				if a.deepDiveConfig.GhosttyBlurRadius < 100 {
+					a.deepDiveConfig.GhosttyBlurRadius += 5
 				}
+			case 4: // Scrollback lines
+				opts := []string{"1000", "5000", "10000", "50000", "100000"}
+				current := fmt.Sprintf("%d", a.deepDiveConfig.GhosttyScrollbackLines)
+				result := cycleOption(opts, current, true)
+				a.deepDiveConfig.GhosttyScrollbackLines = atoi(result, 10000)
+			case 5: // Cursor style
+				opts := []string{"block", "bar", "underline"}
+				a.deepDiveConfig.GhostyCursorStyle = cycleOption(opts, a.deepDiveConfig.GhostyCursorStyle, true)
+			case 6: // Tab bindings
+				opts := []string{"super", "ctrl", "alt"}
+				a.deepDiveConfig.GhosttyTabBindings = cycleOption(opts, a.deepDiveConfig.GhosttyTabBindings, true)
 			}
 		case "esc", "enter":
 			a.configFieldIndex = 0
@@ -1137,13 +1186,15 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	// Tmux config
+	// Fields: 0=prefix, 1=splits, 2=status, 3=mouse, 4=history, 5=escape, 6=base, 7=TPM toggle
+	// If TPM enabled: 8=sensible, 9=resurrect, 10=continuum, 11=yank, 12=interval (if continuum)
 	case ScreenConfigTmux:
 		// Calculate max field based on TPM state
-		maxField := 4 // Fields 0-4 (prefix, splits, status, mouse, TPM toggle)
+		maxField := 7 // Fields 0-7 (basic settings + TPM toggle)
 		if a.deepDiveConfig.TmuxTPMEnabled {
-			maxField = 8 // + plugin toggles (5-8)
+			maxField = 11 // + plugin toggles (8-11)
 			if a.deepDiveConfig.TmuxPluginContinuum {
-				maxField = 9 // + continuum interval
+				maxField = 12 // + continuum interval
 			}
 		}
 
@@ -1152,12 +1203,12 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if a.configFieldIndex > 0 {
 				a.configFieldIndex--
 				// Skip hidden fields when TPM is disabled
-				if !a.deepDiveConfig.TmuxTPMEnabled && a.configFieldIndex > 4 {
-					a.configFieldIndex = 4
+				if !a.deepDiveConfig.TmuxTPMEnabled && a.configFieldIndex > 7 {
+					a.configFieldIndex = 7
 				}
 				// Skip interval field when continuum is disabled
-				if a.deepDiveConfig.TmuxTPMEnabled && !a.deepDiveConfig.TmuxPluginContinuum && a.configFieldIndex == 9 {
-					a.configFieldIndex = 8
+				if a.deepDiveConfig.TmuxTPMEnabled && !a.deepDiveConfig.TmuxPluginContinuum && a.configFieldIndex == 12 {
+					a.configFieldIndex = 11
 				}
 			}
 		case "down", "j":
@@ -1165,10 +1216,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.configFieldIndex++
 			}
 		case "left", "right", "h", "l":
+			fwd := key == "right" || key == "l"
 			switch a.configFieldIndex {
 			case 0: // Prefix
 				opts := []string{"ctrl-a", "ctrl-b", "ctrl-space"}
-				a.deepDiveConfig.TmuxPrefix = cycleOption(opts, a.deepDiveConfig.TmuxPrefix, key == "right" || key == "l")
+				a.deepDiveConfig.TmuxPrefix = cycleOption(opts, a.deepDiveConfig.TmuxPrefix, fwd)
 			case 1: // Split binds
 				if a.deepDiveConfig.TmuxSplitBinds == "pipes" {
 					a.deepDiveConfig.TmuxSplitBinds = "percent"
@@ -1181,9 +1233,23 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else {
 					a.deepDiveConfig.TmuxStatusBar = "top"
 				}
-			case 9: // Continuum interval
+			case 4: // History limit
+				opts := []string{"10000", "25000", "50000", "100000"}
+				current := fmt.Sprintf("%d", a.deepDiveConfig.TmuxHistoryLimit)
+				a.deepDiveConfig.TmuxHistoryLimit = atoi(cycleOption(opts, current, fwd), 50000)
+			case 5: // Escape time
+				opts := []string{"0", "10", "50", "100"}
+				current := fmt.Sprintf("%d", a.deepDiveConfig.TmuxEscapeTime)
+				a.deepDiveConfig.TmuxEscapeTime = atoi(cycleOption(opts, current, fwd), 10)
+			case 6: // Base index
+				if a.deepDiveConfig.TmuxBaseIndex == 0 {
+					a.deepDiveConfig.TmuxBaseIndex = 1
+				} else {
+					a.deepDiveConfig.TmuxBaseIndex = 0
+				}
+			case 12: // Continuum interval
 				if a.deepDiveConfig.TmuxTPMEnabled && a.deepDiveConfig.TmuxPluginContinuum {
-					if key == "right" || key == "l" {
+					if fwd {
 						if a.deepDiveConfig.TmuxContinuumSaveMin < 60 {
 							a.deepDiveConfig.TmuxContinuumSaveMin += 5
 						}
@@ -1198,15 +1264,15 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch a.configFieldIndex {
 			case 3: // Mouse mode
 				a.deepDiveConfig.TmuxMouseMode = !a.deepDiveConfig.TmuxMouseMode
-			case 4: // TPM enabled
+			case 7: // TPM enabled
 				a.deepDiveConfig.TmuxTPMEnabled = !a.deepDiveConfig.TmuxTPMEnabled
-			case 5: // tmux-sensible
+			case 8: // tmux-sensible
 				a.deepDiveConfig.TmuxPluginSensible = !a.deepDiveConfig.TmuxPluginSensible
-			case 6: // tmux-resurrect
+			case 9: // tmux-resurrect
 				a.deepDiveConfig.TmuxPluginResurrect = !a.deepDiveConfig.TmuxPluginResurrect
-			case 7: // tmux-continuum
+			case 10: // tmux-continuum
 				a.deepDiveConfig.TmuxPluginContinuum = !a.deepDiveConfig.TmuxPluginContinuum
-			case 8: // tmux-yank
+			case 11: // tmux-yank
 				a.deepDiveConfig.TmuxPluginYank = !a.deepDiveConfig.TmuxPluginYank
 			}
 		case "esc", "enter":
@@ -1215,6 +1281,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	// Zsh config
+	// Fields: 0-3=prompts, 4=history, 5=autocd, 6=syntax, 7=autosuggestions, 8-12=plugins
 	case ScreenConfigZsh:
 		switch key {
 		case "up", "k":
@@ -1222,19 +1289,34 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.configFieldIndex--
 			}
 		case "down", "j":
-			if a.configFieldIndex < 8 { // 4 prompts + 5 plugins - 1
+			if a.configFieldIndex < 12 { // 4 prompts + 4 shell options + 5 plugins - 1
 				a.configFieldIndex++
 			}
 		case "left", "right", "h", "l", " ":
+			fwd := key == "right" || key == "l"
 			if a.configFieldIndex < 4 {
 				// Prompt style selection
 				opts := []string{"p10k", "starship", "pure", "minimal"}
 				a.deepDiveConfig.ZshPromptStyle = opts[a.configFieldIndex]
+			} else if a.configFieldIndex == 4 {
+				// History size
+				opts := []string{"1000", "5000", "10000", "50000"}
+				current := fmt.Sprintf("%d", a.deepDiveConfig.ZshHistorySize)
+				a.deepDiveConfig.ZshHistorySize = atoi(cycleOption(opts, current, fwd), 10000)
+			} else if a.configFieldIndex == 5 {
+				// Auto CD
+				a.deepDiveConfig.ZshAutoCD = !a.deepDiveConfig.ZshAutoCD
+			} else if a.configFieldIndex == 6 {
+				// Syntax highlighting
+				a.deepDiveConfig.ZshSyntaxHighlight = !a.deepDiveConfig.ZshSyntaxHighlight
+			} else if a.configFieldIndex == 7 {
+				// Autosuggestions
+				a.deepDiveConfig.ZshAutosuggestions = !a.deepDiveConfig.ZshAutosuggestions
 			} else {
 				// Plugin toggle
 				plugins := []string{"zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "fzf-tab", "zsh-history-substring-search"}
-				pluginIdx := a.configFieldIndex - 4
-				if pluginIdx < len(plugins) {
+				pluginIdx := a.configFieldIndex - 8
+				if pluginIdx >= 0 && pluginIdx < len(plugins) {
 					togglePlugin(&a.deepDiveConfig.ZshPlugins, plugins[pluginIdx])
 				}
 			}
@@ -1244,6 +1326,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	// Neovim config
+	// Fields: 0-3=configs, 4=tabwidth, 5=wrap, 6=cursorline, 7=clipboard, 8-13=LSPs
 	case ScreenConfigNeovim:
 		switch key {
 		case "up", "k":
@@ -1251,17 +1334,35 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.configFieldIndex--
 			}
 		case "down", "j":
-			if a.configFieldIndex < 9 { // 4 configs + 6 LSPs - 1
+			if a.configFieldIndex < 13 { // 4 configs + 4 editor settings + 6 LSPs - 1
 				a.configFieldIndex++
 			}
 		case "left", "right", "h", "l", " ":
+			fwd := key == "right" || key == "l"
 			if a.configFieldIndex < 4 {
+				// Config preset selection
 				opts := []string{"kickstart", "lazyvim", "nvchad", "custom"}
 				a.deepDiveConfig.NeovimConfig = opts[a.configFieldIndex]
+			} else if a.configFieldIndex == 4 {
+				// Tab width
+				opts := []string{"2", "4", "8"}
+				current := fmt.Sprintf("%d", a.deepDiveConfig.NeovimTabWidth)
+				a.deepDiveConfig.NeovimTabWidth = atoi(cycleOption(opts, current, fwd), 4)
+			} else if a.configFieldIndex == 5 {
+				// Wrap
+				a.deepDiveConfig.NeovimWrap = !a.deepDiveConfig.NeovimWrap
+			} else if a.configFieldIndex == 6 {
+				// Cursor line
+				a.deepDiveConfig.NeovimCursorLine = !a.deepDiveConfig.NeovimCursorLine
+			} else if a.configFieldIndex == 7 {
+				// Clipboard
+				opts := []string{"unnamedplus", "unnamed", "none"}
+				a.deepDiveConfig.NeovimClipboard = cycleOption(opts, a.deepDiveConfig.NeovimClipboard, fwd)
 			} else {
+				// LSP toggle
 				lsps := []string{"lua_ls", "pyright", "tsserver", "gopls", "rust_analyzer", "clangd"}
-				lspIdx := a.configFieldIndex - 4
-				if lspIdx < len(lsps) {
+				lspIdx := a.configFieldIndex - 8
+				if lspIdx >= 0 && lspIdx < len(lsps) {
 					togglePlugin(&a.deepDiveConfig.NeovimLSPs, lsps[lspIdx])
 				}
 			}
@@ -1271,6 +1372,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	// Git config
+	// Fields: 0=delta, 1=branch, 2=rebase, 3=sign, 4=credential
 	case ScreenConfigGit:
 		switch key {
 		case "up", "k":
@@ -1278,17 +1380,27 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.configFieldIndex--
 			}
 		case "down", "j":
-			if a.configFieldIndex < 2 {
+			if a.configFieldIndex < 4 {
 				a.configFieldIndex++
 			}
 		case "left", "right", "h", "l":
-			if a.configFieldIndex == 1 {
+			fwd := key == "right" || key == "l"
+			switch a.configFieldIndex {
+			case 1: // Default branch
 				opts := []string{"main", "master", "develop"}
-				a.deepDiveConfig.GitDefaultBranch = cycleOption(opts, a.deepDiveConfig.GitDefaultBranch, key == "right" || key == "l")
+				a.deepDiveConfig.GitDefaultBranch = cycleOption(opts, a.deepDiveConfig.GitDefaultBranch, fwd)
+			case 4: // Credential helper
+				opts := []string{"cache", "store", "osxkeychain", "none"}
+				a.deepDiveConfig.GitCredentialHelper = cycleOption(opts, a.deepDiveConfig.GitCredentialHelper, fwd)
 			}
 		case " ":
-			if a.configFieldIndex == 0 {
+			switch a.configFieldIndex {
+			case 0: // Delta side-by-side
 				a.deepDiveConfig.GitDeltaSideBySide = !a.deepDiveConfig.GitDeltaSideBySide
+			case 2: // Pull rebase
+				a.deepDiveConfig.GitPullRebase = !a.deepDiveConfig.GitPullRebase
+			case 3: // Sign commits
+				a.deepDiveConfig.GitSignCommits = !a.deepDiveConfig.GitSignCommits
 			}
 		case "esc", "enter":
 			a.configFieldIndex = 0
@@ -1903,6 +2015,9 @@ func (a *App) startInstallation() tea.Cmd {
 	a.installStep = 0
 	a.installOutput = []string{}
 
+	// Save theme and nav style before installation
+	a.saveInstallerConfig()
+
 	// Collect all selected tools from deep dive config
 	selectedTools := a.collectSelectedTools()
 
@@ -2285,6 +2400,15 @@ func cycleOption(opts []string, current string, forward bool) string {
 	return opts[0]
 }
 
+// atoi converts a string to int with a default value
+func atoi(s string, defaultVal int) int {
+	var n int
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		return defaultVal
+	}
+	return n
+}
+
 // togglePlugin adds or removes a plugin from the list
 func togglePlugin(plugins *[]string, plugin string) {
 	for i, p := range *plugins {
@@ -2456,6 +2580,20 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 	}
 }
 
+// saveInstallerConfig saves theme and nav style during installer flow
+func (a *App) saveInstallerConfig() {
+	g, err := config.LoadGlobalConfig()
+	if err != nil {
+		g = config.DefaultGlobalConfig()
+	}
+	g.Theme = a.theme
+	g.NavStyle = a.navStyle
+	g.DisableAnimations = !a.animationsEnabled
+
+	// Save synchronously since we're about to start installation
+	_ = config.SaveGlobalConfig(g)
+}
+
 // SetStartScreen sets the initial screen to display (for CLI routing)
 func (a *App) SetStartScreen(screen Screen) {
 	a.startScreen = screen
@@ -2617,15 +2755,22 @@ func (a *App) ensureInstallCache() {
 	}
 
 	for _, t := range all {
+		found := false
 		if installedPkgs != nil {
 			pkgs := t.Packages()[platform]
 			if len(pkgs) == 0 {
 				pkgs = t.Packages()["all"]
 			}
 			if len(pkgs) > 0 {
-				a.manageInstalled[t.ID()] = installedPkgs[pkgs[0]]
+				if installedPkgs[pkgs[0]] {
+					a.manageInstalled[t.ID()] = true
+					found = true
+				}
 			}
-		} else {
+		}
+		// Fall back to IsInstalled() for tools not found via package manager
+		// (e.g., flatpaks, AppImages, direct binaries)
+		if !found {
 			a.manageInstalled[t.ID()] = t.IsInstalled()
 		}
 	}
@@ -2683,4 +2828,242 @@ func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 		return "partial" // Partially installed (yellow)
 	}
 	return "pending" // None installed (grey)
+}
+
+// handleWelcomeMouse handles mouse clicks on the welcome screen
+func (a *App) handleWelcomeMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	// Handle left click to toggle deep dive option or proceed
+	if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+		// The welcome screen has two boxes side by side at the bottom
+		// Left box: Quick Install, Right box: Deep Dive
+		centerY := a.height / 2
+		centerX := a.width / 2
+
+		// If clicking in lower half where the options are
+		if m.Y > centerY {
+			if m.X < centerX {
+				a.deepDive = false
+			} else {
+				a.deepDive = true
+			}
+		}
+	}
+
+	return a, nil
+}
+
+// handleThemePickerMouse handles mouse clicks on the theme picker screen
+func (a *App) handleThemePickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	// Handle scroll wheel for navigation (works anywhere on screen)
+	switch m.Button {
+	case tea.MouseButtonWheelUp:
+		if a.themeIndex > 0 {
+			a.themeIndex--
+			a.theme = themes[a.themeIndex].name
+			SetTheme(a.theme)
+		}
+		return a, nil
+	case tea.MouseButtonWheelDown:
+		if a.themeIndex < len(themes)-1 {
+			a.themeIndex++
+			a.theme = themes[a.themeIndex].name
+			SetTheme(a.theme)
+		}
+		return a, nil
+	}
+
+	// Handle left clicks
+	if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+		// The content is centered using PlaceWithBackground + ContainerStyle
+		// Container has Padding(1, 2) and Border, then title + empty line + themes
+		// Calculate approximate content area
+		containerH := len(themes) + 6 // title + empty + themes + empty + help + padding
+		containerW := 60              // approximate
+		startY := (a.height - containerH) / 2
+		startX := (a.width - containerW) / 2
+
+		// Theme list starts after: container border (1) + padding (1) + title (1) + empty (1)
+		listStartY := startY + 4
+
+		// Check if click is in theme list area
+		if m.Y >= listStartY && m.Y < listStartY+len(themes) && m.X >= startX {
+			themeIdx := m.Y - listStartY
+			if themeIdx >= 0 && themeIdx < len(themes) {
+				a.themeIndex = themeIdx
+				a.theme = themes[themeIdx].name
+				SetTheme(a.theme)
+				return a, nil
+			}
+		}
+	}
+
+	return a, nil
+}
+
+// handleNavPickerMouse handles mouse clicks on the nav picker screen
+func (a *App) handleNavPickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
+		return a, nil
+	}
+
+	// Nav picker has two boxes side by side (or stacked on narrow terminals)
+	// Calculate approximate positions
+	centerX := a.width / 2
+	centerY := a.height / 2
+
+	if a.width >= 78 {
+		// Side by side layout
+		// Emacs box is on the left, Vim box is on the right
+		if m.X < centerX {
+			a.navStyle = "emacs"
+		} else {
+			a.navStyle = "vim"
+		}
+	} else {
+		// Stacked layout - Emacs on top, Vim on bottom
+		if m.Y < centerY {
+			a.navStyle = "emacs"
+		} else {
+			a.navStyle = "vim"
+		}
+	}
+
+	return a, nil
+}
+
+// handleDeepDiveMenuMouse handles mouse clicks on the deep dive menu
+func (a *App) handleDeepDiveMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	// Handle scroll wheel
+	if m.Button == tea.MouseButtonWheelUp {
+		if a.deepDiveMenuIndex > 0 {
+			a.deepDiveMenuIndex--
+		}
+		return a, nil
+	}
+	if m.Button == tea.MouseButtonWheelDown {
+		items := GetDeepDiveMenuItems()
+		if a.deepDiveMenuIndex < len(items)-1 {
+			a.deepDiveMenuIndex++
+		}
+		return a, nil
+	}
+
+	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
+		return a, nil
+	}
+
+	// Menu items are in a centered container
+	items := GetDeepDiveMenuItems()
+	contentHeight := len(items) + 10 // items + headers + padding
+	startY := (a.height - contentHeight) / 2
+	listStartY := startY + 4 // After title and instructions
+
+	// Account for category headers (they take up a line but aren't clickable)
+	clickableY := listStartY
+	for i, item := range items {
+		if item.Category != "" {
+			clickableY++ // Category header takes a line
+		}
+		if m.Y == clickableY {
+			a.deepDiveMenuIndex = i
+			// Double-click or single click to enter
+			a.configFieldIndex = 0
+			a.screen = item.Screen
+			return a, nil
+		}
+		clickableY++
+	}
+
+	return a, nil
+}
+
+// handleConfigScreenMouse handles mouse clicks on config screens
+func (a *App) handleConfigScreenMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	// Handle scroll wheel for field navigation
+	if m.Button == tea.MouseButtonWheelUp {
+		if a.configFieldIndex > 0 {
+			a.configFieldIndex--
+		}
+		return a, nil
+	}
+	if m.Button == tea.MouseButtonWheelDown {
+		// Get max fields for current screen
+		maxFields := a.getConfigScreenMaxFields()
+		if a.configFieldIndex < maxFields-1 {
+			a.configFieldIndex++
+		}
+		return a, nil
+	}
+
+	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
+		return a, nil
+	}
+
+	// Config screens have fields listed vertically
+	// Approximate click detection based on Y position
+	contentHeight := a.getConfigScreenMaxFields() + 8
+	startY := (a.height - contentHeight) / 2
+	fieldStartY := startY + 4 // After title
+
+	if m.Y >= fieldStartY {
+		fieldIdx := m.Y - fieldStartY
+		maxFields := a.getConfigScreenMaxFields()
+		if fieldIdx >= 0 && fieldIdx < maxFields {
+			a.configFieldIndex = fieldIdx
+		}
+	}
+
+	return a, nil
+}
+
+// getConfigScreenMaxFields returns the number of fields for the current config screen
+func (a *App) getConfigScreenMaxFields() int {
+	switch a.screen {
+	case ScreenConfigGhostty:
+		return 7
+	case ScreenConfigTmux:
+		if a.deepDiveConfig.TmuxTPMEnabled {
+			return 13
+		}
+		return 8
+	case ScreenConfigZsh:
+		return 13
+	case ScreenConfigNeovim:
+		return 14
+	case ScreenConfigGit:
+		return 5
+	case ScreenConfigYazi:
+		return 3
+	case ScreenConfigFzf:
+		return 3
+	case ScreenConfigMacApps:
+		return len(a.deepDiveConfig.MacApps)
+	case ScreenConfigGUIApps:
+		return 4
+	case ScreenConfigCLITools:
+		return 5
+	case ScreenConfigCLIUtilities:
+		return 7
+	case ScreenConfigUtilities:
+		return 3
+	default:
+		return 10
+	}
+}
+
+// handleSummaryMouse handles mouse clicks on the summary screen
+func (a *App) handleSummaryMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Summary screen doesn't need special mouse handling yet
+	// Left click could be used to trigger install in the future
+	return a, nil
 }

@@ -67,7 +67,7 @@ func (l hotkeysLayout) inRightList(x, y int) bool {
 
 func (a *App) hotkeysLayout() hotkeysLayout {
 	const headerH = 3
-	const footerH = 2
+	const footerH = 3 // Two lines for help text + one for status
 	bodyY := headerH
 	bodyH := a.height - headerH - footerH
 	if bodyH < 5 {
@@ -400,10 +400,15 @@ func (a *App) renderHotkeysDualPane() string {
 	left := a.renderHotkeysCategoriesPanel(layout, cats)
 	right := a.renderHotkeysItemsPanel(layout, cats)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", layout.gap), right)
+	// Style the gap between panels (no explicit background to respect terminal transparency)
+	gapStyle := lipgloss.NewStyle().
+		Height(layout.bodyH)
+	gap := gapStyle.Render(strings.Repeat(" ", layout.gap))
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
 	view := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 
-	// Let terminal background show through - don't force opaque background
+	// No explicit background to respect terminal transparency
 	return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, view)
 }
 
@@ -421,8 +426,11 @@ func (a *App) renderHotkeysHeader(width int) string {
 }
 
 func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
+	// Split help text into two lines for better readability
+	helpLine1 := "Tab pane  ↑↓ move  ←→ switch"
+	helpLine2 := "Click select  Scroll  Esc back  q quit"
 	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
-		"Tab switch pane • ↑↓ move • Click select • Esc back • q quit",
+		helpLine1 + "\n" + helpLine2,
 	)
 
 	statusText := ""
@@ -457,7 +465,8 @@ func (a *App) renderHotkeysCategoriesPanel(layout hotkeysLayout, cats []hotkeys.
 	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("%d sections", len(cats)))
 
 	innerW := maxInt(0, layout.leftW-(layout.border*2)-(layout.padX*2))
-	countStyle := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorOverlay).Padding(0, 1)
+	countStyle := lipgloss.NewStyle().Foreground(ColorText).Background(ColorOverlay).Padding(0, 1)
+	const minBadgeSpacing = 2 // Ensure minimum spacing between name and badge
 
 	lines := make([]string, 0, layout.leftListH)
 	for i := a.hotkeyCatScroll; i < len(cats) && len(lines) < layout.leftListH; i++ {
@@ -466,9 +475,12 @@ func (a *App) renderHotkeysCategoriesPanel(layout hotkeysLayout, cats []hotkeys.
 
 		cursor := "  "
 		nameStyle := lipgloss.NewStyle().Foreground(ColorText)
+		lineStyle := lipgloss.NewStyle()
 		if focused {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
 			nameStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+			// Add background highlight for focused item
+			lineStyle = lipgloss.NewStyle().Background(ColorOverlay)
 		}
 
 		left := fmt.Sprintf("%s%s %s", cursor, c.Icon, nameStyle.Render(c.Name))
@@ -476,7 +488,7 @@ func (a *App) renderHotkeysCategoriesPanel(layout hotkeysLayout, cats []hotkeys.
 
 		leftW := ansi.StringWidth(left)
 		badgeW := ansi.StringWidth(badge)
-		availLeft := innerW - badgeW - 1
+		availLeft := innerW - badgeW - minBadgeSpacing
 		if availLeft < 0 {
 			availLeft = 0
 		}
@@ -485,12 +497,18 @@ func (a *App) renderHotkeysCategoriesPanel(layout hotkeysLayout, cats []hotkeys.
 			leftW = ansi.StringWidth(left)
 		}
 		spaces := innerW - leftW - badgeW
-		if spaces < 1 {
-			spaces = 1
+		if spaces < minBadgeSpacing {
+			spaces = minBadgeSpacing
 		}
 
 		line := left + strings.Repeat(" ", spaces) + badge
-		lines = append(lines, truncateVisible(line, innerW))
+		// Apply background highlight for focused line
+		if focused {
+			line = lineStyle.Width(innerW).Render(truncateVisible(line, innerW))
+		} else {
+			line = truncateVisible(line, innerW)
+		}
+		lines = append(lines, line)
 	}
 	for len(lines) < layout.leftListH {
 		lines = append(lines, "")
@@ -506,11 +524,18 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 		borderColor = ColorCyan
 	}
 
+	// Cap right pane width for better readability
+	maxRightW := 100
+	rightW := layout.rightW
+	if rightW > maxRightW {
+		rightW = maxRightW
+	}
+
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(1, 1).
-		Width(maxInt(1, layout.rightW-2)).
+		Width(maxInt(1, rightW-2)).
 		Height(maxInt(1, layout.bodyH-2))
 
 	if len(cats) == 0 {
@@ -524,7 +549,8 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("ITEMS")
 	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("%s %s", cat.Icon, cat.Name))
 
-	innerW := maxInt(0, layout.rightW-(layout.border*2)-(layout.padX*2))
+	// Use capped rightW for inner width calculation
+	innerW := maxInt(0, rightW-(layout.border*2)-(layout.padX*2))
 	keyW := min(22, maxInt(12, innerW/3))
 
 	lines := make([]string, 0, layout.rightListH)
@@ -535,13 +561,22 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 		cursor := "  "
 		keyStyle := lipgloss.NewStyle().Foreground(ColorYellow).Bold(true).Width(keyW)
 		descStyle := lipgloss.NewStyle().Foreground(ColorText)
+		lineStyle := lipgloss.NewStyle()
 		if focused {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
 			descStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+			// Add background highlight for focused item
+			lineStyle = lipgloss.NewStyle().Background(ColorOverlay)
 		}
 
 		line := fmt.Sprintf("%s%s %s", cursor, keyStyle.Render(it.Keys), descStyle.Render(it.Description))
-		lines = append(lines, truncateVisible(line, innerW))
+		// Apply background highlight for focused line
+		if focused {
+			line = lineStyle.Width(innerW).Render(truncateVisible(line, innerW))
+		} else {
+			line = truncateVisible(line, innerW)
+		}
+		lines = append(lines, line)
 	}
 	for len(lines) < layout.rightListH {
 		lines = append(lines, "")

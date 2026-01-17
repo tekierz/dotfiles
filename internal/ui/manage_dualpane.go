@@ -1093,9 +1093,8 @@ func (a *App) renderManageDualPane() string {
 			Bold(true)
 		loadingText := loadingStyle.Render(fmt.Sprintf("%s Loading installation status...", spinner))
 
-		return lipgloss.Place(
+		return PlaceWithBackground(
 			a.width, a.height,
-			lipgloss.Center, lipgloss.Center,
 			loadingText,
 		)
 	}
@@ -1124,10 +1123,15 @@ func (a *App) renderManageDualPane() string {
 	left := a.renderManageToolsPanel(layout, items)
 	right := a.renderManageSettingsPanel(layout, items, fields)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", layout.gap), right)
+	// Style the gap between panels (no explicit background to respect terminal transparency)
+	gapStyle := lipgloss.NewStyle().
+		Height(layout.bodyH)
+	gap := gapStyle.Render(strings.Repeat(" ", layout.gap))
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
 	view := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 
-	// Let terminal background show through - don't force opaque background
+	// No explicit background to respect terminal transparency
 	return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, view)
 }
 
@@ -1212,7 +1216,7 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("%d installed • %d tools", installedCount, toolCount))
 
 	innerW := maxInt(0, layout.leftW-(layout.border*2)-(layout.padX*2))
-	tagStyle := lipgloss.NewStyle().Foreground(ColorTextMuted).Background(ColorOverlay).Padding(0, 1)
+	tagStyle := lipgloss.NewStyle().Foreground(ColorText).Background(ColorOverlay).Padding(0, 1)
 
 	var lines []string
 	for i := a.manageToolsScroll; i < len(items) && len(lines) < layout.leftListH; i++ {

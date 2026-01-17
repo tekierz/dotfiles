@@ -241,11 +241,11 @@ func (a *App) renderManageDetailed() string {
 	// Title
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#89b4fa"))
+		Foreground(ColorCyan)
 	title := titleStyle.Render("  Manage Tools")
 
 	subtitle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render(fmt.Sprintf("%d tools available • Select to configure", len(manageTools)))
 
 	var lines []string
@@ -254,17 +254,17 @@ func (a *App) renderManageDetailed() string {
 		tool, exists := registry.Get(mt.id)
 
 		cursor := "  "
-		nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
-		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
+		nameStyle := lipgloss.NewStyle().Foreground(ColorText)
+		statusStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 
 		if i == a.manageIndex {
-			cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render("▸ ")
-			nameStyle = nameStyle.Foreground(lipgloss.Color("#a6e3a1")).Bold(true)
+			cursor = lipgloss.NewStyle().Foreground(ColorGreen).Render("▸ ")
+			nameStyle = nameStyle.Foreground(ColorGreen).Bold(true)
 		}
 
 		status := "○ Not installed"
 		if exists && tool.IsInstalled() {
-			status = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render("● Installed")
+			status = lipgloss.NewStyle().Foreground(ColorGreen).Render("● Installed")
 		}
 
 		line := fmt.Sprintf("%s%s %s  %s",
@@ -279,7 +279,7 @@ func (a *App) renderManageDetailed() string {
 
 	// Footer
 	footer := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • Enter Configure • Esc Back • q Quit")
 
 	content := fmt.Sprintf("\n\n%s\n%s\n\n%s\n\n%s",
@@ -294,9 +294,9 @@ func (a *App) renderManageDetailed() string {
 func renderManageTitle(icon, name, desc string) string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#89b4fa"))
+		Foreground(ColorCyan)
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Italic(true)
 
 	return lipgloss.JoinVertical(lipgloss.Center,
@@ -306,64 +306,64 @@ func renderManageTitle(icon, name, desc string) string {
 }
 
 func renderManageField(label string, value string, focused bool) string {
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4")).Width(20)
-	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
+	labelStyle := lipgloss.NewStyle().Foreground(ColorText).Width(20)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 
 	cursor := "  "
 	if focused {
-		cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render("▸ ")
-		labelStyle = labelStyle.Foreground(lipgloss.Color("#a6e3a1")).Bold(true)
-		valueStyle = valueStyle.Foreground(lipgloss.Color("#89b4fa"))
+		cursor = lipgloss.NewStyle().Foreground(ColorGreen).Render("▸ ")
+		labelStyle = labelStyle.Foreground(ColorGreen).Bold(true)
+		valueStyle = valueStyle.Foreground(ColorCyan)
 	}
 
 	return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(label), valueStyle.Render(value))
 }
 
 func renderManageToggle(label string, value bool, focused bool) string {
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4")).Width(20)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorText).Width(20)
 
 	cursor := "  "
 	if focused {
-		cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render("▸ ")
-		labelStyle = labelStyle.Foreground(lipgloss.Color("#a6e3a1")).Bold(true)
+		cursor = lipgloss.NewStyle().Foreground(ColorGreen).Render("▸ ")
+		labelStyle = labelStyle.Foreground(ColorGreen).Bold(true)
 	}
 
-	toggle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8")).Render("○ OFF")
+	toggle := lipgloss.NewStyle().Foreground(ColorRed).Render("○ OFF")
 	if value {
-		toggle = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render("● ON")
+		toggle = lipgloss.NewStyle().Foreground(ColorGreen).Render("● ON")
 	}
 
 	return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(label), toggle)
 }
 
 func renderManageNumber(label string, value int, unit string, focused bool) string {
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4")).Width(20)
-	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
+	labelStyle := lipgloss.NewStyle().Foreground(ColorText).Width(20)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 
 	cursor := "  "
 	if focused {
-		cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render("▸ ")
-		labelStyle = labelStyle.Foreground(lipgloss.Color("#a6e3a1")).Bold(true)
-		valueStyle = valueStyle.Foreground(lipgloss.Color("#89b4fa"))
+		cursor = lipgloss.NewStyle().Foreground(ColorGreen).Render("▸ ")
+		labelStyle = labelStyle.Foreground(ColorGreen).Bold(true)
+		valueStyle = valueStyle.Foreground(ColorCyan)
 	}
 
 	return fmt.Sprintf("%s%s ◀ %s ▶", cursor, labelStyle.Render(label), valueStyle.Render(fmt.Sprintf("%d%s", value, unit)))
 }
 
 func renderManageOption(label string, value string, options []string, focused bool) string {
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4")).Width(20)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorText).Width(20)
 
 	cursor := "  "
 	if focused {
-		cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render("▸ ")
-		labelStyle = labelStyle.Foreground(lipgloss.Color("#a6e3a1")).Bold(true)
+		cursor = lipgloss.NewStyle().Foreground(ColorGreen).Render("▸ ")
+		labelStyle = labelStyle.Foreground(ColorGreen).Bold(true)
 	}
 
 	var parts []string
 	for _, opt := range options {
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
+		style := lipgloss.NewStyle().Foreground(ColorTextMuted)
 		if opt == value {
-			style = lipgloss.NewStyle().Foreground(lipgloss.Color("#89b4fa")).Bold(true)
+			style = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 		}
 		parts = append(parts, style.Render(opt))
 	}
@@ -392,13 +392,13 @@ func (a *App) renderManageGhostty() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(60).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -427,13 +427,13 @@ func (a *App) renderManageTmux() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(65).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -461,13 +461,13 @@ func (a *App) renderManageZsh() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(55).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -496,13 +496,13 @@ func (a *App) renderManageNeovim() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(65).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -530,13 +530,13 @@ func (a *App) renderManageGit() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(65).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -562,13 +562,13 @@ func (a *App) renderManageYazi() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(65).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -594,13 +594,13 @@ func (a *App) renderManageFzf() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(65).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -625,13 +625,13 @@ func (a *App) renderManageLazyGit() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(60).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -654,13 +654,13 @@ func (a *App) renderManageLazyDocker() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(55).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -687,13 +687,13 @@ func (a *App) renderManageBtop() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(70).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
@@ -718,13 +718,13 @@ func (a *App) renderManageGlow() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")).
+		BorderForeground(ColorOverlay).
 		Padding(1, 2).
 		Width(55).
 		Render(content)
 
 	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,

@@ -119,19 +119,19 @@ type mockTool struct {
 	installed   bool
 }
 
-func (t *mockTool) ID() string                              { return t.id }
-func (t *mockTool) Name() string                            { return t.name }
-func (t *mockTool) Description() string                     { return t.description }
-func (t *mockTool) Icon() string                            { return t.icon }
-func (t *mockTool) Category() Category                      { return t.category }
-func (t *mockTool) Packages() map[pkg.Platform][]string     { return t.packages }
-func (t *mockTool) IsInstalled() bool                       { return t.installed }
-func (t *mockTool) Install(mgr pkg.PackageManager) error    { return nil }
-func (t *mockTool) ConfigPaths() []string                   { return nil }
-func (t *mockTool) HasConfig() bool                         { return false }
-func (t *mockTool) GenerateConfig(theme string) string      { return "" }
-func (t *mockTool) ApplyConfig(theme string) error          { return nil }
-func (t *mockTool) IsHeavy() bool                           { return false }
+func (t *mockTool) ID() string                           { return t.id }
+func (t *mockTool) Name() string                         { return t.name }
+func (t *mockTool) Description() string                  { return t.description }
+func (t *mockTool) Icon() string                         { return t.icon }
+func (t *mockTool) Category() Category                   { return t.category }
+func (t *mockTool) Packages() map[pkg.Platform][]string  { return t.packages }
+func (t *mockTool) IsInstalled() bool                    { return t.installed }
+func (t *mockTool) Install(mgr pkg.PackageManager) error { return nil }
+func (t *mockTool) ConfigPaths() []string                { return nil }
+func (t *mockTool) HasConfig() bool                      { return false }
+func (t *mockTool) GenerateConfig(theme string) string   { return "" }
+func (t *mockTool) ApplyConfig(theme string) error       { return nil }
+func (t *mockTool) IsHeavy() bool                        { return false }
 
 func TestCategoryConstants(t *testing.T) {
 	// Verify all category constants are distinct

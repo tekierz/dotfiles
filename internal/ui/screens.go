@@ -364,9 +364,8 @@ func (a *App) renderThemePicker() string {
 
 	help := HelpStyle.Render("[↑↓/jk] Navigate    [ENTER] Select    [ESC] Back")
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		ContainerStyle.Render(lipgloss.JoinVertical(
 			lipgloss.Left,
 			title,
@@ -420,9 +419,8 @@ func (a *App) renderNavPicker() string {
 
 	help := HelpStyle.Render("[←→] Select    [ENTER] Continue    [ESC] Back")
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		ContainerStyle.Render(lipgloss.JoinVertical(
 			lipgloss.Center,
 			title,
@@ -764,9 +762,8 @@ func (a *App) renderSummary() string {
 
 	help := HelpStyle.Render("[ENTER] Exit")
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		ContainerStyle.Render(lipgloss.JoinVertical(
 			lipgloss.Center,
 			title,
@@ -804,9 +801,8 @@ func (a *App) renderError() string {
 		ButtonStyle.Render(" [Q] Quit "),
 	)
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		ContainerStyle.Render(lipgloss.JoinVertical(
 			lipgloss.Center,
 			title,

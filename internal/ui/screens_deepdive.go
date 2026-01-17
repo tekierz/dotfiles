@@ -189,21 +189,67 @@ func (a *App) renderConfigGhostty() string {
 
 	cfg := a.deepDiveConfig
 	var content strings.Builder
+	fieldIdx := 0
+
+	// Font family
+	fontFamilyFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Font Family", fontFamilyFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"JetBrains Mono", "Fira Code", "Hack", "Menlo", "Monaco"},
+		[]string{"JetBrains Mono", "Fira Code", "Hack", "Menlo", "Monaco"},
+		cfg.GhosttyFontFamily,
+		fontFamilyFocused,
+	))
+	content.WriteString("\n\n")
+	fieldIdx++
 
 	// Font size
-	fontFocused := a.configFieldIndex == 0
+	fontFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Font Size", fontFocused))
 	content.WriteString(renderNumberControl(cfg.GhosttyFontSize, 8, 32, fontFocused))
 	content.WriteString("\n\n")
+	fieldIdx++
 
 	// Opacity
-	opacityFocused := a.configFieldIndex == 1
+	opacityFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Background Opacity", opacityFocused))
 	content.WriteString(renderSliderControl(cfg.GhosttyOpacity, 100, 24, opacityFocused))
 	content.WriteString("\n\n")
+	fieldIdx++
+
+	// Blur radius
+	blurFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Blur Radius", blurFocused))
+	content.WriteString(renderSliderControl(cfg.GhosttyBlurRadius, 100, 24, blurFocused))
+	content.WriteString("\n\n")
+	fieldIdx++
+
+	// Scrollback lines
+	scrollFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Scrollback Lines", scrollFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"1000", "5000", "10000", "50000", "100000"},
+		[]string{"1K", "5K", "10K", "50K", "100K"},
+		fmt.Sprintf("%d", cfg.GhosttyScrollbackLines),
+		scrollFocused,
+	))
+	content.WriteString("\n\n")
+	fieldIdx++
+
+	// Cursor style
+	cursorFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Cursor Style", cursorFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"block", "bar", "underline"},
+		[]string{"█ Block", "│ Bar", "_ Underline"},
+		cfg.GhostyCursorStyle,
+		cursorFocused,
+	))
+	content.WriteString("\n\n")
+	fieldIdx++
 
 	// Tab keybindings
-	tabFocused := a.configFieldIndex == 2
+	tabFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("New Tab Keybinding", tabFocused))
 	content.WriteString(renderOptionSelector(
 		[]string{"super", "ctrl", "alt"},
@@ -212,12 +258,11 @@ func (a *App) renderConfigGhostty() string {
 		tabFocused,
 	))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • enter/esc save & back")
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
@@ -228,9 +273,10 @@ func (a *App) renderConfigTmux() string {
 
 	cfg := a.deepDiveConfig
 	var content strings.Builder
+	fieldIdx := 0
 
 	// Prefix key
-	prefixFocused := a.configFieldIndex == 0
+	prefixFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Prefix Key", prefixFocused))
 	content.WriteString(renderOptionSelector(
 		[]string{"ctrl-a", "ctrl-b", "ctrl-space"},
@@ -239,9 +285,10 @@ func (a *App) renderConfigTmux() string {
 		prefixFocused,
 	))
 	content.WriteString("\n\n")
+	fieldIdx++
 
 	// Split bindings
-	splitFocused := a.configFieldIndex == 1
+	splitFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Split Pane Keys", splitFocused))
 	content.WriteString(renderOptionSelector(
 		[]string{"pipes", "percent"},
@@ -250,9 +297,10 @@ func (a *App) renderConfigTmux() string {
 		splitFocused,
 	))
 	content.WriteString("\n\n")
+	fieldIdx++
 
 	// Status bar
-	statusFocused := a.configFieldIndex == 2
+	statusFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Status Bar Position", statusFocused))
 	content.WriteString(renderOptionSelector(
 		[]string{"bottom", "top"},
@@ -261,61 +309,104 @@ func (a *App) renderConfigTmux() string {
 		statusFocused,
 	))
 	content.WriteString("\n\n")
+	fieldIdx++
 
 	// Mouse mode
-	mouseFocused := a.configFieldIndex == 3
+	mouseFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Mouse Support", mouseFocused))
 	content.WriteString(renderToggle(cfg.TmuxMouseMode, mouseFocused))
+	content.WriteString("\n\n")
+	fieldIdx++
+
+	// History limit
+	historyFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("History Limit", historyFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"10000", "25000", "50000", "100000"},
+		[]string{"10K", "25K", "50K", "100K"},
+		fmt.Sprintf("%d", cfg.TmuxHistoryLimit),
+		historyFocused,
+	))
+	content.WriteString("\n\n")
+	fieldIdx++
+
+	// Escape time
+	escapeFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Escape Time (ms)", escapeFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"0", "10", "50", "100"},
+		[]string{"0ms", "10ms", "50ms", "100ms"},
+		fmt.Sprintf("%d", cfg.TmuxEscapeTime),
+		escapeFocused,
+	))
+	content.WriteString("\n\n")
+	fieldIdx++
+
+	// Base index
+	baseFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Base Index", baseFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"0", "1"},
+		[]string{"0 (default)", "1 (starts at 1)"},
+		fmt.Sprintf("%d", cfg.TmuxBaseIndex),
+		baseFocused,
+	))
+	fieldIdx++
 
 	// TPM section
 	content.WriteString("\n\n")
 	content.WriteString(sectionHeaderStyle.Render("TPM Plugins"))
 	content.WriteString("\n\n")
 
-	// TPM Enable toggle (field 4)
-	tpmFocused := a.configFieldIndex == 4
+	// TPM Enable toggle
+	tpmFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Enable TPM", tpmFocused))
 	content.WriteString(renderToggle(cfg.TmuxTPMEnabled, tpmFocused))
+	fieldIdx++
 
-	// Plugin checkboxes (fields 5-8) - only if TPM enabled
+	// Plugin checkboxes - only if TPM enabled
 	if cfg.TmuxTPMEnabled {
 		content.WriteString("\n\n")
 
-		// tmux-sensible (field 5)
-		sensibleFocused := a.configFieldIndex == 5
+		// tmux-sensible
+		sensibleFocused := a.configFieldIndex == fieldIdx
 		content.WriteString(renderCheckbox("tmux-sensible", cfg.TmuxPluginSensible, sensibleFocused))
 		if sensibleFocused {
 			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Sensible defaults"))
 		}
 		content.WriteString("\n")
+		fieldIdx++
 
-		// tmux-resurrect (field 6)
-		resurrectFocused := a.configFieldIndex == 6
+		// tmux-resurrect
+		resurrectFocused := a.configFieldIndex == fieldIdx
 		content.WriteString(renderCheckbox("tmux-resurrect", cfg.TmuxPluginResurrect, resurrectFocused))
 		if resurrectFocused {
 			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Session save/restore"))
 		}
 		content.WriteString("\n")
+		fieldIdx++
 
-		// tmux-continuum (field 7)
-		continuumFocused := a.configFieldIndex == 7
+		// tmux-continuum
+		continuumFocused := a.configFieldIndex == fieldIdx
 		content.WriteString(renderCheckbox("tmux-continuum", cfg.TmuxPluginContinuum, continuumFocused))
 		if continuumFocused {
 			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Auto-save sessions"))
 		}
 		content.WriteString("\n")
+		fieldIdx++
 
-		// tmux-yank (field 8)
-		yankFocused := a.configFieldIndex == 8
+		// tmux-yank
+		yankFocused := a.configFieldIndex == fieldIdx
 		content.WriteString(renderCheckbox("tmux-yank", cfg.TmuxPluginYank, yankFocused))
 		if yankFocused {
 			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Clipboard integration"))
 		}
+		fieldIdx++
 
-		// Continuum interval (field 9) - only if continuum enabled
+		// Continuum interval - only if continuum enabled
 		if cfg.TmuxPluginContinuum {
 			content.WriteString("\n\n")
-			intervalFocused := a.configFieldIndex == 9
+			intervalFocused := a.configFieldIndex == fieldIdx
 			content.WriteString(renderFieldLabel("Auto-save Interval", intervalFocused))
 			content.WriteString(renderNumberControl(cfg.TmuxContinuumSaveMin, 5, 60, intervalFocused))
 			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" min"))
@@ -325,9 +416,8 @@ func (a *App) renderConfigTmux() string {
 	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • enter/esc back")
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
@@ -338,6 +428,7 @@ func (a *App) renderConfigZsh() string {
 
 	cfg := a.deepDiveConfig
 	var content strings.Builder
+	fieldIdx := 0
 
 	// Prompt style - radio buttons
 	content.WriteString(sectionHeaderStyle.Render("Prompt Style"))
@@ -352,12 +443,47 @@ func (a *App) renderConfigZsh() string {
 		{"pure", "Pure", "Pretty, minimal, fast"},
 		{"minimal", "Minimal", "Simple $ prompt"},
 	}
-	for i, p := range prompts {
-		focused := a.configFieldIndex == i
+	for _, p := range prompts {
+		focused := a.configFieldIndex == fieldIdx
 		selected := cfg.ZshPromptStyle == p.value
 		content.WriteString(renderRadioOption(p.label, p.desc, selected, focused))
 		content.WriteString("\n")
+		fieldIdx++
 	}
+
+	// Shell options section
+	content.WriteString(sectionHeaderStyle.Render("Shell Options"))
+	content.WriteString("\n")
+
+	// History size
+	historyFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("History Size", historyFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"1000", "5000", "10000", "50000"},
+		[]string{"1K", "5K", "10K", "50K"},
+		fmt.Sprintf("%d", cfg.ZshHistorySize),
+		historyFocused,
+	))
+	content.WriteString("\n")
+	fieldIdx++
+
+	// Auto CD
+	autoCDFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderCheckbox("Auto CD (cd into directories)", cfg.ZshAutoCD, autoCDFocused))
+	content.WriteString("\n")
+	fieldIdx++
+
+	// Syntax highlighting
+	syntaxFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderCheckbox("Syntax Highlighting", cfg.ZshSyntaxHighlight, syntaxFocused))
+	content.WriteString("\n")
+	fieldIdx++
+
+	// Autosuggestions
+	suggestFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderCheckbox("Auto-suggestions", cfg.ZshAutosuggestions, suggestFocused))
+	content.WriteString("\n")
+	fieldIdx++
 
 	// Plugins - checkboxes
 	content.WriteString(sectionHeaderStyle.Render("Plugins"))
@@ -372,8 +498,8 @@ func (a *App) renderConfigZsh() string {
 		{"fzf-tab", "FZF tab completion"},
 		{"zsh-history-substring-search", "History search"},
 	}
-	for i, p := range plugins {
-		focused := a.configFieldIndex == i+4
+	for _, p := range plugins {
+		focused := a.configFieldIndex == fieldIdx
 		enabled := false
 		for _, ep := range cfg.ZshPlugins {
 			if ep == p.id {
@@ -383,14 +509,14 @@ func (a *App) renderConfigZsh() string {
 		}
 		content.WriteString(renderCheckbox(p.name, enabled, focused))
 		content.WriteString("\n")
+		fieldIdx++
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space/enter select • esc back")
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
@@ -401,6 +527,7 @@ func (a *App) renderConfigNeovim() string {
 
 	cfg := a.deepDiveConfig
 	var content strings.Builder
+	fieldIdx := 0
 
 	// Config preset - radio buttons
 	content.WriteString(sectionHeaderStyle.Render("Configuration"))
@@ -415,12 +542,53 @@ func (a *App) renderConfigNeovim() string {
 		{"nvchad", "NvChad", "Beautiful and fast"},
 		{"custom", "Keep existing", "Don't modify config"},
 	}
-	for i, c := range configs {
-		focused := a.configFieldIndex == i
+	for _, c := range configs {
+		focused := a.configFieldIndex == fieldIdx
 		selected := cfg.NeovimConfig == c.value
 		content.WriteString(renderRadioOption(c.label, c.desc, selected, focused))
 		content.WriteString("\n")
+		fieldIdx++
 	}
+
+	// Editor settings section
+	content.WriteString(sectionHeaderStyle.Render("Editor Settings"))
+	content.WriteString("\n")
+
+	// Tab width
+	tabFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Tab Width", tabFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"2", "4", "8"},
+		[]string{"2", "4", "8"},
+		fmt.Sprintf("%d", cfg.NeovimTabWidth),
+		tabFocused,
+	))
+	content.WriteString("\n")
+	fieldIdx++
+
+	// Line wrap
+	wrapFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderCheckbox("Line Wrapping", cfg.NeovimWrap, wrapFocused))
+	content.WriteString("\n")
+	fieldIdx++
+
+	// Cursor line
+	cursorFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderCheckbox("Highlight Cursor Line", cfg.NeovimCursorLine, cursorFocused))
+	content.WriteString("\n")
+	fieldIdx++
+
+	// Clipboard
+	clipboardFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Clipboard", clipboardFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"unnamedplus", "unnamed", "none"},
+		[]string{"System (+)", "Selection (*)", "None"},
+		cfg.NeovimClipboard,
+		clipboardFocused,
+	))
+	content.WriteString("\n")
+	fieldIdx++
 
 	// LSP servers - checkboxes
 	content.WriteString(sectionHeaderStyle.Render("LSP Servers"))
@@ -436,8 +604,8 @@ func (a *App) renderConfigNeovim() string {
 		{"rust_analyzer", "Rust"},
 		{"clangd", "C/C++"},
 	}
-	for i, l := range lsps {
-		focused := a.configFieldIndex == i+4
+	for _, l := range lsps {
+		focused := a.configFieldIndex == fieldIdx
 		enabled := false
 		for _, el := range cfg.NeovimLSPs {
 			if el == l.id {
@@ -447,14 +615,14 @@ func (a *App) renderConfigNeovim() string {
 		}
 		content.WriteString(renderCheckbox(l.name, enabled, focused))
 		content.WriteString("\n")
+		fieldIdx++
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • space/enter select • esc back")
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
@@ -465,15 +633,17 @@ func (a *App) renderConfigGit() string {
 
 	cfg := a.deepDiveConfig
 	var content strings.Builder
+	fieldIdx := 0
 
 	// Delta side-by-side
-	deltaFocused := a.configFieldIndex == 0
+	deltaFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Delta Diff View", deltaFocused))
 	content.WriteString(renderToggleLabeled(cfg.GitDeltaSideBySide, "Side-by-side", "Unified", deltaFocused))
 	content.WriteString("\n\n")
+	fieldIdx++
 
 	// Default branch
-	branchFocused := a.configFieldIndex == 1
+	branchFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("Default Branch", branchFocused))
 	content.WriteString(renderOptionSelector(
 		[]string{"main", "master", "develop"},
@@ -482,6 +652,31 @@ func (a *App) renderConfigGit() string {
 		branchFocused,
 	))
 	content.WriteString("\n\n")
+	fieldIdx++
+
+	// Pull rebase
+	rebaseFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderCheckbox("Pull with Rebase", cfg.GitPullRebase, rebaseFocused))
+	content.WriteString("\n")
+	fieldIdx++
+
+	// Sign commits
+	signFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderCheckbox("GPG Sign Commits", cfg.GitSignCommits, signFocused))
+	content.WriteString("\n\n")
+	fieldIdx++
+
+	// Credential helper
+	credFocused := a.configFieldIndex == fieldIdx
+	content.WriteString(renderFieldLabel("Credential Helper", credFocused))
+	content.WriteString(renderOptionSelector(
+		[]string{"cache", "store", "osxkeychain", "none"},
+		[]string{"Cache (temp)", "Store (file)", "macOS Keychain", "None"},
+		cfg.GitCredentialHelper,
+		credFocused,
+	))
+	content.WriteString("\n\n")
+	fieldIdx++
 
 	// Aliases preview
 	content.WriteString(sectionHeaderStyle.Render("Included Aliases"))
@@ -497,12 +692,11 @@ func (a *App) renderConfigGit() string {
 		content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  " + alias + "\n"))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
 
-	return lipgloss.Place(
+	return PlaceWithBackground(
 		a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
 }
@@ -706,7 +900,7 @@ func renderNumberControl(value, min, max int, focused bool) string {
 	if focused {
 		valueStyle = lipgloss.NewStyle().
 			Background(ColorCyan).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(ColorBg).
 			Padding(0, 1)
 	}
 
@@ -721,7 +915,7 @@ func renderSliderControl(value, max, width int, focused bool) string {
 	empty := width - filled
 
 	fillColor := ColorTextMuted
-	emptyColor := lipgloss.Color("#333333")
+	emptyColor := ColorBorder
 	if focused {
 		fillColor = ColorCyan
 	}
@@ -751,7 +945,7 @@ func renderOptionSelector(values, labels []string, selected string, focused bool
 			if !focused {
 				style = lipgloss.NewStyle().
 					Background(ColorTextMuted).
-					Foreground(lipgloss.Color("#000000")).
+					Foreground(ColorBg).
 					Padding(0, 1)
 			}
 			parts = append(parts, style.Render(label))
@@ -771,18 +965,18 @@ func renderToggle(value bool, focused bool) string {
 		if !focused {
 			onStyle = lipgloss.NewStyle().
 				Background(ColorGreen).
-				Foreground(lipgloss.Color("#000000")).
+				Foreground(ColorBg).
 				Padding(0, 1)
 		}
 	} else {
 		offStyle = lipgloss.NewStyle().
 			Background(ColorRed).
-			Foreground(lipgloss.Color("#ffffff")).
+			Foreground(ColorTextBright).
 			Padding(0, 1)
 		if !focused {
 			offStyle = lipgloss.NewStyle().
 				Background(ColorTextMuted).
-				Foreground(lipgloss.Color("#000000")).
+				Foreground(ColorBg).
 				Padding(0, 1)
 		}
 	}
@@ -799,7 +993,7 @@ func renderToggleLabeled(value bool, onLabel, offLabel string, focused bool) str
 		if !focused {
 			onStyle = lipgloss.NewStyle().
 				Background(ColorTextMuted).
-				Foreground(lipgloss.Color("#000000")).
+				Foreground(ColorBg).
 				Padding(0, 1)
 		}
 	} else {
@@ -807,7 +1001,7 @@ func renderToggleLabeled(value bool, onLabel, offLabel string, focused bool) str
 		if !focused {
 			offStyle = lipgloss.NewStyle().
 				Background(ColorTextMuted).
-				Foreground(lipgloss.Color("#000000")).
+				Foreground(ColorBg).
 				Padding(0, 1)
 		}
 	}

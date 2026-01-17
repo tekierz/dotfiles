@@ -9,10 +9,10 @@ import (
 
 // MockPackageManagerProvider is a test implementation of PackageManagerProvider.
 type MockPackageManagerProvider struct {
-	Manager     pkg.PackageManager
-	Platform    pkg.Platform
-	Updates     []pkg.Package
-	UpdatesErr  error
+	Manager    pkg.PackageManager
+	Platform   pkg.Platform
+	Updates    []pkg.Package
+	UpdatesErr error
 }
 
 func (m *MockPackageManagerProvider) DetectManager() pkg.PackageManager {
@@ -29,10 +29,10 @@ func (m *MockPackageManagerProvider) CheckUpdates() ([]pkg.Package, error) {
 
 // MockConfigProvider is a test implementation of ConfigProvider.
 type MockConfigProvider struct {
-	GlobalConfig   *config.GlobalConfig
-	ManageConfig   *ManageConfig
-	UserProfiles   map[string]*config.UserProfile
-	ActiveUser     *config.UserProfile
+	GlobalConfig *config.GlobalConfig
+	ManageConfig *ManageConfig
+	UserProfiles map[string]*config.UserProfile
+	ActiveUser   *config.UserProfile
 
 	SavedGlobalConfig *config.GlobalConfig
 	SavedManageConfig *ManageConfig
@@ -158,8 +158,8 @@ func (m *MockToolRegistryProvider) NewRegistry() *tools.Registry {
 
 // MockRunnerProvider is a test implementation of RunnerProvider.
 type MockRunnerProvider struct {
-	SudoCached     bool
-	RequiresSudo   bool
+	SudoCached   bool
+	RequiresSudo bool
 }
 
 func (m *MockRunnerProvider) NewRunner() *runner.Runner {

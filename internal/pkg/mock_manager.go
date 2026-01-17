@@ -10,23 +10,23 @@ import (
 // MockPackageManager is a test implementation of PackageManager.
 type MockPackageManager struct {
 	// Configuration
-	ManagerName     string
-	Available       bool
-	RequiresSudo    bool
-	InstalledPkgs   map[string]string // package name -> version
-	OutdatedPkgs    []Package
-	SearchResults   []Package
-	InstallErr      error
-	UninstallErr    error
-	UpdateErr       error
+	ManagerName      string
+	Available        bool
+	RequiresSudo     bool
+	InstalledPkgs    map[string]string // package name -> version
+	OutdatedPkgs     []Package
+	SearchResults    []Package
+	InstallErr       error
+	UninstallErr     error
+	UpdateErr        error
 	CheckOutdatedErr error
-	SearchErr       error
+	SearchErr        error
 
 	// Call tracking
-	InstallCalls     [][]string
-	UninstallCalls   [][]string
-	UpdateCalls      [][]string
-	UpdateAllCalled  bool
+	InstallCalls    [][]string
+	UninstallCalls  [][]string
+	UpdateCalls     [][]string
+	UpdateAllCalled bool
 }
 
 // NewMockPackageManager creates a new mock package manager.

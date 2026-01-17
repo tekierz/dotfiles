@@ -54,11 +54,8 @@ func (s *ErrorScreen) Update(msg tea.Msg) (ui.ScreenHandler, tea.Cmd) {
 
 // View renders the error screen.
 func (s *ErrorScreen) View(width, height int) string {
-	// Get colors from the styles package
-	colorRed := lipgloss.Color("#FF6B6B")
-
 	title := lipgloss.NewStyle().
-		Foreground(colorRed).
+		Foreground(ui.ColorRed).
 		Bold(true).
 		Render("✗ Error Occurred")
 
@@ -69,14 +66,13 @@ func (s *ErrorScreen) View(width, height int) string {
 
 	errorBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorRed).
+		BorderForeground(ui.ColorRed).
 		Padding(1).
 		MaxWidth(max(20, width-10)).
 		Render(errMsg)
 
 	buttonStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#2D3748")).
+		Foreground(ui.ColorTextBright).
 		Padding(0, 1)
 
 	options := lipgloss.JoinHorizontal(
@@ -90,7 +86,7 @@ func (s *ErrorScreen) View(width, height int) string {
 
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#00F5D4")).
+		BorderForeground(ui.ColorCyan).
 		Padding(1, 2)
 
 	return lipgloss.Place(

@@ -327,11 +327,11 @@ func (a *App) renderManage() string {
 	// Title
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#89b4fa")).
+		Foreground(ColorCyan).
 		Render("  Manage Tools")
 
 	subtitle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render(fmt.Sprintf("%d tools registered • %d installed", registry.Count(), registry.InstalledCount()))
 
 	// Group by category
@@ -356,23 +356,23 @@ func (a *App) renderManage() string {
 
 		// Category header
 		catStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#cba6f7")).
+			Foreground(ColorMagenta).
 			Bold(true)
 		lines = append(lines, catStyle.Render(fmt.Sprintf("\n  %s", strings.ToUpper(string(cat)))))
 
 		for _, tool := range catTools {
 			cursor := "  "
-			nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
-			descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
+			nameStyle := lipgloss.NewStyle().Foreground(ColorText)
+			descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 
 			if itemIndex == a.manageIndex {
 				cursor = " "
-				nameStyle = nameStyle.Foreground(lipgloss.Color("#a6e3a1")).Bold(true)
+				nameStyle = nameStyle.Foreground(ColorGreen).Bold(true)
 			}
 
-			status := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086")).Render("○")
+			status := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("○")
 			if tool.IsInstalled() {
-				status = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Render("●")
+				status = lipgloss.NewStyle().Foreground(ColorGreen).Render("●")
 			}
 
 			line := fmt.Sprintf("%s%s %s %s  %s",
@@ -390,7 +390,7 @@ func (a *App) renderManage() string {
 
 	// Footer
 	footer := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")).
+		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • Enter Configure • Esc Back • q Quit")
 
 	content := fmt.Sprintf("\n\n%s\n%s\n%s\n\n%s",
