@@ -694,7 +694,7 @@ func restoreBackupCmd(backup BackupEntry) tea.Cmd {
 				continue
 			}
 
-			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+			if err := os.WriteFile(dstPath, data, 0600); err != nil {
 				continue
 			}
 
