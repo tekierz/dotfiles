@@ -1552,3 +1552,86 @@ func (a *App) deepDiveBoxWidth(preferred int) int {
 
 	return w
 }
+
+// renderConfigClaudeCode renders the Claude Code MCP configuration screen
+func (a *App) renderConfigClaudeCode() string {
+	title := renderConfigTitle("󰚩", "Claude Code", "AI-powered coding assistant with MCP servers")
+
+	cfg := a.deepDiveConfig
+	var content strings.Builder
+
+	// Install toggle
+	content.WriteString(renderFieldLabel("Install Claude Code", a.configFieldIndex == -1))
+	enabled := cfg.CLITools["claude-code"]
+	installed := a.manageInstalled["claude-code"]
+	content.WriteString(renderCheckboxInlineWithInstallState(enabled, a.configFieldIndex == -1, installed))
+	if installed {
+		content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)"))
+	}
+	content.WriteString("\n\n")
+
+	// MCP Servers header
+	mcpHeader := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true).Render("MCP Servers")
+	mcpDesc := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" (Model Context Protocol)")
+	content.WriteString(mcpHeader + mcpDesc + "\n\n")
+
+	// MCP server list
+	mcps := []struct {
+		id   string
+		name string
+		desc string
+	}{
+		{"context7", "Context7", "Documentation lookup for any library"},
+		{"task-master", "Task Master", "AI-driven task management"},
+		{"github", "GitHub", "GitHub integration and automation"},
+		{"supabase", "Supabase", "Supabase database integration"},
+		{"convex", "Convex", "Convex backend integration"},
+		{"puppeteer", "Puppeteer", "Browser automation and testing"},
+		{"sequential-thinking", "Sequential Thinking", "Enhanced reasoning chains"},
+	}
+
+	for i, mcp := range mcps {
+		focused := a.configFieldIndex == i
+		enabled := cfg.ClaudeCodeMCPs[mcp.id]
+
+		cursor := "  "
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		}
+
+		checkbox := "[ ]"
+		if enabled {
+			checkbox = lipgloss.NewStyle().Foreground(ColorGreen).Render("[✓]")
+		}
+
+		nameStyle := lipgloss.NewStyle().Foreground(ColorText)
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if focused {
+			nameStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+			descStyle = lipgloss.NewStyle().Foreground(ColorText)
+		}
+
+		// Show (default) indicator for context7
+		suffix := ""
+		if mcp.id == "context7" {
+			suffix = lipgloss.NewStyle().Foreground(ColorYellow).Render(" (recommended)")
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
+			cursor,
+			checkbox,
+			nameStyle.Render(fmt.Sprintf("%-20s", mcp.name)),
+			suffix,
+			descStyle.Render(mcp.desc),
+		))
+	}
+
+	box := configBoxStyle.Width(a.deepDiveBoxWidth(65)).Render(content.String())
+	help := HelpStyle.Render("↑↓ navigate • space toggle • esc back")
+
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
+}

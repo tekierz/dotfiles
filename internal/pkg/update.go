@@ -30,13 +30,12 @@ func CheckAllUpdates() ([]Package, error) {
 		allPackages = append(allPackages, packages...)
 	}
 
-	// Deduplicate packages by name+manager (safety net)
+	// Deduplicate packages by name only (same package from different sources is still same package)
 	seen := make(map[string]bool)
 	var deduped []Package
 	for _, p := range allPackages {
-		key := p.Name + ":" + p.InstalledBy
-		if !seen[key] {
-			seen[key] = true
+		if !seen[p.Name] {
+			seen[p.Name] = true
 			deduped = append(deduped, p)
 		}
 	}

@@ -48,6 +48,16 @@ func AllMCPServers() map[string]MCPServer {
 			Command: "npx",
 			Args:    []string{"-y", "@modelcontextprotocol/server-github"},
 		},
+		"supabase": {
+			Type:    "stdio",
+			Command: "npx",
+			Args:    []string{"-y", "@supabase/mcp-server-supabase"},
+		},
+		"convex": {
+			Type:    "stdio",
+			Command: "npx",
+			Args:    []string{"-y", "@anthropic-ai/mcp-server-convex"},
+		},
 		"puppeteer": {
 			Type:    "stdio",
 			Command: "npx",

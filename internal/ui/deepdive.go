@@ -97,6 +97,9 @@ type DeepDiveConfig struct {
 	GlowPager string
 	GlowStyle string
 	GlowWidth int
+
+	// Claude Code MCP settings
+	ClaudeCodeMCPs map[string]bool // MCP servers to enable
 }
 
 // NewDeepDiveConfig creates a new config with defaults
@@ -254,6 +257,17 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GlowPager: "auto",
 		GlowStyle: "auto",
 		GlowWidth: 80,
+
+		// Claude Code MCP defaults
+		ClaudeCodeMCPs: map[string]bool{
+			"context7":            true,  // Documentation lookup (default enabled)
+			"task-master":         false, // Task management
+			"github":              false, // GitHub integration
+			"supabase":            false, // Supabase database
+			"convex":              false, // Convex backend
+			"puppeteer":           false, // Browser automation
+			"sequential-thinking": false, // Reasoning chains
+		},
 	}
 }
 
@@ -307,9 +321,15 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		},
 		{
 			Name:        "CLI Tools",
-			Description: "LazyGit, LazyDocker, btop, Glow, Claude",
+			Description: "LazyGit, LazyDocker, btop, Glow",
 			Screen:      ScreenConfigCLITools,
 			Icon:        "",
+		},
+		{
+			Name:        "Claude Code",
+			Description: "AI coding assistant, MCP servers",
+			Screen:      ScreenConfigClaudeCode,
+			Icon:        "󰚩",
 		},
 		// Quality of Life tools
 		{

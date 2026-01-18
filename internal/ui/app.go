@@ -766,8 +766,140 @@ func createBackupCmd() tea.Cmd {
 		manifestPath := filepath.Join(backupDir, "manifest.txt")
 		os.WriteFile(manifestPath, []byte(manifest), 0600)
 
+		// Run backup cleanup based on settings
+		cleanupBackups()
+
 		return backupCreateDoneMsg{name: timestamp, err: nil}
 	}
+}
+
+// cleanupBackups removes old backups based on global config settings
+func cleanupBackups() {
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return
+	}
+
+	backupsDir := filepath.Join(config.ConfigDir(), "backups")
+	entries, err := os.ReadDir(backupsDir)
+	if err != nil {
+		return
+	}
+
+	type backupInfo struct {
+		name    string
+		modTime time.Time
+	}
+
+	var backups []backupInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		backups = append(backups, backupInfo{
+			name:    entry.Name(),
+			modTime: info.ModTime(),
+		})
+	}
+
+	// Sort by modification time (newest first)
+	sort.Slice(backups, func(i, j int) bool {
+		return backups[i].modTime.After(backups[j].modTime)
+	})
+
+	now := time.Now()
+	for i, backup := range backups {
+		shouldDelete := false
+
+		// Delete if exceeds max count (and max count is set)
+		if cfg.BackupMaxCount > 0 && i >= cfg.BackupMaxCount {
+			shouldDelete = true
+		}
+
+		// Delete if exceeds max age (and max age is set)
+		if cfg.BackupMaxAgeDays > 0 {
+			age := now.Sub(backup.modTime)
+			if age > time.Duration(cfg.BackupMaxAgeDays)*24*time.Hour {
+				shouldDelete = true
+			}
+		}
+
+		if shouldDelete {
+			backupPath := filepath.Join(backupsDir, backup.name)
+			os.RemoveAll(backupPath)
+		}
+	}
+}
+
+// autoBackupIfEnabled creates a backup if auto-backup is enabled in settings
+func autoBackupIfEnabled() error {
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+
+	if !cfg.AutoBackup {
+		return nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	// Create backup directory with timestamp
+	timestamp := time.Now().Format("2006-01-02_15-04-05") + "_auto"
+	backupDir := filepath.Join(config.ConfigDir(), "backups", timestamp)
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
+		return err
+	}
+
+	// Files to backup (relative to home)
+	filesToBackup := []string{
+		".zshrc",
+		".tmux.conf",
+		".config/nvim/init.lua",
+		".config/ghostty/config",
+		".config/yazi/yazi.toml",
+		".gitconfig",
+	}
+
+	backedUp := []string{}
+	for _, relPath := range filesToBackup {
+		srcPath := filepath.Join(home, relPath)
+		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+			continue
+		}
+
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			continue
+		}
+
+		// Replace path separators with underscores for flat storage
+		safeName := strings.ReplaceAll(relPath, string(os.PathSeparator), "_")
+		dstPath := filepath.Join(backupDir, safeName)
+
+		if err := os.WriteFile(dstPath, data, 0600); err != nil {
+			continue
+		}
+
+		backedUp = append(backedUp, relPath)
+	}
+
+	// Write manifest
+	manifest := strings.Join(backedUp, "\n")
+	manifestPath := filepath.Join(backupDir, "manifest.txt")
+	os.WriteFile(manifestPath, []byte(manifest), 0600)
+
+	// Run cleanup after creating backup
+	cleanupBackups()
+
+	return nil
 }
 
 // Update handles messages
@@ -1216,7 +1348,7 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		ScreenConfigGit, ScreenConfigYazi, ScreenConfigFzf, ScreenConfigUtilities,
 		ScreenConfigMacApps, ScreenConfigApps, ScreenConfigCLITools, ScreenConfigGUIApps,
 		ScreenConfigCLIUtilities, ScreenConfigLazyGit, ScreenConfigLazyDocker,
-		ScreenConfigBtop, ScreenConfigGlow:
+		ScreenConfigBtop, ScreenConfigGlow, ScreenConfigClaudeCode:
 		return a.handleConfigScreenMouse(msg)
 	default:
 		return a, nil
@@ -1853,7 +1985,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// CLI Tools config
 	case ScreenConfigCLITools:
-		tools := []string{"lazygit", "lazydocker", "btop", "glow", "claude-code"}
+		tools := []string{"lazygit", "lazydocker", "btop", "glow"}
 		switch key {
 		case "up", "k":
 			if a.cliToolIndex > 0 {
@@ -2040,6 +2172,26 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					a.deepDiveConfig.GlowWidth += 10
 				}
 			}
+		case "esc", "enter":
+			a.configFieldIndex = 0
+			a.screen = ScreenDeepDiveMenu
+		}
+
+	// Claude Code config (MCP servers)
+	case ScreenConfigClaudeCode:
+		mcps := []string{"context7", "task-master", "github", "supabase", "convex", "puppeteer", "sequential-thinking"}
+		switch key {
+		case "up", "k":
+			if a.configFieldIndex > 0 {
+				a.configFieldIndex--
+			}
+		case "down", "j":
+			if a.configFieldIndex < len(mcps)-1 {
+				a.configFieldIndex++
+			}
+		case " ":
+			mcp := mcps[a.configFieldIndex]
+			a.deepDiveConfig.ClaudeCodeMCPs[mcp] = !a.deepDiveConfig.ClaudeCodeMCPs[mcp]
 		case "esc", "enter":
 			a.configFieldIndex = 0
 			a.screen = ScreenDeepDiveMenu
@@ -2364,6 +2516,8 @@ func (a *App) View() string {
 		return a.renderConfigBtop()
 	case ScreenConfigGlow:
 		return a.renderConfigGlow()
+	case ScreenConfigClaudeCode:
+		return a.renderConfigClaudeCode()
 	case ScreenConfigCLIUtilities:
 		return a.renderConfigCLIUtilities()
 	// Management platform screens
@@ -2426,6 +2580,16 @@ func (a *App) startInstallation() tea.Cmd {
 		if len(selectedTools) == 0 {
 			a.installOutput = append(a.installOutput, "No tools selected for installation")
 			return installDoneMsg{err: nil}
+		}
+
+		// Auto-backup before making changes (if enabled)
+		if err := autoBackupIfEnabled(); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("⚠ Auto-backup failed: %v", err))
+		} else {
+			globalCfg, _ := config.LoadGlobalConfig()
+			if globalCfg != nil && globalCfg.AutoBackup {
+				a.installOutput = append(a.installOutput, "✓ Auto-backup created before installation")
+			}
 		}
 
 		// Detect package manager
@@ -2547,11 +2711,19 @@ func (a *App) startInstallation() tea.Cmd {
 			a.installStep++
 			a.installOutput = append(a.installOutput, "\n▶ Configuring Claude Code MCP servers...")
 			claudeTool := tools.NewClaudeCodeTool()
-			if err := claudeTool.ApplyConfig(a.theme); err != nil {
+			// Use user's MCP selections from deep dive config
+			if err := claudeTool.ApplyConfigWithMCPs(a.deepDiveConfig.ClaudeCodeMCPs); err != nil {
 				a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Claude MCP: %v", err))
 				lastErr = err
 			} else {
-				a.installOutput = append(a.installOutput, "  ✓ Claude Code MCP servers configured (context7 enabled)")
+				// Count enabled MCPs for status message
+				enabledCount := 0
+				for _, enabled := range a.deepDiveConfig.ClaudeCodeMCPs {
+					if enabled {
+						enabledCount++
+					}
+				}
+				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
 			}
 		}
 

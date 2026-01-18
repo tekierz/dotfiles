@@ -45,6 +45,16 @@ func (t *ClaudeCodeTool) IsInstalled() bool {
 
 // ApplyConfig applies MCP server configuration
 func (t *ClaudeCodeTool) ApplyConfig(theme string) error {
+	// Use default MCPs when called without specific selections
+	defaults := make(map[string]bool)
+	for name := range config.DefaultMCPServers() {
+		defaults[name] = true
+	}
+	return t.ApplyConfigWithMCPs(defaults)
+}
+
+// ApplyConfigWithMCPs applies MCP server configuration with specific MCP selections
+func (t *ClaudeCodeTool) ApplyConfigWithMCPs(enabledMCPs map[string]bool) error {
 	cfg, err := config.LoadClaudeConfig()
 	if err != nil {
 		cfg = &config.ClaudeConfig{MCPServers: make(map[string]config.MCPServer)}
@@ -55,11 +65,18 @@ func (t *ClaudeCodeTool) ApplyConfig(theme string) error {
 		cfg.MCPServers = make(map[string]config.MCPServer)
 	}
 
-	// Add default MCPs if not already configured
-	defaults := config.DefaultMCPServers()
-	for name, server := range defaults {
-		if _, exists := cfg.MCPServers[name]; !exists {
-			cfg.MCPServers[name] = server
+	// Get all available MCP server configurations
+	allMCPs := config.AllMCPServers()
+
+	// Add enabled MCPs
+	for name, enabled := range enabledMCPs {
+		if enabled {
+			if server, exists := allMCPs[name]; exists {
+				cfg.MCPServers[name] = server
+			}
+		} else {
+			// Remove disabled MCPs if they exist
+			delete(cfg.MCPServers, name)
 		}
 	}
 

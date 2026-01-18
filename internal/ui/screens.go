@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
 // renderAnimation renders the intro animation screen
@@ -492,13 +493,15 @@ func (a *App) renderFileTree() string {
 			}
 		}
 	}
-	// macOS Apps
-	for id, enabled := range cfg.MacApps {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
+	// macOS Apps (only on macOS)
+	if pkg.DetectPlatform() == pkg.PlatformMacOS {
+		for id, enabled := range cfg.MacApps {
+			if enabled {
+				if a.manageInstalled[id] {
+					alreadyInstalled = append(alreadyInstalled, id)
+				} else {
+					toInstall = append(toInstall, id)
+				}
 			}
 		}
 	}
