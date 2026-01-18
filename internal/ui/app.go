@@ -3308,8 +3308,8 @@ var ScreenToolIDs = map[Screen][]string{
 	ScreenConfigLazyDocker:   {"lazydocker"},
 	ScreenConfigBtop:         {"btop"},
 	ScreenConfigGlow:         {"glow"},
-	ScreenConfigCLIUtilities: {"bat", "eza", "zoxide", "ripgrep", "fd", "delta", "fswatch"},
-	ScreenConfigGUIApps:      {"zen-browser", "cursor", "lm-studio", "obs"},
+	ScreenConfigCLIUtilities: {"bat", "eza", "zoxide", "ripgrep", "fd", "delta", "fswatch", "tailscale"},
+	ScreenConfigGUIApps:      {"zen-browser", "cursor", "lm-studio", "obs", "sunshine", "moonlight"},
 	ScreenConfigMacApps:      {"rectangle", "raycast", "iina", "appcleaner"},
 	ScreenConfigCLITools:     {"lazygit", "lazydocker", "btop", "glow", "claude-code"},
 	ScreenConfigUtilities:    {"hk", "caff", "sshh"}, // shell scripts, not package manager installs

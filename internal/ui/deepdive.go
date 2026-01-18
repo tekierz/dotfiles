@@ -226,17 +226,20 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"cursor":      false,
 			"lm-studio":   false,
 			"obs":         false,
+			"sunshine":    false,
+			"moonlight":   false,
 		},
 
 		// CLI Utilities defaults (commonly useful tools enabled by default)
 		CLIUtilities: map[string]bool{
-			"bat":     true,  // cat replacement with syntax highlighting
-			"eza":     true,  // ls replacement
-			"zoxide":  true,  // cd replacement
-			"ripgrep": true,  // grep replacement
-			"fd":      true,  // find replacement
-			"delta":   true,  // git diff viewer
-			"fswatch": false, // file watcher (optional)
+			"bat":       true,  // cat replacement with syntax highlighting
+			"eza":       true,  // ls replacement
+			"zoxide":    true,  // cd replacement
+			"ripgrep":   true,  // grep replacement
+			"fd":        true,  // find replacement
+			"delta":     true,  // git diff viewer
+			"fswatch":   false, // file watcher (optional)
+			"tailscale": false, // mesh VPN (optional)
 		},
 
 		// LazyGit defaults
@@ -347,14 +350,14 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		},
 		{
 			Name:        "CLI Utilities",
-			Description: "bat, eza, zoxide, ripgrep, fd, delta",
+			Description: "bat, eza, zoxide, ripgrep, fd, tailscale",
 			Screen:      ScreenConfigCLIUtilities,
 			Icon:        "󰘳",
 		},
 		// Optional Apps
 		{
 			Name:        "GUI Apps",
-			Description: "Zen Browser, Cursor, LM Studio, OBS",
+			Description: "Zen Browser, Cursor, Sunshine, Moonlight",
 			Screen:      ScreenConfigGUIApps,
 			Icon:        "󰏇",
 			Category:    "OPTIONAL APPS",
