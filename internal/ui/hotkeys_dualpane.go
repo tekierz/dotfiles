@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/hotkeys"
 )
 
@@ -161,6 +162,40 @@ func (a *App) hotkeyCategories() []hotkeys.Category {
 	return cats
 }
 
+// getCurrentUsername returns the active user name from global config, or "default" if none set.
+func (a *App) getCurrentUsername() string {
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil || cfg == nil || cfg.ActiveUser == "" {
+		return "default"
+	}
+	return cfg.ActiveUser
+}
+
+// getCurrentUserHotkeys returns the hotkeys config for the current user.
+func (a *App) getCurrentUserHotkeys() *config.UserHotkeys {
+	if a.hotkeysFavorites == nil {
+		a.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]config.UserHotkeys)}
+	}
+	username := a.getCurrentUsername()
+	return a.hotkeysFavorites.GetUserHotkeys(username)
+}
+
+// isHotkeyFavorite checks if the given hotkey item is a favorite.
+func (a *App) isHotkeyFavorite(categoryID, itemKey string) bool {
+	userHotkeys := a.getCurrentUserHotkeys()
+	return userHotkeys.IsFavorite(categoryID, itemKey)
+}
+
+// toggleHotkeyFavorite toggles the favorite status of the current hotkey item.
+func (a *App) toggleHotkeyFavorite(categoryID, itemKey string) {
+	username := a.getCurrentUsername()
+	userHotkeys := a.getCurrentUserHotkeys()
+	userHotkeys.ToggleFavorite(categoryID, itemKey)
+	a.hotkeysFavorites.SetUserHotkeys(username, userHotkeys)
+	// Save to disk
+	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
+}
+
 func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
@@ -176,11 +211,25 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Clamp indices.
 	a.hotkeyCategory = clampInt(a.hotkeyCategory, 0, len(cats)-1)
-	items := cats[a.hotkeyCategory].Items
-	if len(items) == 0 {
+	cat := cats[a.hotkeyCategory]
+	allItems := cat.Items
+
+	// Get display items (filtered if favorites-only mode)
+	displayItems := allItems
+	if a.hotkeysFavoritesOnly {
+		var filtered []hotkeys.Item
+		for _, it := range allItems {
+			if a.isHotkeyFavorite(cat.ID, it.Keys) {
+				filtered = append(filtered, it)
+			}
+		}
+		displayItems = filtered
+	}
+
+	if len(displayItems) == 0 {
 		a.hotkeyCursor = 0
 	} else {
-		a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(items)-1)
+		a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(displayItems)-1)
 	}
 
 	ensureCatVisible := func() {
@@ -195,7 +244,7 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	ensureItemVisible := func() {
-		maxScroll := layout.maxItemScroll(len(items))
+		maxScroll := layout.maxItemScroll(len(displayItems))
 		a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxScroll)
 		if a.hotkeyCursor < a.hotkeyItemScroll {
 			a.hotkeyItemScroll = a.hotkeyCursor
@@ -213,6 +262,7 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
 		a.hotkeyFilter = ""
+		a.hotkeysFavoritesOnly = false // Reset favorites filter on exit
 		a.screen = a.hotkeysReturn
 		a.hotkeysReturn = ScreenMainMenu
 		return a, nil
@@ -248,6 +298,12 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "right", "l", "enter":
 			a.hotkeysPane = hotkeysPaneItems
 			return a, nil
+		case "F":
+			// Allow toggling favorites filter from categories pane too
+			a.hotkeysFavoritesOnly = !a.hotkeysFavoritesOnly
+			a.hotkeyCursor = 0
+			a.hotkeyItemScroll = 0
+			return a, nil
 		}
 		return a, nil
 	}
@@ -261,13 +317,42 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ensureItemVisible()
 		return a, nil
 	case "down", "j":
-		if a.hotkeyCursor < len(items)-1 {
+		if a.hotkeyCursor < len(displayItems)-1 {
 			a.hotkeyCursor++
 		}
 		ensureItemVisible()
 		return a, nil
 	case "left", "h":
 		a.hotkeysPane = hotkeysPaneCategories
+		return a, nil
+	case "f":
+		// Toggle favorite for current item
+		if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
+			item := displayItems[a.hotkeyCursor]
+			a.toggleHotkeyFavorite(cat.ID, item.Keys)
+			// If in favorites-only mode and we just unfavorited, adjust cursor
+			if a.hotkeysFavoritesOnly {
+				// Recalculate filtered list
+				var newFiltered []hotkeys.Item
+				for _, it := range allItems {
+					if a.isHotkeyFavorite(cat.ID, it.Keys) {
+						newFiltered = append(newFiltered, it)
+					}
+				}
+				if len(newFiltered) == 0 {
+					a.hotkeyCursor = 0
+				} else if a.hotkeyCursor >= len(newFiltered) {
+					a.hotkeyCursor = len(newFiltered) - 1
+				}
+			}
+		}
+		return a, nil
+	case "F":
+		// Toggle favorites-only filter mode
+		a.hotkeysFavoritesOnly = !a.hotkeysFavoritesOnly
+		// Reset cursor when toggling filter
+		a.hotkeyCursor = 0
+		a.hotkeyItemScroll = 0
 		return a, nil
 	}
 
@@ -309,8 +394,21 @@ func (a *App) handleHotkeysMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.X < layout.rightX {
 			a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll+delta, 0, layout.maxCatScroll(len(cats)))
 		} else {
-			items := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)].Items
-			a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll+delta, 0, layout.maxItemScroll(len(items)))
+			cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
+			allItems := cat.Items
+
+			// Get display items (filtered if favorites-only mode)
+			displayItems := allItems
+			if a.hotkeysFavoritesOnly {
+				var filtered []hotkeys.Item
+				for _, it := range allItems {
+					if a.isHotkeyFavorite(cat.ID, it.Keys) {
+						filtered = append(filtered, it)
+					}
+				}
+				displayItems = filtered
+			}
+			a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll+delta, 0, layout.maxItemScroll(len(displayItems)))
 		}
 		return a, nil
 	}
@@ -334,10 +432,24 @@ func (a *App) handleHotkeysMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	// Click items.
 	if layout.inRightList(m.X, m.Y) {
-		items := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)].Items
+		cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
+		allItems := cat.Items
+
+		// Get display items (filtered if favorites-only mode)
+		displayItems := allItems
+		if a.hotkeysFavoritesOnly {
+			var filtered []hotkeys.Item
+			for _, it := range allItems {
+				if a.isHotkeyFavorite(cat.ID, it.Keys) {
+					filtered = append(filtered, it)
+				}
+			}
+			displayItems = filtered
+		}
+
 		rel := m.Y - layout.rightListY
 		idx := a.hotkeyItemScroll + rel
-		if idx >= 0 && idx < len(items) {
+		if idx >= 0 && idx < len(displayItems) {
 			a.hotkeysPane = hotkeysPaneItems
 			a.hotkeyCursor = idx
 		}
@@ -368,16 +480,28 @@ func (a *App) renderHotkeysDualPane() string {
 		}
 		a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll, 0, maxCatScroll)
 
-		items := cats[a.hotkeyCategory].Items
-		if len(items) == 0 {
+		cat := cats[a.hotkeyCategory]
+		allItems := cat.Items
+
+		// Get display items (filtered if favorites-only mode)
+		displayItems := allItems
+		if a.hotkeysFavoritesOnly {
+			var filtered []hotkeys.Item
+			for _, it := range allItems {
+				if a.isHotkeyFavorite(cat.ID, it.Keys) {
+					filtered = append(filtered, it)
+				}
+			}
+			displayItems = filtered
+		}
+
+		if len(displayItems) == 0 {
 			a.hotkeyCursor = 0
 			a.hotkeyItemScroll = 0
-			if a.hotkeysPane == hotkeysPaneItems {
-				a.hotkeysPane = hotkeysPaneCategories
-			}
+			// Don't force back to categories pane if filtering - user might want to toggle filter
 		} else {
-			a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(items)-1)
-			maxItemScroll := layout.maxItemScroll(len(items))
+			a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(displayItems)-1)
+			maxItemScroll := layout.maxItemScroll(len(displayItems))
 			a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxItemScroll)
 			if a.hotkeyCursor < a.hotkeyItemScroll {
 				a.hotkeyItemScroll = a.hotkeyCursor
@@ -427,7 +551,7 @@ func (a *App) renderHotkeysHeader(width int) string {
 
 func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 	// Split help text into two lines for better readability
-	helpLine1 := "Tab pane  ↑↓ move  ←→ switch"
+	helpLine1 := "Tab pane  ↑↓ move  ←→ switch  f toggle favorite  F filter favorites"
 	helpLine2 := "Click select  Scroll  Esc back  q quit"
 	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
 		helpLine1 + "\n" + helpLine2,
@@ -440,6 +564,9 @@ func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 	}
 	if a.hotkeyFilter != "" {
 		statusText = statusText + lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  (filtered)")
+	}
+	if a.hotkeysFavoritesOnly {
+		statusText = statusText + lipgloss.NewStyle().Foreground(ColorYellow).Render("  [favorites only]")
 	}
 	if statusText == "" {
 		statusText = " "
@@ -546,30 +673,67 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 	cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
 	items := cat.Items
 
+	// Filter to favorites only if mode is enabled
+	displayItems := items
+	itemIndices := make([]int, len(items)) // Map display index to original index
+	for i := range items {
+		itemIndices[i] = i
+	}
+	if a.hotkeysFavoritesOnly {
+		var filteredItems []hotkeys.Item
+		var filteredIndices []int
+		for i, it := range items {
+			if a.isHotkeyFavorite(cat.ID, it.Keys) {
+				filteredItems = append(filteredItems, it)
+				filteredIndices = append(filteredIndices, i)
+			}
+		}
+		displayItems = filteredItems
+		itemIndices = filteredIndices
+	}
+
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("ITEMS")
-	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("%s %s", cat.Icon, cat.Name))
+	subText := fmt.Sprintf("%s %s", cat.Icon, cat.Name)
+	if a.hotkeysFavoritesOnly {
+		subText += fmt.Sprintf(" (%d favorites)", len(displayItems))
+	}
+	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(subText)
 
 	// Use capped rightW for inner width calculation
 	innerW := maxInt(0, rightW-(layout.border*2)-(layout.padX*2))
 	keyW := min(22, maxInt(12, innerW/3))
 
+	// Show message if no favorites in filter mode
+	if a.hotkeysFavoritesOnly && len(displayItems) == 0 {
+		msg := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No favorites in this category.\nPress 'F' to show all items.")
+		content := lipgloss.JoinVertical(lipgloss.Left, title, sub, "", msg)
+		return panel.Render(content)
+	}
+
 	lines := make([]string, 0, layout.rightListH)
-	for i := a.hotkeyItemScroll; i < len(items) && len(lines) < layout.rightListH; i++ {
-		it := items[i]
+	for i := a.hotkeyItemScroll; i < len(displayItems) && len(lines) < layout.rightListH; i++ {
+		it := displayItems[i]
 		focused := i == a.hotkeyCursor
+
+		// Check if this item is a favorite
+		isFavorite := a.isHotkeyFavorite(cat.ID, it.Keys)
+		starIndicator := "  "
+		if isFavorite {
+			starIndicator = lipgloss.NewStyle().Foreground(ColorYellow).Render("* ")
+		}
 
 		cursor := "  "
 		keyStyle := lipgloss.NewStyle().Foreground(ColorYellow).Bold(true).Width(keyW)
 		descStyle := lipgloss.NewStyle().Foreground(ColorText)
 		lineStyle := lipgloss.NewStyle()
 		if focused {
-			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("> ")
 			descStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 			// Add background highlight for focused item
 			lineStyle = lipgloss.NewStyle().Background(ColorOverlay)
 		}
 
-		line := fmt.Sprintf("%s%s %s", cursor, keyStyle.Render(it.Keys), descStyle.Render(it.Description))
+		line := fmt.Sprintf("%s%s%s %s", starIndicator, cursor, keyStyle.Render(it.Keys), descStyle.Render(it.Description))
 		// Apply background highlight for focused line
 		if focused {
 			line = lineStyle.Width(innerW).Render(truncateVisible(line, innerW))

@@ -76,6 +76,9 @@ func NewRegistry() *Registry {
 	r.Register(NewGlowTool())
 	r.Register(NewFswatchTool())
 	r.Register(NewClaudeCodeTool())
+	r.Register(NewTailscaleTool())
+	r.Register(NewSunshineTool())
+	r.Register(NewMoonlightTool())
 
 	// GUI Apps
 	r.Register(NewZenBrowserTool())

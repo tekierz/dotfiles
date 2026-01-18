@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -77,6 +78,7 @@ const (
 	ScreenManageLazyDocker
 	ScreenManageBtop
 	ScreenManageGlow
+	ScreenConfigClaudeCode
 )
 
 // Available themes
@@ -179,17 +181,27 @@ type App struct {
 	runner          *runner.Runner
 
 	// Management platform state (new)
-	mainMenuIndex    int    // Main menu cursor
-	manageIndex      int    // Manage screen cursor
-	updateIndex      int    // Update screen cursor
-	hotkeyFilter     string // Filter hotkeys by tool
-	hotkeyCursor     int    // Hotkeys screen cursor
-	hotkeyCategory   int    // Current category in hotkeys
-	hotkeysPane      int    // 0 = categories, 1 = items
-	hotkeyCatScroll  int    // Category list scroll
-	hotkeyItemScroll int    // Item list scroll
-	hotkeysReturn    Screen // Screen to return to when leaving hotkeys
-	backupIndex      int    // Backup selection cursor
+	mainMenuIndex        int                   // Main menu cursor
+	manageIndex          int                   // Manage screen cursor
+	updateIndex          int                   // Update screen cursor
+	hotkeyFilter         string                // Filter hotkeys by tool
+	hotkeyCursor         int                   // Hotkeys screen cursor
+	hotkeyCategory       int                   // Current category in hotkeys
+	hotkeysPane          int                   // 0 = categories, 1 = items
+	hotkeyCatScroll      int                   // Category list scroll
+	hotkeyItemScroll     int                   // Item list scroll
+	hotkeysReturn        Screen                // Screen to return to when leaving hotkeys
+	hotkeysFavorites     *config.HotkeysConfig // User hotkey favorites config
+	hotkeysFavoritesOnly bool                  // Filter to show only favorites
+	backupIndex          int                   // Backup selection cursor
+	backups              []BackupEntry
+	backupsLoaded        bool
+	backupsLoading       bool
+	backupConfirmMode    bool
+	backupConfirmType    string // "restore" or "delete"
+	backupStatus         string // Status message for backup operations
+	backupRunning        bool   // Currently running a backup operation
+	backupError          error  // Error from backup operation
 
 	// Users screen state
 	usersItems      []userItem // Cached user list
@@ -276,6 +288,13 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 	// Best-effort: load persisted management settings for deep-dive manager UI.
 	if cfg, err := config.LoadToolConfig("manage", NewManageConfig); err == nil && cfg != nil {
 		app.manageConfig = cfg
+	}
+
+	// Best-effort: load hotkeys favorites config.
+	if hkCfg, err := config.LoadHotkeysConfig(); err == nil && hkCfg != nil {
+		app.hotkeysFavorites = hkCfg
+	} else {
+		app.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]config.UserHotkeys)}
 	}
 
 	if skipIntro {
@@ -392,6 +411,40 @@ type manageStartInstallMsg struct {
 type updateStartMsg struct {
 	packages []pkg.Package
 	all      bool
+}
+
+// BackupEntry represents a backup in the list
+type BackupEntry struct {
+	Name      string
+	Timestamp time.Time
+	FileCount int
+	Size      int64 // bytes
+	Path      string
+}
+
+// backupsLoadedMsg indicates the async backup list loading completed
+type backupsLoadedMsg struct {
+	backups []BackupEntry
+	err     error
+}
+
+// backupRestoreDoneMsg indicates a restore operation completed
+type backupRestoreDoneMsg struct {
+	name  string
+	count int
+	err   error
+}
+
+// backupDeleteDoneMsg indicates a delete operation completed
+type backupDeleteDoneMsg struct {
+	name string
+	err  error
+}
+
+// backupCreateDoneMsg indicates a new backup was created
+type backupCreateDoneMsg struct {
+	name string
+	err  error
 }
 
 func tickAnimation() tea.Cmd {
@@ -516,6 +569,204 @@ func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
 
 		// Sudo not needed or already cached - start streaming update
 		return updateStartMsg{packages: packages, all: all}
+	}
+}
+
+// loadBackupsCmd loads the list of available backups asynchronously
+func loadBackupsCmd() tea.Cmd {
+	return func() tea.Msg {
+		backupDir := filepath.Join(config.ConfigDir(), "backups")
+		entries, err := os.ReadDir(backupDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return backupsLoadedMsg{backups: []BackupEntry{}}
+			}
+			return backupsLoadedMsg{err: err}
+		}
+
+		var backups []BackupEntry
+		for _, entry := range entries {
+			if entry.IsDir() {
+				info, _ := entry.Info()
+				path := filepath.Join(backupDir, entry.Name())
+				count := countBackupFiles(path)
+				size := calcDirSize(path)
+
+				timestamp := time.Time{}
+				if info != nil {
+					timestamp = info.ModTime()
+				}
+
+				backups = append(backups, BackupEntry{
+					Name:      entry.Name(),
+					Timestamp: timestamp,
+					FileCount: count,
+					Size:      size,
+					Path:      path,
+				})
+			}
+		}
+
+		// Sort by timestamp descending (newest first)
+		sort.Slice(backups, func(i, j int) bool {
+			return backups[i].Timestamp.After(backups[j].Timestamp)
+		})
+
+		return backupsLoadedMsg{backups: backups}
+	}
+}
+
+// countBackupFiles counts files in a backup directory
+func countBackupFiles(path string) int {
+	count := 0
+	filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
+		if info != nil && !info.IsDir() {
+			count++
+		}
+		return nil
+	})
+	return count
+}
+
+// calcDirSize calculates the total size of files in a directory
+func calcDirSize(path string) int64 {
+	var size int64
+	filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
+		if info != nil && !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size
+}
+
+// formatBytes formats a byte count into a human-readable string
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// restoreBackupCmd restores files from a backup
+func restoreBackupCmd(backup BackupEntry) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := os.ReadDir(backup.Path)
+		if err != nil {
+			return backupRestoreDoneMsg{name: backup.Name, err: err}
+		}
+
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return backupRestoreDoneMsg{name: backup.Name, err: err}
+		}
+
+		restored := 0
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Name() == "manifest.txt" {
+				continue
+			}
+
+			srcPath := filepath.Join(backup.Path, entry.Name())
+			// Backup files are named with underscores replacing slashes
+			relPath := strings.ReplaceAll(entry.Name(), "_", string(os.PathSeparator))
+			dstPath := filepath.Clean(filepath.Join(home, relPath))
+
+			// Security: Prevent path traversal attacks
+			if !strings.HasPrefix(dstPath, home+string(os.PathSeparator)) && dstPath != home {
+				continue
+			}
+
+			// Ensure destination directory exists
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+				continue
+			}
+
+			// Read source and write to destination
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				continue
+			}
+
+			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+				continue
+			}
+
+			restored++
+		}
+
+		return backupRestoreDoneMsg{name: backup.Name, count: restored, err: nil}
+	}
+}
+
+// deleteBackupCmd deletes a backup directory
+func deleteBackupCmd(backup BackupEntry) tea.Cmd {
+	return func() tea.Msg {
+		err := os.RemoveAll(backup.Path)
+		return backupDeleteDoneMsg{name: backup.Name, err: err}
+	}
+}
+
+// createBackupCmd creates a new backup of current dotfiles
+func createBackupCmd() tea.Cmd {
+	return func() tea.Msg {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return backupCreateDoneMsg{err: err}
+		}
+
+		// Create backup directory with timestamp
+		timestamp := time.Now().Format("2006-01-02_15-04-05")
+		backupDir := filepath.Join(config.ConfigDir(), "backups", timestamp)
+		if err := os.MkdirAll(backupDir, 0700); err != nil {
+			return backupCreateDoneMsg{err: err}
+		}
+
+		// Files to backup (relative to home)
+		filesToBackup := []string{
+			".zshrc",
+			".tmux.conf",
+			".config/nvim/init.lua",
+			".config/ghostty/config",
+			".config/yazi/yazi.toml",
+			".gitconfig",
+		}
+
+		backedUp := []string{}
+		for _, relPath := range filesToBackup {
+			srcPath := filepath.Join(home, relPath)
+			if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+				continue
+			}
+
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				continue
+			}
+
+			// Replace path separators with underscores for flat storage
+			safeName := strings.ReplaceAll(relPath, string(os.PathSeparator), "_")
+			dstPath := filepath.Join(backupDir, safeName)
+
+			if err := os.WriteFile(dstPath, data, 0600); err != nil {
+				continue
+			}
+
+			backedUp = append(backedUp, relPath)
+		}
+
+		// Write manifest
+		manifest := strings.Join(backedUp, "\n")
+		manifestPath := filepath.Join(backupDir, "manifest.txt")
+		os.WriteFile(manifestPath, []byte(manifest), 0600)
+
+		return backupCreateDoneMsg{name: timestamp, err: nil}
 	}
 }
 
@@ -855,6 +1106,59 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.updateCheckDone = false
 			a.updateChecking = true
 			return a, checkUpdatesCmd()
+		}
+		return a, nil
+
+	case backupsLoadedMsg:
+		a.backupsLoading = false
+		a.backupsLoaded = true
+		if msg.err != nil {
+			a.backupError = msg.err
+			a.backups = []BackupEntry{}
+		} else {
+			a.backups = msg.backups
+			a.backupError = nil
+		}
+		return a, nil
+
+	case backupRestoreDoneMsg:
+		a.backupRunning = false
+		a.backupConfirmMode = false
+		if msg.err != nil {
+			a.backupStatus = fmt.Sprintf("Restore failed: %v", msg.err)
+		} else {
+			a.backupStatus = fmt.Sprintf("Restored %d files from %s", msg.count, msg.name)
+		}
+		return a, nil
+
+	case backupDeleteDoneMsg:
+		a.backupRunning = false
+		a.backupConfirmMode = false
+		if msg.err != nil {
+			a.backupStatus = fmt.Sprintf("Delete failed: %v", msg.err)
+		} else {
+			a.backupStatus = fmt.Sprintf("Deleted backup: %s", msg.name)
+			// Adjust index if needed
+			if a.backupIndex > 0 && a.backupIndex >= len(a.backups)-1 {
+				a.backupIndex--
+			}
+			// Refresh backup list
+			a.backupsLoaded = false
+			a.backupsLoading = true
+			return a, loadBackupsCmd()
+		}
+		return a, nil
+
+	case backupCreateDoneMsg:
+		a.backupRunning = false
+		if msg.err != nil {
+			a.backupStatus = fmt.Sprintf("Backup failed: %v", msg.err)
+		} else {
+			a.backupStatus = fmt.Sprintf("Created backup: %s", msg.name)
+			// Refresh backup list
+			a.backupsLoaded = false
+			a.backupsLoading = true
+			return a, loadBackupsCmd()
 		}
 		return a, nil
 	}
@@ -1909,11 +2213,70 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Backups screen navigation
 	case ScreenBackups:
+		// Start async backup loading if not already running or done
+		if !a.backupsLoading && !a.backupsLoaded {
+			a.backupsLoading = true
+			return a, loadBackupsCmd()
+		}
+		// Don't allow actions while backup operation is running
+		if a.backupRunning {
+			return a, nil
+		}
+		// Handle confirmation mode
+		if a.backupConfirmMode {
+			switch key {
+			case "y", "Y":
+				if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
+					a.backupRunning = true
+					backup := a.backups[a.backupIndex]
+					if a.backupConfirmType == "restore" {
+						return a, restoreBackupCmd(backup)
+					} else if a.backupConfirmType == "delete" {
+						return a, deleteBackupCmd(backup)
+					}
+				}
+				a.backupConfirmMode = false
+			case "n", "N", "esc":
+				a.backupConfirmMode = false
+				a.backupStatus = ""
+			}
+			return a, nil
+		}
 		// Handle tab navigation first
 		if handled, cmd := a.handleTabNavigationWithCmd(key); handled {
 			return a, cmd
 		}
 		switch key {
+		case "up", "k":
+			if a.backupIndex > 0 {
+				a.backupIndex--
+			}
+		case "down", "j":
+			if len(a.backups) > 0 && a.backupIndex < len(a.backups)-1 {
+				a.backupIndex++
+			}
+		case "enter": // Restore selected backup
+			if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
+				a.backupConfirmMode = true
+				a.backupConfirmType = "restore"
+				a.backupStatus = fmt.Sprintf("Restore backup '%s'? (y/n)", a.backups[a.backupIndex].Name)
+			}
+		case "d", "D": // Delete selected backup
+			if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
+				a.backupConfirmMode = true
+				a.backupConfirmType = "delete"
+				a.backupStatus = fmt.Sprintf("Delete backup '%s'? (y/n)", a.backups[a.backupIndex].Name)
+			}
+		case "n", "N": // Create new backup
+			a.backupRunning = true
+			a.backupStatus = "Creating backup..."
+			return a, createBackupCmd()
+		case "r", "R": // Refresh backup list
+			a.backupsLoaded = false
+			a.backupsLoading = true
+			a.backupStatus = ""
+			a.backupError = nil
+			return a, loadBackupsCmd()
 		case "esc":
 			a.screen = ScreenMainMenu
 		}

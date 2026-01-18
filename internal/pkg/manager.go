@@ -165,10 +165,10 @@ func AllManagers() []PackageManager {
 	if brew := NewBrewManager(); brew.IsAvailable() {
 		managers = append(managers, brew)
 	}
+	// Prefer paru if available (handles both official + AUR)
 	if paru := NewPacmanManager(true); paru.IsAvailable() {
 		managers = append(managers, paru)
-	}
-	if pacman := NewPacmanManager(false); pacman.IsAvailable() {
+	} else if pacman := NewPacmanManager(false); pacman.IsAvailable() {
 		managers = append(managers, pacman)
 	}
 	if apt := NewAptManager(); apt.IsAvailable() {

@@ -9,7 +9,7 @@ type DeepDiveConfig struct {
 	GhosttyFontFamily      string // Font family name
 	GhosttyBlurRadius      int    // 0-100 (blur behind window)
 	GhosttyScrollbackLines int    // Number of scrollback lines
-	GhosttyCursorStyle      string // block, bar, underline
+	GhosttyCursorStyle     string // block, bar, underline
 
 	// Tmux settings
 	TmuxPrefix       string
@@ -109,7 +109,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GhosttyFontFamily:      "JetBrains Mono",
 		GhosttyBlurRadius:      0,
 		GhosttyScrollbackLines: 10000,
-		GhosttyCursorStyle:      "block",
+		GhosttyCursorStyle:     "block",
 
 		// Tmux defaults
 		TmuxPrefix:       "ctrl-a",

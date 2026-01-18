@@ -522,7 +522,7 @@ func (a *App) renderFileTree() string {
 
 	// Already installed section
 	if len(alreadyInstalled) > 0 {
-		lines = append(lines, mutedStyle.Render("  Already Installed (skipped):"))
+		lines = append(lines, mutedStyle.Render("  Already Installed (settings will update):"))
 		for i, toolID := range alreadyInstalled {
 			prefix := "├──"
 			if i == len(alreadyInstalled)-1 {
@@ -530,6 +530,7 @@ func (a *App) renderFileTree() string {
 			}
 			lines = append(lines, textStyle.Render("  "+prefix+" ")+mutedStyle.Render(toolID+" ✓"))
 		}
+		lines = append(lines, mutedStyle.Render("  Note: Settings and themes will be applied to all tools"))
 		lines = append(lines, "")
 	}
 
@@ -605,10 +606,11 @@ func (a *App) renderFileTree() string {
 	tree := strings.Join(lines, "\n")
 
 	legend := mutedStyle.Render(
-		fmt.Sprintf("  %s New    %s Modified    %s Package",
+		fmt.Sprintf("  %s New    %s Modified    %s Package    %s Settings Only",
 			newStyle.Render("●"),
 			modStyle.Render("●"),
 			pkgStyle.Render("●"),
+			mutedStyle.Render("●"),
 		))
 
 	help := HelpStyle.Render("[ENTER] Start Installation    [ESC] Back")
