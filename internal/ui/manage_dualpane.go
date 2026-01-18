@@ -1,0 +1,1730 @@
+package ui
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"unicode/utf8"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/runner"
+	"github.com/tekierz/dotfiles/internal/tools"
+)
+
+// ==========================
+// Manage Screen (Dual Pane)
+// ==========================
+//
+// Design goals:
+// - Always render in a predictable full-screen layout (no centering) so mouse hit-testing is simple.
+// - Dual-pane by default: left = tools, right = settings for selected tool.
+// - Keyboard first, but mouse friendly (click to select, wheel to scroll, click to toggle/adjust).
+//
+// Notes:
+// - This UI edits a persistent ManageConfig stored at:
+//   ~/.config/dotfiles/tools/manage.json
+//   via internal/config's generic JSON helpers.
+//
+// - The underlying "apply config to actual tool config files" is a separate concern; here we focus
+//   on the management experience + storing preferences.
+
+const (
+	managePaneTools    = 0
+	managePaneSettings = 1
+)
+
+// manageFieldKind describes how a setting should be rendered and edited.
+type manageFieldKind int
+
+const (
+	manageFieldText manageFieldKind = iota
+	manageFieldToggle
+	manageFieldNumber
+	manageFieldOption
+)
+
+// manageField is a single editable field in the right pane.
+//
+// This is intentionally "small" and pointer-based so we can edit values without lots of boilerplate.
+// For more complex types (slices, maps), add explicit handlers later.
+type manageField struct {
+	key         string
+	label       string
+	description string
+	kind        manageFieldKind
+
+	// One of these will be set depending on kind.
+	str  *string
+	b    *bool
+	n    *int
+	unit string
+
+	// For option fields (kind == manageFieldOption).
+	options []string
+
+	// For numeric fields (kind == manageFieldNumber).
+	min  int
+	max  int
+	step int
+}
+
+// manageItem is a tool entry in the left pane.
+type manageItem struct {
+	id           string
+	name         string
+	icon         string
+	description  string
+	category     tools.Category
+	installed    bool
+	configurable bool
+}
+
+// manageSavedMsg is emitted after a save attempt.
+type manageSavedMsg struct{ err error }
+
+// manageInstallDoneMsg is emitted after attempting to install a tool/app.
+type manageInstallDoneMsg struct {
+	toolID string
+	err    error
+}
+
+func (a *App) saveManageConfigCmd() tea.Cmd {
+	// Capture by value (pointer is stable) and run file I/O in a command.
+	cfg := a.manageConfig
+	theme := a.theme
+	nav := a.navStyle
+	animationsEnabled := a.animationsEnabled
+	return func() tea.Msg {
+		if err := config.SaveToolConfig("manage", cfg); err != nil {
+			return manageSavedMsg{err: err}
+		}
+
+		// Also persist global theme/nav so installer + CLI stay in sync.
+		g, err := config.LoadGlobalConfig()
+		if err != nil {
+			g = config.DefaultGlobalConfig()
+		}
+		g.Theme = theme
+		g.NavStyle = nav
+		g.DisableAnimations = !animationsEnabled
+
+		if err := config.SaveGlobalConfig(g); err != nil {
+			return manageSavedMsg{err: err}
+		}
+
+		return manageSavedMsg{err: nil}
+	}
+}
+
+func (a *App) installToolCmd(toolID string) tea.Cmd {
+	return func() tea.Msg {
+		reg := tools.GetRegistry()
+		t, ok := reg.Get(toolID)
+		if !ok {
+			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("unknown tool: %s", toolID)}
+		}
+
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
+		}
+
+		return manageInstallDoneMsg{toolID: toolID, err: t.Install(mgr)}
+	}
+}
+
+// checkSudoAndInstallCmd checks if sudo is needed and either prompts or starts install
+func (a *App) checkSudoAndInstallCmd(toolID string) tea.Cmd {
+	return func() tea.Msg {
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
+		}
+
+		// Check if sudo is needed and not cached
+		if mgr.NeedsSudo() && !runner.CheckSudoCached() {
+			return manageSudoRequiredMsg{toolID: toolID}
+		}
+
+		// Sudo not needed or already cached - start streaming install
+		return manageStartInstallMsg{toolID: toolID}
+	}
+}
+
+func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Inline string editor captures keys first so typing doesn't trigger global bindings.
+	if a.manageEditing {
+		switch key {
+		case "esc":
+			a.manageCancelEditing()
+			return a, nil
+
+		case "enter":
+			a.manageCommitEditing()
+			a.manageStatus = "Updated ✓"
+			return a, nil
+
+		case "left", "h":
+			if a.manageEditCursor > 0 {
+				a.manageEditCursor--
+			}
+			return a, nil
+
+		case "right", "l":
+			if a.manageEditCursor < utf8.RuneCountInString(a.manageEditValue) {
+				a.manageEditCursor++
+			}
+			return a, nil
+
+		case "home":
+			a.manageEditCursor = 0
+			return a, nil
+
+		case "end":
+			a.manageEditCursor = utf8.RuneCountInString(a.manageEditValue)
+			return a, nil
+
+		case "backspace":
+			r := []rune(a.manageEditValue)
+			cur := clampInt(a.manageEditCursor, 0, len(r))
+			if cur > 0 {
+				r = append(r[:cur-1], r[cur:]...)
+				a.manageEditCursor = cur - 1
+				a.manageEditValue = string(r)
+			}
+			return a, nil
+
+		case "delete":
+			r := []rune(a.manageEditValue)
+			cur := clampInt(a.manageEditCursor, 0, len(r))
+			if cur < len(r) {
+				r = append(r[:cur], r[cur+1:]...)
+				a.manageEditValue = string(r)
+			}
+			return a, nil
+
+		default:
+			// Insert typed runes (ignore non-rune keys and alt-modified keys).
+			// Note: Bubble Tea represents Ctrl combinations as KeyType values (not KeyRunes).
+			if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 && !msg.Alt {
+				r := []rune(a.manageEditValue)
+				cur := clampInt(a.manageEditCursor, 0, len(r))
+				insert := msg.Runes
+
+				out := make([]rune, 0, len(r)+len(insert))
+				out = append(out, r[:cur]...)
+				out = append(out, insert...)
+				out = append(out, r[cur:]...)
+
+				a.manageEditValue = string(out)
+				a.manageEditCursor = cur + len(insert)
+			}
+			return a, nil
+		}
+	}
+
+	// Non-editing manage UI.
+	items := a.manageItems()
+	if len(items) == 0 {
+		if key == "esc" {
+			a.screen = ScreenMainMenu
+		}
+		return a, nil
+	}
+
+	layout := a.manageLayout()
+	a.manageEnsureToolsVisible(layout, len(items))
+	fields := a.manageFieldsFor(items[a.manageIndex].id)
+	a.manageEnsureFieldsVisible(layout, len(fields))
+
+	// Helpers.
+	currentField := func() (manageField, bool) {
+		if len(fields) == 0 {
+			return manageField{}, false
+		}
+		idx := clampInt(a.configFieldIndex, 0, len(fields)-1)
+		return fields[idx], true
+	}
+
+	adjustField := func(dir int) {
+		f, ok := currentField()
+		if !ok {
+			return
+		}
+		switch f.kind {
+		case manageFieldOption:
+			if f.str != nil && len(f.options) > 0 {
+				*f.str = cycleStringOption(f.options, *f.str, dir > 0)
+				if f.key == "theme" {
+					a.syncThemeIndex()
+				}
+			}
+		case manageFieldNumber:
+			if f.n != nil {
+				step := f.step
+				if step == 0 {
+					step = 1
+				}
+				*f.n = clampInt(*f.n+(dir*step), f.min, f.max)
+			}
+		}
+	}
+
+	toggleField := func() {
+		f, ok := currentField()
+		if !ok {
+			return
+		}
+		if f.kind == manageFieldToggle && f.b != nil {
+			*f.b = !*f.b
+		}
+	}
+
+	startEditingField := func() {
+		f, ok := currentField()
+		if !ok {
+			return
+		}
+		a.manageStartEditing(f)
+	}
+
+	// Handle tab navigation first (1-4 keys)
+	if handled, cmd := a.handleTabNavigationWithCmd(key); handled {
+		return a, cmd
+	}
+
+	switch key {
+	// Global navigation.
+	case "esc":
+		a.manageStatus = ""
+		a.manageCancelEditing()
+		a.managePane = managePaneTools
+		a.screen = ScreenMainMenu
+		return a, nil
+
+	case "tab":
+		if a.managePane == managePaneTools {
+			a.managePane = managePaneSettings
+		} else {
+			a.managePane = managePaneTools
+		}
+		return a, nil
+
+	// Save (persist to config).
+	case "s", "ctrl+s":
+		a.manageStatus = "Saving…"
+		return a, a.saveManageConfigCmd()
+
+	case "i":
+		// Install selected tool/app (settings pane only).
+		if a.managePane != managePaneSettings {
+			return a, nil
+		}
+		item := items[a.manageIndex]
+		if item.id == "global" {
+			a.manageStatus = "Select a tool/app to install"
+			return a, nil
+		}
+		if a.manageInstalling {
+			return a, nil
+		}
+		if item.installed {
+			a.manageStatus = "Already installed"
+			return a, nil
+		}
+
+		// Clear logs and start install flow (will check sudo first)
+		a.clearInstallLogs()
+		a.manageStatus = ""
+		a.manageInstalling = true
+		a.manageInstallID = item.id
+		return a, a.checkSudoAndInstallCmd(item.id)
+
+	case "?":
+		// Jump to hotkeys/cheatsheet for the selected tool.
+		item := items[a.manageIndex]
+		a.hotkeyFilter = ""
+		if item.id != "global" {
+			a.hotkeyFilter = item.id
+		}
+		a.hotkeyCategory = 0
+		a.hotkeyCursor = 0
+		a.hotkeyCatScroll = 0
+		a.hotkeyItemScroll = 0
+		a.hotkeysPane = 0
+		a.hotkeysReturn = ScreenManage
+		a.screen = ScreenHotkeys
+		return a, nil
+
+	case "c", "C":
+		// Clear install logs (only when not installing)
+		if !a.manageInstalling && len(a.installLogs) > 0 {
+			a.clearInstallLogs()
+			a.manageStatus = "Logs cleared"
+		}
+		return a, nil
+
+	case "pgup", "ctrl+u":
+		// Scroll logs up (when viewing logs)
+		if len(a.installLogs) > 0 {
+			a.installLogScroll += 10
+			maxScroll := CalculateMaxLogScroll(len(a.installLogs), layout.bodyH-6)
+			if a.installLogScroll > maxScroll {
+				a.installLogScroll = maxScroll
+			}
+			a.installLogAutoScroll = false
+		}
+		return a, nil
+
+	case "pgdown", "ctrl+d":
+		// Scroll logs down (when viewing logs)
+		if len(a.installLogs) > 0 {
+			a.installLogScroll -= 10
+			if a.installLogScroll < 0 {
+				a.installLogScroll = 0
+			}
+		}
+		return a, nil
+	}
+
+	// Pane-specific navigation.
+	if a.managePane == managePaneTools {
+		switch key {
+		case "up", "k":
+			if a.manageIndex > 0 {
+				a.manageIndex--
+				a.configFieldIndex = 0
+				a.manageFieldsScroll = 0
+			}
+			a.manageEnsureToolsVisible(layout, len(items))
+			return a, nil
+
+		case "down", "j":
+			if a.manageIndex < len(items)-1 {
+				a.manageIndex++
+				a.configFieldIndex = 0
+				a.manageFieldsScroll = 0
+			}
+			a.manageEnsureToolsVisible(layout, len(items))
+			return a, nil
+
+		case "right", "l", "enter":
+			a.managePane = managePaneSettings
+			return a, nil
+		}
+
+		return a, nil
+	}
+
+	// Settings pane.
+	switch key {
+	case "up", "k":
+		if a.configFieldIndex > 0 {
+			a.configFieldIndex--
+		}
+		a.manageEnsureFieldsVisible(layout, len(fields))
+		return a, nil
+
+	case "down", "j":
+		if a.configFieldIndex < len(fields)-1 {
+			a.configFieldIndex++
+		}
+		a.manageEnsureFieldsVisible(layout, len(fields))
+		return a, nil
+
+	case "left", "h":
+		adjustField(-1)
+		return a, nil
+
+	case "right", "l":
+		adjustField(1)
+		return a, nil
+
+	case " ":
+		// Space toggles booleans. For options/numbers, it acts as "forward".
+		if f, ok := currentField(); ok {
+			switch f.kind {
+			case manageFieldToggle:
+				wasEnabled := a.animationsEnabled
+				toggleField()
+				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+					// Restart the UI tick when enabling animations.
+					return a, tickUI()
+				}
+			case manageFieldOption:
+				adjustField(1)
+			case manageFieldNumber:
+				adjustField(1)
+			}
+		}
+		return a, nil
+
+	case "enter":
+		// Enter toggles boolean fields, or starts editing for text fields.
+		if f, ok := currentField(); ok {
+			switch f.kind {
+			case manageFieldToggle:
+				wasEnabled := a.animationsEnabled
+				toggleField()
+				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+					return a, tickUI()
+				}
+			case manageFieldText:
+				startEditingField()
+			case manageFieldOption:
+				adjustField(1)
+			case manageFieldNumber:
+				// No modal editor for numbers yet; treat as increment.
+				adjustField(1)
+			}
+		}
+		return a, nil
+	}
+
+	return a, nil
+}
+
+func (a *App) handleManageMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	// When editing, keep interaction keyboard-driven to avoid confusing focus
+	// shifts and accidental toggles.
+	if a.manageEditing {
+		return a, nil
+	}
+
+	// Nothing to do if we don't have a valid layout yet.
+	if a.width <= 0 || a.height <= 0 {
+		return a, nil
+	}
+
+	// Handle tab bar clicks (Y=0 is the tab bar line)
+	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+		if screen, cmd := a.detectTabClick(m.X); screen != 0 {
+			a.screen = screen
+			return a, cmd
+		}
+	}
+
+	layout := a.manageLayout()
+	items := a.manageItems()
+
+	// Wheel scroll: choose pane based on mouse X.
+	if m.IsWheel() {
+		delta := 0
+		switch m.Button {
+		case tea.MouseButtonWheelUp:
+			delta = -1
+		case tea.MouseButtonWheelDown:
+			delta = 1
+		default:
+			return a, nil
+		}
+
+		if m.X < layout.rightX { // left side (tools)
+			a.manageToolsScroll = clampInt(a.manageToolsScroll+delta, 0, layout.maxToolsScroll(len(items)))
+		} else { // right side (fields)
+			fields := a.manageFieldsFor(items[a.manageIndex].id)
+			a.manageFieldsScroll = clampInt(a.manageFieldsScroll+delta, 0, layout.maxFieldsScroll(len(fields)))
+		}
+		return a, nil
+	}
+
+	// Only respond to left click presses for now.
+	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
+		return a, nil
+	}
+
+	// Click in left pane list area: select tool.
+	if layout.inLeftList(m.X, m.Y) {
+		relY := m.Y - layout.leftListY
+		idx := a.manageToolsScroll + relY
+		if idx >= 0 && idx < len(items) {
+			a.managePane = managePaneTools
+			if idx != a.manageIndex {
+				a.manageIndex = idx
+				a.configFieldIndex = 0
+				a.manageFieldsScroll = 0
+				a.manageEditing = false
+				a.manageEditField = nil
+				a.manageEditValue = ""
+				a.manageStatus = ""
+			}
+			a.manageEnsureToolsVisible(layout, len(items))
+		}
+		return a, nil
+	}
+
+	// Click in right pane fields area: focus + edit/toggle/adjust.
+	if layout.inRightList(m.X, m.Y) {
+		items := a.manageItems()
+		if len(items) == 0 {
+			return a, nil
+		}
+
+		fields := a.manageFieldsFor(items[a.manageIndex].id)
+		if len(fields) == 0 {
+			return a, nil
+		}
+
+		relY := m.Y - layout.rightListY
+		fieldIdx := a.manageFieldsScroll + relY
+		if fieldIdx < 0 || fieldIdx >= len(fields) {
+			return a, nil
+		}
+
+		a.managePane = managePaneSettings
+		a.configFieldIndex = fieldIdx
+		a.manageEnsureFieldsVisible(layout, len(fields))
+
+		f := fields[fieldIdx]
+		switch f.kind {
+		case manageFieldToggle:
+			if f.b != nil {
+				wasEnabled := a.animationsEnabled
+				*f.b = !*f.b
+				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+					// Restart UI tick if animations were turned back on via mouse.
+					return a, tickUI()
+				}
+			}
+		case manageFieldOption:
+			// Click on left half cycles backward, right half cycles forward.
+			forward := m.X >= (layout.rightX + layout.rightW/2)
+			if f.str != nil && len(f.options) > 0 {
+				*f.str = cycleStringOption(f.options, *f.str, forward)
+				if f.key == "theme" {
+					a.syncThemeIndex()
+				}
+			}
+		case manageFieldNumber:
+			// Click on left half decrements, right half increments.
+			dir := -1
+			if m.X >= (layout.rightX + layout.rightW/2) {
+				dir = 1
+			}
+			if f.n != nil {
+				step := f.step
+				if step == 0 {
+					step = 1
+				}
+				*f.n = clampInt(*f.n+dir*step, f.min, f.max)
+			}
+		case manageFieldText:
+			// Single click just focuses. Enter starts editing (keyboard) for now.
+		}
+
+		return a, nil
+	}
+
+	return a, nil
+}
+
+// manageLayout captures all geometry needed for consistent rendering and mouse hit-testing.
+type manageLayout struct {
+	w int
+	h int
+
+	headerH int
+	footerH int
+	bodyY   int
+	bodyH   int
+
+	gap int
+
+	leftX int
+	leftW int
+
+	rightX int
+	rightW int
+
+	// Panel internals (we keep these constants in sync with render styles).
+	border int
+	padX   int
+	padY   int
+
+	// List and fields areas (absolute coordinates in terminal space).
+	leftListY int
+	leftListH int
+
+	rightListY int
+	rightListH int
+
+	// Optional widget area (e.g., globe) in the bottom of the right pane.
+	rightGlobeY int
+	rightGlobeH int
+}
+
+func (l manageLayout) maxToolsScroll(itemsLen int) int {
+	return maxInt(0, itemsLen-l.leftListH)
+}
+
+func (l manageLayout) maxFieldsScroll(fieldsLen int) int {
+	return maxInt(0, fieldsLen-l.rightListH)
+}
+
+func (l manageLayout) inLeftList(x, y int) bool {
+	if x < l.leftX || x >= l.leftX+l.leftW {
+		return false
+	}
+	return y >= l.leftListY && y < l.leftListY+l.leftListH
+}
+
+func (l manageLayout) inRightList(x, y int) bool {
+	if x < l.rightX || x >= l.rightX+l.rightW {
+		return false
+	}
+	return y >= l.rightListY && y < l.rightListY+l.rightListH
+}
+
+func (a *App) manageLayout() manageLayout {
+	// Header/footer heights are kept fixed for consistent mouse mapping.
+	const headerH = 3
+	const footerH = 2
+
+	bodyY := headerH
+	bodyH := a.height - headerH - footerH
+	if bodyH < 5 {
+		bodyH = 5
+	}
+
+	gap := 1
+
+	// Default split: 1/3 tools, 2/3 details.
+	leftW := clampInt(a.width/3, 26, 42)
+	minRight := 38
+	if a.width-leftW-gap < minRight {
+		leftW = maxInt(22, a.width-minRight-gap)
+	}
+	rightW := maxInt(0, a.width-leftW-gap)
+
+	// Panel styling constants (must match render functions).
+	border := 1
+	padX := 1
+	padY := 1
+
+	// Left panel: title line + subtitle line + blank line.
+	leftHeaderLines := 3
+	leftInnerY := bodyY + border + padY
+	leftInnerH := bodyH - (border * 2) - (padY * 2)
+	leftListY := leftInnerY + leftHeaderLines
+	leftListH := maxInt(1, leftInnerH-leftHeaderLines)
+
+	// Right panel: title line + subtitle line + blank line.
+	rightHeaderLines := 3
+	rightInnerY := bodyY + border + padY
+	rightInnerH := bodyH - (border * 2) - (padY * 2)
+	rightListY := rightInnerY + rightHeaderLines
+	rightFieldsH := maxInt(1, rightInnerH-rightHeaderLines) // total area under header
+
+	// Reserve space for a small animated widget (globe) when there's enough room.
+	rightListH := rightFieldsH
+	rightGlobeH := 0
+	rightGlobeY := 0
+	if a.animationsEnabled && rightW >= 56 && rightFieldsH >= 18 {
+		globeH := 10
+		if rightFieldsH >= 22 {
+			globeH = 12
+		}
+		rightGlobeH = globeH
+		rightListH = maxInt(1, rightFieldsH-rightGlobeH-1) // 1 line gap above globe
+		rightGlobeY = rightListY + rightListH + 1
+	}
+
+	return manageLayout{
+		w: a.width,
+		h: a.height,
+
+		headerH: headerH,
+		footerH: footerH,
+		bodyY:   bodyY,
+		bodyH:   bodyH,
+
+		gap: gap,
+
+		leftX:  0,
+		leftW:  leftW,
+		rightX: leftW + gap,
+		rightW: rightW,
+
+		border: border,
+		padX:   padX,
+		padY:   padY,
+
+		leftListY: leftListY,
+		leftListH: leftListH,
+
+		rightListY: rightListY,
+		rightListH: rightListH,
+
+		rightGlobeY: rightGlobeY,
+		rightGlobeH: rightGlobeH,
+	}
+}
+
+func (a *App) manageEnsureToolsVisible(layout manageLayout, itemsLen int) {
+	if itemsLen <= 0 {
+		a.manageIndex = 0
+		a.manageToolsScroll = 0
+		return
+	}
+
+	a.manageIndex = clampInt(a.manageIndex, 0, itemsLen-1)
+	maxScroll := layout.maxToolsScroll(itemsLen)
+	a.manageToolsScroll = clampInt(a.manageToolsScroll, 0, maxScroll)
+
+	// Keep selection within [scroll, scroll+visible).
+	if a.manageIndex < a.manageToolsScroll {
+		a.manageToolsScroll = a.manageIndex
+	} else if a.manageIndex >= a.manageToolsScroll+layout.leftListH {
+		a.manageToolsScroll = a.manageIndex - layout.leftListH + 1
+	}
+	a.manageToolsScroll = clampInt(a.manageToolsScroll, 0, maxScroll)
+}
+
+func (a *App) manageEnsureFieldsVisible(layout manageLayout, fieldsLen int) {
+	if fieldsLen <= 0 {
+		a.configFieldIndex = 0
+		a.manageFieldsScroll = 0
+		return
+	}
+
+	a.configFieldIndex = clampInt(a.configFieldIndex, 0, fieldsLen-1)
+	maxScroll := layout.maxFieldsScroll(fieldsLen)
+	a.manageFieldsScroll = clampInt(a.manageFieldsScroll, 0, maxScroll)
+
+	if a.configFieldIndex < a.manageFieldsScroll {
+		a.manageFieldsScroll = a.configFieldIndex
+	} else if a.configFieldIndex >= a.manageFieldsScroll+layout.rightListH {
+		a.manageFieldsScroll = a.configFieldIndex - layout.rightListH + 1
+	}
+	a.manageFieldsScroll = clampInt(a.manageFieldsScroll, 0, maxScroll)
+}
+
+func (a *App) manageItems() []manageItem {
+	reg := tools.GetRegistry()
+	all := reg.All()
+	platform := pkg.DetectPlatform()
+
+	// Prefer a stable, human-friendly ordering (category → name).
+	categoryOrder := map[tools.Category]int{
+		tools.CategoryShell:     0,
+		tools.CategoryTerminal:  1,
+		tools.CategoryEditor:    2,
+		tools.CategoryFile:      3,
+		tools.CategoryGit:       4,
+		tools.CategoryContainer: 5,
+		tools.CategoryUtility:   6,
+		tools.CategoryApp:       7,
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		ci := categoryOrder[all[i].Category()]
+		cj := categoryOrder[all[j].Category()]
+		if ci != cj {
+			return ci < cj
+		}
+		return all[i].Name() < all[j].Name()
+	})
+
+	// Install cache should be populated asynchronously via startInstallCacheLoad().
+	// If not ready yet, initialize empty map to avoid nil panics during loading.
+	if a.manageInstalled == nil {
+		a.manageInstalled = make(map[string]bool, len(all))
+	}
+
+	// Filter by platform support: hide tools/apps that can't be installed on this
+	// OS, but keep anything already installed.
+	//
+	// This is especially important for GUI apps: don't show macOS-only apps on
+	// Linux and vice versa.
+	if platform != pkg.PlatformUnknown {
+		filtered := make([]tools.Tool, 0, len(all))
+		for _, t := range all {
+			installed := a.manageInstalled[t.ID()]
+			supported := toolHasPackagesForPlatform(t, platform)
+			if installed || supported {
+				filtered = append(filtered, t)
+			}
+		}
+		all = filtered
+	}
+
+	// Add a global section at the top.
+	items := []manageItem{
+		{
+			id:           "global",
+			name:         "Global",
+			icon:         "󰒓",
+			description:  "UI + platform preferences",
+			category:     "global",
+			installed:    true,
+			configurable: true,
+		},
+	}
+
+	for _, t := range all {
+		icon := t.Icon()
+		if icon == "" {
+			icon = fallbackToolIcon(t.ID(), t.Category())
+		}
+
+		items = append(items, manageItem{
+			id:           t.ID(),
+			name:         t.Name(),
+			icon:         icon,
+			description:  t.Description(),
+			category:     t.Category(),
+			installed:    a.manageInstalled[t.ID()],
+			configurable: t.HasConfig(),
+		})
+	}
+
+	return items
+}
+
+func toolHasPackagesForPlatform(t tools.Tool, platform pkg.Platform) bool {
+	pkgs := t.Packages()[platform]
+	if len(pkgs) == 0 {
+		pkgs = t.Packages()["all"]
+	}
+	return len(pkgs) > 0
+}
+
+func fallbackToolIcon(id string, cat tools.Category) string {
+	// Reasonable defaults when a tool doesn't specify an icon.
+	// Prefer category icons so the UI stays visually consistent.
+	switch cat {
+	case tools.CategoryShell:
+		return ""
+	case tools.CategoryTerminal:
+		return ""
+	case tools.CategoryEditor:
+		return ""
+	case tools.CategoryFile:
+		return "󰉋"
+	case tools.CategoryGit:
+		return ""
+	case tools.CategoryContainer:
+		return ""
+	case tools.CategoryUtility:
+		return "󰘚"
+	case tools.CategoryApp:
+		return "󰏇"
+	}
+
+	// ID-based fallback (for unknown categories like "global").
+	if strings.Contains(id, "git") {
+		return ""
+	}
+	return "󰈚"
+}
+
+func (a *App) manageFieldsFor(itemID string) []manageField {
+	cfg := a.manageConfig
+	if cfg == nil {
+		return nil
+	}
+
+	switch itemID {
+	case "global":
+		return []manageField{
+			{
+				key:         "theme",
+				label:       "Theme",
+				description: "Controls generated tool configs (installer) and visual accents",
+				kind:        manageFieldOption,
+				str:         &a.theme,
+				options:     config.AvailableThemes,
+			},
+			{
+				key:         "nav",
+				label:       "Navigation",
+				description: "Default navigation style throughout the TUI",
+				kind:        manageFieldOption,
+				str:         &a.navStyle,
+				options:     []string{"emacs", "vim"},
+			},
+			{
+				key:         "animations",
+				label:       "Animations",
+				description: "Enable animated UI elements (headers, globe, spinners)",
+				kind:        manageFieldToggle,
+				b:           &a.animationsEnabled,
+			},
+		}
+
+	case "ghostty":
+		return []manageField{
+			{key: "font_family", label: "Font Family", description: "Terminal font family", kind: manageFieldText, str: &cfg.GhosttyFontFamily},
+			{key: "font_size", label: "Font Size", description: "Font size (pt)", kind: manageFieldNumber, n: &cfg.GhosttyFontSize, min: 8, max: 32, step: 1, unit: "pt"},
+			{key: "opacity", label: "Opacity", description: "Background opacity (%)", kind: manageFieldNumber, n: &cfg.GhosttyOpacity, min: 0, max: 100, step: 5, unit: "%"},
+			{key: "blur", label: "Blur Radius", description: "Background blur (platform dependent)", kind: manageFieldNumber, n: &cfg.GhosttyBlurRadius, min: 0, max: 40, step: 1},
+			{key: "cursor", label: "Cursor Style", description: "Cursor shape", kind: manageFieldOption, str: &cfg.GhosstyCursorStyle, options: []string{"block", "bar", "underline"}},
+			{key: "scrollback", label: "Scrollback", description: "Scrollback history lines", kind: manageFieldNumber, n: &cfg.GhosttyScrollbackLines, min: 1000, max: 200000, step: 1000, unit: " lines"},
+			{key: "decor", label: "Window Decorations", description: "Show native window decorations", kind: manageFieldToggle, b: &cfg.GhosttyWindowDecorations},
+			{key: "confirm_close", label: "Confirm Close", description: "Prompt before closing window", kind: manageFieldToggle, b: &cfg.GhosttyConfirmClose},
+		}
+
+	case "tmux":
+		return []manageField{
+			{key: "prefix", label: "Prefix Key", description: "Leader key for tmux commands", kind: manageFieldOption, str: &cfg.TmuxPrefix, options: []string{"C-a", "C-b", "C-Space"}},
+			{key: "base", label: "Base Index", description: "Start window/pane numbering at", kind: manageFieldNumber, n: &cfg.TmuxBaseIndex, min: 0, max: 10, step: 1},
+			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.TmuxMouseMode},
+			{key: "status_pos", label: "Status Position", description: "Status bar placement", kind: manageFieldOption, str: &cfg.TmuxStatusPosition, options: []string{"top", "bottom"}},
+			{key: "pane_border", label: "Pane Border", description: "Pane border style", kind: manageFieldOption, str: &cfg.TmuxPaneBorderStyle, options: []string{"single", "double", "heavy", "simple"}},
+			{key: "history", label: "History Limit", description: "Scrollback lines per pane", kind: manageFieldNumber, n: &cfg.TmuxHistoryLimit, min: 1000, max: 200000, step: 1000, unit: " lines"},
+			{key: "escape", label: "Escape Time", description: "Escape timing for key chords", kind: manageFieldNumber, n: &cfg.TmuxEscapeTime, min: 0, max: 1000, step: 5, unit: "ms"},
+			{key: "resize", label: "Aggressive Resize", description: "Aggressively resize panes on window changes", kind: manageFieldToggle, b: &cfg.TmuxAggressiveResize},
+			// TPM (Plugin Manager) settings
+			{key: "tpm_enabled", label: "TPM Enabled", description: "Enable Tmux Plugin Manager", kind: manageFieldToggle, b: &cfg.TmuxTPMEnabled},
+			{key: "plugin_sensible", label: "tmux-sensible", description: "Sensible default settings", kind: manageFieldToggle, b: &cfg.TmuxPluginSensible},
+			{key: "plugin_resurrect", label: "tmux-resurrect", description: "Save and restore sessions", kind: manageFieldToggle, b: &cfg.TmuxPluginResurrect},
+			{key: "plugin_continuum", label: "tmux-continuum", description: "Automatic session saving", kind: manageFieldToggle, b: &cfg.TmuxPluginContinuum},
+			{key: "plugin_yank", label: "tmux-yank", description: "Enhanced clipboard support", kind: manageFieldToggle, b: &cfg.TmuxPluginYank},
+			{key: "continuum_save", label: "Auto-save Interval", description: "Minutes between auto-saves", kind: manageFieldNumber, n: &cfg.TmuxContinuumSaveMin, min: 5, max: 60, step: 5, unit: " min"},
+			{key: "continuum_restore", label: "Auto-restore", description: "Restore sessions on tmux start", kind: manageFieldToggle, b: &cfg.TmuxContinuumRestore},
+		}
+
+	case "zsh":
+		return []manageField{
+			{key: "hist_size", label: "History Size", description: "Maximum history entries", kind: manageFieldNumber, n: &cfg.ZshHistorySize, min: 1000, max: 500000, step: 1000, unit: " entries"},
+			{key: "hist_dups", label: "Ignore Duplicates", description: "Don't store duplicated history entries", kind: manageFieldToggle, b: &cfg.ZshHistoryIgnoreDups},
+			{key: "autocd", label: "Auto CD", description: "Allow entering directories without typing cd", kind: manageFieldToggle, b: &cfg.ZshAutoCD},
+			{key: "correct", label: "Auto Correction", description: "Suggest corrections for commands", kind: manageFieldToggle, b: &cfg.ZshCorrection},
+			{key: "menu", label: "Completion Menu", description: "Use menu selection for completions", kind: manageFieldToggle, b: &cfg.ZshCompletionMenu},
+			{key: "syntax", label: "Syntax Highlight", description: "Syntax highlighting in shell", kind: manageFieldToggle, b: &cfg.ZshSyntaxHighlight},
+			{key: "autosug", label: "Auto Suggestions", description: "Inline suggestions from history", kind: manageFieldToggle, b: &cfg.ZshAutosuggestions},
+		}
+
+	case "neovim":
+		return []manageField{
+			{key: "numbers", label: "Line Numbers", description: "Absolute/relative/none", kind: manageFieldOption, str: &cfg.NeovimLineNumbers, options: []string{"absolute", "relative", "none"}},
+			{key: "rel", label: "Relative Num", description: "Show relative line numbers", kind: manageFieldToggle, b: &cfg.NeovimRelativeNum},
+			{key: "tab", label: "Tab Width", description: "Indent width", kind: manageFieldNumber, n: &cfg.NeovimTabWidth, min: 2, max: 8, step: 1, unit: " spaces"},
+			{key: "expand", label: "Expand Tab", description: "Use spaces instead of tabs", kind: manageFieldToggle, b: &cfg.NeovimExpandTab},
+			{key: "wrap", label: "Line Wrap", description: "Soft wrap long lines", kind: manageFieldToggle, b: &cfg.NeovimWrap},
+			{key: "cursor", label: "Cursor Line", description: "Highlight current line", kind: manageFieldToggle, b: &cfg.NeovimCursorLine},
+			{key: "clip", label: "Clipboard", description: "Clipboard integration", kind: manageFieldOption, str: &cfg.NeovimClipboard, options: []string{"unnamedplus", "unnamed", "none"}},
+			{key: "undo", label: "Undo File", description: "Persistent undo on disk", kind: manageFieldToggle, b: &cfg.NeovimUndoFile},
+		}
+
+	case "git":
+		return []manageField{
+			{key: "branch", label: "Default Branch", description: "Default init branch name", kind: manageFieldOption, str: &cfg.GitDefaultBranch, options: []string{"main", "master", "develop"}},
+			{key: "setup_remote", label: "Auto Setup Remote", description: "Auto-create tracking remotes on push", kind: manageFieldToggle, b: &cfg.GitAutoSetupRemote},
+			{key: "rebase", label: "Pull Rebase", description: "Prefer rebase on git pull", kind: manageFieldToggle, b: &cfg.GitPullRebase},
+			{key: "diff", label: "Diff Tool", description: "Default diff tool", kind: manageFieldOption, str: &cfg.GitDiffTool, options: []string{"delta", "difftastic", "vimdiff"}},
+			{key: "merge", label: "Merge Tool", description: "Default merge tool", kind: manageFieldOption, str: &cfg.GitMergeTool, options: []string{"vimdiff", "nvimdiff", "meld"}},
+			{key: "creds", label: "Credential Helper", description: "Credential helper backend", kind: manageFieldOption, str: &cfg.GitCredentialHelper, options: []string{"store", "cache", "osxkeychain"}},
+			{key: "sign", label: "Sign Commits", description: "Require signed commits", kind: manageFieldToggle, b: &cfg.GitSignCommits},
+		}
+
+	case "yazi":
+		return []manageField{
+			{key: "hidden", label: "Show Hidden", description: "Show dotfiles by default", kind: manageFieldToggle, b: &cfg.YaziShowHidden},
+			{key: "sort_by", label: "Sort By", description: "Sort order", kind: manageFieldOption, str: &cfg.YaziSortBy, options: []string{"alphabetical", "modified", "size", "natural"}},
+			{key: "sort_rev", label: "Sort Reverse", description: "Reverse sort direction", kind: manageFieldToggle, b: &cfg.YaziSortReverse},
+			{key: "linemode", label: "Line Mode", description: "Line metadata style", kind: manageFieldOption, str: &cfg.YaziLineMode, options: []string{"size", "permissions", "mtime", "none"}},
+			{key: "scrolloff", label: "Scroll Offset", description: "Keep N items visible above/below cursor", kind: manageFieldNumber, n: &cfg.YaziScrollOff, min: 0, max: 20, step: 1, unit: " lines"},
+		}
+
+	case "fzf":
+		return []manageField{
+			{key: "opts", label: "Default Opts", description: "Extra CLI options passed to fzf", kind: manageFieldText, str: &cfg.FzfDefaultOpts},
+			{key: "height", label: "Height", description: "Height percentage for fzf UI", kind: manageFieldNumber, n: &cfg.FzfHeight, min: 20, max: 100, step: 5, unit: "%"},
+			{key: "layout", label: "Layout", description: "Layout mode", kind: manageFieldOption, str: &cfg.FzfLayout, options: []string{"reverse", "default", "reverse-list"}},
+			{key: "border", label: "Border Style", description: "Border style for fzf window", kind: manageFieldOption, str: &cfg.FzfBorderStyle, options: []string{"rounded", "sharp", "bold", "none"}},
+			{key: "preview", label: "Preview", description: "Enable preview pane", kind: manageFieldToggle, b: &cfg.FzfPreview},
+			{key: "preview_window", label: "Preview Window", description: "Preview placement/size", kind: manageFieldOption, str: &cfg.FzfPreviewWindow, options: []string{"right:50%", "up:50%", "down:50%"}},
+		}
+
+	case "lazygit":
+		return []manageField{
+			{key: "side", label: "Side-by-Side Diff", description: "Use side-by-side diffs", kind: manageFieldToggle, b: &cfg.LazyGitSideBySide},
+			{key: "paging", label: "Paging", description: "Paging backend", kind: manageFieldOption, str: &cfg.LazyGitPaging, options: []string{"delta", "diff-so-fancy", "never"}},
+			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.LazyGitMouseMode},
+			{key: "gui_theme", label: "GUI Theme", description: "GUI theme selection", kind: manageFieldOption, str: &cfg.LazyGitGuiTheme, options: []string{"auto", "light", "dark"}},
+		}
+
+	case "lazydocker":
+		return []manageField{
+			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.LazyDockerMouseMode},
+			{key: "tail", label: "Logs Tail", description: "How many log lines to show", kind: manageFieldNumber, n: &cfg.LazyDockerLogsTail, min: 10, max: 2000, step: 10, unit: " lines"},
+		}
+
+	case "btop":
+		return []manageField{
+			{key: "theme", label: "Theme", description: "btop theme name", kind: manageFieldOption, str: &cfg.BtopTheme, options: []string{"auto", "dracula", "gruvbox", "nord", "tokyo-night"}},
+			{key: "rate", label: "Update Rate", description: "Refresh interval", kind: manageFieldNumber, n: &cfg.BtopUpdateMs, min: 250, max: 10000, step: 250, unit: "ms"},
+			{key: "temp", label: "Show Temp", description: "Show CPU temperature", kind: manageFieldToggle, b: &cfg.BtopShowTemp},
+			{key: "scale", label: "Temp Scale", description: "Celsius/Fahrenheit", kind: manageFieldOption, str: &cfg.BtopTempScale, options: []string{"celsius", "fahrenheit"}},
+			{key: "graph", label: "Graph Symbol", description: "Graph rendering symbol set", kind: manageFieldOption, str: &cfg.BtopGraphSymbol, options: []string{"braille", "block", "tty"}},
+			{key: "boxes", label: "Shown Boxes", description: "Which panels to show", kind: manageFieldText, str: &cfg.BtopShownBoxes},
+		}
+
+	case "glow":
+		return []manageField{
+			{key: "style", label: "Style", description: "Style theme for Glow", kind: manageFieldOption, str: &cfg.GlowStyle, options: []string{"auto", "dark", "light", "notty"}},
+			{key: "pager", label: "Pager", description: "Pager program", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"less", "more", "none"}},
+			{key: "width", label: "Width", description: "Max render width", kind: manageFieldNumber, n: &cfg.GlowWidth, min: 40, max: 240, step: 5, unit: " chars"},
+			{key: "mouse", label: "Mouse", description: "Enable mouse support in Glow", kind: manageFieldToggle, b: &cfg.GlowMouse},
+		}
+	}
+
+	return nil
+}
+
+func (a *App) renderManageDualPane() string {
+	if a.width == 0 || a.height == 0 {
+		return "Loading..."
+	}
+
+	// Show loading state if cache is being populated
+	if a.installCacheLoading {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		loadingStyle := lipgloss.NewStyle().
+			Foreground(ColorCyan).
+			Bold(true)
+		loadingText := loadingStyle.Render(fmt.Sprintf("%s Loading installation status...", spinner))
+
+		return PlaceWithBackground(
+			a.width, a.height,
+			loadingText,
+		)
+	}
+
+	layout := a.manageLayout()
+	items := a.manageItems()
+
+	// Clamp selection safely (important if config/tools list changes).
+	if len(items) > 0 {
+		a.manageIndex = clampInt(a.manageIndex, 0, len(items)-1)
+	} else {
+		a.manageIndex = 0
+	}
+
+	// Keep scrolls sane.
+	a.manageEnsureToolsVisible(layout, len(items))
+	fields := []manageField(nil)
+	if len(items) > 0 {
+		fields = a.manageFieldsFor(items[a.manageIndex].id)
+	}
+	a.manageEnsureFieldsVisible(layout, len(fields))
+
+	header := a.renderManageHeader(layout.w)
+	footer := a.renderManageFooter(layout.w, items, fields)
+
+	left := a.renderManageToolsPanel(layout, items)
+	right := a.renderManageSettingsPanel(layout, items, fields)
+
+	// Style the gap between panels (no explicit background to respect terminal transparency)
+	gapStyle := lipgloss.NewStyle().
+		Height(layout.bodyH)
+	gap := gapStyle.Render(strings.Repeat(" ", layout.gap))
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
+	view := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+
+	// No explicit background to respect terminal transparency
+	return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Top, view)
+}
+
+func (a *App) renderManageHeader(width int) string {
+	tabs := RenderTabBar(ScreenManage, width)
+
+	subText := "Dual-pane config editor • Click, scroll, and tweak everything"
+	if a.animationsEnabled {
+		subText = AnimatedSpinnerDots(a.uiFrame/2) + " " + subText
+	}
+	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(subText, width))
+
+	divider := ShimmerDivider(maxInt(0, width), a.uiFrame, a.animationsEnabled)
+
+	// Keep this exactly 3 lines (see manageLayout.headerH).
+	return lipgloss.JoinVertical(lipgloss.Left, tabs, sub, divider)
+}
+
+func (a *App) renderManageFooter(width int, items []manageItem, fields []manageField) string {
+	// Hint line: short and consistent.
+	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
+		"Tab switch pane • ↑↓ move • ←→ adjust • Space toggle • Enter edit • I install • ? hotkeys • S save • Esc back • q quit",
+	)
+
+	// Status line: either save feedback, or focused field description.
+	statusText := a.manageStatus
+	if a.manageInstalling {
+		name := a.manageInstallID
+		for _, it := range items {
+			if it.id == a.manageInstallID {
+				name = it.name
+				break
+			}
+		}
+		if a.animationsEnabled {
+			statusText = fmt.Sprintf("%s Installing %s…", AnimatedSpinnerDots(a.uiFrame), name)
+		} else {
+			statusText = fmt.Sprintf("Installing %s…", name)
+		}
+	}
+	if statusText == "" && a.managePane == managePaneSettings && len(fields) > 0 {
+		idx := clampInt(a.configFieldIndex, 0, len(fields)-1)
+		if fields[idx].description != "" {
+			statusText = fields[idx].description
+		}
+	}
+
+	if statusText == "" {
+		statusText = " "
+	}
+	status := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(statusText, width))
+
+	// Keep this exactly 2 lines (see manageLayout.footerH).
+	return lipgloss.JoinVertical(lipgloss.Left, hints, status)
+}
+
+func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) string {
+	borderColor := ColorBorder
+	if a.managePane == managePaneTools {
+		borderColor = ColorCyan
+	}
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 1).
+		// lipgloss applies borders after Width/Height, so subtract 2 to target an
+		// exact outer size for predictable layouts and mouse hit-testing.
+		Width(maxInt(1, layout.leftW-2)).
+		Height(maxInt(1, layout.bodyH-2))
+
+	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("TOOLS")
+	toolCount := maxInt(0, len(items)-1) // exclude "Global"
+	installedCount := 0
+	for _, it := range items {
+		if it.id == "global" {
+			continue
+		}
+		if it.installed {
+			installedCount++
+		}
+	}
+	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("%d installed • %d tools", installedCount, toolCount))
+
+	innerW := maxInt(0, layout.leftW-(layout.border*2)-(layout.padX*2))
+	tagStyle := lipgloss.NewStyle().Foreground(ColorText).Background(ColorOverlay).Padding(0, 1)
+
+	var lines []string
+	for i := a.manageToolsScroll; i < len(items) && len(lines) < layout.leftListH; i++ {
+		it := items[i]
+		focused := i == a.manageIndex
+
+		cursor := "  "
+		nameStyle := lipgloss.NewStyle().Foreground(ColorText)
+		if it.id != "global" && !it.installed {
+			nameStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		}
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
+			nameStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+		}
+
+		status := StatusDot("pending")
+		if it.id == "global" {
+			status = lipgloss.NewStyle().Foreground(ColorCyan).Render("●")
+		} else if it.installed {
+			status = StatusDot("success")
+		}
+
+		icon := it.icon
+		if icon != "" {
+			icon += " "
+		}
+
+		// Right-aligned category tag (helps scanning without changing selection mapping).
+		cat := strings.ToUpper(string(it.category))
+		if it.id == "global" {
+			cat = "GLOBAL"
+		}
+		tag := tagStyle.Render(cat)
+
+		left := fmt.Sprintf("%s%s %s%s", cursor, status, icon, nameStyle.Render(it.name))
+		// Small visual hint that settings exist.
+		if it.id != "global" && it.configurable {
+			left += lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  ")
+		}
+
+		leftW := ansi.StringWidth(left)
+		tagW := ansi.StringWidth(tag)
+		// Keep at least 1 space between left content and tag.
+		availLeft := innerW - tagW - 1
+		if availLeft < 0 {
+			availLeft = 0
+		}
+		if leftW > availLeft {
+			left = truncateVisible(left, availLeft)
+			leftW = ansi.StringWidth(left)
+		}
+		spaces := innerW - leftW - tagW
+		if spaces < 1 {
+			spaces = 1
+		}
+
+		line := left + strings.Repeat(" ", spaces) + tag
+		lines = append(lines, truncateVisible(line, innerW))
+	}
+
+	// Pad list to keep the panel stable.
+	for len(lines) < layout.leftListH {
+		lines = append(lines, "")
+	}
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		sub,
+		"",
+		strings.Join(lines, "\n"),
+	)
+
+	return panel.Render(content)
+}
+
+func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem, fields []manageField) string {
+	borderColor := ColorBorder
+	if a.managePane == managePaneSettings {
+		borderColor = ColorCyan
+	}
+
+	// If installing, show log panel instead of settings
+	if a.manageInstalling || len(a.installLogs) > 0 {
+		return a.renderManageLogPanel(layout, items)
+	}
+
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 1).
+		// lipgloss applies borders after Width/Height, so subtract 2 to target an
+		// exact outer size for predictable layouts and mouse hit-testing.
+		Width(maxInt(1, layout.rightW-2)).
+		Height(maxInt(1, layout.bodyH-2))
+
+	if len(items) == 0 {
+		return panel.Render(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No tools found"))
+	}
+
+	item := items[a.manageIndex]
+
+	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("SETTINGS")
+	statusBadge := ""
+	if item.id != "global" {
+		if item.installed {
+			statusBadge = " " + RenderBadge("INSTALLED", ColorBg, ColorGreen)
+		} else {
+			statusBadge = " " + RenderBadge("NOT INSTALLED", ColorText, ColorMuted)
+		}
+	}
+	metaName := item.name
+	if item.icon != "" {
+		metaName = item.icon + " " + metaName
+	}
+	meta := lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(metaName) +
+		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description) +
+		statusBadge
+
+	innerW := maxInt(0, layout.rightW-(layout.border*2)-(layout.padX*2))
+
+	// Field list lines (fixed height for stable layout).
+	visibleFieldLines := layout.rightListH
+	fieldCapacity := visibleFieldLines
+	if a.manageEditing && a.manageEditField != nil && fieldCapacity > 0 {
+		// Reserve the first line for the editor, but keep overall height stable.
+		fieldCapacity--
+	}
+
+	var fieldLines []string
+	if len(fields) == 0 {
+		// No explicit fields for this tool. Show a helpful placeholder plus an
+		// install hint.
+		msgStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		strong := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
+
+		if item.id == "global" {
+			fieldLines = append(fieldLines, msgStyle.Render("No global settings available."))
+		} else {
+			if item.configurable {
+				fieldLines = append(fieldLines, msgStyle.Render("No manager UI fields yet (tool has config)."))
+			} else {
+				fieldLines = append(fieldLines, msgStyle.Render("No configurable settings for this tool."))
+			}
+
+			if !item.installed {
+				fieldLines = append(fieldLines, strong.Render("Press I to install"))
+			} else {
+				fieldLines = append(fieldLines, msgStyle.Render("Installed — press S to save global prefs"))
+			}
+
+			// Show package names for this platform (best-effort).
+			if t, ok := tools.GetRegistry().Get(item.id); ok {
+				platform := pkg.DetectPlatform()
+				pkgs := t.Packages()[platform]
+				if len(pkgs) == 0 {
+					pkgs = t.Packages()["all"]
+				}
+				if len(pkgs) > 0 {
+					pkgLine := msgStyle.Render("Packages: ") + strong.Render(strings.Join(pkgs, ", "))
+					fieldLines = append(fieldLines, pkgLine)
+				}
+			}
+		}
+	} else {
+		for i := a.manageFieldsScroll; i < len(fields) && len(fieldLines) < fieldCapacity; i++ {
+			f := fields[i]
+			focused := (a.managePane == managePaneSettings) && (i == a.configFieldIndex)
+			fieldLines = append(fieldLines, truncateVisible(renderManageFieldLine(f, focused), innerW))
+		}
+	}
+	for len(fieldLines) < fieldCapacity {
+		fieldLines = append(fieldLines, "")
+	}
+
+	var fieldsBlock string
+	if a.manageEditing && a.manageEditField != nil && visibleFieldLines > 0 {
+		fieldsBlock = strings.Join(append([]string{a.renderManageInlineEditor(innerW)}, fieldLines...), "\n")
+	} else {
+		fieldsBlock = strings.Join(fieldLines, "\n")
+	}
+
+	// Exactly 3 header lines before the fields area (matches manageLayout.rightHeaderLines).
+	actionLine := ""
+	if item.id != "global" && !item.installed {
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
+	} else if item.id != "global" && len(fields) == 0 {
+		actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
+	}
+
+	contentLines := []string{
+		title,
+		truncateVisible(meta, innerW),
+		truncateVisible(actionLine, innerW),
+		fieldsBlock,
+	}
+
+	// Optional animated widget area (globe) at the bottom.
+	if a.animationsEnabled && layout.rightGlobeH > 0 {
+		globeW := min(30, maxInt(20, innerW/2))
+		globe := RenderMiniGlobe(globeW, layout.rightGlobeH, a.uiFrame)
+		globePlaced := lipgloss.Place(innerW, layout.rightGlobeH, lipgloss.Right, lipgloss.Center, globe)
+		contentLines = append(contentLines, "", globePlaced)
+	}
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		contentLines...,
+	)
+
+	return panel.Render(content)
+}
+
+func renderManageFieldLine(f manageField, focused bool) string {
+	// Left label column.
+	labelStyle := lipgloss.NewStyle().Foreground(ColorText).Width(18)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	cursor := "  "
+
+	if focused {
+		cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
+		labelStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Width(18)
+		valueStyle = lipgloss.NewStyle().Foreground(ColorText).Bold(true)
+	}
+
+	switch f.kind {
+	case manageFieldToggle:
+		val := lipgloss.NewStyle().Foreground(ColorRed).Render("OFF")
+		if f.b != nil && *f.b {
+			val = lipgloss.NewStyle().Foreground(ColorGreen).Render("ON")
+		}
+		return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), val)
+
+	case manageFieldNumber:
+		if f.n == nil {
+			return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), valueStyle.Render("—"))
+		}
+		leftArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("◀")
+		rightArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("▶")
+		if focused {
+			leftArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("◀")
+			rightArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("▶")
+		}
+		val := valueStyle.Render(fmt.Sprintf("%d%s", *f.n, f.unit))
+		return fmt.Sprintf("%s%s %s %s %s", cursor, labelStyle.Render(f.label), leftArrow, val, rightArrow)
+
+	case manageFieldOption:
+		if f.str == nil || len(f.options) == 0 {
+			return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), valueStyle.Render("—"))
+		}
+		leftArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("◀")
+		rightArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("▶")
+		if focused {
+			leftArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("◀")
+			rightArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("▶")
+		}
+		val := valueStyle.Render(*f.str)
+		return fmt.Sprintf("%s%s %s %s %s", cursor, labelStyle.Render(f.label), leftArrow, val, rightArrow)
+
+	case manageFieldText:
+		if f.str == nil {
+			return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), valueStyle.Render("—"))
+		}
+		val := *f.str
+		if val == "" {
+			val = "—"
+		}
+		return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), valueStyle.Render(val))
+	}
+
+	return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), valueStyle.Render("—"))
+}
+
+func (a *App) renderManageInlineEditor(width int) string {
+	// Single-line editor used for string fields.
+	//
+	// Important: this must remain ONE LINE so the fields pane layout and mouse
+	// hit-testing remain stable.
+	if width <= 0 {
+		return ""
+	}
+
+	// Render a caret by inserting a solid block at the current position.
+	runes := []rune(a.manageEditValue)
+	cur := clampInt(a.manageEditCursor, 0, len(runes))
+	left := string(runes[:cur])
+	right := string(runes[cur:])
+
+	plain := fmt.Sprintf("EDIT %s: %s%s%s", a.manageEditFieldKey, left, "█", right)
+	plain = truncatePlain(plain, width)
+
+	return lipgloss.NewStyle().
+		Foreground(ColorTextBright).
+		Background(ColorOverlay).
+		Render(plain)
+}
+
+func (a *App) manageStartEditing(field manageField) {
+	if field.kind != manageFieldText || field.str == nil {
+		return
+	}
+
+	a.manageEditing = true
+	a.manageEditField = field.str
+	a.manageEditFieldKey = field.label
+	a.manageEditValue = *field.str
+	a.manageEditCursor = utf8.RuneCountInString(a.manageEditValue)
+}
+
+func (a *App) manageCommitEditing() {
+	if !a.manageEditing || a.manageEditField == nil {
+		return
+	}
+	*a.manageEditField = a.manageEditValue
+	a.manageEditing = false
+	a.manageEditField = nil
+	a.manageEditFieldKey = ""
+}
+
+func (a *App) manageCancelEditing() {
+	a.manageEditing = false
+	a.manageEditField = nil
+	a.manageEditFieldKey = ""
+	a.manageEditValue = ""
+	a.manageEditCursor = 0
+}
+
+// Utility helpers local to this file.
+
+func clampInt(v, minV, maxV int) int {
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func cycleStringOption(opts []string, current string, forward bool) string {
+	if len(opts) == 0 {
+		return current
+	}
+	for i, o := range opts {
+		if o == current {
+			if forward {
+				return opts[(i+1)%len(opts)]
+			}
+			return opts[(i-1+len(opts))%len(opts)]
+		}
+	}
+	return opts[0]
+}
+
+// truncateVisible truncates a string to a visible width, being conservative with ANSI sequences.
+// We use lipgloss.Width which accounts for ANSI, and rune-based slicing as a best-effort.
+func truncateVisible(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	// ANSI-safe truncation (won't break escape sequences).
+	return ansi.Truncate(s, width, "…")
+}
+
+func truncatePlain(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(r[:width-1]) + "…"
+}
+
+// renderManageLogPanel renders the log panel when installing/updating
+func (a *App) renderManageLogPanel(layout manageLayout, items []manageItem) string {
+	borderColor := ColorCyan
+	if !a.manageInstalling {
+		borderColor = ColorBorder
+	}
+
+	// Get the tool name for the title
+	toolName := "Install"
+	for _, it := range items {
+		if it.id == a.manageInstallID {
+			toolName = it.name
+			break
+		}
+	}
+
+	// Calculate panel dimensions
+	panelW := layout.rightW
+	panelH := layout.bodyH
+
+	// Build title with status
+	var title string
+	if a.manageInstalling {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		if !a.animationsEnabled {
+			spinner = "..."
+		}
+		title = fmt.Sprintf("INSTALLING %s %s", strings.ToUpper(toolName), spinner)
+	} else {
+		title = fmt.Sprintf("INSTALL LOG: %s", strings.ToUpper(toolName))
+	}
+
+	// Use the LogPanel component
+	logPanel := RenderLogPanel(
+		a.installLogs,
+		panelW,
+		panelH,
+		a.installLogScroll,
+		title,
+		a.managePane == managePaneSettings,
+	)
+
+	// Add scroll hint and clear hint at bottom if logs exist
+	if len(a.installLogs) > 0 && !a.manageInstalling {
+		hintStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		clearHint := hintStyle.Render("Press C to clear logs • ↑↓ to scroll")
+		logPanel = lipgloss.JoinVertical(lipgloss.Left, logPanel, clearHint)
+	}
+
+	// Override with simple styled panel to match layout
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 1).
+		Width(maxInt(1, layout.rightW-2)).
+		Height(maxInt(1, layout.bodyH-2))
+
+	// Build content
+	innerWidth := maxInt(0, layout.rightW-4)
+	innerHeight := maxInt(0, layout.bodyH-6)
+
+	// Title line
+	titleStyle := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true)
+	titleLine := titleStyle.Render(title)
+
+	// Calculate visible log range
+	visibleLines := innerHeight
+	totalLines := len(a.installLogs)
+
+	var logLines []string
+	if totalLines == 0 {
+		// Empty state
+		if a.manageInstalling {
+			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Waiting for output..."))
+		} else {
+			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No logs"))
+		}
+	} else {
+		// Calculate range (scroll from bottom)
+		endIdx := totalLines - a.installLogScroll
+		if endIdx > totalLines {
+			endIdx = totalLines
+		}
+		if endIdx < 0 {
+			endIdx = 0
+		}
+		startIdx := endIdx - visibleLines
+		if startIdx < 0 {
+			startIdx = 0
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			line := a.installLogs[i]
+			if lipgloss.Width(line) > innerWidth {
+				line = truncateVisible(line, innerWidth)
+			}
+			logLines = append(logLines, line)
+		}
+	}
+
+	// Pad to fill height
+	for len(logLines) < visibleLines {
+		logLines = append([]string{""}, logLines...)
+	}
+
+	// Footer with hints
+	var footerText string
+	if a.manageInstalling {
+		footerText = "Installing..."
+	} else if len(a.installLogs) > 0 {
+		footerText = "C: clear • ↑↓: scroll"
+	}
+	footer := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(footerText)
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		titleLine,
+		"",
+		strings.Join(logLines, "\n"),
+		"",
+		footer,
+	)
+
+	return panel.Render(content)
+}
