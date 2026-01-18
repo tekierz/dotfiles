@@ -568,6 +568,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.updateChecking = true
 					return a, checkUpdatesCmd()
 				}
+				// Trigger install cache load if transitioning to Manage or Hotkeys screen
+				if a.postIntroScreen == ScreenManage || a.postIntroScreen == ScreenHotkeys {
+					if cmd := a.startInstallCacheLoad(); cmd != nil {
+						return a, cmd
+					}
+				}
 				return a, nil
 			}
 			return a, tickAnimation()
@@ -594,6 +600,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.postIntroScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
 			a.updateChecking = true
 			return a, checkUpdatesCmd()
+		}
+		// Trigger install cache load if transitioning to Manage or Hotkeys screen
+		if a.postIntroScreen == ScreenManage || a.postIntroScreen == ScreenHotkeys {
+			if cmd := a.startInstallCacheLoad(); cmd != nil {
+				return a, cmd
+			}
 		}
 		return a, nil
 
@@ -994,6 +1006,12 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.postIntroScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
 			a.updateChecking = true
 			return a, checkUpdatesCmd()
+		}
+		// Trigger install cache load if transitioning to Manage or Hotkeys screen
+		if a.postIntroScreen == ScreenManage || a.postIntroScreen == ScreenHotkeys {
+			if cmd := a.startInstallCacheLoad(); cmd != nil {
+				return a, cmd
+			}
 		}
 		return a, nil
 
