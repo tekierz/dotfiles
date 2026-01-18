@@ -294,7 +294,7 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 	if hkCfg, err := config.LoadHotkeysConfig(); err == nil && hkCfg != nil {
 		app.hotkeysFavorites = hkCfg
 	} else {
-		app.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]config.UserHotkeys)}
+		app.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]*config.UserHotkeys)}
 	}
 
 	if skipIntro {
@@ -1190,13 +1190,17 @@ func (a *App) clearInstallLogs() {
 
 func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch a.screen {
+	case ScreenMainMenu:
+		return a.handleMainMenuMouse(msg)
 	case ScreenManage:
 		return a.handleManageMouse(msg)
 	case ScreenHotkeys:
 		return a.handleHotkeysMouse(msg)
 	case ScreenUsers:
 		return a.handleUsersMouse(msg)
-	case ScreenUpdate, ScreenBackups:
+	case ScreenBackups:
+		return a.handleBackupsMouse(msg)
+	case ScreenUpdate:
 		return a.handleTabBarMouse(msg)
 	case ScreenWelcome:
 		return a.handleWelcomeMouse(msg)

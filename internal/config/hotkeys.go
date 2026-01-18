@@ -9,7 +9,7 @@ import (
 // HotkeysConfig stores per-user hotkey customizations
 type HotkeysConfig struct {
 	// Keyed by user name from global config's ActiveUser
-	Users map[string]UserHotkeys `json:"users"`
+	Users map[string]*UserHotkeys `json:"users"`
 }
 
 // UserHotkeys stores a user's hotkey customizations
@@ -29,7 +29,7 @@ func LoadHotkeysConfig() (*HotkeysConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &HotkeysConfig{Users: make(map[string]UserHotkeys)}, nil
+			return &HotkeysConfig{Users: make(map[string]*UserHotkeys)}, nil
 		}
 		return nil, err
 	}
@@ -39,7 +39,7 @@ func LoadHotkeysConfig() (*HotkeysConfig, error) {
 		return nil, err
 	}
 	if cfg.Users == nil {
-		cfg.Users = make(map[string]UserHotkeys)
+		cfg.Users = make(map[string]*UserHotkeys)
 	}
 	return &cfg, nil
 }
@@ -63,33 +63,34 @@ func SaveHotkeysConfig(cfg *HotkeysConfig) error {
 	return os.WriteFile(path, data, 0600)
 }
 
-// GetUserHotkeys gets or creates hotkeys for a specific user
+// GetUserHotkeys gets or creates hotkeys for a specific user.
+// Returns a pointer to the actual map entry, so modifications persist.
 func (c *HotkeysConfig) GetUserHotkeys(username string) *UserHotkeys {
 	if c.Users == nil {
-		c.Users = make(map[string]UserHotkeys)
+		c.Users = make(map[string]*UserHotkeys)
 	}
 	h, ok := c.Users[username]
-	if !ok {
-		h = UserHotkeys{
+	if !ok || h == nil {
+		h = &UserHotkeys{
 			Favorites: make(map[string][]string),
 			Aliases:   make(map[string]string),
 		}
 		c.Users[username] = h
 	}
-	return &h
+	return h
 }
 
 // SetUserHotkeys updates the hotkeys for a specific user
 func (c *HotkeysConfig) SetUserHotkeys(username string, h *UserHotkeys) {
 	if c.Users == nil {
-		c.Users = make(map[string]UserHotkeys)
+		c.Users = make(map[string]*UserHotkeys)
 	}
-	c.Users[username] = *h
+	c.Users[username] = h
 }
 
 // IsFavorite checks if a hotkey item is a favorite for the user
 func (u *UserHotkeys) IsFavorite(categoryID, itemKey string) bool {
-	if u.Favorites == nil {
+	if u == nil || u.Favorites == nil {
 		return false
 	}
 	items, ok := u.Favorites[categoryID]
@@ -124,6 +125,9 @@ func (u *UserHotkeys) ToggleFavorite(categoryID, itemKey string) {
 
 // GetFavoriteCount returns the total number of favorites for the user
 func (u *UserHotkeys) GetFavoriteCount() int {
+	if u == nil {
+		return 0
+	}
 	count := 0
 	for _, items := range u.Favorites {
 		count += len(items)

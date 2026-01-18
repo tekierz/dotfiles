@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -586,4 +587,125 @@ func (a *App) renderBackups() string {
 	return lipgloss.Place(a.width, a.height,
 		lipgloss.Center, lipgloss.Top,
 		content)
+}
+
+// =====================================
+// Mouse Handlers
+// =====================================
+
+// handleMainMenuMouse handles mouse clicks on the main menu
+func (a *App) handleMainMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	// Only handle left clicks
+	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
+		return a, nil
+	}
+
+	items := GetMainMenuItems()
+	if len(items) == 0 {
+		return a, nil
+	}
+
+	// The main menu is centered. Calculate the content boundaries.
+	// Content structure: title(1), subtitle(1), empty(1), menu items(n), empty(1), help(1)
+	// Total content height = 5 + len(items)
+	contentH := 5 + len(items)
+	startY := (a.height - contentH) / 2 // Center vertically
+
+	// Menu items start at line 3 (after title, subtitle, empty)
+	menuStartY := startY + 3
+
+	// Check if click is within menu area
+	for i := range items {
+		itemY := menuStartY + i
+		if m.Y == itemY {
+			// Select this item
+			a.mainMenuIndex = i
+			// Trigger enter action
+			targetScreen := items[i].Screen
+			a.screen = targetScreen
+			// Start async operations for screens that need it
+			switch targetScreen {
+			case ScreenManage:
+				if cmd := a.startInstallCacheLoad(); cmd != nil {
+					return a, cmd
+				}
+			case ScreenBackups:
+				if !a.backupsLoading && !a.backupsLoaded {
+					a.backupsLoading = true
+					return a, loadBackupsCmd()
+				}
+			case ScreenUpdate:
+				if !a.updateChecking && !a.updateCheckDone {
+					a.updateChecking = true
+					return a, checkUpdatesCmd()
+				}
+			case ScreenUsers:
+				if !a.usersLoaded {
+					a.usersLoaded = true
+					return a, loadUsersCmd()
+				}
+			case ScreenHotkeys:
+				a.hotkeysReturn = ScreenMainMenu
+			}
+			return a, nil
+		}
+	}
+
+	return a, nil
+}
+
+// handleBackupsMouse handles mouse clicks on the backups screen
+func (a *App) handleBackupsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m := tea.MouseEvent(msg)
+
+	// Handle tab bar clicks (Y=0 is the tab bar line)
+	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+		if screen, cmd := a.detectTabClick(m.X); screen != 0 {
+			a.screen = screen
+			return a, cmd
+		}
+	}
+
+	// Handle mouse wheel scrolling for backup list
+	if m.IsWheel() && len(a.backups) > 0 {
+		delta := 0
+		switch m.Button {
+		case tea.MouseButtonWheelUp:
+			delta = -1
+		case tea.MouseButtonWheelDown:
+			delta = 1
+		default:
+			return a, nil
+		}
+		a.backupIndex = clampInt(a.backupIndex+delta, 0, len(a.backups)-1)
+		return a, nil
+	}
+
+	// Only handle left clicks for list selection
+	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
+		return a, nil
+	}
+
+	// Skip if loading or no backups
+	if a.backupsLoading || len(a.backups) == 0 {
+		return a, nil
+	}
+
+	// The backup list starts after: tabBar(1), empty(1), title(1), subtitle(1), status?(1), empty(1), header(1), divider(1)
+	// So list items start around Y=7-8 depending on status
+	listStartY := 7
+	if a.backupStatus != "" {
+		listStartY = 8
+	}
+
+	// Check if click is within list area
+	clickedIndex := m.Y - listStartY
+	if clickedIndex >= 0 && clickedIndex < len(a.backups) {
+		a.backupIndex = clickedIndex
+		return a, nil
+	}
+
+	return a, nil
 }

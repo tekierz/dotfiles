@@ -50,6 +50,11 @@ func (t *ClaudeCodeTool) ApplyConfig(theme string) error {
 		cfg = &config.ClaudeConfig{MCPServers: make(map[string]config.MCPServer)}
 	}
 
+	// Ensure MCPServers map is initialized (may be nil if settings.json exists but lacks this field)
+	if cfg.MCPServers == nil {
+		cfg.MCPServers = make(map[string]config.MCPServer)
+	}
+
 	// Add default MCPs if not already configured
 	defaults := config.DefaultMCPServers()
 	for name, server := range defaults {

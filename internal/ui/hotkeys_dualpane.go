@@ -174,7 +174,7 @@ func (a *App) getCurrentUsername() string {
 // getCurrentUserHotkeys returns the hotkeys config for the current user.
 func (a *App) getCurrentUserHotkeys() *config.UserHotkeys {
 	if a.hotkeysFavorites == nil {
-		a.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]config.UserHotkeys)}
+		a.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]*config.UserHotkeys)}
 	}
 	username := a.getCurrentUsername()
 	return a.hotkeysFavorites.GetUserHotkeys(username)
