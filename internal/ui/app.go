@@ -2538,6 +2538,19 @@ func (a *App) startInstallation() tea.Cmd {
 			}
 		}
 
+		// Apply Claude Code MCP configuration if claude-code was selected
+		if a.deepDiveConfig.CLITools["claude-code"] || a.deepDiveConfig.Utilities["claude-code"] {
+			a.installStep++
+			a.installOutput = append(a.installOutput, "\n▶ Configuring Claude Code MCP servers...")
+			claudeTool := tools.NewClaudeCodeTool()
+			if err := claudeTool.ApplyConfig(a.theme); err != nil {
+				a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Claude MCP: %v", err))
+				lastErr = err
+			} else {
+				a.installOutput = append(a.installOutput, "  ✓ Claude Code MCP servers configured (context7 enabled)")
+			}
+		}
+
 		// Build context from last few output lines for error display
 		var context string
 		if lastErr != nil && len(a.installOutput) > 0 {
