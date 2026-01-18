@@ -23,12 +23,13 @@ internal/
   runner/                # Bash script execution
   scripts/               # Embedded utility scripts (hk, caff, sshh)
   tools/                 # Tool registry (27+ tools)
-  ui/                    # Bubble Tea TUI (~8,000 lines)
+  ui/                    # Bubble Tea TUI (~12,600 lines)
 bin/
   dotfiles               # Built Go binary
   dotfiles-setup         # Legacy bash script
 docs/
   tools.md               # Detailed tool reference
+  beta.plan              # Planned improvements for next release
 ```
 
 ## Homebrew Distribution
@@ -129,6 +130,26 @@ go vet ./...        # Static analysis
 2. Add case in `View()` method
 3. Add key handling in `Update()` method
 4. Create render function
+
+### Testing
+
+```bash
+go test ./...           # Run all tests
+go test ./internal/ui/  # Run UI tests only
+go test -v ./...        # Verbose output
+```
+
+Test infrastructure includes:
+- Mock package manager (`internal/pkg/mock_manager.go`)
+- Mock config provider (`internal/ui/deps_test.go`)
+- Screen handler tests (`internal/ui/screen_test.go`)
+
+### Pre-PR Checklist
+
+See `.claude/skills/pre-pr-tests/SKILL.md` for comprehensive testing checklist including:
+- Automated tests (build, vet, fmt, security scan)
+- Manual TUI testing
+- Cross-repository compatibility checks
 
 ### Performance Considerations
 

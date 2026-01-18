@@ -6,12 +6,13 @@ This directory contains the core Go packages for the dotfiles TUI application.
 
 | Package | Purpose | Key Files |
 |---------|---------|-----------|
-| `config/` | Configuration loading/saving | `config.go` |
+| `config/` | Configuration loading/saving | `config.go`, `user.go` |
 | `hotkeys/` | Hotkey definitions for tools | `hotkeys.go` |
 | `pkg/` | Package manager abstraction | `manager.go`, `brew.go`, `pacman.go`, `apt.go` |
-| `runner/` | Bash script execution | `runner.go` |
-| `tools/` | Tool registry and definitions | `registry.go`, `tool.go` |
-| `ui/` | Bubble Tea TUI application | `app.go`, `screens.go`, `styles.go` |
+| `runner/` | Bash script execution | `bash.go` |
+| `scripts/` | Embedded utility scripts | `scripts.go` (hk, caff, sshh) |
+| `tools/` | Tool registry and definitions | `registry.go`, `tool.go`, `apps.go` |
+| `ui/` | Bubble Tea TUI application (~12,600 lines) | `app.go`, `screens.go`, `styles.go` |
 
 ## Architecture
 

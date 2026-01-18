@@ -6,7 +6,9 @@ User configuration management with JSON storage.
 
 | File | Purpose |
 |------|---------|
-| `config.go` | Config structs, load/save functions |
+| `config.go` | GlobalConfig, tool configs, load/save functions |
+| `user.go` | UserProfile management (multi-user support) |
+| `user_test.go` | User profile tests |
 
 ## Config Directory
 
@@ -85,4 +87,44 @@ func (c *GhosttyConfig) Validate() {
         c.FontSize = 14 // Default
     }
 }
+```
+
+## User Profiles
+
+Multi-user support with per-user themes and navigation preferences.
+
+Stored in `~/.config/dotfiles/users/<username>.json`:
+
+```go
+type UserProfile struct {
+    Name          string `json:"name"`
+    Theme         string `json:"theme"`
+    NavStyle      string `json:"nav_style"`
+    KeyboardStyle string `json:"keyboard_style"`
+    CreatedAt     string `json:"created_at"`
+    UpdatedAt     string `json:"updated_at"`
+}
+
+// CRUD operations
+profile := config.DefaultUserProfile("username")
+err := config.SaveUserProfile(profile)
+profile, err := config.LoadUserProfile("username")
+err := config.DeleteUserProfile("username")
+users, err := config.ListUserProfiles()
+
+// Active user
+err := config.ApplyUserProfile(profile)  // Sets as active
+user, err := config.GetActiveUser()
+err := config.ClearActiveUser()
+```
+
+## Username Validation
+
+Usernames must:
+- Start with a letter
+- Contain only letters, numbers, underscores, hyphens
+- Be 1-32 characters long
+
+```go
+err := config.ValidateUsername("myuser")
 ```

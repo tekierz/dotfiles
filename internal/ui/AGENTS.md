@@ -6,15 +6,22 @@ TUI implementation using Bubble Tea (Elm architecture: Model-Update-View).
 
 | File | Purpose | Lines |
 |------|---------|-------|
-| `app.go` | Main App model, Update(), View(), message handlers | ~1400 |
-| `screens.go` | Wizard screen rendering (intro, theme, nav, summary) | ~500 |
-| `screens_deepdive.go` | Deep dive config screens for installer | ~1100 |
+| `app.go` | Main App model, Update(), View(), message handlers | ~3100 |
+| `screens.go` | Wizard screen rendering (intro, theme, nav, summary) | ~800 |
+| `screens_deepdive.go` | Deep dive config screens for installer | ~1550 |
 | `screens_management.go` | Management platform screens | ~450 |
-| `manage_dualpane.go` | Dual-pane management UI with mouse support | ~1500 |
-| `hotkeys_dualpane.go` | Hotkey viewer dual-pane layout | ~550 |
-| `styles.go` | Lipgloss color palette and style definitions | ~430 |
-| `deepdive.go` | DeepDiveConfig struct and menu items | ~290 |
-| `animation.go` | ASCII art animations for intro | varies |
+| `screens_manage.go` | Manage screen with tool actions | ~750 |
+| `manage_dualpane.go` | Dual-pane management UI with mouse support | ~1730 |
+| `hotkeys_dualpane.go` | Hotkey viewer dual-pane layout | ~600 |
+| `styles.go` | Lipgloss color palette and style definitions | ~810 |
+| `deepdive.go` | DeepDiveConfig struct and menu items | ~360 |
+| `screen.go` | ScreenHandler interface and base implementations | ~150 |
+| `screen_manager.go` | Screen lifecycle management | ~200 |
+| `screen_users.go` | User profile management screens | ~670 |
+| `deps.go` | Dependency injection interfaces | ~200 |
+| `deps_test.go` | Mock implementations for testing | ~200 |
+
+**Total: ~12,600 lines**
 
 ## Screen Navigation
 
