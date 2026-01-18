@@ -242,7 +242,7 @@ func (a *App) renderConfigGhostty() string {
 	content.WriteString(renderOptionSelector(
 		[]string{"block", "bar", "underline"},
 		[]string{"█ Block", "│ Bar", "_ Underline"},
-		cfg.GhostyCursorStyle,
+		cfg.GhosttyCursorStyle,
 		cursorFocused,
 	))
 	content.WriteString("\n\n")

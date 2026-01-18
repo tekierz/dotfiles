@@ -1164,7 +1164,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.deepDiveConfig.GhosttyScrollbackLines = atoi(result, 10000)
 			case 5: // Cursor style
 				opts := []string{"block", "bar", "underline"}
-				a.deepDiveConfig.GhostyCursorStyle = cycleOption(opts, a.deepDiveConfig.GhostyCursorStyle, false)
+				a.deepDiveConfig.GhosttyCursorStyle = cycleOption(opts, a.deepDiveConfig.GhosttyCursorStyle, false)
 			case 6: // Tab bindings
 				opts := []string{"super", "ctrl", "alt"}
 				a.deepDiveConfig.GhosttyTabBindings = cycleOption(opts, a.deepDiveConfig.GhosttyTabBindings, false)
@@ -1193,7 +1193,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.deepDiveConfig.GhosttyScrollbackLines = atoi(result, 10000)
 			case 5: // Cursor style
 				opts := []string{"block", "bar", "underline"}
-				a.deepDiveConfig.GhostyCursorStyle = cycleOption(opts, a.deepDiveConfig.GhostyCursorStyle, true)
+				a.deepDiveConfig.GhosttyCursorStyle = cycleOption(opts, a.deepDiveConfig.GhosttyCursorStyle, true)
 			case 6: // Tab bindings
 				opts := []string{"super", "ctrl", "alt"}
 				a.deepDiveConfig.GhosttyTabBindings = cycleOption(opts, a.deepDiveConfig.GhosttyTabBindings, true)
