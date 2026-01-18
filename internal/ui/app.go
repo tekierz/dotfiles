@@ -2056,10 +2056,26 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			targetScreen := items[a.mainMenuIndex].Screen
 			a.screen = targetScreen
-			// Start async install cache for screens that need it
-			if targetScreen == ScreenManage {
+			// Start async operations for screens that need it
+			switch targetScreen {
+			case ScreenManage:
 				if cmd := a.startInstallCacheLoad(); cmd != nil {
 					return a, cmd
+				}
+			case ScreenBackups:
+				if !a.backupsLoading && !a.backupsLoaded {
+					a.backupsLoading = true
+					return a, loadBackupsCmd()
+				}
+			case ScreenUpdate:
+				if !a.updateChecking && !a.updateCheckDone {
+					a.updateChecking = true
+					return a, checkUpdatesCmd()
+				}
+			case ScreenUsers:
+				if !a.usersLoaded {
+					a.usersLoaded = true
+					return a, loadUsersCmd()
 				}
 			}
 		}
@@ -2756,6 +2772,11 @@ func (a *App) handleTabNavigationWithCmd(key string) (bool, tea.Cmd) {
 	if targetScreen == ScreenUsers && !a.usersLoaded {
 		a.usersLoaded = true
 		return true, loadUsersCmd()
+	}
+
+	if targetScreen == ScreenBackups && !a.backupsLoading && !a.backupsLoaded {
+		a.backupsLoading = true
+		return true, loadBackupsCmd()
 	}
 
 	return true, nil
