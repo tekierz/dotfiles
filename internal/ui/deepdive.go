@@ -1,5 +1,19 @@
 package ui
 
+import "github.com/tekierz/dotfiles/internal/tools"
+
+// buildToolGroupDefaults creates a map of tool IDs to their default enabled state
+// for the specified UI group. Uses the tool registry as single source of truth.
+func buildToolGroupDefaults(group tools.UIGroup) map[string]bool {
+	result := make(map[string]bool)
+	for _, t := range tools.GetRegistry().All() {
+		if t.UIGroup() == group {
+			result[t.ID()] = t.DefaultEnabled()
+		}
+	}
+	return result
+}
+
 // DeepDiveConfig holds all deep dive configuration options
 type DeepDiveConfig struct {
 	// Ghostty settings
@@ -190,19 +204,8 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		FzfHeight:  40,
 		FzfLayout:  "reverse",
 
-		// macOS Apps defaults
-		MacApps: map[string]bool{
-			"rectangle":       true,
-			"raycast":         true,
-			"stats":           true,
-			"alt-tab":         false,
-			"monitor-control": false,
-			"mos":             false,
-			"karabiner":       false,
-			"iina":            false,
-			"the-unarchiver":  true,
-			"appcleaner":      true,
-		},
+		// macOS Apps defaults (from registry)
+		MacApps: buildToolGroupDefaults(tools.UIGroupMacApps),
 
 		// Utilities defaults (all enabled by default)
 		Utilities: map[string]bool{
@@ -211,36 +214,14 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"sshh": true,
 		},
 
-		// CLI Tools defaults
-		CLITools: map[string]bool{
-			"lazygit":     true,
-			"lazydocker":  true,
-			"btop":        true,
-			"glow":        true,
-			"claude-code": false,
-		},
+		// CLI Tools defaults (from registry)
+		CLITools: buildToolGroupDefaults(tools.UIGroupCLITools),
 
-		// GUI Apps defaults
-		GUIApps: map[string]bool{
-			"zen-browser": false,
-			"cursor":      false,
-			"lm-studio":   false,
-			"obs":         false,
-			"sunshine":    false,
-			"moonlight":   false,
-		},
+		// GUI Apps defaults (from registry)
+		GUIApps: buildToolGroupDefaults(tools.UIGroupGUIApps),
 
-		// CLI Utilities defaults (commonly useful tools enabled by default)
-		CLIUtilities: map[string]bool{
-			"bat":       true,  // cat replacement with syntax highlighting
-			"eza":       true,  // ls replacement
-			"zoxide":    true,  // cd replacement
-			"ripgrep":   true,  // grep replacement
-			"fd":        true,  // find replacement
-			"delta":     true,  // git diff viewer
-			"fswatch":   false, // file watcher (optional)
-			"tailscale": false, // mesh VPN (optional)
-		},
+		// CLI Utilities defaults (from registry)
+		CLIUtilities: buildToolGroupDefaults(tools.UIGroupCLIUtilities),
 
 		// LazyGit defaults
 		LazyGitSideBySide: true,
