@@ -460,55 +460,11 @@ func (a *App) renderFileTree() string {
 	// Collect selected and already installed tools
 	var toInstall []string
 	var alreadyInstalled []string
-	selectedTools := make(map[string]bool) // Track all selected tool IDs
+	selectedTools := make(map[string]bool)
 
-	// CLI Tools
-	for id, enabled := range cfg.CLITools {
-		if enabled {
-			selectedTools[id] = true
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// GUI Apps
-	for id, enabled := range cfg.GUIApps {
-		if enabled {
-			selectedTools[id] = true
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// CLI Utilities
-	for id, enabled := range cfg.CLIUtilities {
-		if enabled {
-			selectedTools[id] = true
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// Utilities
-	for id, enabled := range cfg.Utilities {
-		if enabled {
-			selectedTools[id] = true
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// macOS Apps (only on macOS)
-	if pkg.DetectPlatform() == pkg.PlatformMacOS {
-		for id, enabled := range cfg.MacApps {
+	// Helper to categorize enabled tools
+	collectTools := func(toolMap map[string]bool) {
+		for id, enabled := range toolMap {
 			if enabled {
 				selectedTools[id] = true
 				if a.manageInstalled[id] {
@@ -518,6 +474,14 @@ func (a *App) renderFileTree() string {
 				}
 			}
 		}
+	}
+
+	collectTools(cfg.CLITools)
+	collectTools(cfg.GUIApps)
+	collectTools(cfg.CLIUtilities)
+	collectTools(cfg.Utilities)
+	if pkg.DetectPlatform() == pkg.PlatformMacOS {
+		collectTools(cfg.MacApps)
 	}
 
 	// Sort for stable display order (prevents flickering from map iteration)
@@ -554,27 +518,25 @@ func (a *App) renderFileTree() string {
 	// Configurations to Apply section - show tools that have config files
 	var configTools []string
 	registry := tools.GetRegistry()
+
 	// Core tools always configured
-	coreConfigTools := []string{"ghostty", "tmux", "zsh", "neovim", "git", "yazi"}
-	for _, id := range coreConfigTools {
+	coreToolIDs := map[string]bool{
+		"ghostty": true, "tmux": true, "zsh": true,
+		"neovim": true, "git": true, "yazi": true,
+	}
+	for id := range coreToolIDs {
 		if tool, exists := registry.Get(id); exists && tool.HasConfig() {
 			configTools = append(configTools, tool.Name())
 		}
 	}
-	// CLI utilities with config (bat, lazygit, lazydocker, btop, etc.)
+
+	// Additional selected tools with config (bat, lazygit, lazydocker, btop, etc.)
 	for id := range selectedTools {
+		if coreToolIDs[id] {
+			continue
+		}
 		if tool, exists := registry.Get(id); exists && tool.HasConfig() {
-			// Skip core tools already added
-			isCore := false
-			for _, coreID := range coreConfigTools {
-				if id == coreID {
-					isCore = true
-					break
-				}
-			}
-			if !isCore {
-				configTools = append(configTools, tool.Name())
-			}
+			configTools = append(configTools, tool.Name())
 		}
 	}
 	sort.Strings(configTools)
