@@ -164,7 +164,58 @@ See `.claude/skills/pre-pr-tests/SKILL.md` for comprehensive testing checklist i
 - **Validate all user input** in config parsing
 - **File permissions**: config directories get 700, settings files get 600
 
-## Git Commit Rules
+## Git Strategy
+
+### Versioning
+
+Use semantic versioning with tags:
+- **Major** (v3.0.0): Breaking changes, major rewrites
+- **Minor** (v2.1.0): New features, backward compatible
+- **Patch** (v2.1.1): Bug fixes, small improvements
+
+Tag releases after merging to main:
+```bash
+git tag v2.1.0
+git push origin v2.1.0
+```
+
+### Branch Structure
+
+```
+main          ← Production-ready releases only
+  ↑
+develop       ← Integration branch, PR target for features
+  ↑
+feature/*     ← Individual feature/fix branches
+fix/*
+refactor/*
+```
+
+- **main**: Always stable, tagged releases only
+- **develop**: Integration branch where features are merged and tested together
+- **Feature branches**: Branch from and merge back to `develop`
+
+### Branch Naming
+
+Use prefixes to indicate branch purpose:
+
+| Prefix | Purpose | Example |
+|--------|---------|---------|
+| `feature/` | New features | `feature/backup-restore-ui` |
+| `fix/` | Bug fixes | `fix/v2.1.1` |
+| `refactor/` | Code restructuring | `refactor/extract-input-handlers` |
+| `docs/` | Documentation only | `docs/update-tool-reference` |
+
+### Pull Requests
+
+- **Target `develop`** for feature/fix branches, not `main`
+- **One logical change per PR** - easier to review and revert
+- Keep PRs focused and small when possible
+- Run pre-PR tests before creating PR (see `.claude/skills/pre-pr-tests/`)
+- Squash merge for cleaner history on feature branches
+- Merge `develop` → `main` only for releases (with version tag)
+
+### Commit Rules
 
 - Never add "Generated with Claude Code" tags to commits
 - Never add "Co-Authored-By: Claude" lines to commits
