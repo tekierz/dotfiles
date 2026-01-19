@@ -196,6 +196,10 @@ func (a *App) handleManagementKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		maxFields := 3
 		a.handleManageNavigation(key, maxFields, ScreenManage)
 
+	case ScreenManageClaudeCode:
+		maxFields := 7 // Number of MCP toggles
+		a.handleManageNavigation(key, maxFields, ScreenManage)
+
 	// Users screen navigation - delegates to existing handler
 	case ScreenUsers:
 		return a.handleUsersKey(msg)

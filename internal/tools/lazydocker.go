@@ -33,7 +33,7 @@ func NewLazyDockerTool() *LazyDockerTool {
 			heavyTool: true, // Skip on low-memory systems (Pi Zero 2)
 			// UI metadata
 			uiGroup:        UIGroupCLITools,
-			configScreen:   0, // Part of CLI Tools group screen
+			configScreen:   29, // ScreenConfigLazyDocker - has dedicated config screen
 			defaultEnabled: true,
 		},
 	}

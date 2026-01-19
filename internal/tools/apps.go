@@ -245,6 +245,16 @@ func NewRectangleTool() *RectangleTool {
 	}
 }
 
+// IsInstalled checks if Rectangle is available (Homebrew or app bundle)
+func (t *RectangleTool) IsInstalled() bool {
+	// Check macOS app bundle first
+	if hasMacOSApp("Rectangle") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
+}
+
 // RaycastTool represents Raycast launcher
 type RaycastTool struct {
 	BaseTool
@@ -270,6 +280,16 @@ func NewRaycastTool() *RaycastTool {
 			platformFilter: pkg.PlatformMacOS,
 		},
 	}
+}
+
+// IsInstalled checks if Raycast is available (Homebrew or app bundle)
+func (t *RaycastTool) IsInstalled() bool {
+	// Check macOS app bundle first
+	if hasMacOSApp("Raycast") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
 }
 
 // IINATool represents IINA media player
@@ -299,6 +319,16 @@ func NewIINATool() *IINATool {
 	}
 }
 
+// IsInstalled checks if IINA is available (Homebrew or app bundle)
+func (t *IINATool) IsInstalled() bool {
+	// Check macOS app bundle first
+	if hasMacOSApp("IINA") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
+}
+
 // AppCleanerTool represents AppCleaner
 type AppCleanerTool struct {
 	BaseTool
@@ -324,6 +354,16 @@ func NewAppCleanerTool() *AppCleanerTool {
 			platformFilter: pkg.PlatformMacOS,
 		},
 	}
+}
+
+// IsInstalled checks if AppCleaner is available (Homebrew or app bundle)
+func (t *AppCleanerTool) IsInstalled() bool {
+	// Check macOS app bundle first
+	if hasMacOSApp("AppCleaner") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
 }
 
 // Helper functions for detecting installed apps

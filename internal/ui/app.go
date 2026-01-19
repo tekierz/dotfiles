@@ -76,6 +76,7 @@ const (
 	ScreenManageBtop
 	ScreenManageGlow
 	ScreenConfigClaudeCode
+	ScreenManageClaudeCode
 )
 
 // Available themes
@@ -329,11 +330,10 @@ func (a *App) Init() tea.Cmd {
 		a.updateChecking = true
 		cmds = append(cmds, checkUpdatesCmd())
 	}
-	// Start install cache loading if starting directly on Manage or Hotkeys screen
-	if a.screen == ScreenManage || a.screen == ScreenHotkeys {
-		if cmd := a.startInstallCacheLoad(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	// Preload install cache immediately on startup for faster Deep Dive/Manage transitions
+	// By loading during intro animation, cache is ready when user navigates to those screens
+	if cmd := a.startInstallCacheLoad(); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
 }
@@ -1157,7 +1157,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ScreenMainMenu, ScreenManage, ScreenUpdate, ScreenHotkeys, ScreenBackups, ScreenUsers,
 		ScreenManageGhostty, ScreenManageTmux, ScreenManageZsh, ScreenManageNeovim,
 		ScreenManageGit, ScreenManageYazi, ScreenManageFzf, ScreenManageLazyGit,
-		ScreenManageLazyDocker, ScreenManageBtop, ScreenManageGlow:
+		ScreenManageLazyDocker, ScreenManageBtop, ScreenManageGlow, ScreenManageClaudeCode:
 		return a.handleManagementKey(msg)
 
 	// Deep dive screens
@@ -1262,6 +1262,8 @@ func (a *App) View() string {
 		return a.renderManageBtop()
 	case ScreenManageGlow:
 		return a.renderManageGlow()
+	case ScreenManageClaudeCode:
+		return a.renderManageClaudeCode()
 	case ScreenUpdate:
 		return a.renderUpdate()
 	case ScreenHotkeys:

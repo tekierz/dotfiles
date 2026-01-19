@@ -1075,6 +1075,17 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "width", label: "Width", description: "Max render width", kind: manageFieldNumber, n: &cfg.GlowWidth, min: 40, max: 240, step: 5, unit: " chars"},
 			{key: "mouse", label: "Mouse", description: "Enable mouse support in Glow", kind: manageFieldToggle, b: &cfg.GlowMouse},
 		}
+
+	case "claude-code":
+		return []manageField{
+			{key: "mcp_context7", label: "Context7", description: "Documentation lookup for any library (recommended)", kind: manageFieldToggle, b: &cfg.ClaudeCodeMCPContext7},
+			{key: "mcp_taskmaster", label: "Task Master", description: "AI-driven task management", kind: manageFieldToggle, b: &cfg.ClaudeCodeMCPTaskMaster},
+			{key: "mcp_github", label: "GitHub", description: "GitHub integration and automation", kind: manageFieldToggle, b: &cfg.ClaudeCodeMCPGitHub},
+			{key: "mcp_supabase", label: "Supabase", description: "Supabase database integration", kind: manageFieldToggle, b: &cfg.ClaudeCodeMCPSupabase},
+			{key: "mcp_convex", label: "Convex", description: "Convex backend integration", kind: manageFieldToggle, b: &cfg.ClaudeCodeMCPConvex},
+			{key: "mcp_puppeteer", label: "Puppeteer", description: "Browser automation and testing", kind: manageFieldToggle, b: &cfg.ClaudeCodeMCPPuppeteer},
+			{key: "mcp_sequential", label: "Seq. Thinking", description: "Enhanced reasoning chains", kind: manageFieldToggle, b: &cfg.ClaudeCodeMCPSequentialThinking},
+		}
 	}
 
 	return nil

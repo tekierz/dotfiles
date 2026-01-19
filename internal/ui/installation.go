@@ -182,6 +182,157 @@ func (a *App) startInstallation() tea.Cmd {
 			}
 		}
 
+		// Configure Ghostty
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring Ghostty...")
+		ghosttyCfg := tools.GhosttyConfig{
+			FontSize:        a.deepDiveConfig.GhosttyFontSize,
+			FontFamily:      a.deepDiveConfig.GhosttyFontFamily,
+			Opacity:         a.deepDiveConfig.GhosttyOpacity,
+			BlurRadius:      a.deepDiveConfig.GhosttyBlurRadius,
+			TabBindings:     a.deepDiveConfig.GhosttyTabBindings,
+			ScrollbackLines: a.deepDiveConfig.GhosttyScrollbackLines,
+			CursorStyle:     a.deepDiveConfig.GhosttyCursorStyle,
+		}
+		if err := tools.WriteGhosttyConfig(ghosttyCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Ghostty: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ Ghostty configured")
+		}
+
+		// Configure Zsh
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring Zsh...")
+		zshCfg := tools.ZshConfig{
+			PromptStyle:     a.deepDiveConfig.ZshPromptStyle,
+			Plugins:         a.deepDiveConfig.ZshPlugins,
+			Aliases:         a.deepDiveConfig.ZshAliases,
+			HistorySize:     a.deepDiveConfig.ZshHistorySize,
+			AutoCD:          a.deepDiveConfig.ZshAutoCD,
+			SyntaxHighlight: a.deepDiveConfig.ZshSyntaxHighlight,
+			Autosuggestions: a.deepDiveConfig.ZshAutosuggestions,
+		}
+		if err := tools.WriteZshConfig(zshCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Zsh: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ Zsh configured with ~/.zshrc")
+		}
+
+		// Configure Neovim
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring Neovim...")
+		neovimCfg := tools.NeovimConfig{
+			ConfigPreset: a.deepDiveConfig.NeovimConfig,
+			LSPs:         a.deepDiveConfig.NeovimLSPs,
+			Plugins:      a.deepDiveConfig.NeovimPlugins,
+			TabWidth:     a.deepDiveConfig.NeovimTabWidth,
+			Wrap:         a.deepDiveConfig.NeovimWrap,
+			CursorLine:   a.deepDiveConfig.NeovimCursorLine,
+			Clipboard:    a.deepDiveConfig.NeovimClipboard,
+		}
+		if err := tools.WriteNeovimConfig(neovimCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Neovim: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ✓ Neovim configured (%s)", neovimCfg.ConfigPreset))
+		}
+
+		// Configure Git
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring Git...")
+		gitCfg := tools.GitConfig{
+			DeltaSideBySide:  a.deepDiveConfig.GitDeltaSideBySide,
+			DefaultBranch:    a.deepDiveConfig.GitDefaultBranch,
+			Aliases:          a.deepDiveConfig.GitAliases,
+			PullRebase:       a.deepDiveConfig.GitPullRebase,
+			SignCommits:      a.deepDiveConfig.GitSignCommits,
+			CredentialHelper: a.deepDiveConfig.GitCredentialHelper,
+		}
+		if err := tools.WriteGitConfig(gitCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Git: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ Git configured with ~/.gitconfig")
+		}
+
+		// Configure Yazi
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring Yazi...")
+		yaziCfg := tools.YaziConfig{
+			Keymap:      a.deepDiveConfig.YaziKeymap,
+			ShowHidden:  a.deepDiveConfig.YaziShowHidden,
+			PreviewMode: a.deepDiveConfig.YaziPreviewMode,
+		}
+		if err := tools.WriteYaziConfig(yaziCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Yazi: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ Yazi configured")
+		}
+
+		// Configure FZF
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring FZF...")
+		fzfCfg := tools.FzfConfig{
+			Preview: a.deepDiveConfig.FzfPreview,
+			Height:  a.deepDiveConfig.FzfHeight,
+			Layout:  a.deepDiveConfig.FzfLayout,
+		}
+		if err := tools.WriteFzfConfig(fzfCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure FZF: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ FZF configured")
+		}
+
+		// Configure LazyGit
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring LazyGit...")
+		lazygitCfg := tools.LazyGitConfig{
+			SideBySide: a.deepDiveConfig.LazyGitSideBySide,
+			MouseMode:  a.deepDiveConfig.LazyGitMouseMode,
+			Theme:      a.deepDiveConfig.LazyGitTheme,
+		}
+		if err := tools.WriteLazyGitConfig(lazygitCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure LazyGit: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ LazyGit configured")
+		}
+
+		// Configure Btop
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring Btop...")
+		btopCfg := tools.BtopConfig{
+			Theme:     a.deepDiveConfig.BtopTheme,
+			UpdateMs:  a.deepDiveConfig.BtopUpdateMs,
+			ShowTemp:  a.deepDiveConfig.BtopShowTemp,
+			GraphType: a.deepDiveConfig.BtopGraphType,
+		}
+		if err := tools.WriteBtopConfig(btopCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Btop: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ Btop configured")
+		}
+
+		// Configure Glow
+		a.installStep++
+		a.installOutput = append(a.installOutput, "\n▶ Configuring Glow...")
+		glowCfg := tools.GlowConfig{
+			Pager: a.deepDiveConfig.GlowPager,
+			Style: a.deepDiveConfig.GlowStyle,
+			Width: a.deepDiveConfig.GlowWidth,
+		}
+		if err := tools.WriteGlowConfig(glowCfg, a.theme); err != nil {
+			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Glow: %v", err))
+			lastErr = err
+		} else {
+			a.installOutput = append(a.installOutput, "  ✓ Glow configured")
+		}
+
 		// Build context from last few output lines for error display
 		var context string
 		if lastErr != nil && len(a.installOutput) > 0 {
