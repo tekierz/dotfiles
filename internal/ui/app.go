@@ -14,6 +14,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 const (
@@ -1415,23 +1416,38 @@ func GetMainMenuItems() []MainMenuItem {
 	}
 }
 
-// ScreenToolIDs maps deep dive screens to their corresponding tool IDs
-// This is the single source of truth for screen-to-tool mapping
-var ScreenToolIDs = map[Screen][]string{
-	ScreenConfigGhostty:      {"ghostty"},
-	ScreenConfigTmux:         {"tmux"},
-	ScreenConfigZsh:          {"zsh"},
-	ScreenConfigNeovim:       {"neovim"},
-	ScreenConfigGit:          {"git"},
-	ScreenConfigYazi:         {"yazi"},
-	ScreenConfigFzf:          {"fzf"},
-	ScreenConfigLazyGit:      {"lazygit"},
-	ScreenConfigLazyDocker:   {"lazydocker"},
-	ScreenConfigBtop:         {"btop"},
-	ScreenConfigGlow:         {"glow"},
-	ScreenConfigCLIUtilities: {"bat", "eza", "zoxide", "ripgrep", "fd", "delta", "fswatch", "tailscale"},
-	ScreenConfigGUIApps:      {"zen-browser", "cursor", "lm-studio", "obs", "sunshine", "moonlight"},
-	ScreenConfigMacApps:      {"rectangle", "raycast", "iina", "appcleaner"},
-	ScreenConfigCLITools:     {"lazygit", "lazydocker", "btop", "glow", "claude-code"},
-	ScreenConfigUtilities:    {"hk", "caff", "sshh"}, // shell scripts, not package manager installs
+// buildScreenToolIDs generates the screen to tool ID mapping from the registry.
+// This uses the tool registry as the single source of truth.
+func buildScreenToolIDs() map[Screen][]string {
+	result := make(map[Screen][]string)
+
+	// Map UIGroup to their group screens
+	groupScreens := map[tools.UIGroup]Screen{
+		tools.UIGroupCLITools:     ScreenConfigCLITools,
+		tools.UIGroupCLIUtilities: ScreenConfigCLIUtilities,
+		tools.UIGroupGUIApps:      ScreenConfigGUIApps,
+		tools.UIGroupMacApps:      ScreenConfigMacApps,
+	}
+
+	for _, t := range tools.GetRegistry().All() {
+		// Tools with dedicated screens (UIGroupNone with a configScreen set)
+		if t.UIGroup() == tools.UIGroupNone && t.ConfigScreen() != 0 {
+			screen := Screen(t.ConfigScreen())
+			result[screen] = append(result[screen], t.ID())
+		}
+
+		// Tools in group screens
+		if screen, ok := groupScreens[t.UIGroup()]; ok {
+			result[screen] = append(result[screen], t.ID())
+		}
+	}
+
+	// Add utilities (shell scripts not in registry)
+	result[ScreenConfigUtilities] = []string{"hk", "caff", "sshh"}
+
+	return result
 }
+
+// ScreenToolIDs maps deep dive screens to their corresponding tool IDs
+// Generated from tool registry - single source of truth
+var ScreenToolIDs = buildScreenToolIDs()
