@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 // renderAnimation renders the intro animation screen
@@ -446,16 +447,25 @@ func (a *App) renderFileTree() string {
 
 	var lines []string
 
+	// Quick Setup explanation (when not using Deep Dive)
+	if !a.deepDive {
+		lines = append(lines, mutedStyle.Render("  Quick Setup: Core tools + CLI utilities with sensible defaults"))
+		lines = append(lines, mutedStyle.Render("  Use Deep Dive mode for full customization"))
+		lines = append(lines, "")
+	}
+
 	// Ensure install cache is populated
 	a.ensureInstallCache()
 
 	// Collect selected and already installed tools
 	var toInstall []string
 	var alreadyInstalled []string
+	selectedTools := make(map[string]bool) // Track all selected tool IDs
 
 	// CLI Tools
 	for id, enabled := range cfg.CLITools {
 		if enabled {
+			selectedTools[id] = true
 			if a.manageInstalled[id] {
 				alreadyInstalled = append(alreadyInstalled, id)
 			} else {
@@ -466,6 +476,7 @@ func (a *App) renderFileTree() string {
 	// GUI Apps
 	for id, enabled := range cfg.GUIApps {
 		if enabled {
+			selectedTools[id] = true
 			if a.manageInstalled[id] {
 				alreadyInstalled = append(alreadyInstalled, id)
 			} else {
@@ -476,6 +487,7 @@ func (a *App) renderFileTree() string {
 	// CLI Utilities
 	for id, enabled := range cfg.CLIUtilities {
 		if enabled {
+			selectedTools[id] = true
 			if a.manageInstalled[id] {
 				alreadyInstalled = append(alreadyInstalled, id)
 			} else {
@@ -486,6 +498,7 @@ func (a *App) renderFileTree() string {
 	// Utilities
 	for id, enabled := range cfg.Utilities {
 		if enabled {
+			selectedTools[id] = true
 			if a.manageInstalled[id] {
 				alreadyInstalled = append(alreadyInstalled, id)
 			} else {
@@ -497,6 +510,7 @@ func (a *App) renderFileTree() string {
 	if pkg.DetectPlatform() == pkg.PlatformMacOS {
 		for id, enabled := range cfg.MacApps {
 			if enabled {
+				selectedTools[id] = true
 				if a.manageInstalled[id] {
 					alreadyInstalled = append(alreadyInstalled, id)
 				} else {
@@ -537,28 +551,68 @@ func (a *App) renderFileTree() string {
 		lines = append(lines, "")
 	}
 
-	// ~/.config/ section
-	lines = append(lines, textStyle.Render("  Files to be Modified:"))
+	// Configurations to Apply section - show tools that have config files
+	var configTools []string
+	registry := tools.GetRegistry()
+	// Core tools always configured
+	coreConfigTools := []string{"ghostty", "tmux", "zsh", "neovim", "git", "yazi"}
+	for _, id := range coreConfigTools {
+		if tool, exists := registry.Get(id); exists && tool.HasConfig() {
+			configTools = append(configTools, tool.Name())
+		}
+	}
+	// CLI utilities with config (bat, lazygit, lazydocker, btop, etc.)
+	for id := range selectedTools {
+		if tool, exists := registry.Get(id); exists && tool.HasConfig() {
+			// Skip core tools already added
+			isCore := false
+			for _, coreID := range coreConfigTools {
+				if id == coreID {
+					isCore = true
+					break
+				}
+			}
+			if !isCore {
+				configTools = append(configTools, tool.Name())
+			}
+		}
+	}
+	sort.Strings(configTools)
+
+	if len(configTools) > 0 {
+		lines = append(lines, textStyle.Render("  Configurations to Apply:"))
+		for i, name := range configTools {
+			prefix := "├──"
+			if i == len(configTools)-1 {
+				prefix = "└──"
+			}
+			lines = append(lines, textStyle.Render("  "+prefix+" ")+newStyle.Render(name))
+		}
+		lines = append(lines, "")
+	}
+
+	// Config directories section
+	lines = append(lines, textStyle.Render("  Config Directories:"))
 	lines = append(lines, textStyle.Render("  ~/.config/"))
-	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("dotfiles/")+mutedStyle.Render(" (new)"))
-	lines = append(lines, textStyle.Render("  │   ├── settings"))
-	lines = append(lines, textStyle.Render("  │   └── backups/"))
-
-	// Ghostty
+	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("dotfiles/")+mutedStyle.Render(" (settings & backups)"))
 	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("ghostty/"))
-	lines = append(lines, textStyle.Render("  │   ├── config"))
-	lines = append(lines, textStyle.Render("  │   └── themes/dotfiles-theme"))
-
-	// Yazi
 	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("yazi/"))
-	lines = append(lines, textStyle.Render("  │   ├── yazi.toml"))
-	lines = append(lines, textStyle.Render("  │   ├── keymap.toml"))
-	lines = append(lines, textStyle.Render("  │   └── theme.toml"))
 
-	// Bat (if CLI utilities include bat)
+	// Conditionally show config directories based on selected tools
 	if cfg.CLIUtilities["bat"] {
 		lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("bat/"))
-		lines = append(lines, textStyle.Render("  │   └── config"))
+	}
+	if cfg.CLITools["lazygit"] {
+		lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("lazygit/"))
+	}
+	if cfg.CLITools["lazydocker"] {
+		lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("lazydocker/"))
+	}
+	if cfg.CLIUtilities["btop"] {
+		lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("btop/"))
+	}
+	if cfg.CLIUtilities["ripgrep"] {
+		lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("ripgrep/"))
 	}
 
 	// Neovim with config type
