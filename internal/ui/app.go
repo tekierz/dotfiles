@@ -140,7 +140,13 @@ type App struct {
 	// animationsEnabled controls non-essential UI animations (headers/widgets).
 	// When false, we render static UI to reduce motion/jank and CPU usage.
 	animationsEnabled bool
-	deepDive          bool
+
+	// Backup settings (from GlobalConfig)
+	autoBackup       bool
+	backupMaxCount   int
+	backupMaxAgeDays int
+
+	deepDive bool
 
 	// Deep dive state (installer)
 	deepDiveMenuIndex int
@@ -260,6 +266,9 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		theme:                "catppuccin-mocha",
 		navStyle:             "emacs",
 		animationsEnabled:    true,
+		autoBackup:           true, // Default: auto-backup enabled
+		backupMaxCount:       100,  // Default: keep last 100 backups
+		backupMaxAgeDays:     30,   // Default: delete backups older than 30 days
 		runner:               runner.NewRunner(),
 		installOutput:        make([]string, 0, 100),
 		deepDiveConfig:       NewDeepDiveConfig(),
@@ -281,6 +290,10 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 			app.navStyle = cfg.NavStyle
 		}
 		app.animationsEnabled = !cfg.DisableAnimations
+		// Backup settings
+		app.autoBackup = cfg.AutoBackup
+		app.backupMaxCount = cfg.BackupMaxCount
+		app.backupMaxAgeDays = cfg.BackupMaxAgeDays
 	}
 
 	// Keep the theme picker cursor in sync with the persisted theme.
