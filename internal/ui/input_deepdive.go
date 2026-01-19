@@ -477,7 +477,7 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// GUI Apps config
 	case ScreenConfigGUIApps:
-		apps := []string{"zen-browser", "cursor", "lm-studio", "obs"}
+		apps := []string{"zen-browser", "cursor", "sunshine", "moonlight", "lm-studio", "obs"}
 		switch key {
 		case "up", "k":
 			if a.guiAppIndex > 0 {
@@ -651,7 +651,8 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		mcps := []string{"context7", "task-master", "github", "supabase", "convex", "puppeteer", "sequential-thinking"}
 		switch key {
 		case "up", "k":
-			if a.configFieldIndex > 0 {
+			// Allow navigating to -1 for the install toggle
+			if a.configFieldIndex > -1 {
 				a.configFieldIndex--
 			}
 		case "down", "j":
@@ -659,8 +660,15 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.configFieldIndex++
 			}
 		case " ":
-			mcp := mcps[a.configFieldIndex]
-			a.deepDiveConfig.ClaudeCodeMCPs[mcp] = !a.deepDiveConfig.ClaudeCodeMCPs[mcp]
+			if a.configFieldIndex == -1 {
+				// Toggle Claude Code installation
+				current := a.deepDiveConfig.CLITools["claude-code"]
+				a.deepDiveConfig.CLITools["claude-code"] = !current
+			} else {
+				// Toggle MCP server
+				mcp := mcps[a.configFieldIndex]
+				a.deepDiveConfig.ClaudeCodeMCPs[mcp] = !a.deepDiveConfig.ClaudeCodeMCPs[mcp]
+			}
 		case "esc", "enter":
 			a.configFieldIndex = 0
 			a.screen = ScreenDeepDiveMenu

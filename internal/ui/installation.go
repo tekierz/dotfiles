@@ -342,10 +342,12 @@ func (a *App) collectSelectedTools() []string {
 	// Note: Utilities (hk, caff, sshh) are shell scripts handled by installUtilities()
 	// They don't go through the package manager
 
-	// macOS Apps (rectangle, raycast, stats, etc.)
-	for id, enabled := range a.deepDiveConfig.MacApps {
-		if enabled && !a.manageInstalled[id] {
-			selected = append(selected, id)
+	// macOS Apps (rectangle, raycast, stats, etc.) - only on macOS
+	if pkg.DetectPlatform() == pkg.PlatformMacOS {
+		for id, enabled := range a.deepDiveConfig.MacApps {
+			if enabled && !a.manageInstalled[id] {
+				selected = append(selected, id)
+			}
 		}
 	}
 

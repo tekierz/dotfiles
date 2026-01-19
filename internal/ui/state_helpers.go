@@ -156,7 +156,7 @@ func (a *App) getConfigScreenMaxFields() int {
 	case ScreenConfigMacApps:
 		return len(a.deepDiveConfig.MacApps)
 	case ScreenConfigGUIApps:
-		return 4
+		return 6
 	case ScreenConfigCLITools:
 		return 5
 	case ScreenConfigCLIUtilities:

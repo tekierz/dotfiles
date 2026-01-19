@@ -1,0 +1,143 @@
+# Linux Local Testing Notes
+
+## Environment
+- **Platform**: Linux (CachyOS/Arch)
+- **OS Version**: Linux 6.18.3-2-cachyos
+- **Date**: 2026-01-18
+- **Branch**: feature/beta-v2.1
+
+## Fixes Applied This Session
+
+1. **Mac apps showing on Linux in installer summary**
+   - Files: `internal/ui/deepdive.go`, `internal/ui/installation.go`
+   - `buildToolGroupDefaults()` now filters by platform using `PlatformFilter()`
+   - `collectSelectedTools()` only includes Mac apps when `pkg.DetectPlatform() == pkg.PlatformMacOS`
+
+2. **Claude Code MCP selection screen navigation**
+   - File: `internal/ui/input_deepdive.go`
+   - Navigation now allows going to index -1 for the install toggle
+   - Spacebar toggles both install checkbox (at -1) and MCP servers (0-6)
+
+3. **Install status not clear in deep dive menu**
+   - File: `internal/ui/screens_deepdive.go`
+   - Added status legend explaining colored dots: `● installed  ● partial  ○ not installed`
+
+4. **Sunshine/Moonlight missing from GUI Apps**
+   - Files: `internal/ui/screens_deepdive.go`, `internal/ui/input_deepdive.go`, `internal/ui/state_helpers.go`
+   - Added both tools to hardcoded list (apps now: zen-browser, cursor, sunshine, moonlight, lm-studio, obs)
+   - Updated max fields from 4 to 6
+
+---
+
+## Remaining Issues
+
+### 1. Deep Dive Configs Not Applied to Tool Config Files
+
+**Severity**: High
+**Status**: Architectural gap
+
+**Problem**:
+The DeepDiveConfig settings captured in the UI (Ghostty font, Tmux prefix, Zsh plugins, Neovim settings, etc.) are NOT actually written to the tool configuration files on disk.
+
+**What Works**:
+- Tmux config IS written via `tools.SetupTPM()` in `installation.go`
+- Claude Code MCP config IS written via `claudeTool.ApplyConfigWithMCPs()`
+
+**What Doesn't Work**:
+- Ghostty settings are captured but `~/.config/ghostty/config` is not updated
+- Zsh settings are captured but `~/.zshrc` is not updated
+- Neovim settings are captured but `~/.config/nvim/` is not updated
+- Git settings are captured but `~/.gitconfig` is not updated
+- Yazi settings are captured but `~/.config/yazi/` is not updated
+- FZF settings are captured but no config is written
+
+**Root Cause**:
+- The `Tool` interface has `ApplyConfig(theme string) error` method
+- Only `TmuxTool` and `ClaudeCodeTool` implement custom `ApplyConfig`
+- Other tools use `BaseTool.ApplyConfig` which returns `nil` (does nothing)
+- The installation flow only explicitly calls tmux and Claude config application
+
+**Files to Modify for Fix**:
+- `internal/tools/ghostty.go` - Add `ApplyConfig` implementation
+- `internal/tools/zsh.go` - Add `ApplyConfig` implementation
+- `internal/tools/neovim.go` - Add `ApplyConfig` implementation
+- `internal/tools/git.go` - Add `ApplyConfig` implementation
+- `internal/tools/yazi.go` - Add `ApplyConfig` implementation
+- `internal/tools/fzf.go` - Add `ApplyConfig` implementation
+- `internal/ui/installation.go` - Call `ApplyConfig` for all configured tools
+
+**Workaround**:
+Currently, users would need to manually configure these tools after installation.
+
+---
+
+### 2. Config Presets Feature Not Implemented
+
+**Severity**: Medium
+**Status**: Feature request
+
+**Problem**:
+User requested "optimized global config presets" - predefined configuration bundles for different use cases (e.g., "Developer", "Minimal", "Full").
+
+**Suggested Implementation**:
+- Add preset selection to welcome screen or deep dive menu
+- Presets would set DeepDiveConfig values for all tools at once
+- Could include: Minimal (core tools only), Developer (with LSPs), Full (everything)
+
+---
+
+### 3. Hardcoded Tool Lists in UI
+
+**Severity**: Medium
+**Status**: Technical debt
+
+**Problem**:
+Several UI screens have hardcoded tool lists that don't sync with the tool registry:
+- `renderConfigGUIApps()` - manually lists apps
+- `renderConfigCLITools()` - manually lists tools
+- `renderConfigCLIUtilities()` - manually lists utilities
+- Input handlers have matching hardcoded lists
+
+This caused Sunshine/Moonlight to be missing even though they were in the registry.
+
+**Files Affected**:
+- `internal/ui/screens_deepdive.go` - Multiple render functions
+- `internal/ui/input_deepdive.go` - Multiple input handlers
+- `internal/ui/state_helpers.go` - `getConfigScreenMaxFields()`
+
+**Suggested Fix**:
+Dynamically generate tool lists from registry using `tools.GetRegistry().All()` filtered by `UIGroup()`.
+
+---
+
+### 4. Sunshine Installation Error (Not a Bug)
+
+**Severity**: N/A
+**Status**: External issue
+
+**Observed Error**:
+```
+error: failed retrieving file 'sunshine-2025.924.154138-2-x86_64.pkg.tar.zst' from cdn77.cachyos.org : The requested URL returned error: 404
+error: sunshine: signature from "CachyOS <admin@cachyos.org>" is invalid
+error: failed to commit transaction (invalid or corrupted package (PGP signature))
+```
+
+**Cause**: CachyOS repository CDN issue, not a dotfiles bug.
+
+**Solution**:
+```bash
+sudo pacman -Sy   # Refresh package databases
+# or
+paru -Sy          # If using paru
+```
+
+---
+
+## Testing Checklist for Next Session
+
+- [ ] Run `dotfiles install` on Linux - verify no Mac apps in summary
+- [ ] Enter Claude Code config screen - verify can navigate to install toggle with up arrow
+- [ ] Verify status legend appears at bottom of deep dive menu
+- [ ] Enter GUI Apps config - verify Sunshine and Moonlight appear
+- [ ] Test Quick Install flow - verify no Mac apps
+- [ ] Check if tool configs are actually written after installation

@@ -168,6 +168,14 @@ func (a *App) renderDeepDiveMenu() string {
 	// Wrap menu in a box
 	menuBox := configBoxStyle.Width(a.deepDiveBoxWidth(64)).Render(menuList.String())
 
+	// Status legend
+	legendStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	installedDot := lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("●")
+	partialDot := lipgloss.NewStyle().Foreground(ColorYellow).Render("●")
+	pendingDot := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("○")
+	legend := legendStyle.Render(fmt.Sprintf("%s installed  %s partial  %s not installed",
+		installedDot, partialDot, pendingDot))
+
 	help := HelpStyle.Render("↑↓/jk navigate • enter select • esc back")
 
 	content := lipgloss.JoinVertical(
@@ -176,6 +184,8 @@ func (a *App) renderDeepDiveMenu() string {
 		subtitle,
 		"",
 		menuBox,
+		"",
+		legend,
 		"",
 		help,
 	)
@@ -1328,6 +1338,8 @@ func (a *App) renderConfigGUIApps() string {
 	}{
 		{"zen-browser", "Zen Browser", "Privacy-focused browser based on Firefox"},
 		{"cursor", "Cursor", "AI-first code editor"},
+		{"sunshine", "Sunshine", "Game streaming host (NVIDIA GameStream)"},
+		{"moonlight", "Moonlight", "Game streaming client"},
 		{"lm-studio", "LM Studio", "Run local LLMs"},
 		{"obs", "OBS Studio", "Streaming and recording software"},
 	}

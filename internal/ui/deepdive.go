@@ -1,13 +1,22 @@
 package ui
 
-import "github.com/tekierz/dotfiles/internal/tools"
+import (
+	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/tools"
+)
 
 // buildToolGroupDefaults creates a map of tool IDs to their default enabled state
 // for the specified UI group. Uses the tool registry as single source of truth.
+// Respects platform filtering - tools with a platformFilter only appear on matching platforms.
 func buildToolGroupDefaults(group tools.UIGroup) map[string]bool {
 	result := make(map[string]bool)
+	currentPlatform := pkg.DetectPlatform()
 	for _, t := range tools.GetRegistry().All() {
 		if t.UIGroup() == group {
+			// Skip tools that are filtered to a different platform
+			if t.PlatformFilter() != "" && t.PlatformFilter() != currentPlatform {
+				continue
+			}
 			result[t.ID()] = t.DefaultEnabled()
 		}
 	}
