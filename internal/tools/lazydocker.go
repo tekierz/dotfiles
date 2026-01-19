@@ -20,7 +20,7 @@ func NewLazyDockerTool() *LazyDockerTool {
 			id:          "lazydocker",
 			name:        "LazyDocker",
 			description: "Simple terminal UI for Docker",
-			icon:        "",
+			icon:        "",
 			category:    CategoryContainer,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"lazydocker"},
@@ -31,6 +31,10 @@ func NewLazyDockerTool() *LazyDockerTool {
 				filepath.Join(home, ".config", "lazydocker", "config.yml"),
 			},
 			heavyTool: true, // Skip on low-memory systems (Pi Zero 2)
+			// UI metadata
+			uiGroup:        UIGroupCLITools,
+			configScreen:   29, // ScreenConfigLazyDocker - has dedicated config screen
+			defaultEnabled: true,
 		},
 	}
 }

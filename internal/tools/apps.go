@@ -29,6 +29,10 @@ func NewZenBrowserTool() *ZenBrowserTool {
 				pkg.PlatformArch:  {"zen-browser-bin"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }
@@ -81,6 +85,10 @@ func NewCursorTool() *CursorTool {
 				pkg.PlatformArch:  {"cursor-bin"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }
@@ -124,6 +132,10 @@ func NewLMStudioTool() *LMStudioTool {
 				pkg.PlatformArch:  {"lm-studio"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }
@@ -182,6 +194,10 @@ func NewOBSTool() *OBSTool {
 				pkg.PlatformDebian: {"obs-studio"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }
@@ -220,8 +236,23 @@ func NewRectangleTool() *RectangleTool {
 				pkg.PlatformMacOS: {"rectangle"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupMacApps,
+			configScreen:   0, // Part of macOS Apps group screen
+			defaultEnabled: true,
+			platformFilter: pkg.PlatformMacOS,
 		},
 	}
+}
+
+// IsInstalled checks if Rectangle is available (Homebrew or app bundle)
+func (t *RectangleTool) IsInstalled() bool {
+	// Check macOS app bundle first
+	if hasMacOSApp("Rectangle") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
 }
 
 // RaycastTool represents Raycast launcher
@@ -242,8 +273,23 @@ func NewRaycastTool() *RaycastTool {
 				pkg.PlatformMacOS: {"raycast"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupMacApps,
+			configScreen:   0, // Part of macOS Apps group screen
+			defaultEnabled: true,
+			platformFilter: pkg.PlatformMacOS,
 		},
 	}
+}
+
+// IsInstalled checks if Raycast is available (Homebrew or app bundle)
+func (t *RaycastTool) IsInstalled() bool {
+	// Check macOS app bundle first
+	if hasMacOSApp("Raycast") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
 }
 
 // IINATool represents IINA media player
@@ -264,8 +310,23 @@ func NewIINATool() *IINATool {
 				pkg.PlatformMacOS: {"iina"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupMacApps,
+			configScreen:   0, // Part of macOS Apps group screen
+			defaultEnabled: false,
+			platformFilter: pkg.PlatformMacOS,
 		},
 	}
+}
+
+// IsInstalled checks if IINA is available (Homebrew or app bundle)
+func (t *IINATool) IsInstalled() bool {
+	// Check macOS app bundle first
+	if hasMacOSApp("IINA") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
 }
 
 // AppCleanerTool represents AppCleaner
@@ -286,8 +347,23 @@ func NewAppCleanerTool() *AppCleanerTool {
 				pkg.PlatformMacOS: {"appcleaner"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupMacApps,
+			configScreen:   0, // Part of macOS Apps group screen
+			defaultEnabled: true,
+			platformFilter: pkg.PlatformMacOS,
 		},
 	}
+}
+
+// IsInstalled checks if AppCleaner is available (Homebrew or app bundle)
+func (t *AppCleanerTool) IsInstalled() bool {
+	// Check macOS app bundle first
+	if hasMacOSApp("AppCleaner") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
 }
 
 // Helper functions for detecting installed apps

@@ -1,5 +1,28 @@
 package ui
 
+import (
+	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/tools"
+)
+
+// buildToolGroupDefaults creates a map of tool IDs to their default enabled state
+// for the specified UI group. Uses the tool registry as single source of truth.
+// Respects platform filtering - tools with a platformFilter only appear on matching platforms.
+func buildToolGroupDefaults(group tools.UIGroup) map[string]bool {
+	result := make(map[string]bool)
+	currentPlatform := pkg.DetectPlatform()
+	for _, t := range tools.GetRegistry().All() {
+		if t.UIGroup() == group {
+			// Skip tools that are filtered to a different platform
+			if t.PlatformFilter() != "" && t.PlatformFilter() != currentPlatform {
+				continue
+			}
+			result[t.ID()] = t.DefaultEnabled()
+		}
+	}
+	return result
+}
+
 // DeepDiveConfig holds all deep dive configuration options
 type DeepDiveConfig struct {
 	// Ghostty settings
@@ -9,7 +32,7 @@ type DeepDiveConfig struct {
 	GhosttyFontFamily      string // Font family name
 	GhosttyBlurRadius      int    // 0-100 (blur behind window)
 	GhosttyScrollbackLines int    // Number of scrollback lines
-	GhosttyCursorStyle      string // block, bar, underline
+	GhosttyCursorStyle     string // block, bar, underline
 
 	// Tmux settings
 	TmuxPrefix       string
@@ -97,6 +120,9 @@ type DeepDiveConfig struct {
 	GlowPager string
 	GlowStyle string
 	GlowWidth int
+
+	// Claude Code MCP settings
+	ClaudeCodeMCPs map[string]bool // MCP servers to enable
 }
 
 // NewDeepDiveConfig creates a new config with defaults
@@ -109,7 +135,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GhosttyFontFamily:      "JetBrains Mono",
 		GhosttyBlurRadius:      0,
 		GhosttyScrollbackLines: 10000,
-		GhosttyCursorStyle:      "block",
+		GhosttyCursorStyle:     "block",
 
 		// Tmux defaults
 		TmuxPrefix:       "ctrl-a",
@@ -187,19 +213,8 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		FzfHeight:  40,
 		FzfLayout:  "reverse",
 
-		// macOS Apps defaults
-		MacApps: map[string]bool{
-			"rectangle":       true,
-			"raycast":         true,
-			"stats":           true,
-			"alt-tab":         false,
-			"monitor-control": false,
-			"mos":             false,
-			"karabiner":       false,
-			"iina":            false,
-			"the-unarchiver":  true,
-			"appcleaner":      true,
-		},
+		// macOS Apps defaults (from registry)
+		MacApps: buildToolGroupDefaults(tools.UIGroupMacApps),
 
 		// Utilities defaults (all enabled by default)
 		Utilities: map[string]bool{
@@ -208,33 +223,14 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"sshh": true,
 		},
 
-		// CLI Tools defaults
-		CLITools: map[string]bool{
-			"lazygit":     true,
-			"lazydocker":  true,
-			"btop":        true,
-			"glow":        true,
-			"claude-code": false,
-		},
+		// CLI Tools defaults (from registry)
+		CLITools: buildToolGroupDefaults(tools.UIGroupCLITools),
 
-		// GUI Apps defaults
-		GUIApps: map[string]bool{
-			"zen-browser": false,
-			"cursor":      false,
-			"lm-studio":   false,
-			"obs":         false,
-		},
+		// GUI Apps defaults (from registry)
+		GUIApps: buildToolGroupDefaults(tools.UIGroupGUIApps),
 
-		// CLI Utilities defaults (commonly useful tools enabled by default)
-		CLIUtilities: map[string]bool{
-			"bat":     true,  // cat replacement with syntax highlighting
-			"eza":     true,  // ls replacement
-			"zoxide":  true,  // cd replacement
-			"ripgrep": true,  // grep replacement
-			"fd":      true,  // find replacement
-			"delta":   true,  // git diff viewer
-			"fswatch": false, // file watcher (optional)
-		},
+		// CLI Utilities defaults (from registry)
+		CLIUtilities: buildToolGroupDefaults(tools.UIGroupCLIUtilities),
 
 		// LazyGit defaults
 		LazyGitSideBySide: true,
@@ -254,6 +250,17 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GlowPager: "auto",
 		GlowStyle: "auto",
 		GlowWidth: 80,
+
+		// Claude Code MCP defaults
+		ClaudeCodeMCPs: map[string]bool{
+			"context7":            true,  // Documentation lookup (default enabled)
+			"task-master":         false, // Task management
+			"github":              false, // GitHub integration
+			"supabase":            false, // Supabase database
+			"convex":              false, // Convex backend
+			"puppeteer":           false, // Browser automation
+			"sequential-thinking": false, // Reasoning chains
+		},
 	}
 }
 
@@ -307,9 +314,15 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		},
 		{
 			Name:        "CLI Tools",
-			Description: "LazyGit, LazyDocker, btop, Glow, Claude",
+			Description: "LazyGit, LazyDocker, btop, Glow",
 			Screen:      ScreenConfigCLITools,
 			Icon:        "",
+		},
+		{
+			Name:        "Claude Code",
+			Description: "AI coding assistant, MCP servers",
+			Screen:      ScreenConfigClaudeCode,
+			Icon:        "󰚩",
 		},
 		// Quality of Life tools
 		{
@@ -327,14 +340,14 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		},
 		{
 			Name:        "CLI Utilities",
-			Description: "bat, eza, zoxide, ripgrep, fd, delta",
+			Description: "bat, eza, zoxide, ripgrep, fd, tailscale",
 			Screen:      ScreenConfigCLIUtilities,
 			Icon:        "󰘳",
 		},
 		// Optional Apps
 		{
 			Name:        "GUI Apps",
-			Description: "Zen Browser, Cursor, LM Studio, OBS",
+			Description: "Zen Browser, Cursor, Sunshine, Moonlight",
 			Screen:      ScreenConfigGUIApps,
 			Icon:        "󰏇",
 			Category:    "OPTIONAL APPS",

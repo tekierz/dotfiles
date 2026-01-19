@@ -30,6 +30,17 @@ func CheckAllUpdates() ([]Package, error) {
 		allPackages = append(allPackages, packages...)
 	}
 
+	// Deduplicate packages by name only (same package from different sources is still same package)
+	seen := make(map[string]bool)
+	var deduped []Package
+	for _, p := range allPackages {
+		if !seen[p.Name] {
+			seen[p.Name] = true
+			deduped = append(deduped, p)
+		}
+	}
+	allPackages = deduped
+
 	// Sort by name for consistent display
 	sort.Slice(allPackages, func(i, j int) bool {
 		return allPackages[i].Name < allPackages[j].Name

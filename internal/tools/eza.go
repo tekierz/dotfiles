@@ -24,6 +24,10 @@ func NewEzaTool() *EzaTool {
 				pkg.PlatformDebian: {"eza"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupCLIUtilities,
+			configScreen:   0, // Part of CLI Utilities group screen
+			defaultEnabled: true,
 		},
 	}
 }

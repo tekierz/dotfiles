@@ -30,6 +30,10 @@ func NewBatTool() *BatTool {
 			configPaths: []string{
 				filepath.Join(home, ".config", "bat", "config"),
 			},
+			// UI metadata
+			uiGroup:        UIGroupCLIUtilities,
+			configScreen:   0, // Part of CLI Utilities group screen
+			defaultEnabled: true,
 		},
 	}
 }

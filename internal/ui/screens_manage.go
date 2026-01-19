@@ -105,6 +105,15 @@ type ManageConfig struct {
 	GlowPager string
 	GlowWidth int
 	GlowMouse bool
+
+	// Claude Code MCP server settings
+	ClaudeCodeMCPContext7           bool
+	ClaudeCodeMCPTaskMaster         bool
+	ClaudeCodeMCPGitHub             bool
+	ClaudeCodeMCPSupabase           bool
+	ClaudeCodeMCPConvex             bool
+	ClaudeCodeMCPPuppeteer          bool
+	ClaudeCodeMCPSequentialThinking bool
 }
 
 // NewManageConfig creates a new management config with defaults
@@ -205,6 +214,15 @@ func NewManageConfig() *ManageConfig {
 		GlowPager: "less",
 		GlowWidth: 80,
 		GlowMouse: true,
+
+		// Claude Code MCPs (context7 enabled by default)
+		ClaudeCodeMCPContext7:           true,
+		ClaudeCodeMCPTaskMaster:         false,
+		ClaudeCodeMCPGitHub:             false,
+		ClaudeCodeMCPSupabase:           false,
+		ClaudeCodeMCPConvex:             false,
+		ClaudeCodeMCPPuppeteer:          false,
+		ClaudeCodeMCPSequentialThinking: false,
 	}
 }
 
@@ -230,6 +248,7 @@ func getManageTools() []manageTool {
 		{"lazydocker", "LazyDocker", "", ScreenManageLazyDocker},
 		{"btop", "Btop", "", ScreenManageBtop},
 		{"glow", "Glow", "", ScreenManageGlow},
+		{"claude-code", "Claude Code", "󰚩", ScreenManageClaudeCode},
 	}
 }
 
@@ -726,6 +745,81 @@ func (a *App) renderManageGlow() string {
 	help := lipgloss.NewStyle().
 		Foreground(ColorTextMuted).
 		Render("↑↓ Navigate • ←→ Adjust • Space Toggle • Esc Back")
+
+	return lipgloss.Place(a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help))
+}
+
+// renderManageClaudeCode renders the Claude Code MCP configuration screen
+func (a *App) renderManageClaudeCode() string {
+	title := renderManageTitle("󰚩", "Claude Code", "AI-powered coding assistant with MCP servers")
+	cfg := a.manageConfig
+
+	// MCP server list with descriptions
+	mcps := []struct {
+		name    string
+		desc    string
+		enabled *bool
+		rec     bool // recommended
+	}{
+		{"Context7", "Documentation lookup for any library", &cfg.ClaudeCodeMCPContext7, true},
+		{"Task Master", "AI-driven task management", &cfg.ClaudeCodeMCPTaskMaster, false},
+		{"GitHub", "GitHub integration and automation", &cfg.ClaudeCodeMCPGitHub, false},
+		{"Supabase", "Supabase database integration", &cfg.ClaudeCodeMCPSupabase, false},
+		{"Convex", "Convex backend integration", &cfg.ClaudeCodeMCPConvex, false},
+		{"Puppeteer", "Browser automation and testing", &cfg.ClaudeCodeMCPPuppeteer, false},
+		{"Sequential Thinking", "Enhanced reasoning chains", &cfg.ClaudeCodeMCPSequentialThinking, false},
+	}
+
+	var lines []string
+	for i, mcp := range mcps {
+		focused := a.configFieldIndex == i
+		enabled := *mcp.enabled
+
+		cursor := "  "
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		}
+
+		checkbox := "[ ]"
+		if enabled {
+			checkbox = lipgloss.NewStyle().Foreground(ColorGreen).Render("[✓]")
+		}
+
+		nameStyle := lipgloss.NewStyle().Foreground(ColorText)
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if focused {
+			nameStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+			descStyle = lipgloss.NewStyle().Foreground(ColorText)
+		}
+
+		// Show (recommended) indicator
+		suffix := ""
+		if mcp.rec {
+			suffix = lipgloss.NewStyle().Foreground(ColorYellow).Render(" (recommended)")
+		}
+
+		line := fmt.Sprintf("%s%s %s%s  %s",
+			cursor,
+			checkbox,
+			nameStyle.Render(mcp.name),
+			suffix,
+			descStyle.Render(mcp.desc))
+		lines = append(lines, line)
+	}
+
+	content := strings.Join(lines, "\n")
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorOverlay).
+		Padding(1, 2).
+		Width(65).
+		Render(content)
+
+	help := lipgloss.NewStyle().
+		Foreground(ColorTextMuted).
+		Render("↑↓ Navigate • Space Toggle • Esc Back")
 
 	return lipgloss.Place(a.width, a.height,
 		lipgloss.Center, lipgloss.Center,

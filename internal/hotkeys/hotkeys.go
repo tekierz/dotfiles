@@ -336,5 +336,40 @@ func Categories(navStyle string) []Category {
 				{"Esc Esc", "Exit Claude Code"},
 			},
 		},
+		{
+			ID:   "tailscale",
+			Name: "Tailscale",
+			Icon: "󰖂",
+			Items: []Item{
+				{"tailscale status", "Show connection status"},
+				{"tailscale up", "Connect to tailnet"},
+				{"tailscale down", "Disconnect from tailnet"},
+				{"tailscale ip", "Show Tailscale IP addresses"},
+				{"tailscale ssh <host>", "SSH to peer node"},
+				{"tailscale ping <host>", "Ping peer node"},
+				{"tailscale netcheck", "Network diagnostic"},
+			},
+		},
+		{
+			ID:   "sunshine",
+			Name: "Sunshine",
+			Icon: "☀",
+			Items: []Item{
+				{"sunshine", "Start streaming server"},
+				{"sunshine --help", "Show command options"},
+				{"localhost:47990", "Web UI (browser)"},
+			},
+		},
+		{
+			ID:   "moonlight",
+			Name: "Moonlight",
+			Icon: "🌙",
+			Items: []Item{
+				{"moonlight", "Launch client"},
+				{"moonlight pair <host>", "Pair with host"},
+				{"moonlight stream <host>", "Stream from host"},
+				{"moonlight list <host>", "List available apps"},
+			},
+		},
 	}
 }
