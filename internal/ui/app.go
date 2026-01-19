@@ -190,15 +190,21 @@ type App struct {
 	hotkeysReturn        Screen                // Screen to return to when leaving hotkeys
 	hotkeysFavorites     *config.HotkeysConfig // User hotkey favorites config
 	hotkeysFavoritesOnly bool                  // Filter to show only favorites
-	backupIndex          int                   // Backup selection cursor
-	backups              []BackupEntry
-	backupsLoaded        bool
-	backupsLoading       bool
-	backupConfirmMode    bool
-	backupConfirmType    string // "restore" or "delete"
-	backupStatus         string // Status message for backup operations
-	backupRunning        bool   // Currently running a backup operation
-	backupError          error  // Error from backup operation
+	// Hotkeys alias editing state
+	hotkeysAddingAlias  bool   // Currently adding an alias
+	hotkeysAliasName    string // Alias name being entered
+	hotkeysAliasCommand string // Command the alias maps to
+	hotkeysAliasField   int    // 0 = name, 1 = command
+	hotkeysAliasCursor  int    // Cursor position in current field
+	backupIndex         int    // Backup selection cursor
+	backups             []BackupEntry
+	backupsLoaded       bool
+	backupsLoading      bool
+	backupConfirmMode   bool
+	backupConfirmType   string // "restore" or "delete"
+	backupStatus        string // Status message for backup operations
+	backupRunning       bool   // Currently running a backup operation
+	backupError         error  // Error from backup operation
 
 	// Users screen state
 	usersItems      []userItem // Cached user list

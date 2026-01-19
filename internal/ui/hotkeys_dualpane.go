@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -199,6 +200,11 @@ func (a *App) toggleHotkeyFavorite(categoryID, itemKey string) {
 func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// Handle alias input mode first (captures all keys)
+	if a.hotkeysAddingAlias {
+		return a.handleHotkeysAliasInput(msg)
+	}
+
 	cats := a.hotkeyCategories()
 	if len(cats) == 0 {
 		if key == "esc" {
@@ -354,9 +360,179 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.hotkeyCursor = 0
 		a.hotkeyItemScroll = 0
 		return a, nil
+	case "a":
+		// Start adding alias - pre-fill command with current item if one is selected
+		a.hotkeysAddingAlias = true
+		a.hotkeysAliasField = 0 // Start with name field
+		a.hotkeysAliasCursor = 0
+		a.hotkeysAliasName = ""
+		if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
+			item := displayItems[a.hotkeyCursor]
+			a.hotkeysAliasCommand = item.Keys // Pre-fill command from selected hotkey
+		} else {
+			a.hotkeysAliasCommand = ""
+		}
+		return a, nil
 	}
 
 	return a, nil
+}
+
+// handleHotkeysAliasInput handles key input when adding an alias
+func (a *App) handleHotkeysAliasInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		a.hotkeysCancelAlias()
+		return a, nil
+
+	case "enter":
+		if a.hotkeysAliasName != "" && a.hotkeysAliasCommand != "" {
+			a.hotkeysSaveAlias()
+		}
+		a.hotkeysCancelAlias()
+		return a, nil
+
+	case "tab":
+		// Switch between name and command fields
+		a.hotkeysAliasField = (a.hotkeysAliasField + 1) % 2
+		// Move cursor to end of new field
+		if a.hotkeysAliasField == 0 {
+			a.hotkeysAliasCursor = utf8.RuneCountInString(a.hotkeysAliasName)
+		} else {
+			a.hotkeysAliasCursor = utf8.RuneCountInString(a.hotkeysAliasCommand)
+		}
+		return a, nil
+
+	case "left", "h":
+		if a.hotkeysAliasCursor > 0 {
+			a.hotkeysAliasCursor--
+		}
+		return a, nil
+
+	case "right", "l":
+		maxLen := a.hotkeysAliasCurrentFieldLen()
+		if a.hotkeysAliasCursor < maxLen {
+			a.hotkeysAliasCursor++
+		}
+		return a, nil
+
+	case "home":
+		a.hotkeysAliasCursor = 0
+		return a, nil
+
+	case "end":
+		a.hotkeysAliasCursor = a.hotkeysAliasCurrentFieldLen()
+		return a, nil
+
+	case "backspace":
+		a.hotkeysAliasBackspace()
+		return a, nil
+
+	case "delete":
+		a.hotkeysAliasDelete()
+		return a, nil
+
+	default:
+		// Insert typed runes (ignore non-rune keys and alt-modified keys)
+		if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 && !msg.Alt {
+			a.hotkeysAliasInsertRunes(msg.Runes)
+		}
+		return a, nil
+	}
+}
+
+// hotkeysAliasCurrentFieldLen returns the rune count of the current alias field
+func (a *App) hotkeysAliasCurrentFieldLen() int {
+	if a.hotkeysAliasField == 0 {
+		return utf8.RuneCountInString(a.hotkeysAliasName)
+	}
+	return utf8.RuneCountInString(a.hotkeysAliasCommand)
+}
+
+// hotkeysAliasBackspace deletes the character before the cursor
+func (a *App) hotkeysAliasBackspace() {
+	if a.hotkeysAliasField == 0 {
+		r := []rune(a.hotkeysAliasName)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		if cur > 0 {
+			r = append(r[:cur-1], r[cur:]...)
+			a.hotkeysAliasCursor = cur - 1
+			a.hotkeysAliasName = string(r)
+		}
+	} else {
+		r := []rune(a.hotkeysAliasCommand)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		if cur > 0 {
+			r = append(r[:cur-1], r[cur:]...)
+			a.hotkeysAliasCursor = cur - 1
+			a.hotkeysAliasCommand = string(r)
+		}
+	}
+}
+
+// hotkeysAliasDelete deletes the character at the cursor
+func (a *App) hotkeysAliasDelete() {
+	if a.hotkeysAliasField == 0 {
+		r := []rune(a.hotkeysAliasName)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		if cur < len(r) {
+			r = append(r[:cur], r[cur+1:]...)
+			a.hotkeysAliasName = string(r)
+		}
+	} else {
+		r := []rune(a.hotkeysAliasCommand)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		if cur < len(r) {
+			r = append(r[:cur], r[cur+1:]...)
+			a.hotkeysAliasCommand = string(r)
+		}
+	}
+}
+
+// hotkeysAliasInsertRunes inserts runes at the cursor position
+func (a *App) hotkeysAliasInsertRunes(runes []rune) {
+	if a.hotkeysAliasField == 0 {
+		r := []rune(a.hotkeysAliasName)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		out := make([]rune, 0, len(r)+len(runes))
+		out = append(out, r[:cur]...)
+		out = append(out, runes...)
+		out = append(out, r[cur:]...)
+		a.hotkeysAliasName = string(out)
+		a.hotkeysAliasCursor = cur + len(runes)
+	} else {
+		r := []rune(a.hotkeysAliasCommand)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		out := make([]rune, 0, len(r)+len(runes))
+		out = append(out, r[:cur]...)
+		out = append(out, runes...)
+		out = append(out, r[cur:]...)
+		a.hotkeysAliasCommand = string(out)
+		a.hotkeysAliasCursor = cur + len(runes)
+	}
+}
+
+// hotkeysSaveAlias saves the alias to the user's config
+func (a *App) hotkeysSaveAlias() {
+	userHotkeys := a.getCurrentUserHotkeys()
+	if userHotkeys.Aliases == nil {
+		userHotkeys.Aliases = make(map[string]string)
+	}
+	userHotkeys.Aliases[a.hotkeysAliasName] = a.hotkeysAliasCommand
+	username := a.getCurrentUsername()
+	a.hotkeysFavorites.SetUserHotkeys(username, userHotkeys)
+	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
+}
+
+// hotkeysCancelAlias cancels alias editing and resets state
+func (a *App) hotkeysCancelAlias() {
+	a.hotkeysAddingAlias = false
+	a.hotkeysAliasName = ""
+	a.hotkeysAliasCommand = ""
+	a.hotkeysAliasField = 0
+	a.hotkeysAliasCursor = 0
 }
 
 func (a *App) handleHotkeysMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -551,7 +727,7 @@ func (a *App) renderHotkeysHeader(width int) string {
 
 func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 	// Split help text into two lines for better readability
-	helpLine1 := "Tab pane  ↑↓ move  ←→ switch  f toggle favorite  F filter favorites"
+	helpLine1 := "Tab pane  ↑↓ move  ←→ switch  f favorite  F filter  a add alias"
 	helpLine2 := "Click select  Scroll  Esc back  q quit"
 	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
 		helpLine1 + "\n" + helpLine2,
@@ -703,6 +879,13 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 	innerW := maxInt(0, rightW-(layout.border*2)-(layout.padX*2))
 	keyW := min(22, maxInt(12, innerW/3))
 
+	// Show alias input dialog if adding
+	if a.hotkeysAddingAlias {
+		aliasContent := a.renderHotkeysAliasDialog(innerW)
+		content := lipgloss.JoinVertical(lipgloss.Left, title, sub, "", aliasContent)
+		return panel.Render(content)
+	}
+
 	// Show message if no favorites in filter mode
 	if a.hotkeysFavoritesOnly && len(displayItems) == 0 {
 		msg := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No favorites in this category.\nPress 'F' to show all items.")
@@ -758,4 +941,73 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 
 	content := lipgloss.JoinVertical(lipgloss.Left, contentLines...)
 	return panel.Render(content)
+}
+
+// renderHotkeysAliasDialog renders the alias input dialog
+func (a *App) renderHotkeysAliasDialog(width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	fieldStyle := lipgloss.NewStyle().Foreground(ColorText)
+	focusedFieldStyle := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	hintStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+
+	// Build cursor-aware field display
+	renderField := func(value string, isFocused bool, cursorPos int) string {
+		if !isFocused {
+			display := value
+			if display == "" {
+				display = "(empty)"
+			}
+			return fieldStyle.Render(truncateVisible(display, width-10))
+		}
+
+		// Show cursor for focused field
+		runes := []rune(value)
+		cur := clampInt(cursorPos, 0, len(runes))
+		left := string(runes[:cur])
+		right := string(runes[cur:])
+
+		cursorChar := lipgloss.NewStyle().Background(ColorCyan).Foreground(ColorBg).Render(" ")
+		if cur < len(runes) {
+			cursorChar = lipgloss.NewStyle().Background(ColorCyan).Foreground(ColorBg).Render(string(runes[cur]))
+			right = string(runes[cur+1:])
+		}
+
+		display := focusedFieldStyle.Render(left) + cursorChar + focusedFieldStyle.Render(right)
+		return truncateVisible(display, width-10)
+	}
+
+	nameLabel := "Name:    "
+	cmdLabel := "Command: "
+
+	if a.hotkeysAliasField == 0 {
+		nameLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Name:    ")
+	} else {
+		nameLabel = labelStyle.Render("Name:    ")
+	}
+
+	if a.hotkeysAliasField == 1 {
+		cmdLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Command: ")
+	} else {
+		cmdLabel = labelStyle.Render("Command: ")
+	}
+
+	nameLine := nameLabel + renderField(a.hotkeysAliasName, a.hotkeysAliasField == 0, a.hotkeysAliasCursor)
+	cmdLine := cmdLabel + renderField(a.hotkeysAliasCommand, a.hotkeysAliasField == 1, a.hotkeysAliasCursor)
+
+	title := titleStyle.Render("ADD ALIAS")
+	hint := hintStyle.Render("Tab switch field  Enter save  Esc cancel")
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		nameLine,
+		cmdLine,
+		"",
+		hint,
+	)
 }
