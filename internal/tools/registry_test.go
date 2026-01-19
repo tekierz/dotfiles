@@ -132,6 +132,10 @@ func (t *mockTool) HasConfig() bool                      { return false }
 func (t *mockTool) GenerateConfig(theme string) string   { return "" }
 func (t *mockTool) ApplyConfig(theme string) error       { return nil }
 func (t *mockTool) IsHeavy() bool                        { return false }
+func (t *mockTool) UIGroup() UIGroup                     { return UIGroupNone }
+func (t *mockTool) ConfigScreen() int                    { return 0 }
+func (t *mockTool) DefaultEnabled() bool                 { return false }
+func (t *mockTool) PlatformFilter() pkg.Platform         { return "" }
 
 func TestCategoryConstants(t *testing.T) {
 	// Verify all category constants are distinct

@@ -18,6 +18,18 @@ const (
 	CategoryApp       Category = "app"
 )
 
+// UIGroup represents which installer section a tool belongs to
+type UIGroup string
+
+const (
+	UIGroupNone         UIGroup = "" // Has dedicated config screen
+	UIGroupCLITools     UIGroup = "cli-tools"
+	UIGroupCLIUtilities UIGroup = "cli-utilities"
+	UIGroupGUIApps      UIGroup = "gui-apps"
+	UIGroupMacApps      UIGroup = "macos-apps"
+	UIGroupUtilities    UIGroup = "utilities" // Shell scripts (hk, caff, sshh)
+)
+
 // Tool defines the interface for all managed tools
 type Tool interface {
 	// Identity
@@ -40,6 +52,12 @@ type Tool interface {
 
 	// Resource requirements
 	IsHeavy() bool // Whether this tool requires significant resources (skip on low-memory systems)
+
+	// UI metadata for installer screens
+	UIGroup() UIGroup             // Which installer group (empty = dedicated screen)
+	ConfigScreen() int            // Which config screen constant (0 = part of group screen)
+	DefaultEnabled() bool         // Default state in installer
+	PlatformFilter() pkg.Platform // Empty for all platforms, or specific platform
 }
 
 // BaseTool provides common functionality for tools
@@ -52,6 +70,12 @@ type BaseTool struct {
 	packages    map[pkg.Platform][]string
 	configPaths []string
 	heavyTool   bool // If true, tool is skipped on low-memory systems (e.g., Pi Zero 2)
+
+	// UI metadata
+	uiGroup        UIGroup
+	configScreen   int // Screen constant as int to avoid import cycle
+	defaultEnabled bool
+	platformFilter pkg.Platform
 }
 
 func (t *BaseTool) ID() string          { return t.id }
@@ -75,6 +99,11 @@ func (t *BaseTool) HasConfig() bool {
 func (t *BaseTool) IsHeavy() bool {
 	return t.heavyTool
 }
+
+func (t *BaseTool) UIGroup() UIGroup             { return t.uiGroup }
+func (t *BaseTool) ConfigScreen() int            { return t.configScreen }
+func (t *BaseTool) DefaultEnabled() bool         { return t.defaultEnabled }
+func (t *BaseTool) PlatformFilter() pkg.Platform { return t.platformFilter }
 
 func (t *BaseTool) IsInstalled() bool {
 	platform := pkg.DetectPlatform()
