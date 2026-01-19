@@ -32,6 +32,10 @@ func NewYaziTool() *YaziTool {
 				filepath.Join(home, ".config", "yazi", "theme.toml"),
 			},
 			heavyTool: true, // Skip on low-memory systems (Pi Zero 2)
+			// UI metadata
+			uiGroup:        UIGroupNone,
+			configScreen:   14, // ScreenConfigYazi
+			defaultEnabled: true,
 		},
 	}
 }

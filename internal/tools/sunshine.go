@@ -24,6 +24,10 @@ func NewSunshineTool() *SunshineTool {
 				pkg.PlatformDebian: {"sunshine"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }

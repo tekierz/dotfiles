@@ -30,6 +30,10 @@ func NewLazyGitTool() *LazyGitTool {
 			configPaths: []string{
 				filepath.Join(home, ".config", "lazygit", "config.yml"),
 			},
+			// UI metadata
+			uiGroup:        UIGroupCLITools,
+			configScreen:   0, // Part of CLI Tools group screen
+			defaultEnabled: true,
 		},
 	}
 }

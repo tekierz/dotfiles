@@ -24,6 +24,10 @@ func NewFzfTool() *FzfTool {
 				pkg.PlatformDebian: {"fzf"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupNone,
+			configScreen:   15, // ScreenConfigFzf
+			defaultEnabled: true,
 		},
 	}
 }

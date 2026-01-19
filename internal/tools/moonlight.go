@@ -24,6 +24,10 @@ func NewMoonlightTool() *MoonlightTool {
 				pkg.PlatformDebian: {"moonlight-qt"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }

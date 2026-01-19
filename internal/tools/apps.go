@@ -29,6 +29,10 @@ func NewZenBrowserTool() *ZenBrowserTool {
 				pkg.PlatformArch:  {"zen-browser-bin"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }
@@ -81,6 +85,10 @@ func NewCursorTool() *CursorTool {
 				pkg.PlatformArch:  {"cursor-bin"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }
@@ -124,6 +132,10 @@ func NewLMStudioTool() *LMStudioTool {
 				pkg.PlatformArch:  {"lm-studio"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }
@@ -182,6 +194,10 @@ func NewOBSTool() *OBSTool {
 				pkg.PlatformDebian: {"obs-studio"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupGUIApps,
+			configScreen:   0, // Part of GUI Apps group screen
+			defaultEnabled: false,
 		},
 	}
 }
@@ -220,6 +236,11 @@ func NewRectangleTool() *RectangleTool {
 				pkg.PlatformMacOS: {"rectangle"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupMacApps,
+			configScreen:   0, // Part of macOS Apps group screen
+			defaultEnabled: true,
+			platformFilter: pkg.PlatformMacOS,
 		},
 	}
 }
@@ -242,6 +263,11 @@ func NewRaycastTool() *RaycastTool {
 				pkg.PlatformMacOS: {"raycast"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupMacApps,
+			configScreen:   0, // Part of macOS Apps group screen
+			defaultEnabled: true,
+			platformFilter: pkg.PlatformMacOS,
 		},
 	}
 }
@@ -264,6 +290,11 @@ func NewIINATool() *IINATool {
 				pkg.PlatformMacOS: {"iina"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupMacApps,
+			configScreen:   0, // Part of macOS Apps group screen
+			defaultEnabled: false,
+			platformFilter: pkg.PlatformMacOS,
 		},
 	}
 }
@@ -286,6 +317,11 @@ func NewAppCleanerTool() *AppCleanerTool {
 				pkg.PlatformMacOS: {"appcleaner"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupMacApps,
+			configScreen:   0, // Part of macOS Apps group screen
+			defaultEnabled: true,
+			platformFilter: pkg.PlatformMacOS,
 		},
 	}
 }

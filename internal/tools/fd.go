@@ -24,6 +24,10 @@ func NewFdTool() *FdTool {
 				pkg.PlatformDebian: {"fd-find"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupCLIUtilities,
+			configScreen:   0, // Part of CLI Utilities group screen
+			defaultEnabled: true,
 		},
 	}
 }

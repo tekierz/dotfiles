@@ -24,6 +24,10 @@ func NewGlowTool() *GlowTool {
 				pkg.PlatformDebian: {"glow"},
 			},
 			configPaths: []string{},
+			// UI metadata
+			uiGroup:        UIGroupCLITools,
+			configScreen:   0, // Part of CLI Tools group screen
+			defaultEnabled: true,
 		},
 	}
 }

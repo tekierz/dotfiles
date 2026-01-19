@@ -33,6 +33,10 @@ func NewClaudeCodeTool() *ClaudeCodeTool {
 			configPaths: []string{
 				filepath.Join(home, ".claude", "settings.json"),
 			},
+			// UI metadata
+			uiGroup:        UIGroupCLITools,
+			configScreen:   0, // Part of CLI Tools group screen
+			defaultEnabled: false,
 		},
 	}
 }
