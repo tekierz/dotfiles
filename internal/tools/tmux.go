@@ -50,6 +50,10 @@ func NewTmuxTool() *TmuxTool {
 			configPaths: []string{
 				filepath.Join(home, ".tmux.conf"),
 			},
+			// UI metadata
+			uiGroup:        UIGroupNone,
+			configScreen:   10, // ScreenConfigTmux
+			defaultEnabled: true,
 		},
 	}
 }

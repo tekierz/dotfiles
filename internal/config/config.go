@@ -13,13 +13,21 @@ type GlobalConfig struct {
 	NavStyle          string `json:"nav_style"`
 	ActiveUser        string `json:"active_user,omitempty"`
 	DisableAnimations bool   `json:"disable_animations,omitempty"`
+
+	// Backup settings
+	AutoBackup       bool `json:"auto_backup"`         // Create backup before install/config changes
+	BackupMaxCount   int  `json:"backup_max_count"`    // Max number of backups to keep (0 = unlimited)
+	BackupMaxAgeDays int  `json:"backup_max_age_days"` // Delete backups older than this (0 = keep forever)
 }
 
 // DefaultGlobalConfig returns default global settings
 func DefaultGlobalConfig() *GlobalConfig {
 	return &GlobalConfig{
-		Theme:    "catppuccin-mocha",
-		NavStyle: "emacs",
+		Theme:            "catppuccin-mocha",
+		NavStyle:         "emacs",
+		AutoBackup:       true, // Auto-backup enabled by default
+		BackupMaxCount:   10,   // Keep last 10 backups
+		BackupMaxAgeDays: 30,   // Delete backups older than 30 days
 	}
 }
 

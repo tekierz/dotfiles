@@ -3,10 +3,12 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/hotkeys"
 )
 
@@ -161,8 +163,47 @@ func (a *App) hotkeyCategories() []hotkeys.Category {
 	return cats
 }
 
+// getCurrentUsername returns the active user name from global config, or "default" if none set.
+func (a *App) getCurrentUsername() string {
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil || cfg == nil || cfg.ActiveUser == "" {
+		return "default"
+	}
+	return cfg.ActiveUser
+}
+
+// getCurrentUserHotkeys returns the hotkeys config for the current user.
+func (a *App) getCurrentUserHotkeys() *config.UserHotkeys {
+	if a.hotkeysFavorites == nil {
+		a.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]*config.UserHotkeys)}
+	}
+	username := a.getCurrentUsername()
+	return a.hotkeysFavorites.GetUserHotkeys(username)
+}
+
+// isHotkeyFavorite checks if the given hotkey item is a favorite.
+func (a *App) isHotkeyFavorite(categoryID, itemKey string) bool {
+	userHotkeys := a.getCurrentUserHotkeys()
+	return userHotkeys.IsFavorite(categoryID, itemKey)
+}
+
+// toggleHotkeyFavorite toggles the favorite status of the current hotkey item.
+func (a *App) toggleHotkeyFavorite(categoryID, itemKey string) {
+	username := a.getCurrentUsername()
+	userHotkeys := a.getCurrentUserHotkeys()
+	userHotkeys.ToggleFavorite(categoryID, itemKey)
+	a.hotkeysFavorites.SetUserHotkeys(username, userHotkeys)
+	// Save to disk
+	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
+}
+
 func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// Handle alias input mode first (captures all keys)
+	if a.hotkeysAddingAlias {
+		return a.handleHotkeysAliasInput(msg)
+	}
 
 	cats := a.hotkeyCategories()
 	if len(cats) == 0 {
@@ -176,11 +217,25 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Clamp indices.
 	a.hotkeyCategory = clampInt(a.hotkeyCategory, 0, len(cats)-1)
-	items := cats[a.hotkeyCategory].Items
-	if len(items) == 0 {
+	cat := cats[a.hotkeyCategory]
+	allItems := cat.Items
+
+	// Get display items (filtered if favorites-only mode)
+	displayItems := allItems
+	if a.hotkeysFavoritesOnly {
+		var filtered []hotkeys.Item
+		for _, it := range allItems {
+			if a.isHotkeyFavorite(cat.ID, it.Keys) {
+				filtered = append(filtered, it)
+			}
+		}
+		displayItems = filtered
+	}
+
+	if len(displayItems) == 0 {
 		a.hotkeyCursor = 0
 	} else {
-		a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(items)-1)
+		a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(displayItems)-1)
 	}
 
 	ensureCatVisible := func() {
@@ -195,7 +250,7 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	ensureItemVisible := func() {
-		maxScroll := layout.maxItemScroll(len(items))
+		maxScroll := layout.maxItemScroll(len(displayItems))
 		a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxScroll)
 		if a.hotkeyCursor < a.hotkeyItemScroll {
 			a.hotkeyItemScroll = a.hotkeyCursor
@@ -213,6 +268,7 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
 		a.hotkeyFilter = ""
+		a.hotkeysFavoritesOnly = false // Reset favorites filter on exit
 		a.screen = a.hotkeysReturn
 		a.hotkeysReturn = ScreenMainMenu
 		return a, nil
@@ -248,6 +304,12 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "right", "l", "enter":
 			a.hotkeysPane = hotkeysPaneItems
 			return a, nil
+		case "F":
+			// Allow toggling favorites filter from categories pane too
+			a.hotkeysFavoritesOnly = !a.hotkeysFavoritesOnly
+			a.hotkeyCursor = 0
+			a.hotkeyItemScroll = 0
+			return a, nil
 		}
 		return a, nil
 	}
@@ -261,7 +323,7 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ensureItemVisible()
 		return a, nil
 	case "down", "j":
-		if a.hotkeyCursor < len(items)-1 {
+		if a.hotkeyCursor < len(displayItems)-1 {
 			a.hotkeyCursor++
 		}
 		ensureItemVisible()
@@ -269,9 +331,208 @@ func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left", "h":
 		a.hotkeysPane = hotkeysPaneCategories
 		return a, nil
+	case "f":
+		// Toggle favorite for current item
+		if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
+			item := displayItems[a.hotkeyCursor]
+			a.toggleHotkeyFavorite(cat.ID, item.Keys)
+			// If in favorites-only mode and we just unfavorited, adjust cursor
+			if a.hotkeysFavoritesOnly {
+				// Recalculate filtered list
+				var newFiltered []hotkeys.Item
+				for _, it := range allItems {
+					if a.isHotkeyFavorite(cat.ID, it.Keys) {
+						newFiltered = append(newFiltered, it)
+					}
+				}
+				if len(newFiltered) == 0 {
+					a.hotkeyCursor = 0
+				} else if a.hotkeyCursor >= len(newFiltered) {
+					a.hotkeyCursor = len(newFiltered) - 1
+				}
+			}
+		}
+		return a, nil
+	case "F":
+		// Toggle favorites-only filter mode
+		a.hotkeysFavoritesOnly = !a.hotkeysFavoritesOnly
+		// Reset cursor when toggling filter
+		a.hotkeyCursor = 0
+		a.hotkeyItemScroll = 0
+		return a, nil
+	case "a":
+		// Start adding alias - pre-fill command with current item if one is selected
+		a.hotkeysAddingAlias = true
+		a.hotkeysAliasField = 0 // Start with name field
+		a.hotkeysAliasCursor = 0
+		a.hotkeysAliasName = ""
+		if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
+			item := displayItems[a.hotkeyCursor]
+			a.hotkeysAliasCommand = item.Keys // Pre-fill command from selected hotkey
+		} else {
+			a.hotkeysAliasCommand = ""
+		}
+		return a, nil
 	}
 
 	return a, nil
+}
+
+// handleHotkeysAliasInput handles key input when adding an alias
+func (a *App) handleHotkeysAliasInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		a.hotkeysCancelAlias()
+		return a, nil
+
+	case "enter":
+		if a.hotkeysAliasName != "" && a.hotkeysAliasCommand != "" {
+			a.hotkeysSaveAlias()
+		}
+		a.hotkeysCancelAlias()
+		return a, nil
+
+	case "tab":
+		// Switch between name and command fields
+		a.hotkeysAliasField = (a.hotkeysAliasField + 1) % 2
+		// Move cursor to end of new field
+		if a.hotkeysAliasField == 0 {
+			a.hotkeysAliasCursor = utf8.RuneCountInString(a.hotkeysAliasName)
+		} else {
+			a.hotkeysAliasCursor = utf8.RuneCountInString(a.hotkeysAliasCommand)
+		}
+		return a, nil
+
+	case "left", "h":
+		if a.hotkeysAliasCursor > 0 {
+			a.hotkeysAliasCursor--
+		}
+		return a, nil
+
+	case "right", "l":
+		maxLen := a.hotkeysAliasCurrentFieldLen()
+		if a.hotkeysAliasCursor < maxLen {
+			a.hotkeysAliasCursor++
+		}
+		return a, nil
+
+	case "home":
+		a.hotkeysAliasCursor = 0
+		return a, nil
+
+	case "end":
+		a.hotkeysAliasCursor = a.hotkeysAliasCurrentFieldLen()
+		return a, nil
+
+	case "backspace":
+		a.hotkeysAliasBackspace()
+		return a, nil
+
+	case "delete":
+		a.hotkeysAliasDelete()
+		return a, nil
+
+	default:
+		// Insert typed runes (ignore non-rune keys and alt-modified keys)
+		if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 && !msg.Alt {
+			a.hotkeysAliasInsertRunes(msg.Runes)
+		}
+		return a, nil
+	}
+}
+
+// hotkeysAliasCurrentFieldLen returns the rune count of the current alias field
+func (a *App) hotkeysAliasCurrentFieldLen() int {
+	if a.hotkeysAliasField == 0 {
+		return utf8.RuneCountInString(a.hotkeysAliasName)
+	}
+	return utf8.RuneCountInString(a.hotkeysAliasCommand)
+}
+
+// hotkeysAliasBackspace deletes the character before the cursor
+func (a *App) hotkeysAliasBackspace() {
+	if a.hotkeysAliasField == 0 {
+		r := []rune(a.hotkeysAliasName)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		if cur > 0 {
+			r = append(r[:cur-1], r[cur:]...)
+			a.hotkeysAliasCursor = cur - 1
+			a.hotkeysAliasName = string(r)
+		}
+	} else {
+		r := []rune(a.hotkeysAliasCommand)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		if cur > 0 {
+			r = append(r[:cur-1], r[cur:]...)
+			a.hotkeysAliasCursor = cur - 1
+			a.hotkeysAliasCommand = string(r)
+		}
+	}
+}
+
+// hotkeysAliasDelete deletes the character at the cursor
+func (a *App) hotkeysAliasDelete() {
+	if a.hotkeysAliasField == 0 {
+		r := []rune(a.hotkeysAliasName)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		if cur < len(r) {
+			r = append(r[:cur], r[cur+1:]...)
+			a.hotkeysAliasName = string(r)
+		}
+	} else {
+		r := []rune(a.hotkeysAliasCommand)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		if cur < len(r) {
+			r = append(r[:cur], r[cur+1:]...)
+			a.hotkeysAliasCommand = string(r)
+		}
+	}
+}
+
+// hotkeysAliasInsertRunes inserts runes at the cursor position
+func (a *App) hotkeysAliasInsertRunes(runes []rune) {
+	if a.hotkeysAliasField == 0 {
+		r := []rune(a.hotkeysAliasName)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		out := make([]rune, 0, len(r)+len(runes))
+		out = append(out, r[:cur]...)
+		out = append(out, runes...)
+		out = append(out, r[cur:]...)
+		a.hotkeysAliasName = string(out)
+		a.hotkeysAliasCursor = cur + len(runes)
+	} else {
+		r := []rune(a.hotkeysAliasCommand)
+		cur := clampInt(a.hotkeysAliasCursor, 0, len(r))
+		out := make([]rune, 0, len(r)+len(runes))
+		out = append(out, r[:cur]...)
+		out = append(out, runes...)
+		out = append(out, r[cur:]...)
+		a.hotkeysAliasCommand = string(out)
+		a.hotkeysAliasCursor = cur + len(runes)
+	}
+}
+
+// hotkeysSaveAlias saves the alias to the user's config
+func (a *App) hotkeysSaveAlias() {
+	userHotkeys := a.getCurrentUserHotkeys()
+	if userHotkeys.Aliases == nil {
+		userHotkeys.Aliases = make(map[string]string)
+	}
+	userHotkeys.Aliases[a.hotkeysAliasName] = a.hotkeysAliasCommand
+	username := a.getCurrentUsername()
+	a.hotkeysFavorites.SetUserHotkeys(username, userHotkeys)
+	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
+}
+
+// hotkeysCancelAlias cancels alias editing and resets state
+func (a *App) hotkeysCancelAlias() {
+	a.hotkeysAddingAlias = false
+	a.hotkeysAliasName = ""
+	a.hotkeysAliasCommand = ""
+	a.hotkeysAliasField = 0
+	a.hotkeysAliasCursor = 0
 }
 
 func (a *App) handleHotkeysMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -309,8 +570,21 @@ func (a *App) handleHotkeysMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.X < layout.rightX {
 			a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll+delta, 0, layout.maxCatScroll(len(cats)))
 		} else {
-			items := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)].Items
-			a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll+delta, 0, layout.maxItemScroll(len(items)))
+			cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
+			allItems := cat.Items
+
+			// Get display items (filtered if favorites-only mode)
+			displayItems := allItems
+			if a.hotkeysFavoritesOnly {
+				var filtered []hotkeys.Item
+				for _, it := range allItems {
+					if a.isHotkeyFavorite(cat.ID, it.Keys) {
+						filtered = append(filtered, it)
+					}
+				}
+				displayItems = filtered
+			}
+			a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll+delta, 0, layout.maxItemScroll(len(displayItems)))
 		}
 		return a, nil
 	}
@@ -334,10 +608,24 @@ func (a *App) handleHotkeysMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	// Click items.
 	if layout.inRightList(m.X, m.Y) {
-		items := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)].Items
+		cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
+		allItems := cat.Items
+
+		// Get display items (filtered if favorites-only mode)
+		displayItems := allItems
+		if a.hotkeysFavoritesOnly {
+			var filtered []hotkeys.Item
+			for _, it := range allItems {
+				if a.isHotkeyFavorite(cat.ID, it.Keys) {
+					filtered = append(filtered, it)
+				}
+			}
+			displayItems = filtered
+		}
+
 		rel := m.Y - layout.rightListY
 		idx := a.hotkeyItemScroll + rel
-		if idx >= 0 && idx < len(items) {
+		if idx >= 0 && idx < len(displayItems) {
 			a.hotkeysPane = hotkeysPaneItems
 			a.hotkeyCursor = idx
 		}
@@ -368,16 +656,28 @@ func (a *App) renderHotkeysDualPane() string {
 		}
 		a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll, 0, maxCatScroll)
 
-		items := cats[a.hotkeyCategory].Items
-		if len(items) == 0 {
+		cat := cats[a.hotkeyCategory]
+		allItems := cat.Items
+
+		// Get display items (filtered if favorites-only mode)
+		displayItems := allItems
+		if a.hotkeysFavoritesOnly {
+			var filtered []hotkeys.Item
+			for _, it := range allItems {
+				if a.isHotkeyFavorite(cat.ID, it.Keys) {
+					filtered = append(filtered, it)
+				}
+			}
+			displayItems = filtered
+		}
+
+		if len(displayItems) == 0 {
 			a.hotkeyCursor = 0
 			a.hotkeyItemScroll = 0
-			if a.hotkeysPane == hotkeysPaneItems {
-				a.hotkeysPane = hotkeysPaneCategories
-			}
+			// Don't force back to categories pane if filtering - user might want to toggle filter
 		} else {
-			a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(items)-1)
-			maxItemScroll := layout.maxItemScroll(len(items))
+			a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(displayItems)-1)
+			maxItemScroll := layout.maxItemScroll(len(displayItems))
 			a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxItemScroll)
 			if a.hotkeyCursor < a.hotkeyItemScroll {
 				a.hotkeyItemScroll = a.hotkeyCursor
@@ -427,7 +727,7 @@ func (a *App) renderHotkeysHeader(width int) string {
 
 func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 	// Split help text into two lines for better readability
-	helpLine1 := "Tab pane  ↑↓ move  ←→ switch"
+	helpLine1 := "Tab pane  ↑↓ move  ←→ switch  f favorite  F filter  a add alias"
 	helpLine2 := "Click select  Scroll  Esc back  q quit"
 	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
 		helpLine1 + "\n" + helpLine2,
@@ -440,6 +740,9 @@ func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 	}
 	if a.hotkeyFilter != "" {
 		statusText = statusText + lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  (filtered)")
+	}
+	if a.hotkeysFavoritesOnly {
+		statusText = statusText + lipgloss.NewStyle().Foreground(ColorYellow).Render("  [favorites only]")
 	}
 	if statusText == "" {
 		statusText = " "
@@ -546,30 +849,74 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 	cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
 	items := cat.Items
 
+	// Filter to favorites only if mode is enabled
+	displayItems := items
+	itemIndices := make([]int, len(items)) // Map display index to original index
+	for i := range items {
+		itemIndices[i] = i
+	}
+	if a.hotkeysFavoritesOnly {
+		var filteredItems []hotkeys.Item
+		var filteredIndices []int
+		for i, it := range items {
+			if a.isHotkeyFavorite(cat.ID, it.Keys) {
+				filteredItems = append(filteredItems, it)
+				filteredIndices = append(filteredIndices, i)
+			}
+		}
+		displayItems = filteredItems
+		itemIndices = filteredIndices
+	}
+
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("ITEMS")
-	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(fmt.Sprintf("%s %s", cat.Icon, cat.Name))
+	subText := fmt.Sprintf("%s %s", cat.Icon, cat.Name)
+	if a.hotkeysFavoritesOnly {
+		subText += fmt.Sprintf(" (%d favorites)", len(displayItems))
+	}
+	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(subText)
 
 	// Use capped rightW for inner width calculation
 	innerW := maxInt(0, rightW-(layout.border*2)-(layout.padX*2))
 	keyW := min(22, maxInt(12, innerW/3))
 
+	// Show alias input dialog if adding
+	if a.hotkeysAddingAlias {
+		aliasContent := a.renderHotkeysAliasDialog(innerW)
+		content := lipgloss.JoinVertical(lipgloss.Left, title, sub, "", aliasContent)
+		return panel.Render(content)
+	}
+
+	// Show message if no favorites in filter mode
+	if a.hotkeysFavoritesOnly && len(displayItems) == 0 {
+		msg := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No favorites in this category.\nPress 'F' to show all items.")
+		content := lipgloss.JoinVertical(lipgloss.Left, title, sub, "", msg)
+		return panel.Render(content)
+	}
+
 	lines := make([]string, 0, layout.rightListH)
-	for i := a.hotkeyItemScroll; i < len(items) && len(lines) < layout.rightListH; i++ {
-		it := items[i]
+	for i := a.hotkeyItemScroll; i < len(displayItems) && len(lines) < layout.rightListH; i++ {
+		it := displayItems[i]
 		focused := i == a.hotkeyCursor
+
+		// Check if this item is a favorite
+		isFavorite := a.isHotkeyFavorite(cat.ID, it.Keys)
+		starIndicator := "  "
+		if isFavorite {
+			starIndicator = lipgloss.NewStyle().Foreground(ColorYellow).Render("* ")
+		}
 
 		cursor := "  "
 		keyStyle := lipgloss.NewStyle().Foreground(ColorYellow).Bold(true).Width(keyW)
 		descStyle := lipgloss.NewStyle().Foreground(ColorText)
 		lineStyle := lipgloss.NewStyle()
 		if focused {
-			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("> ")
 			descStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 			// Add background highlight for focused item
 			lineStyle = lipgloss.NewStyle().Background(ColorOverlay)
 		}
 
-		line := fmt.Sprintf("%s%s %s", cursor, keyStyle.Render(it.Keys), descStyle.Render(it.Description))
+		line := fmt.Sprintf("%s%s%s %s", starIndicator, cursor, keyStyle.Render(it.Keys), descStyle.Render(it.Description))
 		// Apply background highlight for focused line
 		if focused {
 			line = lineStyle.Width(innerW).Render(truncateVisible(line, innerW))
@@ -594,4 +941,73 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 
 	content := lipgloss.JoinVertical(lipgloss.Left, contentLines...)
 	return panel.Render(content)
+}
+
+// renderHotkeysAliasDialog renders the alias input dialog
+func (a *App) renderHotkeysAliasDialog(width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	fieldStyle := lipgloss.NewStyle().Foreground(ColorText)
+	focusedFieldStyle := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	hintStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+
+	// Build cursor-aware field display
+	renderField := func(value string, isFocused bool, cursorPos int) string {
+		if !isFocused {
+			display := value
+			if display == "" {
+				display = "(empty)"
+			}
+			return fieldStyle.Render(truncateVisible(display, width-10))
+		}
+
+		// Show cursor for focused field
+		runes := []rune(value)
+		cur := clampInt(cursorPos, 0, len(runes))
+		left := string(runes[:cur])
+		right := string(runes[cur:])
+
+		cursorChar := lipgloss.NewStyle().Background(ColorCyan).Foreground(ColorBg).Render(" ")
+		if cur < len(runes) {
+			cursorChar = lipgloss.NewStyle().Background(ColorCyan).Foreground(ColorBg).Render(string(runes[cur]))
+			right = string(runes[cur+1:])
+		}
+
+		display := focusedFieldStyle.Render(left) + cursorChar + focusedFieldStyle.Render(right)
+		return truncateVisible(display, width-10)
+	}
+
+	nameLabel := "Name:    "
+	cmdLabel := "Command: "
+
+	if a.hotkeysAliasField == 0 {
+		nameLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Name:    ")
+	} else {
+		nameLabel = labelStyle.Render("Name:    ")
+	}
+
+	if a.hotkeysAliasField == 1 {
+		cmdLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Command: ")
+	} else {
+		cmdLabel = labelStyle.Render("Command: ")
+	}
+
+	nameLine := nameLabel + renderField(a.hotkeysAliasName, a.hotkeysAliasField == 0, a.hotkeysAliasCursor)
+	cmdLine := cmdLabel + renderField(a.hotkeysAliasCommand, a.hotkeysAliasField == 1, a.hotkeysAliasCursor)
+
+	title := titleStyle.Render("ADD ALIAS")
+	hint := hintStyle.Render("Tab switch field  Enter save  Esc cancel")
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		nameLine,
+		cmdLine,
+		"",
+		hint,
+	)
 }

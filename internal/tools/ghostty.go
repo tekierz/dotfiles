@@ -30,6 +30,10 @@ func NewGhosttyTool() *GhosttyTool {
 			configPaths: []string{
 				filepath.Join(home, ".config", "ghostty", "config"),
 			},
+			// UI metadata
+			uiGroup:        UIGroupNone,
+			configScreen:   9, // ScreenConfigGhostty
+			defaultEnabled: true,
 		},
 	}
 }

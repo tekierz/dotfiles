@@ -30,6 +30,10 @@ func NewRipgrepTool() *RipgrepTool {
 			configPaths: []string{
 				filepath.Join(home, ".config", "ripgrep", "config"),
 			},
+			// UI metadata
+			uiGroup:        UIGroupCLIUtilities,
+			configScreen:   0, // Part of CLI Utilities group screen
+			defaultEnabled: true,
 		},
 	}
 }

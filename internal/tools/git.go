@@ -20,7 +20,7 @@ func NewGitTool() *GitTool {
 			id:          "git",
 			name:        "Git",
 			description: "Distributed version control system",
-			icon:        "",
+			icon:        "",
 			category:    CategoryGit,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"git"},
@@ -30,6 +30,10 @@ func NewGitTool() *GitTool {
 			configPaths: []string{
 				filepath.Join(home, ".gitconfig"),
 			},
+			// UI metadata
+			uiGroup:        UIGroupNone,
+			configScreen:   13, // ScreenConfigGit
+			defaultEnabled: true,
 		},
 	}
 }

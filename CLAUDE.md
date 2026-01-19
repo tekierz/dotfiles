@@ -58,7 +58,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 
 ### Screen Navigation
 
-The TUI uses screen-based navigation with 46 screens:
+The TUI uses screen-based navigation with 43 screens:
 - Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
 - Management: MainMenu, Manage, Update, Hotkeys, Backups
 - Config: Per-tool configuration screens

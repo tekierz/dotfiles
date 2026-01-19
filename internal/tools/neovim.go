@@ -20,7 +20,7 @@ func NewNeovimTool() *NeovimTool {
 			id:          "neovim",
 			name:        "Neovim",
 			description: "Hyperextensible Vim-based text editor",
-			icon:        "",
+			icon:        "",
 			category:    CategoryEditor,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS:  {"neovim"},
@@ -30,6 +30,10 @@ func NewNeovimTool() *NeovimTool {
 			configPaths: []string{
 				filepath.Join(home, ".config", "nvim", "init.lua"),
 			},
+			// UI metadata
+			uiGroup:        UIGroupNone,
+			configScreen:   12, // ScreenConfigNeovim
+			defaultEnabled: true,
 		},
 	}
 }

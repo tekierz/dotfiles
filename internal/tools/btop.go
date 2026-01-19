@@ -31,6 +31,10 @@ func NewBtopTool() *BtopTool {
 				filepath.Join(home, ".config", "btop", "btop.conf"),
 			},
 			heavyTool: true, // Skip on low-memory systems (Pi Zero 2)
+			// UI metadata
+			uiGroup:        UIGroupCLITools,
+			configScreen:   0, // Part of CLI Tools group screen
+			defaultEnabled: true,
 		},
 	}
 }
