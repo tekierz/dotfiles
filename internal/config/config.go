@@ -26,7 +26,7 @@ func DefaultGlobalConfig() *GlobalConfig {
 		Theme:            "catppuccin-mocha",
 		NavStyle:         "emacs",
 		AutoBackup:       true, // Auto-backup enabled by default
-		BackupMaxCount:   10,   // Keep last 10 backups
+		BackupMaxCount:   100,  // Keep last 100 backups
 		BackupMaxAgeDays: 30,   // Delete backups older than 30 days
 	}
 }

@@ -98,12 +98,15 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 	theme := a.theme
 	nav := a.navStyle
 	animationsEnabled := a.animationsEnabled
+	autoBackup := a.autoBackup
+	backupMaxCount := a.backupMaxCount
+	backupMaxAgeDays := a.backupMaxAgeDays
 	return func() tea.Msg {
 		if err := config.SaveToolConfig("manage", cfg); err != nil {
 			return manageSavedMsg{err: err}
 		}
 
-		// Also persist global theme/nav so installer + CLI stay in sync.
+		// Also persist global theme/nav/backup so installer + CLI stay in sync.
 		g, err := config.LoadGlobalConfig()
 		if err != nil {
 			g = config.DefaultGlobalConfig()
@@ -111,6 +114,9 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 		g.Theme = theme
 		g.NavStyle = nav
 		g.DisableAnimations = !animationsEnabled
+		g.AutoBackup = autoBackup
+		g.BackupMaxCount = backupMaxCount
+		g.BackupMaxAgeDays = backupMaxAgeDays
 
 		if err := config.SaveGlobalConfig(g); err != nil {
 			return manageSavedMsg{err: err}
@@ -956,6 +962,35 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 				description: "Enable animated UI elements (headers, globe, spinners)",
 				kind:        manageFieldToggle,
 				b:           &a.animationsEnabled,
+			},
+			// Backup settings
+			{
+				key:         "auto_backup",
+				label:       "Auto Backup",
+				description: "Create backup before install/config changes",
+				kind:        manageFieldToggle,
+				b:           &a.autoBackup,
+			},
+			{
+				key:         "backup_max_count",
+				label:       "Max Backups",
+				description: "Maximum backups to keep (0 = unlimited)",
+				kind:        manageFieldNumber,
+				n:           &a.backupMaxCount,
+				min:         0,
+				max:         100,
+				step:        1,
+			},
+			{
+				key:         "backup_max_age",
+				label:       "Max Age (days)",
+				description: "Delete backups older than this (0 = keep forever)",
+				kind:        manageFieldNumber,
+				n:           &a.backupMaxAgeDays,
+				min:         0,
+				max:         365,
+				step:        7,
+				unit:        " days",
 			},
 		}
 
