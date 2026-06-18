@@ -107,11 +107,39 @@ EOF
 // CaffScript is the caffeine script to keep the system awake
 const CaffScript = `#!/usr/bin/env bash
 
-PIDFILE="/tmp/caffeine-$USER.pid"
+# Store the PID in a per-user runtime directory rather than the shared,
+# world-writable /tmp. This avoids the predictable-path / stale-PID hazard
+# where another user (or a reused PID after a reboot) could cause us to kill
+# an arbitrary process.
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}"
+mkdir -p "$RUNTIME_DIR" 2>/dev/null
+chmod 700 "$RUNTIME_DIR" 2>/dev/null
+PIDFILE="$RUNTIME_DIR/caffeine.pid"
+
+# read_pid prints the stored PID only if it is a plausible numeric value.
+read_pid() {
+    local pid
+    pid=$(cat "$PIDFILE" 2>/dev/null)
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    echo "$pid"
+}
+
+# is_caffeine verifies the given PID belongs to a caffeinate/systemd-inhibit
+# process before we act on it, so we never signal an unrelated reused PID.
+is_caffeine() {
+    local pid="$1"
+    local comm
+    comm=$(ps -p "$pid" -o comm= 2>/dev/null) || return 1
+    case "$comm" in
+        *caffeinate*|*systemd-inhibit*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 status() {
-    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-        echo "☕ Caffeine: ON (PID $(cat "$PIDFILE"))"
+    local pid
+    if pid=$(read_pid) && kill -0 "$pid" 2>/dev/null && is_caffeine "$pid"; then
+        echo "☕ Caffeine: ON (PID $pid)"
         return 0
     else
         echo "😴 Caffeine: OFF"
@@ -136,13 +164,13 @@ start() {
             sleep infinity &
     fi
 
-    echo $! > "$PIDFILE"
+    (umask 077; echo $! > "$PIDFILE")
     echo "☕ Caffeine: ON - system will stay awake"
 }
 
 stop() {
-    if [[ -f "$PIDFILE" ]]; then
-        pid=$(cat "$PIDFILE")
+    local pid
+    if pid=$(read_pid) && is_caffeine "$pid"; then
         if kill "$pid" 2>/dev/null; then
             rm -f "$PIDFILE"
             echo "😴 Caffeine: OFF - sleep enabled"
