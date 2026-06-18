@@ -63,6 +63,12 @@ type ScreenContext struct {
 	// Dependencies (injected)
 	Deps *Dependencies
 
+	// app is the owning App instance. During the incremental ScreenHandler
+	// migration, handlers reach shared App state (e.g. deepDiveConfig,
+	// manageConfig, theme) through this. It is unexported so external packages
+	// cannot depend on it; it is wired in WithScreenFactory.
+	app *App
+
 	// Shared state that screens can read/modify
 	Theme             string
 	NavStyle          string
@@ -85,6 +91,16 @@ type BaseScreen struct {
 // Context returns the screen context
 func (s *BaseScreen) Context() *ScreenContext {
 	return s.ctx
+}
+
+// App returns the owning App instance from the context, or nil if the context
+// (or its app) is not set. Handlers use this to read/write shared App state
+// during the incremental migration.
+func (s *BaseScreen) App() *App {
+	if s.ctx == nil {
+		return nil
+	}
+	return s.ctx.app
 }
 
 // SetContext sets the screen context (called by ScreenManager)

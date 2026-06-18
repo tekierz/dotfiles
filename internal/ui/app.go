@@ -125,6 +125,10 @@ type App struct {
 
 	// Screen manager for migrated screens (nil during transition)
 	screenMgr *ScreenManager
+	// screenFactory is the App-owned factory used by screenMgr. It is kept on
+	// the App so transition sites can pass per-screen data (e.g. the error to
+	// display) before navigating through the manager.
+	screenFactory *Factory
 
 	// Animation state
 	animFrame        int
@@ -241,22 +245,55 @@ type App struct {
 // AppOption configures optional App parameters
 type AppOption func(*App)
 
-// WithScreenFactory sets the screen factory for the ScreenManager
-func WithScreenFactory(factory ScreenFactory) AppOption {
+// WithScreenFactory enables the ScreenManager for migrated screens, backed by
+// the App's own Factory. The App owns the Factory so transition sites can set
+// per-screen data (such as the error to display) before navigating.
+func WithScreenFactory() AppOption {
 	return func(a *App) {
-		if factory != nil {
-			deps := NewDependencies()
-			ctx := NewScreenContext(deps)
-			ctx.Theme = a.theme
-			ctx.NavStyle = a.navStyle
-			ctx.AnimationsEnabled = a.animationsEnabled
-			a.screenMgr = NewScreenManager(ctx, factory)
+		if a.screenFactory == nil {
+			a.screenFactory = NewFactory()
 		}
+		deps := NewDependencies()
+		ctx := NewScreenContext(deps)
+		// Connect the context to this App so handlers can reach shared App
+		// state (theme, deepDiveConfig, etc.) through ScreenContext.app.
+		ctx.app = a
+		ctx.Theme = a.theme
+		ctx.NavStyle = a.navStyle
+		ctx.AnimationsEnabled = a.animationsEnabled
+		a.screenMgr = NewScreenManager(ctx, a.screenFactory.CreateFactory())
 	}
+}
+
+// showError transitions to the error screen. When the ScreenManager is active
+// it sets the error on the factory and navigates through the manager (so the
+// migrated ErrorScreen renders with the real error); otherwise it falls back to
+// the legacy screen field. The caller is responsible for setting a.lastError.
+func (a *App) showError(err error) tea.Cmd {
+	if a.screenMgr != nil && a.screenFactory != nil {
+		a.screenFactory.SetError(err)
+		return NavigateTo(ScreenError)
+	}
+	a.screen = ScreenError
+	return nil
+}
+
+// showSummary transitions to the summary screen, preferring the managed
+// ScreenManager path and falling back to the legacy screen field.
+func (a *App) showSummary() tea.Cmd {
+	if a.screenMgr != nil && a.screenFactory != nil {
+		return NavigateTo(ScreenSummary)
+	}
+	a.screen = ScreenSummary
+	return nil
 }
 
 // NewApp creates a new application instance
 func NewApp(skipIntro bool, opts ...AppOption) *App {
+	// Fail fast if the tool->screen mapping has drifted from the tools registry
+	// (e.g. a Screen iota reorder), so misroutes are caught at startup.
+	verifyToolConfigScreens()
+
 	app := &App{
 		skipIntro:            skipIntro,
 		theme:                "catppuccin-mocha",
@@ -777,8 +814,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sudoCachedMsg:
 		if msg.err != nil {
 			a.lastError = msg.err
-			a.screen = ScreenError
-			return a, nil
+			return a, a.showError(msg.err)
 		}
 		// Sudo cached successfully, start installation
 		return a, a.startInstallation()
@@ -836,7 +872,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				a.lastError = msg.err
 			}
-			a.screen = ScreenError
+			return a, a.showError(a.lastError)
 		}
 		return a, nil
 
@@ -1447,10 +1483,14 @@ func buildScreenToolIDs() map[Screen][]string {
 	}
 
 	for _, t := range tools.GetRegistry().All() {
-		// Tools with dedicated screens (UIGroupNone with a configScreen set)
+		// Tools with dedicated screens (UIGroupNone with a configScreen set).
+		// Use the authoritative toolConfigScreens map (keyed by tool ID) rather
+		// than converting the raw int, so the Screen constant is named
+		// symbolically and stays correct if the iota is reordered.
 		if t.UIGroup() == tools.UIGroupNone && t.ConfigScreen() != 0 {
-			screen := Screen(t.ConfigScreen())
-			result[screen] = append(result[screen], t.ID())
+			if screen, ok := toolConfigScreens[t.ID()]; ok {
+				result[screen] = append(result[screen], t.ID())
+			}
 		}
 
 		// Tools in group screens

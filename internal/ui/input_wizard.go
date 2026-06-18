@@ -90,7 +90,7 @@ func (a *App) handleWizardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			// Only advance if installation is complete
 			if !a.installRunning {
-				a.screen = ScreenSummary
+				return a, a.showSummary()
 			}
 		}
 
@@ -101,13 +101,16 @@ func (a *App) handleWizardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case ScreenError:
+		// Note: when the ScreenManager is active, the migrated ErrorScreen
+		// handles these keys; this legacy block only runs as a fallback when
+		// the manager is not wired (e.g. tests constructing App without it).
 		switch key {
 		case "r":
 			// Retry - go back to progress
 			a.screen = ScreenProgress
 		case "s":
 			// Skip - continue to summary
-			a.screen = ScreenSummary
+			return a, a.showSummary()
 		case "q":
 			return a, tea.Quit
 		case "esc":

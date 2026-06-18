@@ -1,8 +1,4 @@
-package screens
-
-import (
-	"github.com/tekierz/dotfiles/internal/ui"
-)
+package ui
 
 // ScreenData holds any data needed to create a screen.
 // This is used to pass context-specific information to screens during creation.
@@ -31,11 +27,11 @@ func (f *Factory) SetError(err error) {
 
 // Create returns a ScreenHandler for the given screen ID.
 // Returns nil if the screen is not migrated yet (falls back to legacy).
-func (f *Factory) Create(id ui.Screen, ctx *ui.ScreenContext) ui.ScreenHandler {
+func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 	switch id {
-	case ui.ScreenError:
+	case ScreenError:
 		return NewErrorScreen(ctx, f.data.Error)
-	case ui.ScreenSummary:
+	case ScreenSummary:
 		return NewSummaryScreen(ctx)
 	default:
 		// Not migrated yet - return nil to use legacy handling
@@ -44,8 +40,8 @@ func (f *Factory) Create(id ui.Screen, ctx *ui.ScreenContext) ui.ScreenHandler {
 }
 
 // CreateFactory returns a ScreenFactory function for use with ScreenManager.
-func (f *Factory) CreateFactory() ui.ScreenFactory {
-	return func(id ui.Screen, ctx *ui.ScreenContext) ui.ScreenHandler {
+func (f *Factory) CreateFactory() ScreenFactory {
+	return func(id Screen, ctx *ScreenContext) ScreenHandler {
 		return f.Create(id, ctx)
 	}
 }

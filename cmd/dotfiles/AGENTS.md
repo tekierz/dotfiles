@@ -61,18 +61,14 @@ func init() {
 
 ## Launching TUI
 
-`NewApp` requires a `skipIntro bool` plus functional options. The screen factory
-(built by `createScreenFactory()`) is wired in via the `WithScreenFactory` option.
+`NewApp` requires a `skipIntro bool` plus functional options. The ScreenManager
+is enabled via the `WithScreenFactory` option, which builds an App-owned
+`ui.Factory` (so transition sites can set per-screen data such as the error to
+display before navigating).
 
 ```go
-// createScreenFactory builds the screen factory for the ScreenManager.
-func createScreenFactory() ui.ScreenFactory {
-    factory := screens.NewFactory()
-    return factory.CreateFactory()
-}
-
 func launchTUI(screen ui.Screen) {
-    app := ui.NewApp(skipIntro, ui.WithScreenFactory(createScreenFactory()))
+    app := ui.NewApp(skipIntro, ui.WithScreenFactory())
     app.SetStartScreen(screen)
 
     p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())

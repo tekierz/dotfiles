@@ -15,7 +15,6 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 	"github.com/tekierz/dotfiles/internal/ui"
-	"github.com/tekierz/dotfiles/internal/ui/screens"
 )
 
 var (
@@ -341,15 +340,9 @@ func main() {
 	}
 }
 
-// createScreenFactory creates the screen factory for the ScreenManager
-func createScreenFactory() ui.ScreenFactory {
-	factory := screens.NewFactory()
-	return factory.CreateFactory()
-}
-
 // launchTUI launches the TUI at a specific screen
 func launchTUI(screen ui.Screen) {
-	app := ui.NewApp(skipIntro, ui.WithScreenFactory(createScreenFactory()))
+	app := ui.NewApp(skipIntro, ui.WithScreenFactory())
 	app.SetStartScreen(screen)
 
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
@@ -361,7 +354,7 @@ func launchTUI(screen ui.Screen) {
 
 // launchToolConfig launches TUI for a specific tool config
 func launchToolConfig(tool string) {
-	app := ui.NewApp(true, ui.WithScreenFactory(createScreenFactory()))
+	app := ui.NewApp(true, ui.WithScreenFactory())
 
 	screen, ok := ui.GetToolConfigScreen(tool)
 	if !ok {
@@ -381,7 +374,7 @@ func launchToolConfig(tool string) {
 
 // launchHotkeysFiltered launches hotkey viewer filtered to a tool
 func launchHotkeysFiltered(tool string) {
-	app := ui.NewApp(true, ui.WithScreenFactory(createScreenFactory()))
+	app := ui.NewApp(true, ui.WithScreenFactory())
 	app.SetStartScreen(ui.ScreenHotkeys)
 	app.SetHotkeyFilter(tool)
 

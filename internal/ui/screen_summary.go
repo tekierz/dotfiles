@@ -1,37 +1,28 @@
-package screens
+package ui
 
 import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tekierz/dotfiles/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Colors used by the summary screen
-var (
-	colorGreen    = lipgloss.Color("#00FF88")
-	colorCyan     = lipgloss.Color("#00F5D4")
-	colorNeonBlue = lipgloss.Color("#00D4FF")
-	colorText     = lipgloss.Color("#E0E0E0")
-)
-
 // SummaryScreen displays the installation completion summary.
 type SummaryScreen struct {
-	ui.BaseScreen
+	BaseScreen
 }
 
 // NewSummaryScreen creates a new summary screen.
-func NewSummaryScreen(ctx *ui.ScreenContext) *SummaryScreen {
+func NewSummaryScreen(ctx *ScreenContext) *SummaryScreen {
 	s := &SummaryScreen{}
 	s.SetContext(ctx)
 	return s
 }
 
 // ID returns the screen identifier.
-func (s *SummaryScreen) ID() ui.Screen {
-	return ui.ScreenSummary
+func (s *SummaryScreen) ID() Screen {
+	return ScreenSummary
 }
 
 // Init returns any initial commands.
@@ -40,7 +31,7 @@ func (s *SummaryScreen) Init() tea.Cmd {
 }
 
 // Update handles input messages.
-func (s *SummaryScreen) Update(msg tea.Msg) (ui.ScreenHandler, tea.Cmd) {
+func (s *SummaryScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -54,16 +45,20 @@ func (s *SummaryScreen) Update(msg tea.Msg) (ui.ScreenHandler, tea.Cmd) {
 }
 
 // View renders the summary screen.
+//
+// Colors come from the active theme palette (ColorGreen/ColorCyan/etc.) rather
+// than hardcoded hex values, so the summary matches the rest of the UI and the
+// user's selected theme.
 func (s *SummaryScreen) View(width, height int) string {
 	title := lipgloss.NewStyle().
-		Foreground(colorGreen).
+		Foreground(ColorGreen).
 		Bold(true).
 		Render("✓ Installation Complete!")
 
 	theme := s.Theme()
 	navStyle := s.NavStyle()
 
-	summary := lipgloss.NewStyle().Foreground(colorText).Render(fmt.Sprintf(`
+	summary := lipgloss.NewStyle().Foreground(ColorText).Render(fmt.Sprintf(`
   Theme:      %s
   Navigation: %s
   Backup:     ~/.config/dotfiles/backups/
@@ -76,23 +71,23 @@ func (s *SummaryScreen) View(width, height int) string {
   4. %s to customize prompt
   5. %s to see hotkey reference
 `,
-		lipgloss.NewStyle().Foreground(colorCyan).Render(theme),
-		lipgloss.NewStyle().Foreground(colorCyan).Render(navStyle),
-		lipgloss.NewStyle().Foreground(colorNeonBlue).Render("source ~/.zshrc"),
-		lipgloss.NewStyle().Foreground(colorNeonBlue).Render("tmux"),
-		lipgloss.NewStyle().Foreground(colorNeonBlue).Render("nvim"),
-		lipgloss.NewStyle().Foreground(colorNeonBlue).Render("p10k configure"),
-		lipgloss.NewStyle().Foreground(colorNeonBlue).Render("hk"),
+		lipgloss.NewStyle().Foreground(ColorCyan).Render(theme),
+		lipgloss.NewStyle().Foreground(ColorCyan).Render(navStyle),
+		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("source ~/.zshrc"),
+		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("tmux"),
+		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("nvim"),
+		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("p10k configure"),
+		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("hk"),
 	))
 	summary = lipgloss.NewStyle().MaxWidth(max(20, width-6)).Render(summary)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#808080"))
+		Foreground(ColorTextMuted)
 	help := helpStyle.Render("[ENTER] Exit")
 
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorCyan).
+		BorderForeground(ColorCyan).
 		Padding(1, 2)
 
 	return lipgloss.Place(

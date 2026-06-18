@@ -1,20 +1,19 @@
-package screens
+package ui
 
 import (
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tekierz/dotfiles/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ErrorScreen displays an error and offers retry/skip/quit options.
 type ErrorScreen struct {
-	ui.BaseScreen
+	BaseScreen
 	err error
 }
 
 // NewErrorScreen creates a new error screen with the given error.
-func NewErrorScreen(ctx *ui.ScreenContext, err error) *ErrorScreen {
+func NewErrorScreen(ctx *ScreenContext, err error) *ErrorScreen {
 	s := &ErrorScreen{
 		err: err,
 	}
@@ -23,8 +22,8 @@ func NewErrorScreen(ctx *ui.ScreenContext, err error) *ErrorScreen {
 }
 
 // ID returns the screen identifier.
-func (s *ErrorScreen) ID() ui.Screen {
-	return ui.ScreenError
+func (s *ErrorScreen) ID() Screen {
+	return ScreenError
 }
 
 // Init returns any initial commands.
@@ -33,20 +32,20 @@ func (s *ErrorScreen) Init() tea.Cmd {
 }
 
 // Update handles input messages.
-func (s *ErrorScreen) Update(msg tea.Msg) (ui.ScreenHandler, tea.Cmd) {
+func (s *ErrorScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "r":
 			// Retry - navigate to progress screen
-			return s, ui.NavigateTo(ui.ScreenProgress)
+			return s, NavigateTo(ScreenProgress)
 		case "s":
 			// Skip - continue to summary
-			return s, ui.NavigateTo(ui.ScreenSummary)
+			return s, NavigateTo(ScreenSummary)
 		case "q":
 			return s, tea.Quit
 		case "esc":
-			return s, ui.NavigateTo(ui.ScreenFileTree)
+			return s, NavigateTo(ScreenFileTree)
 		}
 	}
 	return s, nil
@@ -55,7 +54,7 @@ func (s *ErrorScreen) Update(msg tea.Msg) (ui.ScreenHandler, tea.Cmd) {
 // View renders the error screen.
 func (s *ErrorScreen) View(width, height int) string {
 	title := lipgloss.NewStyle().
-		Foreground(ui.ColorRed).
+		Foreground(ColorRed).
 		Bold(true).
 		Render("✗ Error Occurred")
 
@@ -66,13 +65,13 @@ func (s *ErrorScreen) View(width, height int) string {
 
 	errorBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ui.ColorRed).
+		BorderForeground(ColorRed).
 		Padding(1).
 		MaxWidth(max(20, width-10)).
 		Render(errMsg)
 
 	buttonStyle := lipgloss.NewStyle().
-		Foreground(ui.ColorTextBright).
+		Foreground(ColorTextBright).
 		Padding(0, 1)
 
 	options := lipgloss.JoinHorizontal(
@@ -86,7 +85,7 @@ func (s *ErrorScreen) View(width, height int) string {
 
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ui.ColorCyan).
+		BorderForeground(ColorCyan).
 		Padding(1, 2)
 
 	return lipgloss.Place(
