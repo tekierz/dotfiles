@@ -2,10 +2,50 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+// ErrNoConfigDir is returned when the config directory cannot be determined
+// (e.g. neither XDG_CONFIG_HOME nor HOME is set and os.UserHomeDir fails).
+// It guards against silently building relative paths from an empty base.
+var ErrNoConfigDir = errors.New("cannot determine config directory: HOME and XDG_CONFIG_HOME are unset")
+
+// writeFileAtomic writes data to path atomically by writing to a temporary
+// file in the same directory and renaming it over the destination. This
+// prevents a truncated/half-written file if the process is interrupted
+// mid-write (rename is atomic on the same filesystem).
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// Best-effort cleanup if we fail before the rename.
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
 
 // GlobalConfig holds global dotfiles settings
 type GlobalConfig struct {
@@ -56,6 +96,9 @@ func ToolsDir() string {
 
 // EnsureDirs creates config directories if they don't exist
 func EnsureDirs() error {
+	if ConfigDir() == "" {
+		return ErrNoConfigDir
+	}
 	dirs := []string{
 		ConfigDir(),
 		ToolsDir(),
@@ -72,6 +115,9 @@ func EnsureDirs() error {
 
 // LoadToolConfig loads a tool config from JSON file, returning defaults if not found
 func LoadToolConfig[T any](toolName string, defaultFn func() *T) (*T, error) {
+	if ConfigDir() == "" {
+		return nil, ErrNoConfigDir
+	}
 	path := filepath.Join(ToolsDir(), toolName+".json")
 
 	data, err := os.ReadFile(path)
@@ -104,7 +150,7 @@ func SaveToolConfig[T any](toolName string, cfg *T) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := writeFileAtomic(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 
@@ -113,6 +159,9 @@ func SaveToolConfig[T any](toolName string, cfg *T) error {
 
 // LoadGlobalConfig loads global config from settings file
 func LoadGlobalConfig() (*GlobalConfig, error) {
+	if ConfigDir() == "" {
+		return nil, ErrNoConfigDir
+	}
 	path := filepath.Join(ConfigDir(), "global.json")
 
 	data, err := os.ReadFile(path)
@@ -144,7 +193,7 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 		return fmt.Errorf("failed to marshal global config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := writeFileAtomic(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write global config: %w", err)
 	}
 
