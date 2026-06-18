@@ -23,6 +23,16 @@ const (
 	usersPaneSettings = 1
 )
 
+// Layout offsets shared between renderUsersDualPane and handleUsersMouse so
+// mouse hit detection stays in sync with what is actually drawn.
+//   - usersTabBarRows: rows consumed by the tab bar (RenderTabBar emits 1 line).
+//   - usersHeaderRows: rows each pane draws (a header line + a divider line)
+//     before the first selectable list/field row.
+const (
+	usersTabBarRows = 1
+	usersHeaderRows = 2
+)
+
 // userItem represents a user in the left pane
 type userItem struct {
 	name     string
@@ -137,6 +147,17 @@ func deleteUserCmd(name string) tea.Cmd {
 		if err := config.DeleteUserProfile(name); err != nil {
 			return userDeletedMsg{name: name, err: err}
 		}
+
+		// If the deleted profile was the active user, clear ActiveUser so the
+		// hotkeys/favorites system (keyed by global config's ActiveUser) is not
+		// left pointing at a now-nonexistent profile, orphaning its data.
+		if cfg, err := config.LoadGlobalConfig(); err == nil && cfg != nil && cfg.ActiveUser == name {
+			// Best effort: a failure here leaves the profile deleted but the
+			// active marker stale; surface nothing further since the deletion
+			// itself succeeded.
+			_ = config.ClearActiveUser()
+		}
+
 		return userDeletedMsg{name: name}
 	}
 }
@@ -411,10 +432,17 @@ func (a *App) cycleUserFieldOption(f userField, delta int) {
 
 // handleUsersMouse handles mouse input on the Users screen
 func (a *App) handleUsersMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	// Handle tab bar clicks
-	if msg.Y <= 2 {
+	// Tab bar is a single line at Y=0 (see RenderTabBar in styles.go).
+	if msg.Y == 0 {
 		return a.handleTabBarMouse(msg)
 	}
+
+	// Row of the first selectable item within either pane. The layout is:
+	// tab bar (Y=0), then each pane renders a header line, a divider line,
+	// and only then the first list/field row. This matches renderUsersListPane
+	// and renderUsersSettingsPane, which both write header + divider before
+	// the first row.
+	const firstRowY = usersTabBarRows + usersHeaderRows
 
 	// Handle list clicks
 	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
@@ -422,15 +450,15 @@ func (a *App) handleUsersMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		leftPaneWidth := a.width / 3
 		if msg.X < leftPaneWidth {
 			a.usersPane = usersPaneList
-			// Calculate which user was clicked (accounting for header)
-			userIdx := msg.Y - 5 // Adjust for tab bar + header
+			// Calculate which user was clicked (accounting for header).
+			userIdx := msg.Y - firstRowY
 			if userIdx >= 0 && userIdx < len(a.usersItems) {
 				a.usersIndex = userIdx
 			}
 		} else {
 			a.usersPane = usersPaneSettings
-			// Calculate which field was clicked
-			fieldIdx := msg.Y - 5
+			// Calculate which field was clicked.
+			fieldIdx := msg.Y - firstRowY
 			fields := a.getUserFields()
 			if fieldIdx >= 0 && fieldIdx < len(fields) {
 				a.usersFieldIndex = fieldIdx

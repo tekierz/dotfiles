@@ -130,12 +130,17 @@ func (a *App) handleThemePickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		containerW := 60              // approximate
 		startY := (a.height - containerH) / 2
 		startX := (a.width - containerW) / 2
+		// Clamp to >= 0 so a negative startX (terminal narrower than the
+		// container) doesn't make the entire row width a hit target.
+		if startX < 0 {
+			startX = 0
+		}
 
 		// Theme list starts after: container border (1) + padding (1) + title (1) + empty (1)
 		listStartY := startY + 4
 
-		// Check if click is in theme list area
-		if m.Y >= listStartY && m.Y < listStartY+len(themes) && m.X >= startX {
+		// Check if click is in theme list area (bounded horizontally to the container)
+		if m.Y >= listStartY && m.Y < listStartY+len(themes) && m.X >= startX && m.X < startX+containerW {
 			themeIdx := m.Y - listStartY
 			if themeIdx >= 0 && themeIdx < len(themes) {
 				a.themeIndex = themeIdx
@@ -194,7 +199,7 @@ func (a *App) handleDeepDiveMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	if m.Button == tea.MouseButtonWheelDown {
-		items := GetDeepDiveMenuItems()
+		items := GetFilteredDeepDiveMenuItems()
 		if a.deepDiveMenuIndex < len(items)-1 {
 			a.deepDiveMenuIndex++
 		}
@@ -205,8 +210,11 @@ func (a *App) handleDeepDiveMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Menu items are in a centered container
-	items := GetDeepDiveMenuItems()
+	// Menu items are in a centered container. Use the same filtered/visible
+	// list that the renderer (renderDeepDiveMenu) and keyboard nav
+	// (handleDeepDiveKey) use, so the clicked row maps to the correct item
+	// on platforms where some items are filtered out (e.g. macOS Apps).
+	items := GetFilteredDeepDiveMenuItems()
 	contentHeight := len(items) + 10 // items + headers + padding
 	startY := (a.height - contentHeight) / 2
 	listStartY := startY + 4 // After title and instructions
