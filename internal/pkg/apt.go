@@ -77,11 +77,13 @@ func (a *AptManager) GetVersion(pkg string) (string, error) {
 }
 
 func (a *AptManager) CheckOutdated() ([]Package, error) {
-	// First update package lists
-	updateCmd := exec.Command("sudo", "apt", "update")
-	updateCmd.Run() // Ignore errors, best effort
-
-	// Get list of upgradable packages
+	// CheckOutdated is a read-only query and may run from non-interactive code
+	// paths (e.g. the async update-check command, where Bubble Tea owns the TTY).
+	// Do NOT run `sudo apt update` here: with cached credentials it forces a
+	// surprising network refresh of every repo index, and without them sudo
+	// blocks on the controlling terminal. The repo index is refreshed inside
+	// Update/UpdateAll/UpdateAllStreaming, which is where the network side effect
+	// belongs. We report against the already-synced local cache.
 	cmd := exec.Command("apt", "list", "--upgradable")
 	var out bytes.Buffer
 	cmd.Stdout = &out

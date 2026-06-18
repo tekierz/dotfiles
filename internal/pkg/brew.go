@@ -111,6 +111,7 @@ func (b *BrewManager) CheckOutdated() ([]Package, error) {
 			Name              string   `json:"name"`
 			InstalledVersions []string `json:"installed_versions"`
 			CurrentVersion    string   `json:"current_version"`
+			Pinned            bool     `json:"pinned"`
 		} `json:"formulae"`
 		Casks []struct {
 			Name             string `json:"name"`
@@ -126,6 +127,13 @@ func (b *BrewManager) CheckOutdated() ([]Package, error) {
 	var packages []Package
 
 	for _, f := range outdated.Formulae {
+		// Skip pinned formulae: `brew upgrade <name>` refuses to move a pinned
+		// formula and exits non-zero when one is named explicitly. Reporting it
+		// as outdated would route it into Update() and fail the entire upgrade
+		// batch it shares, so it must not appear in the actionable update list.
+		if f.Pinned {
+			continue
+		}
 		currentVer := ""
 		if len(f.InstalledVersions) > 0 {
 			currentVer = f.InstalledVersions[0]

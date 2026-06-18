@@ -30,12 +30,17 @@ func CheckAllUpdates() ([]Package, error) {
 		allPackages = append(allPackages, packages...)
 	}
 
-	// Deduplicate packages by name only (same package from different sources is still same package)
+	// Deduplicate exact duplicates only, keyed on Name+InstalledBy. This removes
+	// the paru/pacman double-listing artifact without erasing a package's source
+	// manager: two records with the same name but different InstalledBy (e.g. a
+	// "pacman" vs an "aur" entry) are legitimately distinct and must both survive
+	// so UpdatePackages() routes each via the manager that can actually upgrade it.
 	seen := make(map[string]bool)
 	var deduped []Package
 	for _, p := range allPackages {
-		if !seen[p.Name] {
-			seen[p.Name] = true
+		key := p.Name + "\x00" + p.InstalledBy
+		if !seen[key] {
+			seen[key] = true
 			deduped = append(deduped, p)
 		}
 	}
@@ -115,7 +120,17 @@ func getManagerByName(name string) PackageManager {
 	case "pacman":
 		return NewPacmanManager(false)
 	case "paru", "aur":
-		return NewPacmanManager(true)
+		// AUR-sourced packages can only be upgraded by an AUR helper. If paru is
+		// not actually available, NewPacmanManager(true) silently falls back to
+		// plain pacman (useParu==false), whose `sudo pacman -S <aurpkg>` cannot
+		// build AUR targets. Return nil in that case so UpdatePackages reports a
+		// clear "package manager aur not available" error instead of dispatching
+		// a command that is guaranteed to fail on AUR packages.
+		mgr := NewPacmanManager(true)
+		if !mgr.useParu {
+			return nil
+		}
+		return mgr
 	case "apt":
 		return NewAptManager()
 	}

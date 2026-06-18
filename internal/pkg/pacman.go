@@ -102,15 +102,75 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 	// Use checkupdates for official repos (safer, doesn't require root)
 	var packages []Package
 
-	// Check official repo updates
-	cmd := exec.Command("checkupdates")
+	// Check official repo updates.
+	officialOut, err := p.checkOfficialUpdates()
+	if err != nil {
+		return nil, err
+	}
+	packages = append(packages, parsePacmanUpdates(officialOut, "pacman")...)
+
+	// Check AUR updates if using paru
+	if p.useParu {
+		aurCmd := exec.Command(p.pacmanPath, "-Qua")
+		var aurOut bytes.Buffer
+		aurCmd.Stdout = &aurOut
+		// `pacman -Qua` exits non-zero when there are no foreign updates, so
+		// the error is intentionally ignored and we parse whatever it emits.
+		aurCmd.Run()
+
+		packages = append(packages, parsePacmanUpdates(aurOut.String(), "aur")...)
+	}
+
+	return packages, nil
+}
+
+// checkOfficialUpdates returns the raw "name oldver -> newver" lines describing
+// pending official-repo updates. It prefers the `checkupdates` helper (from the
+// optional pacman-contrib package, which queries a private sync DB without
+// root), and falls back to `pacman -Qu` when checkupdates is not installed so a
+// missing optional dependency does not silently report "up to date".
+func (p *PacmanManager) checkOfficialUpdates() (string, error) {
+	if _, err := exec.LookPath("checkupdates"); err == nil {
+		cmd := exec.Command("checkupdates")
+		var out bytes.Buffer
+		cmd.Stdout = &out
+
+		// checkupdates exits 2 when there are no updates (not an error for us)
+		// and 0 when updates are available. Any other exit code is a genuine
+		// failure (e.g. a stale temp DB) that should be surfaced.
+		err := cmd.Run()
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+				return "", nil
+			}
+			return "", fmt.Errorf("checkupdates failed: %w", err)
+		}
+		return out.String(), nil
+	}
+
+	// Fallback: `pacman -Qu` reads the local sync DB and works without the
+	// pacman-contrib package. It exits non-zero when there are no updates, so
+	// distinguish that (empty output) from a real failure.
+	cmd := exec.Command(p.pacmanPath, "-Qu")
 	var out bytes.Buffer
 	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		// `pacman -Qu` returns exit code 1 with empty output when nothing is
+		// outdated; treat empty output as "no updates" rather than an error.
+		if strings.TrimSpace(out.String()) == "" {
+			return "", nil
+		}
+		return "", fmt.Errorf("pacman -Qu failed: %w", err)
+	}
+	return out.String(), nil
+}
 
-	// checkupdates returns exit code 2 if no updates, 0 if updates available
-	cmd.Run() // Ignore error, check output
-
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+// parsePacmanUpdates parses "name oldver -> newver" lines (as produced by
+// checkupdates, `pacman -Qu`, and `pacman -Qua`) into Package records tagged
+// with the given source manager ("pacman" or "aur").
+func parsePacmanUpdates(output, installedBy string) []Package {
+	var packages []Package
+	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -125,41 +185,12 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 					CurrentVersion: nameParts[1],
 					LatestVersion:  strings.TrimSpace(parts[1]),
 					Outdated:       true,
-					InstalledBy:    "pacman",
+					InstalledBy:    installedBy,
 				})
 			}
 		}
 	}
-
-	// Check AUR updates if using paru
-	if p.useParu {
-		aurCmd := exec.Command(p.pacmanPath, "-Qua")
-		var aurOut bytes.Buffer
-		aurCmd.Stdout = &aurOut
-		aurCmd.Run() // Ignore error
-
-		aurLines := strings.Split(strings.TrimSpace(aurOut.String()), "\n")
-		for _, line := range aurLines {
-			if line == "" {
-				continue
-			}
-			parts := strings.Split(line, " -> ")
-			if len(parts) == 2 {
-				nameParts := strings.Fields(parts[0])
-				if len(nameParts) >= 2 {
-					packages = append(packages, Package{
-						Name:           nameParts[0],
-						CurrentVersion: nameParts[1],
-						LatestVersion:  strings.TrimSpace(parts[1]),
-						Outdated:       true,
-						InstalledBy:    "aur",
-					})
-				}
-			}
-		}
-	}
-
-	return packages, nil
+	return packages
 }
 
 func (p *PacmanManager) Update(packages ...string) error {
