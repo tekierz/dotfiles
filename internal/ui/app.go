@@ -919,13 +919,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case updateCheckDoneMsg:
-		a.updateChecking = false
-		a.updateCheckDone = true
-		a.updateResults = msg.updates
-		a.updateError = msg.err
-		return a, nil
-
 	case userLoadedMsg:
 		if msg.err != nil {
 			a.usersStatus = fmt.Sprintf("Load failed: %v", msg.err)
@@ -974,37 +967,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.installCacheLoading = false
 		return a, nil
 
-	case updateRunDoneMsg:
-		a.updateRunning = false
-		a.installLogAutoScroll = false // Allow user to scroll through logs
-		if msg.err != nil {
-			a.updateStatus = fmt.Sprintf("Update failed: %v", msg.err)
-		} else {
-			// Count successes and failures
-			successes := 0
-			failures := 0
-			for _, r := range msg.results {
-				if r.Success {
-					successes++
-				} else {
-					failures++
-				}
-			}
-			if failures > 0 {
-				a.updateStatus = fmt.Sprintf("Updated %d, failed %d", successes, failures)
-			} else if successes > 0 {
-				a.updateStatus = fmt.Sprintf("Updated %d package(s) ✓", successes)
-			} else {
-				a.updateStatus = "Update complete ✓"
-			}
-			// Clear selections and refresh the package list
-			a.updateSelected = make(map[int]bool)
-			a.updateCheckDone = false
-			a.updateChecking = true
-			return a, checkUpdatesCmd()
-		}
-		return a, nil
-
 	case installLogMsg:
 		a.appendInstallLog(msg.line)
 		return a, nil
@@ -1019,31 +981,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return manageStartInstallMsg{toolID: msg.toolID}
 		})
 
-	case updateSudoRequiredMsg:
-		// Need to prompt for sudo before update
-		return a, tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
-			if err != nil {
-				return updateRunDoneMsg{err: err}
-			}
-			// Sudo cached, now start the streaming update
-			return updateStartMsg{packages: msg.packages, all: msg.all}
-		})
-
 	case manageStartInstallMsg:
 		// Start the streaming install (sudo already cached)
 		a.clearInstallLogs()
 		a.manageInstalling = true
 		a.manageInstallID = msg.toolID
 		return a, a.streamingInstallToolCmd(msg.toolID)
-
-	case updateStartMsg:
-		// Start the streaming update (sudo already cached)
-		a.clearInstallLogs()
-		a.updateRunning = true
-		if msg.all {
-			return a, a.streamingUpdateAllCmd()
-		}
-		return a, a.streamingUpdateCmd(msg.packages)
 
 	case manageInstallWithLogsMsg:
 		// Install completed with logs
@@ -1068,94 +1011,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case updateWithLogsMsg:
-		// Update completed with logs
-		a.updateRunning = false
-		a.installLogAutoScroll = false
-		// Append all logs
-		for _, line := range msg.logs {
-			a.appendInstallLog(line)
-		}
-		// Process results
-		if msg.err != nil {
-			a.updateStatus = fmt.Sprintf("Update failed: %v", msg.err)
-		} else {
-			successes := 0
-			failures := 0
-			for _, r := range msg.results {
-				if r.Success {
-					successes++
-				} else {
-					failures++
-				}
-			}
-			if failures > 0 {
-				a.updateStatus = fmt.Sprintf("Updated %d, failed %d", successes, failures)
-			} else if successes > 0 {
-				a.updateStatus = fmt.Sprintf("Updated %d package(s) ✓", successes)
-			} else {
-				a.updateStatus = "Update complete ✓"
-			}
-			// Clear selections and refresh the package list
-			a.updateSelected = make(map[int]bool)
-			a.updateCheckDone = false
-			a.updateChecking = true
-			return a, checkUpdatesCmd()
-		}
-		return a, nil
-
-	case backupsLoadedMsg:
-		a.backupsLoading = false
-		a.backupsLoaded = true
-		if msg.err != nil {
-			a.backupError = msg.err
-			a.backups = []BackupEntry{}
-		} else {
-			a.backups = msg.backups
-			a.backupError = nil
-		}
-		return a, nil
-
-	case backupRestoreDoneMsg:
-		a.backupRunning = false
-		a.backupConfirmMode = false
-		if msg.err != nil {
-			a.backupStatus = fmt.Sprintf("Restore failed: %v", msg.err)
-		} else {
-			a.backupStatus = fmt.Sprintf("Restored %d files from %s", msg.count, msg.name)
-		}
-		return a, nil
-
-	case backupDeleteDoneMsg:
-		a.backupRunning = false
-		a.backupConfirmMode = false
-		if msg.err != nil {
-			a.backupStatus = fmt.Sprintf("Delete failed: %v", msg.err)
-		} else {
-			a.backupStatus = fmt.Sprintf("Deleted backup: %s", msg.name)
-			// Adjust index if needed
-			if a.backupIndex > 0 && a.backupIndex >= len(a.backups)-1 {
-				a.backupIndex--
-			}
-			// Refresh backup list
-			a.backupsLoaded = false
-			a.backupsLoading = true
-			return a, loadBackupsCmd()
-		}
-		return a, nil
-
-	case backupCreateDoneMsg:
-		a.backupRunning = false
-		if msg.err != nil {
-			a.backupStatus = fmt.Sprintf("Backup failed: %v", msg.err)
-		} else {
-			a.backupStatus = fmt.Sprintf("Created backup: %s", msg.name)
-			// Refresh backup list
-			a.backupsLoaded = false
-			a.backupsLoading = true
-			return a, loadBackupsCmd()
-		}
-		return a, nil
 	}
 
 	return a, nil
@@ -1163,21 +1018,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Note: ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
-	// ScreenFileTree, ScreenDeepDiveMenu and ALL ScreenConfig* screens are
+	// ScreenFileTree, ScreenDeepDiveMenu, ALL ScreenConfig* screens, and the
+	// migrated management screens (ScreenHotkeys, ScreenUpdate, ScreenBackups) are
 	// migrated to ScreenHandlers; the ScreenManager delegates their mouse events
 	// to the handler's Update before reaching this legacy dispatch, so they
 	// intentionally no longer appear here.
 	switch a.screen {
 	case ScreenManage:
 		return a.handleManageMouse(msg)
-	case ScreenHotkeys:
-		return a.handleHotkeysMouse(msg)
 	case ScreenUsers:
 		return a.handleUsersMouse(msg)
-	case ScreenBackups:
-		return a.handleBackupsMouse(msg)
-	case ScreenUpdate:
-		return a.handleTabBarMouse(msg)
 	default:
 		return a, nil
 	}
@@ -1204,15 +1054,17 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleWizardKey(msg)
 
 	// Management screens
-	case ScreenMainMenu, ScreenManage, ScreenUpdate, ScreenHotkeys, ScreenBackups, ScreenUsers,
+	case ScreenManage, ScreenUsers,
 		ScreenManageGhostty, ScreenManageTmux, ScreenManageZsh, ScreenManageNeovim,
 		ScreenManageGit, ScreenManageYazi, ScreenManageFzf, ScreenManageLazyGit,
 		ScreenManageLazyDocker, ScreenManageBtop, ScreenManageGlow, ScreenManageClaudeCode:
 		return a.handleManagementKey(msg)
 
-		// Note: ScreenDeepDiveMenu and ALL ScreenConfig* screens are migrated to
-		// ScreenHandlers and handled by the ScreenManager before reaching this
-		// dispatch, so they intentionally no longer appear here.
+		// Note: ScreenMainMenu, ScreenDeepDiveMenu, ALL ScreenConfig* screens, and
+		// the migrated management screens (ScreenHotkeys, ScreenUpdate,
+		// ScreenBackups) are migrated to ScreenHandlers and handled by the
+		// ScreenManager before reaching this dispatch, so they intentionally no
+		// longer appear here.
 	}
 
 	return a, nil
@@ -1228,10 +1080,11 @@ func (a *App) View() string {
 	}
 
 	// Note: ScreenWelcome, ScreenThemePicker, ScreenNavPicker, ScreenFileTree,
-	// ScreenMainMenu, ScreenSummary/ScreenError, ScreenDeepDiveMenu and the
-	// migrated config screens (ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,
-	// Fzf,Utilities,MacApps}) are migrated to ScreenHandlers and rendered by the
-	// ScreenManager above; they no longer appear in this legacy switch.
+	// ScreenMainMenu, ScreenSummary/ScreenError, ScreenDeepDiveMenu, the migrated
+	// config screens (ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,Fzf,Utilities,
+	// MacApps,...}), and the migrated management screens (ScreenHotkeys,
+	// ScreenUpdate, ScreenBackups) are migrated to ScreenHandlers and rendered by
+	// the ScreenManager above; they no longer appear in this legacy switch.
 	switch a.screen {
 	case ScreenAnimation:
 		return a.renderAnimation()
@@ -1268,14 +1121,8 @@ func (a *App) View() string {
 		return a.renderManageGlow()
 	case ScreenManageClaudeCode:
 		return a.renderManageClaudeCode()
-	case ScreenUpdate:
-		return a.renderUpdate()
-	case ScreenHotkeys:
-		return a.renderHotkeysDualPane()
 	case ScreenUsers:
 		return a.renderUsersDualPane()
-	case ScreenBackups:
-		return a.renderBackups()
 	default:
 		return "Unknown screen"
 	}

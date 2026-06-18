@@ -7,7 +7,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// handleTabBarMouse handles mouse clicks on the tab bar for screens that use it
+// handleTabBarMouse handles tab-bar clicks for the still-legacy screens that use
+// the management tab bar (currently the Users screen). For migrated tab
+// destinations (Hotkeys, Update, Backups) it routes through the ScreenManager
+// via NavigateTo so the manager enters managed mode; for legacy destinations it
+// switches a.screen directly. Either way it kicks the destination's on-enter
+// load.
 func (a *App) handleTabBarMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m := tea.MouseEvent(msg)
 
@@ -22,16 +27,26 @@ func (a *App) handleTabBarMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Check if click is on a tab
-	if screen, cmd := a.detectTabClick(m.X); screen != 0 {
+	if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != a.screen {
+		load := startTabTargetLoad(a, screen)
+		if isManagedScreen(screen) {
+			return a, tea.Batch(NavigateTo(screen), load)
+		}
 		a.screen = screen
-		return a, cmd
+		return a, load
 	}
 
 	return a, nil
 }
 
-// detectTabClick determines which tab was clicked based on X position
-// Returns the target screen and any command to run, or (0, nil) if no tab clicked
+// detectTabClick determines which management tab was clicked based on the X
+// position, returning the target screen (or 0 if no tab was clicked).
+//
+// It is pure: it does not mutate App state and does not start any async work.
+// Callers decide how to navigate (legacy a.screen vs. managed NavigateTo) and
+// kick any on-enter load via startTabTargetLoad. The "already on this screen"
+// suppression is the caller's responsibility, since a migrated handler knows its
+// own active screen while a.screen may be stale in managed mode.
 func (a *App) detectTabClick(x int) (Screen, tea.Cmd) {
 	tabs := GetManagementTabs()
 	if len(tabs) == 0 {
@@ -54,17 +69,6 @@ func (a *App) detectTabClick(x int) (Screen, tea.Cmd) {
 		endX := currentX + tabWidths[i]
 
 		if x >= currentX && x < endX {
-			// Don't switch if already on this screen
-			if tab.Screen == a.screen {
-				return 0, nil
-			}
-
-			// Start async update check when switching to Update screen
-			if tab.Screen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
-				a.updateChecking = true
-				return tab.Screen, checkUpdatesCmd()
-			}
-
 			return tab.Screen, nil
 		}
 

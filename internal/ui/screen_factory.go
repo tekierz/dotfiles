@@ -45,6 +45,12 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewMainMenuScreen(ctx)
 	case ScreenDeepDiveMenu:
 		return NewDeepDiveMenuScreen(ctx)
+	case ScreenHotkeys:
+		return NewHotkeysScreen(ctx)
+	case ScreenBackups:
+		return NewBackupsScreen(ctx)
+	case ScreenUpdate:
+		return NewUpdateScreen(ctx)
 	case ScreenConfigGhostty:
 		return NewConfigGhosttyScreen(ctx)
 	case ScreenConfigTmux:

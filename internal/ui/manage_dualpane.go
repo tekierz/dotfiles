@@ -360,8 +360,8 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.hotkeyItemScroll = 0
 		a.hotkeysPane = 0
 		a.hotkeysReturn = ScreenManage
-		a.screen = ScreenHotkeys
-		return a, nil
+		// ScreenHotkeys is migrated; route through the ScreenManager.
+		return a, NavigateTo(ScreenHotkeys)
 
 	case "c", "C":
 		// Clear install logs (only when not installing)
@@ -505,11 +505,17 @@ func (a *App) handleManageMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Handle tab bar clicks (Y=0 is the tab bar line)
+	// Handle tab bar clicks (Y=0 is the tab bar line). Migrated tab destinations
+	// (Hotkeys, Update, Backups) route through the ScreenManager via NavigateTo;
+	// legacy destinations switch a.screen directly.
 	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, cmd := a.detectTabClick(m.X); screen != 0 {
+		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != a.screen {
+			load := startTabTargetLoad(a, screen)
+			if isManagedScreen(screen) {
+				return a, tea.Batch(NavigateTo(screen), load)
+			}
 			a.screen = screen
-			return a, cmd
+			return a, load
 		}
 	}
 

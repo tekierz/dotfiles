@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -1048,5 +1049,359 @@ func TestMigratedScreensReachableViaManager(t *testing.T) {
 	sview := app.screenMgr.View()
 	if !strings.Contains(sview, "Installation Complete") {
 		t.Errorf("managed SummaryScreen should render summary\n---\n%s\n---", sview)
+	}
+}
+
+// ============================================================================
+// Migrated management screens: Hotkeys, Backups, Update
+// ============================================================================
+
+// TestHotkeysScreenGolden is a regression guard for the migrated hotkeysScreen.
+// It renders the dual-pane viewer (categories + items + footer help) and matches
+// the screen ID.
+func TestHotkeysScreenGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+
+	screen := NewHotkeysScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("hotkeysScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"CATEGORIES",
+		"ITEMS",
+		"favorite", // footer help: "f favorite"
+		"Esc back",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("hotkeysScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenHotkeys {
+		t.Errorf("hotkeysScreen.ID() = %v, want ScreenHotkeys", screen.ID())
+	}
+
+	// Hotkeys has no async work on entry.
+	if cmd := screen.Init(); cmd != nil {
+		t.Errorf("hotkeysScreen.Init() should be nil (favorites load in NewApp)")
+	}
+}
+
+// TestHotkeysScreenEscNavigatesBack verifies esc routes back through the
+// ScreenManager to the recorded return screen (the main menu by default).
+func TestHotkeysScreenEscNavigatesBack(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.hotkeysReturn = ScreenMainMenu
+
+	screen := NewHotkeysScreen(ctx)
+	_, cmd := screen.Update(keyMsg("esc"))
+	if cmd == nil {
+		t.Fatal("esc should return a navigation command")
+	}
+	nav, ok := cmd().(NavigateMsg)
+	if !ok {
+		t.Fatalf("expected NavigateMsg from esc, got %T", cmd())
+	}
+	if nav.To != ScreenMainMenu {
+		t.Errorf("esc should NavigateTo(ScreenMainMenu), got %v", nav.To)
+	}
+}
+
+// TestBackupsScreenEmptyGolden is a regression guard for the migrated
+// backupsScreen with an empty (loaded) backup list.
+func TestBackupsScreenEmptyGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	// Loaded with zero backups (deterministic; no disk access).
+	ctx.app.backupsLoading = false
+	ctx.app.backupsLoaded = true
+	ctx.app.backups = []BackupEntry{}
+
+	screen := NewBackupsScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("backupsScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"Backups",
+		"0 backup(s) available",
+		"No backups found.",
+		"new backup",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("backupsScreen.View() (empty) missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenBackups {
+		t.Errorf("backupsScreen.ID() = %v, want ScreenBackups", screen.ID())
+	}
+}
+
+// TestBackupsScreenPopulatedGolden verifies the populated list renders the
+// backup rows, the count, and the details panel.
+func TestBackupsScreenPopulatedGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.backupsLoading = false
+	ctx.app.backupsLoaded = true
+	ctx.app.backupIndex = 0
+	ctx.app.backups = []BackupEntry{
+		{Name: "2026-06-18_alpha", Timestamp: time.Date(2026, 6, 18, 10, 30, 0, 0, time.UTC), FileCount: 5, Size: 2048, Path: "/tmp/backups/alpha"},
+		{Name: "2026-06-17_bravo", Timestamp: time.Date(2026, 6, 17, 9, 15, 0, 0, time.UTC), FileCount: 3, Size: 1024, Path: "/tmp/backups/bravo"},
+	}
+
+	screen := NewBackupsScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	wantSubstrings := []string{
+		"2 backup(s) available",
+		"2026-06-18_alpha",
+		"2026-06-17_bravo",
+		"DETAILS",
+		"Files:",
+		"enter restore",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("backupsScreen.View() (populated) missing %q\n---\n%s\n---", want, out)
+		}
+	}
+}
+
+// TestBackupsScreenAsyncInHandler proves the async-in-handler wiring: feeding a
+// backupsLoadedMsg to the handler's Update updates App state and the rendered
+// list, with no App.Update involvement.
+func TestBackupsScreenAsyncInHandler(t *testing.T) {
+	ctx := newGoldenContext(t)
+	// Start in the loading state (as Init() would leave it).
+	ctx.app.backupsLoading = true
+	ctx.app.backupsLoaded = false
+	ctx.app.backups = nil
+
+	screen := NewBackupsScreen(ctx)
+
+	// Before the async result lands, the view shows the loading spinner.
+	if before := screen.View(ctx.Width, ctx.Height); !strings.Contains(before, "Loading backups") {
+		t.Errorf("backupsScreen.View() should show loading state before backupsLoadedMsg\n---\n%s\n---", before)
+	}
+
+	// Deliver the async result directly to the handler.
+	loaded := backupsLoadedMsg{backups: []BackupEntry{
+		{Name: "async-backup", Timestamp: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), FileCount: 1, Size: 512, Path: "/tmp/backups/async"},
+	}}
+	next, _ := screen.Update(loaded)
+	if next != screen {
+		t.Fatalf("backupsScreen should remain current after backupsLoadedMsg")
+	}
+
+	if ctx.app.backupsLoading {
+		t.Error("backupsLoadedMsg should clear backupsLoading")
+	}
+	if !ctx.app.backupsLoaded {
+		t.Error("backupsLoadedMsg should set backupsLoaded")
+	}
+	if len(ctx.app.backups) != 1 || ctx.app.backups[0].Name != "async-backup" {
+		t.Fatalf("backupsLoadedMsg should populate backups, got %+v", ctx.app.backups)
+	}
+
+	// The rendered list now reflects the async result.
+	out := screen.View(ctx.Width, ctx.Height)
+	if !strings.Contains(out, "async-backup") {
+		t.Errorf("backupsScreen.View() should render the async-loaded backup\n---\n%s\n---", out)
+	}
+	if !strings.Contains(out, "1 backup(s) available") {
+		t.Errorf("backupsScreen.View() should show the updated count\n---\n%s\n---", out)
+	}
+}
+
+// TestBackupsScreenInitLoads verifies Init() kicks the backup load when not yet
+// loaded, and is idempotent when already loading/loaded.
+func TestBackupsScreenInitLoads(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.backupsLoading = false
+	ctx.app.backupsLoaded = false
+
+	screen := NewBackupsScreen(ctx)
+	if cmd := screen.Init(); cmd == nil {
+		t.Fatal("backupsScreen.Init() should return loadBackupsCmd when not loaded")
+	}
+	if !ctx.app.backupsLoading {
+		t.Error("backupsScreen.Init() should set backupsLoading")
+	}
+
+	// Idempotent: already loading -> no new command.
+	if cmd := screen.Init(); cmd != nil {
+		t.Error("backupsScreen.Init() should be a no-op while already loading")
+	}
+}
+
+// TestUpdateScreenCheckingGolden is a regression guard for the migrated
+// updateScreen in its (host-independent) checking state.
+func TestUpdateScreenCheckingGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.updateChecking = true
+	ctx.app.updateCheckDone = false
+
+	screen := NewUpdateScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("updateScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"Package Updates",
+		"Checking for updates",
+		"switch tabs",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("updateScreen.View() (checking) missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenUpdate {
+		t.Errorf("updateScreen.ID() = %v, want ScreenUpdate", screen.ID())
+	}
+}
+
+// TestUpdateScreenNoUpdatesGolden verifies the no-updates / no-results state.
+// The body depends on whether the host has a package manager, so accept either
+// the "up to date" message (manager present) or the "no package manager" message
+// (manager absent) — both are valid deterministic renders of an empty result set.
+func TestUpdateScreenNoUpdatesGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.updateChecking = false
+	ctx.app.updateCheckDone = true
+	ctx.app.updateError = nil
+	ctx.app.updateResults = nil
+
+	screen := NewUpdateScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if !strings.Contains(out, "Package Updates") {
+		t.Errorf("updateScreen.View() should render the title\n---\n%s\n---", out)
+	}
+	if !strings.Contains(out, "All packages are up to date!") &&
+		!strings.Contains(out, "No package manager detected") {
+		t.Errorf("updateScreen.View() (no updates) should show the up-to-date or no-manager body\n---\n%s\n---", out)
+	}
+}
+
+// TestUpdateScreenCheckDoneAsyncInHandler proves the async-in-handler wiring for
+// the update check: feeding an updateCheckDoneMsg updates App state directly.
+func TestUpdateScreenCheckDoneAsyncInHandler(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.updateChecking = true
+	ctx.app.updateCheckDone = false
+
+	screen := NewUpdateScreen(ctx)
+	next, _ := screen.Update(updateCheckDoneMsg{updates: nil, err: nil})
+	if next != screen {
+		t.Fatalf("updateScreen should remain current after updateCheckDoneMsg")
+	}
+	if ctx.app.updateChecking {
+		t.Error("updateCheckDoneMsg should clear updateChecking")
+	}
+	if !ctx.app.updateCheckDone {
+		t.Error("updateCheckDoneMsg should set updateCheckDone")
+	}
+}
+
+// TestUpdateScreenInitChecks verifies Init() kicks the update check when not yet
+// done, and is idempotent when already checking/done.
+func TestUpdateScreenInitChecks(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.updateChecking = false
+	ctx.app.updateCheckDone = false
+
+	screen := NewUpdateScreen(ctx)
+	if cmd := screen.Init(); cmd == nil {
+		t.Fatal("updateScreen.Init() should return checkUpdatesCmd when not done")
+	}
+	if !ctx.app.updateChecking {
+		t.Error("updateScreen.Init() should set updateChecking")
+	}
+
+	// Idempotent: already checking -> no new command.
+	if cmd := screen.Init(); cmd != nil {
+		t.Error("updateScreen.Init() should be a no-op while already checking")
+	}
+}
+
+// TestManagementScreensReachableViaManager verifies the navigation backbone for
+// the three migrated management screens: an App built with the ScreenManager
+// enters managed mode on NavigateTo and renders each through the factory.
+func TestManagementScreensReachableViaManager(t *testing.T) {
+	app := NewApp(true, WithScreenFactory())
+	if app.screenMgr == nil {
+		t.Fatal("WithScreenFactory should initialize screenMgr")
+	}
+	app.screenMgr.SetSize(80, 24)
+
+	cases := []struct {
+		name   string
+		target Screen
+		// substr must appear in the managed render; for screens whose populated
+		// body depends on async loads, we use a header/tab substring that is
+		// always present.
+		substr string
+		setup  func()
+	}{
+		{
+			name:   "Hotkeys",
+			target: ScreenHotkeys,
+			substr: "CATEGORIES",
+		},
+		{
+			name:   "Backups",
+			target: ScreenBackups,
+			substr: "Backups",
+			setup: func() {
+				// Mark as loaded with an empty list so the render is deterministic
+				// (skips the loading spinner) and host-independent.
+				app.backupsLoading = false
+				app.backupsLoaded = true
+				app.backups = []BackupEntry{}
+			},
+		},
+		{
+			name:   "Update",
+			target: ScreenUpdate,
+			substr: "Package Updates",
+			setup: func() {
+				// Force the checking state so the render does not depend on the
+				// host's package manager.
+				app.updateChecking = true
+				app.updateCheckDone = false
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setup != nil {
+				tc.setup()
+			}
+			if _, handled := app.screenMgr.Update(NavigateTo(tc.target)()); !handled {
+				t.Fatalf("manager should handle NavigateMsg to %v", tc.target)
+			}
+			if app.screenMgr.IsLegacyMode() {
+				t.Fatalf("manager should be in managed mode after navigating to %v", tc.target)
+			}
+			if app.screenMgr.Current().ID() != tc.target {
+				t.Fatalf("manager current screen ID = %v, want %v", app.screenMgr.Current().ID(), tc.target)
+			}
+			view := app.screenMgr.View()
+			if !strings.Contains(view, tc.substr) {
+				t.Errorf("managed %s screen should render %q\n---\n%s\n---", tc.name, tc.substr, view)
+			}
+		})
 	}
 }

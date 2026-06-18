@@ -23,61 +23,100 @@ func (a *App) handleManageNavigation(key string, maxFields int, backScreen Scree
 	}
 }
 
-// handleTabNavigation handles number key shortcuts for tab navigation
-// Returns (handled, command) - command may be nil even if handled
-func (a *App) handleTabNavigationWithCmd(key string) (bool, tea.Cmd) {
+// tabNavigationTarget maps a number key ("1".."4") to the corresponding
+// management tab's destination screen. It returns (0, false) for any other key
+// or an out-of-range index. Migrated screen handlers use this to drive tab
+// switches through the ScreenManager (via NavigateTo) instead of poking a.screen.
+func tabNavigationTarget(key string) (Screen, bool) {
 	tabs := GetManagementTabs()
-	var targetScreen Screen
+	var idx int
 	switch key {
 	case "1":
-		if len(tabs) > 0 {
-			targetScreen = tabs[0].Screen
-		}
+		idx = 0
 	case "2":
-		if len(tabs) > 1 {
-			targetScreen = tabs[1].Screen
-		}
+		idx = 1
 	case "3":
-		if len(tabs) > 2 {
-			targetScreen = tabs[2].Screen
-		}
+		idx = 2
 	case "4":
-		if len(tabs) > 3 {
-			targetScreen = tabs[3].Screen
-		}
+		idx = 3
 	default:
-		return false, nil
+		return 0, false
 	}
-
-	if targetScreen == 0 {
-		return false, nil
+	if idx >= len(tabs) {
+		return 0, false
 	}
-
-	a.screen = targetScreen
-
-	// Start async operations when switching to certain screens
-	if targetScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
-		a.updateChecking = true
-		return true, checkUpdatesCmd()
+	target := tabs[idx].Screen
+	if target == 0 {
+		return 0, false
 	}
+	return target, true
+}
 
-	if targetScreen == ScreenManage {
-		if cmd := a.startInstallCacheLoad(); cmd != nil {
-			return true, cmd
+// startTabTargetLoad returns the on-enter async load a management tab destination
+// needs (install cache for Manage, update check for Update, user list for Users,
+// backup list for Backups), or nil if none / already loaded. It is the shared
+// on-enter trigger used by both the legacy handleTabNavigationWithCmd and the
+// migrated screen handlers' tab navigation, so the two paths can never diverge.
+func startTabTargetLoad(a *App, target Screen) tea.Cmd {
+	switch target {
+	case ScreenUpdate:
+		if !a.updateChecking && !a.updateCheckDone {
+			a.updateChecking = true
+			return checkUpdatesCmd()
+		}
+	case ScreenManage:
+		return a.startInstallCacheLoad()
+	case ScreenUsers:
+		if !a.usersLoaded {
+			a.usersLoaded = true
+			return loadUsersCmd()
+		}
+	case ScreenBackups:
+		if !a.backupsLoading && !a.backupsLoaded {
+			a.backupsLoading = true
+			return loadBackupsCmd()
 		}
 	}
+	return nil
+}
 
-	if targetScreen == ScreenUsers && !a.usersLoaded {
-		a.usersLoaded = true
-		return true, loadUsersCmd()
+// handleTabNavigation handles number key shortcuts for tab navigation
+// Returns (handled, command) - command may be nil even if handled.
+//
+// This is the LEGACY-screen path (Manage, Users): for migrated destinations
+// (Hotkeys, Update, Backups) it routes through the ScreenManager via NavigateTo
+// so the manager enters managed mode; for the still-legacy destinations it sets
+// a.screen directly. Either way it kicks the destination's on-enter load.
+func (a *App) handleTabNavigationWithCmd(key string) (bool, tea.Cmd) {
+	targetScreen, ok := tabNavigationTarget(key)
+	if !ok {
+		return false, nil
 	}
 
-	if targetScreen == ScreenBackups && !a.backupsLoading && !a.backupsLoaded {
-		a.backupsLoading = true
-		return true, loadBackupsCmd()
+	load := startTabTargetLoad(a, targetScreen)
+
+	if isManagedScreen(targetScreen) {
+		// Route through the manager so it switches to managed mode for the
+		// migrated destination; a.screen is synced by the manager dispatch.
+		return true, tea.Batch(NavigateTo(targetScreen), load)
 	}
 
-	return true, nil
+	// Legacy destination: switch the screen field directly.
+	a.screen = targetScreen
+	return true, load
+}
+
+// isManagedScreen reports whether the given screen is handled by a migrated
+// ScreenHandler (and therefore must be entered through the ScreenManager rather
+// than by setting a.screen). Kept narrow on purpose: it lists only the
+// management-tab destinations that have been migrated.
+func isManagedScreen(s Screen) bool {
+	switch s {
+	case ScreenHotkeys, ScreenUpdate, ScreenBackups:
+		return true
+	default:
+		return false
+	}
 }
 
 // handleTabNavigation handles number key shortcuts for tab navigation
