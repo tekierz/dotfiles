@@ -61,14 +61,14 @@ func init() {
 
 ## Launching TUI
 
-`NewApp` requires a `skipIntro bool` plus functional options. The ScreenManager
-is enabled via the `WithScreenFactory` option, which builds an App-owned
-`ui.Factory` (so transition sites can set per-screen data such as the error to
-display before navigating).
+`NewApp` requires a `skipIntro bool`. The ScreenManager is always wired
+internally by `NewApp` (via `initScreenManager`), which builds an App-owned
+`ui.Factory` mapping each `Screen` to its `ScreenHandler` — there is no opt-in
+`WithScreenFactory` flag anymore.
 
 ```go
 func launchTUI(screen ui.Screen) {
-    app := ui.NewApp(skipIntro, ui.WithScreenFactory())
+    app := ui.NewApp(skipIntro)
     app.SetStartScreen(screen)
 
     p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
@@ -79,9 +79,10 @@ func launchTUI(screen ui.Screen) {
 }
 ```
 
-`NewApp` is defined as `func NewApp(skipIntro bool, opts ...AppOption) *App`, so
-the `skipIntro` argument is required. `launchToolConfig` and `launchHotkeysFiltered`
-follow the same pattern, passing `true` for `skipIntro`.
+`NewApp` is defined as `func NewApp(skipIntro bool, opts ...AppOption) *App`; the
+variadic `opts` is currently unused (no `With*` options exist), so callers pass
+only `skipIntro`. `launchToolConfig` and `launchHotkeysFiltered` follow the same
+pattern, passing `true` for `skipIntro`.
 
 ## Flags
 

@@ -6,9 +6,10 @@ Tool registry system for managing terminal tools.
 
 | File | Purpose |
 |------|---------|
-| `tool.go` | Tool interface and BaseTool implementation |
+| `tool.go` | Tool interface, BaseTool implementation, and the shared `writeToolConfig()` helper |
 | `registry.go` | Registry for tool registration and querying |
-| Individual files | One file per tool (zsh.go, ghostty.go, etc.) |
+| `simple_tools.go` | Data table of pure-metadata "simple" tools (bat, eza, zoxide, ripgrep, fd, fswatch, delta, lazydocker) built via `newSimpleTool(spec)` |
+| Individual files | One file per tool with custom behavior (zsh.go, ghostty.go, etc.) |
 
 ## Tool Interface
 
@@ -24,8 +25,6 @@ type Tool interface {
     Install(mgr pkg.PackageManager) error    // Install the tool
     ConfigPaths() []string                   // Config file paths
     HasConfig() bool                         // Has configurable options
-    GenerateConfig(theme string) string      // Generate config content
-    ApplyConfig(theme string) error          // Apply configuration
 
     // Resource requirements
     IsHeavy() bool                           // Whether tool needs significant resources (skipped on low-memory systems)
@@ -37,6 +36,11 @@ type Tool interface {
     PlatformFilter() pkg.Platform            // Empty for all platforms, or specific platform
 }
 ```
+
+> The interface no longer carries `GenerateConfig(theme)`/`ApplyConfig(theme)`.
+> Config writing happens through package-level `WriteXConfig(cfg, theme)`
+> functions (e.g. `WriteZshConfig`, `WriteGhosttyConfig`) used by the installer;
+> they share a `writeToolConfig(path, content)` helper in `tool.go`.
 
 ## Categories
 
@@ -69,6 +73,15 @@ const (
 ```
 
 ## Adding a New Tool
+
+If the tool is pure metadata (a package + optional config path, default
+`IsInstalled`/`Install` behavior, no custom config writer), add an entry to the
+`simpleTools` table in `simple_tools.go` — `newSimpleTool(spec)` builds the
+`BaseTool` and `registerSimpleTools()` registers it automatically; no new file is
+needed.
+
+If the tool needs custom behavior (its own config writer, `IsInstalled`, or
+install logic), give it its own file:
 
 1. Create `newtool.go`:
 

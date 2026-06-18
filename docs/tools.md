@@ -352,7 +352,7 @@ After installation, these files contain your tool configurations:
 | `~/.config/lazygit/config.yml` | LazyGit configuration (Go TUI) |
 | `~/.config/lazydocker/config.yml` | LazyDocker configuration (Go TUI) |
 | `~/.config/glow/glow.yml` | Glow markdown renderer settings (Go TUI) |
-| `~/.claude/settings.json` | Claude Code MCP settings (Go TUI) |
+| `~/.claude.json` | Claude Code user-scope MCP servers (Go TUI; only the `mcpServers` key is managed) |
 | `~/.gitconfig` | Git configuration with delta |
 | `~/.config/dotfiles/settings` | Current theme, navigation style, and active user |
 | `~/.sshh` | SSH hosts for quick connect |

@@ -6,11 +6,11 @@ User configuration management with JSON storage.
 
 | File | Purpose |
 |------|---------|
-| `config.go` | GlobalConfig, directory helpers (ConfigDir/ToolsDir/EnsureDirs), generic tool-config load/save (LoadToolConfig/SaveToolConfig), AllToolConfigs aggregation, theme list |
+| `config.go` | GlobalConfig, directory helpers (ConfigDir/ToolsDir/EnsureDirs), generic tool-config load/save (LoadToolConfig/SaveToolConfig), AllToolConfigs aggregation, theme list, and the shared `writeFileAtomic` helper (temp+rename) used by all config saves |
 | `tool.go` | Tool config structs (GhosttyConfig, TmuxConfig, ZshConfig, NeovimConfig, GitConfig, YaziConfig, FzfConfig, AppsConfig, UtilitiesConfig) |
 | `defaults.go` | Default config functions (Default*Config) |
 | `user.go` | UserProfile management (multi-user support) |
-| `claude.go` | Claude Code config (ClaudeConfig/MCPServer) + MCP server defaults |
+| `claude.go` | Claude Code MCP config (ClaudeConfig/MCPServer) in `~/.claude.json` with read-merge-preserve + `.bak` backup + atomic write; MCP server defaults |
 | `hotkeys.go` | Per-user hotkey favorites & aliases (HotkeysConfig/UserHotkeys) |
 | `config_test.go` | Config tests |
 | `user_test.go` | User profile tests |
@@ -162,7 +162,14 @@ err := config.ValidateUsername("myuser")
 
 ## Claude Code / MCP Config
 
-Manages MCP server entries in `~/.claude/settings.json` (dir 0700, file 0600).
+Manages user-scope MCP server entries in `~/.claude.json` (NOT
+`~/.claude/settings.json`, which holds model/permissions/hooks/statusLine and
+must never be clobbered). `SaveClaudeConfig` does a read-merge-preserve: it reads
+the existing file into a generic map, replaces only the `mcpServers` key, leaves
+all other keys untouched, writes a `~/.claude.json.bak` backup of the prior
+contents, then writes atomically (temp file + rename) via `writeFileAtomic`
+(file 0600). `LoadClaudeConfig` extracts only `mcpServers` and returns an empty
+map if the file is missing.
 
 ```go
 type ClaudeConfig struct {
@@ -178,7 +185,7 @@ type MCPServer struct {
 
 cfg, err := config.LoadClaudeConfig()   // empty map if file missing
 err := config.SaveClaudeConfig(cfg)
-defaults := config.DefaultMCPServers()  // {context7}
+defaults := config.DefaultMCPServers()  // {context7 -> npx -y @upstash/context7-mcp}
 all := config.AllMCPServers()           // context7, task-master, github,
                                         // supabase, convex, puppeteer,
                                         // sequential-thinking

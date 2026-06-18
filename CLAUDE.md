@@ -25,7 +25,7 @@ internal/
   scripts/               # Embedded utility scripts (hk, caff, sshh)
   testutil/              # Shared test helpers (testutil.go)
   tools/                 # Tool registry (30 tools)
-  ui/                    # Bubble Tea TUI (~14,400 lines)
+  ui/                    # Bubble Tea TUI (~14,600 lines)
 bin/
   dotfiles               # Built Go binary
   dotfiles-setup         # Legacy bash script
@@ -63,16 +63,24 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 
 ### Screen Navigation
 
-The TUI uses screen-based navigation with 45 screens:
+The TUI uses screen-based navigation with 33 screens (the `Screen` enum in
+`internal/ui/app.go`):
 - Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
 - Management: MainMenu, Manage, Update, Hotkeys, Backups
 - Config: Per-tool configuration screens
+
+Each screen is a `ScreenHandler` implemented in package `ui` in a `screen_*.go`
+file (e.g. `screen_welcome.go`, `screen_manage.go`, `screen_config_*.go`).
+`App.Update` delegates to the `ScreenManager` (`uiTickMsg` and
+`installCacheDoneMsg` are handled globally first); `App.View` delegates to
+`ScreenManager.View()`. `NewApp` always wires the `ScreenManager` via
+`initScreenManager()`.
 
 ### Async Patterns
 
 The TUI uses Bubble Tea's message-based async pattern for long-running operations:
 
-**Install Cache Loading** (`internal/ui/app.go`):
+**Install Cache Loading** (`internal/ui/cache.go`):
 - `loadInstallCacheCmd()` - Async command to check all tool installation status
 - Uses batch package manager queries (`brew list --versions`) for performance
 - Shows loading spinner while cache populates
