@@ -133,39 +133,7 @@ func WriteBtopConfig(cfg BtopConfig, theme string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configDir := filepath.Join(home, ".config", "btop")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("failed to create btop config directory: %w", err)
-	}
-
-	configPath := filepath.Join(configDir, "btop.conf")
+	configPath := filepath.Join(home, ".config", "btop", "btop.conf")
 	content := GenerateBtopConfig(cfg, theme)
-
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write btop config: %w", err)
-	}
-
-	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *BtopTool) GenerateConfig(theme string) string {
-	cfg := BtopConfig{
-		Theme:     "auto",
-		UpdateMs:  2000,
-		ShowTemp:  true,
-		GraphType: "braille",
-	}
-	return GenerateBtopConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *BtopTool) ApplyConfig(theme string) error {
-	cfg := BtopConfig{
-		Theme:     "auto",
-		UpdateMs:  2000,
-		ShowTemp:  true,
-		GraphType: "braille",
-	}
-	return WriteBtopConfig(cfg, theme)
+	return writeToolConfig(configPath, []byte(content))
 }

@@ -169,58 +169,5 @@ func WriteZshConfig(cfg ZshConfig, theme string) error {
 
 	configPath := filepath.Join(home, ".zshrc")
 	content := GenerateZshConfig(cfg, theme)
-
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write .zshrc: %w", err)
-	}
-
-	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *ZshTool) GenerateConfig(theme string) string {
-	cfg := ZshConfig{
-		PromptStyle: "p10k",
-		Plugins: []string{
-			"zsh-autosuggestions",
-			"zsh-syntax-highlighting",
-		},
-		Aliases: map[string]bool{
-			"ll":     true,
-			"la":     true,
-			"gs":     true,
-			"gp":     true,
-			"gc":     true,
-			"docker": true,
-		},
-		HistorySize:     10000,
-		AutoCD:          true,
-		SyntaxHighlight: true,
-		Autosuggestions: true,
-	}
-	return GenerateZshConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *ZshTool) ApplyConfig(theme string) error {
-	cfg := ZshConfig{
-		PromptStyle: "p10k",
-		Plugins: []string{
-			"zsh-autosuggestions",
-			"zsh-syntax-highlighting",
-		},
-		Aliases: map[string]bool{
-			"ll":     true,
-			"la":     true,
-			"gs":     true,
-			"gp":     true,
-			"gc":     true,
-			"docker": true,
-		},
-		HistorySize:     10000,
-		AutoCD:          true,
-		SyntaxHighlight: true,
-		Autosuggestions: true,
-	}
-	return WriteZshConfig(cfg, theme)
+	return writeToolConfig(configPath, []byte(content))
 }

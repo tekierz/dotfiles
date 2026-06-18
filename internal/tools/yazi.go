@@ -157,43 +157,18 @@ func WriteYaziConfig(cfg YaziConfig, theme string) error {
 	}
 
 	configDir := filepath.Join(home, ".config", "yazi")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("failed to create yazi config directory: %w", err)
-	}
 
 	// Write yazi.toml
-	yaziPath := filepath.Join(configDir, "yazi.toml")
 	yaziContent := GenerateYaziConfig(cfg, theme)
-	if err := os.WriteFile(yaziPath, []byte(yaziContent), 0600); err != nil {
-		return fmt.Errorf("failed to write yazi.toml: %w", err)
+	if err := writeToolConfig(filepath.Join(configDir, "yazi.toml"), []byte(yaziContent)); err != nil {
+		return err
 	}
 
 	// Write keymap.toml
-	keymapPath := filepath.Join(configDir, "keymap.toml")
 	keymapContent := GenerateYaziKeymap(cfg, theme)
-	if err := os.WriteFile(keymapPath, []byte(keymapContent), 0600); err != nil {
-		return fmt.Errorf("failed to write keymap.toml: %w", err)
+	if err := writeToolConfig(filepath.Join(configDir, "keymap.toml"), []byte(keymapContent)); err != nil {
+		return err
 	}
 
 	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *YaziTool) GenerateConfig(theme string) string {
-	cfg := YaziConfig{
-		Keymap:      "vim",
-		ShowHidden:  false,
-		PreviewMode: "auto",
-	}
-	return GenerateYaziConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *YaziTool) ApplyConfig(theme string) error {
-	cfg := YaziConfig{
-		Keymap:      "vim",
-		ShowHidden:  false,
-		PreviewMode: "auto",
-	}
-	return WriteYaziConfig(cfg, theme)
 }

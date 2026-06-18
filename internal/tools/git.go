@@ -134,36 +134,5 @@ func WriteGitConfig(cfg GitConfig, theme string) error {
 
 	configPath := filepath.Join(home, ".gitconfig")
 	content := GenerateGitConfig(cfg, theme)
-
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write .gitconfig: %w", err)
-	}
-
-	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *GitTool) GenerateConfig(theme string) string {
-	cfg := GitConfig{
-		DeltaSideBySide:  true,
-		DefaultBranch:    "main",
-		Aliases:          []string{"st", "co", "br", "ci", "lg"},
-		PullRebase:       true,
-		SignCommits:      false,
-		CredentialHelper: "cache",
-	}
-	return GenerateGitConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *GitTool) ApplyConfig(theme string) error {
-	cfg := GitConfig{
-		DeltaSideBySide:  true,
-		DefaultBranch:    "main",
-		Aliases:          []string{"st", "co", "br", "ci", "lg"},
-		PullRebase:       true,
-		SignCommits:      false,
-		CredentialHelper: "cache",
-	}
-	return WriteGitConfig(cfg, theme)
+	return writeToolConfig(configPath, []byte(content))
 }

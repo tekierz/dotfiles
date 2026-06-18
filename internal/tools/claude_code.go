@@ -72,16 +72,6 @@ func (t *ClaudeCodeTool) Install(mgr pkg.PackageManager) error {
 	return nil
 }
 
-// ApplyConfig applies MCP server configuration
-func (t *ClaudeCodeTool) ApplyConfig(theme string) error {
-	// Use default MCPs when called without specific selections
-	defaults := make(map[string]bool)
-	for name := range config.DefaultMCPServers() {
-		defaults[name] = true
-	}
-	return t.ApplyConfigWithMCPs(defaults)
-}
-
 // ApplyConfigWithMCPs applies MCP server configuration with specific MCP selections
 func (t *ClaudeCodeTool) ApplyConfigWithMCPs(enabledMCPs map[string]bool) error {
 	cfg, err := config.LoadClaudeConfig()

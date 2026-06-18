@@ -60,25 +60,19 @@ func NewRegistry() *Registry {
 	// Git tools
 	r.Register(NewGitTool())
 	r.Register(NewLazyGitTool())
-	r.Register(NewDeltaTool())
-
-	// Container tools
-	r.Register(NewLazyDockerTool())
 
 	// Utility tools
 	r.Register(NewFzfTool())
-	r.Register(NewBatTool())
-	r.Register(NewEzaTool())
-	r.Register(NewZoxideTool())
-	r.Register(NewRipgrepTool())
-	r.Register(NewFdTool())
 	r.Register(NewBtopTool())
 	r.Register(NewGlowTool())
-	r.Register(NewFswatchTool())
 	r.Register(NewClaudeCodeTool())
 	r.Register(NewTailscaleTool())
 	r.Register(NewSunshineTool())
 	r.Register(NewMoonlightTool())
+
+	// Simple, pure-metadata tools defined declaratively in simple_tools.go
+	// (bat, eza, zoxide, ripgrep, fd, fswatch, delta, lazydocker).
+	r.registerSimpleTools()
 
 	// GUI Apps
 	r.Register(NewZenBrowserTool())
@@ -303,20 +297,6 @@ func (r *Registry) HeavyTools() []Tool {
 	return tools
 }
 
-// Configurable returns tools that have configuration options
-func (r *Registry) Configurable() []Tool {
-	var tools []Tool
-	for _, t := range r.tools {
-		if t.HasConfig() {
-			tools = append(tools, t)
-		}
-	}
-	sort.Slice(tools, func(i, j int) bool {
-		return tools[i].Name() < tools[j].Name()
-	})
-	return tools
-}
-
 // InstallAll installs all tools using the provided package manager
 func (r *Registry) InstallAll(mgr pkg.PackageManager) error {
 	for _, t := range r.tools {
@@ -338,16 +318,6 @@ func (r *Registry) InstallByCategory(mgr pkg.PackageManager, cat Category) error
 	}
 	// Invalidate cache after installations
 	r.InvalidateCache()
-	return nil
-}
-
-// ApplyAllConfigs applies configs for all configurable tools
-func (r *Registry) ApplyAllConfigs(theme string) error {
-	for _, t := range r.Configurable() {
-		if err := t.ApplyConfig(theme); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

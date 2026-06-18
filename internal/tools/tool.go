@@ -1,6 +1,10 @@
 package tools
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
@@ -45,10 +49,8 @@ type Tool interface {
 	Install(mgr pkg.PackageManager) error
 
 	// Configuration
-	ConfigPaths() []string              // Config file paths (e.g., ~/.config/ghostty/config)
-	HasConfig() bool                    // Whether this tool has configurable options
-	GenerateConfig(theme string) string // Generate config content for a theme
-	ApplyConfig(theme string) error     // Write config to disk
+	ConfigPaths() []string // Config file paths (e.g., ~/.config/ghostty/config)
+	HasConfig() bool       // Whether this tool has configurable options
 
 	// Resource requirements
 	IsHeavy() bool // Whether this tool requires significant resources (skip on low-memory systems)
@@ -147,12 +149,20 @@ func (t *BaseTool) Install(mgr pkg.PackageManager) error {
 	return mgr.Install(pkgs...)
 }
 
-// GenerateConfig default implementation (override in specific tools)
-func (t *BaseTool) GenerateConfig(theme string) string {
-	return ""
-}
-
-// ApplyConfig default implementation (override in specific tools)
-func (t *BaseTool) ApplyConfig(theme string) error {
+// writeToolConfig writes a generated tool config file to disk, creating its
+// parent directory if needed. It is the single source of truth for the
+// "create dir 0700, write file 0600" pattern shared by every WriteXConfig
+// function. Permissions are deliberately restrictive: 0700 on the config
+// directory and 0600 on the file (see the security notes in CLAUDE.md). For
+// configs that live directly in $HOME (e.g. ~/.zshrc, ~/.gitconfig) the parent
+// directory already exists, so MkdirAll is a no-op and does not alter $HOME.
+func writeToolConfig(path string, content []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create config directory %s: %w", dir, err)
+	}
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		return fmt.Errorf("failed to write config file %s: %w", path, err)
+	}
 	return nil
 }

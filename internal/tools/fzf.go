@@ -119,37 +119,7 @@ func WriteFzfConfig(cfg FzfConfig, theme string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configDir := filepath.Join(home, ".config", "fzf")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("failed to create fzf config directory: %w", err)
-	}
-
-	configPath := filepath.Join(configDir, "fzf.zsh")
+	configPath := filepath.Join(home, ".config", "fzf", "fzf.zsh")
 	content := GenerateFzfConfig(cfg, theme)
-
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write fzf config: %w", err)
-	}
-
-	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *FzfTool) GenerateConfig(theme string) string {
-	cfg := FzfConfig{
-		Preview: true,
-		Height:  40,
-		Layout:  "reverse",
-	}
-	return GenerateFzfConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *FzfTool) ApplyConfig(theme string) error {
-	cfg := FzfConfig{
-		Preview: true,
-		Height:  40,
-		Layout:  "reverse",
-	}
-	return WriteFzfConfig(cfg, theme)
+	return writeToolConfig(configPath, []byte(content))
 }

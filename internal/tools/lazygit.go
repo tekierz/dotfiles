@@ -117,37 +117,7 @@ func WriteLazyGitConfig(cfg LazyGitConfig, theme string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configDir := filepath.Join(home, ".config", "lazygit")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("failed to create lazygit config directory: %w", err)
-	}
-
-	configPath := filepath.Join(configDir, "config.yml")
+	configPath := filepath.Join(home, ".config", "lazygit", "config.yml")
 	content := GenerateLazyGitConfig(cfg, theme)
-
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write lazygit config: %w", err)
-	}
-
-	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *LazyGitTool) GenerateConfig(theme string) string {
-	cfg := LazyGitConfig{
-		SideBySide: true,
-		MouseMode:  true,
-		Theme:      "auto",
-	}
-	return GenerateLazyGitConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *LazyGitTool) ApplyConfig(theme string) error {
-	cfg := LazyGitConfig{
-		SideBySide: true,
-		MouseMode:  true,
-		Theme:      "auto",
-	}
-	return WriteLazyGitConfig(cfg, theme)
+	return writeToolConfig(configPath, []byte(content))
 }

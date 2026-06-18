@@ -125,45 +125,7 @@ func WriteGhosttyConfig(cfg GhosttyConfig, theme string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configDir := filepath.Join(home, ".config", "ghostty")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
-	configPath := filepath.Join(configDir, "config")
+	configPath := filepath.Join(home, ".config", "ghostty", "config")
 	content := GenerateGhosttyConfig(cfg, theme)
-
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write ghostty config: %w", err)
-	}
-
-	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *GhosttyTool) GenerateConfig(theme string) string {
-	cfg := GhosttyConfig{
-		FontSize:        14,
-		FontFamily:      "JetBrains Mono",
-		Opacity:         100,
-		BlurRadius:      0,
-		TabBindings:     "super",
-		ScrollbackLines: 10000,
-		CursorStyle:     "block",
-	}
-	return GenerateGhosttyConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *GhosttyTool) ApplyConfig(theme string) error {
-	cfg := GhosttyConfig{
-		FontSize:        14,
-		FontFamily:      "JetBrains Mono",
-		Opacity:         100,
-		BlurRadius:      0,
-		TabBindings:     "super",
-		ScrollbackLines: 10000,
-		CursorStyle:     "block",
-	}
-	return WriteGhosttyConfig(cfg, theme)
+	return writeToolConfig(configPath, []byte(content))
 }

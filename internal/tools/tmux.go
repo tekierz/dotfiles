@@ -244,12 +244,7 @@ func WriteTmuxConfig(cfg TmuxConfig, theme string) error {
 
 	configPath := filepath.Join(home, ".tmux.conf")
 	content := GenerateTmuxConfig(cfg, theme)
-
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write tmux.conf: %w", err)
-	}
-
-	return nil
+	return writeToolConfig(configPath, []byte(content))
 }
 
 // SetupTPM handles TPM installation and plugin setup
@@ -275,38 +270,4 @@ func SetupTPM(cfg TmuxConfig, theme string) error {
 	_ = RunTPMInstall()
 
 	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *TmuxTool) GenerateConfig(theme string) string {
-	cfg := TmuxConfig{
-		Prefix:           "ctrl-a",
-		SplitBinds:       "pipes",
-		StatusBar:        "bottom",
-		MouseMode:        true,
-		TPMEnabled:       true,
-		PluginSensible:   true,
-		PluginResurrect:  true,
-		PluginContinuum:  false,
-		PluginYank:       true,
-		ContinuumSaveMin: 15,
-	}
-	return GenerateTmuxConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *TmuxTool) ApplyConfig(theme string) error {
-	cfg := TmuxConfig{
-		Prefix:           "ctrl-a",
-		SplitBinds:       "pipes",
-		StatusBar:        "bottom",
-		MouseMode:        true,
-		TPMEnabled:       true,
-		PluginSensible:   true,
-		PluginResurrect:  true,
-		PluginContinuum:  false,
-		PluginYank:       true,
-		ContinuumSaveMin: 15,
-	}
-	return SetupTPM(cfg, theme)
 }

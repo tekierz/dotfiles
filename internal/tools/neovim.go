@@ -168,16 +168,10 @@ func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
 
 // writeNeovimUserPrefs writes user preferences to a separate file
 func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
-	luaDir := filepath.Join(nvimDir, "lua", "custom")
-	if err := os.MkdirAll(luaDir, 0700); err != nil {
-		return fmt.Errorf("failed to create lua/custom directory: %w", err)
-	}
-
-	prefsPath := filepath.Join(luaDir, "options.lua")
+	prefsPath := filepath.Join(nvimDir, "lua", "custom", "options.lua")
 	content := GenerateNeovimConfig(cfg, theme)
-
-	if err := os.WriteFile(prefsPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write user preferences: %w", err)
+	if err := writeToolConfig(prefsPath, []byte(content)); err != nil {
+		return err
 	}
 
 	// Add require to init.lua if not already present
@@ -197,44 +191,7 @@ func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 
 // writeMinimalNeovimConfig writes a minimal standalone neovim config
 func writeMinimalNeovimConfig(cfg NeovimConfig, theme, nvimDir string) error {
-	if err := os.MkdirAll(nvimDir, 0700); err != nil {
-		return fmt.Errorf("failed to create nvim config directory: %w", err)
-	}
-
 	initPath := filepath.Join(nvimDir, "init.lua")
 	content := GenerateNeovimConfig(cfg, theme)
-
-	if err := os.WriteFile(initPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write init.lua: %w", err)
-	}
-
-	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *NeovimTool) GenerateConfig(theme string) string {
-	cfg := NeovimConfig{
-		ConfigPreset: "kickstart",
-		LSPs:         []string{"lua_ls", "pyright", "ts_ls", "gopls"},
-		Plugins:      []string{"telescope", "treesitter", "lsp", "cmp"},
-		TabWidth:     4,
-		Wrap:         false,
-		CursorLine:   true,
-		Clipboard:    "unnamedplus",
-	}
-	return GenerateNeovimConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *NeovimTool) ApplyConfig(theme string) error {
-	cfg := NeovimConfig{
-		ConfigPreset: "kickstart",
-		LSPs:         []string{"lua_ls", "pyright", "ts_ls", "gopls"},
-		Plugins:      []string{"telescope", "treesitter", "lsp", "cmp"},
-		TabWidth:     4,
-		Wrap:         false,
-		CursorLine:   true,
-		Clipboard:    "unnamedplus",
-	}
-	return WriteNeovimConfig(cfg, theme)
+	return writeToolConfig(initPath, []byte(content))
 }

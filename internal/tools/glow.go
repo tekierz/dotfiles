@@ -90,37 +90,7 @@ func WriteGlowConfig(cfg GlowConfig, theme string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configDir := filepath.Join(home, ".config", "glow")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("failed to create glow config directory: %w", err)
-	}
-
-	configPath := filepath.Join(configDir, "glow.yml")
+	configPath := filepath.Join(home, ".config", "glow", "glow.yml")
 	content := GenerateGlowConfig(cfg, theme)
-
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write glow config: %w", err)
-	}
-
-	return nil
-}
-
-// GenerateConfig implements Tool interface (uses defaults)
-func (t *GlowTool) GenerateConfig(theme string) string {
-	cfg := GlowConfig{
-		Pager: "auto",
-		Style: "auto",
-		Width: 80,
-	}
-	return GenerateGlowConfig(cfg, theme)
-}
-
-// ApplyConfig implements Tool interface (uses defaults)
-func (t *GlowTool) ApplyConfig(theme string) error {
-	cfg := GlowConfig{
-		Pager: "auto",
-		Style: "auto",
-		Width: 80,
-	}
-	return WriteGlowConfig(cfg, theme)
+	return writeToolConfig(configPath, []byte(content))
 }
