@@ -1104,10 +1104,6 @@ func (a *App) renderManageLogPanel(layout manageLayout, items []manageItem) stri
 		}
 	}
 
-	// Calculate panel dimensions
-	panelW := layout.rightW
-	panelH := layout.bodyH
-
 	// Build title with status
 	var title string
 	if a.manageInstalling {
@@ -1120,24 +1116,7 @@ func (a *App) renderManageLogPanel(layout manageLayout, items []manageItem) stri
 		title = fmt.Sprintf("INSTALL LOG: %s", strings.ToUpper(toolName))
 	}
 
-	// Use the LogPanel component
-	logPanel := RenderLogPanel(
-		a.installLogs,
-		panelW,
-		panelH,
-		a.installLogScroll,
-		title,
-		a.managePane == managePaneSettings,
-	)
-
-	// Add scroll hint and clear hint at bottom if logs exist
-	if len(a.installLogs) > 0 && !a.manageInstalling {
-		hintStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		clearHint := hintStyle.Render("Press C to clear logs • ↑↓ to scroll")
-		logPanel = lipgloss.JoinVertical(lipgloss.Left, logPanel, clearHint)
-	}
-
-	// Override with simple styled panel to match layout
+	// Build the styled log panel to match the dual-pane layout.
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
