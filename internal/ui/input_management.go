@@ -5,10 +5,10 @@ import (
 )
 
 // handleManagementKey handles key events for the still-legacy management
-// screens: ScreenUsers and the ScreenManage* config screens
-// (ScreenManageGhostty, ScreenManageTmux, etc.).
+// screens: the ScreenManage* config detail screens (ScreenManageGhostty,
+// ScreenManageTmux, etc.).
 //
-// Note: ScreenMainMenu, ScreenManage (live dual-pane), ScreenUpdate,
+// Note: ScreenMainMenu, ScreenManage (live dual-pane), ScreenUsers, ScreenUpdate,
 // ScreenHotkeys, and ScreenBackups are migrated to ScreenHandlers and driven by
 // the ScreenManager, so they are no longer handled here.
 func (a *App) handleManagementKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -52,10 +52,6 @@ func (a *App) handleManagementKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case ScreenManageClaudeCode:
 		return a, a.handleManageNavigation(key, 7, ScreenManage) // 7 MCP toggles
-
-	// Users screen navigation - delegates to existing handler
-	case ScreenUsers:
-		return a.handleUsersKey(msg)
 	}
 
 	return a, nil

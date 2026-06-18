@@ -33,6 +33,12 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewErrorScreen(ctx, f.data.Error)
 	case ScreenSummary:
 		return NewSummaryScreen(ctx)
+	case ScreenAnimation:
+		return NewAnimationScreen(ctx)
+	case ScreenProgress:
+		return NewProgressScreen(ctx)
+	case ScreenUsers:
+		return NewUsersScreen(ctx)
 	case ScreenWelcome:
 		return NewWelcomeScreen(ctx)
 	case ScreenThemePicker:

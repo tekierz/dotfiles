@@ -124,7 +124,7 @@ func (a *App) handleTabNavigationWithCmd(key string) (bool, tea.Cmd) {
 // management-tab destinations that have been migrated.
 func isManagedScreen(s Screen) bool {
 	switch s {
-	case ScreenHotkeys, ScreenUpdate, ScreenBackups:
+	case ScreenUsers, ScreenHotkeys, ScreenUpdate, ScreenBackups:
 		return true
 	default:
 		return false

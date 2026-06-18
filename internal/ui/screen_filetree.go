@@ -16,7 +16,10 @@ import (
 // (file tree) screen shown before installation starts.
 //
 // State stays on App: it reads the deep-dive config and install cache through
-// s.App(). Pressing enter starts the (legacy, unmigrated) progress screen.
+// s.App(). Pressing enter navigates to the migrated progress screen, which
+// triggers the install from its own Init() (the sudo check + startInstallation
+// live in progressScreen.Init, so the start does not depend on the ordering of a
+// separate installStartMsg relative to the NavigateMsg in a tea.Batch).
 type fileTreeScreen struct {
 	BaseScreen
 }
@@ -43,13 +46,13 @@ func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		case "ctrl+c", "q":
 			return s, tea.Quit
 		case "enter":
-			// Begin installation: navigate to the (legacy) progress screen and
-			// kick off the install worker. NavigateTo falls back to legacy mode
-			// for the unmigrated progress screen, syncing a.screen in App.Update.
-			return s, tea.Batch(
-				NavigateTo(ScreenProgress),
-				func() tea.Msg { return installStartMsg{} },
-			)
+			// Begin installation: navigate to the migrated progress screen. The
+			// install is triggered by progressScreen.Init() (which does the sudo
+			// check itself), so we deliberately do NOT emit a separate
+			// installStartMsg here — its ordering relative to the NavigateMsg in a
+			// tea.Batch is not guaranteed, and the message would have no migrated
+			// handler until Progress is active.
+			return s, NavigateTo(ScreenProgress)
 		case "esc":
 			return s, NavigateTo(ScreenNavPicker)
 		}

@@ -1684,3 +1684,516 @@ func TestManagementScreensReachableViaManager(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// Migrated wizard screens: Animation, Progress
+// ============================================================================
+
+// TestAnimationScreenGolden is a regression guard for the migrated
+// animationScreen. With a window size set on the App it renders the intro card
+// deterministically (animations off in the context is irrelevant here: the intro
+// frame is driven by App.animFrame, which we fix). It must render the banner and
+// skip hint, and never panic.
+func TestAnimationScreenGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	// The intro layout reads a.width/a.height directly.
+	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
+	ctx.app.animFrame = 36 // a fixed mid-animation frame for determinism
+
+	screen := NewAnimationScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("animationScreen.View() returned empty output")
+	}
+	// The skip hint is always rendered; assert it so we know the card drew.
+	if !strings.Contains(out, "skip") {
+		t.Errorf("animationScreen.View() should render the skip hint\n---\n%s\n---", out)
+	}
+
+	if screen.ID() != ScreenAnimation {
+		t.Errorf("animationScreen.ID() = %v, want ScreenAnimation", screen.ID())
+	}
+}
+
+// TestAnimationScreenNoSizeLoading verifies the "no window size yet" fallback
+// renders the loading placeholder rather than dividing by a zero-size layout.
+func TestAnimationScreenNoSizeLoading(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = 0, 0
+
+	screen := NewAnimationScreen(ctx)
+	if out := screen.View(ctx.Width, ctx.Height); !strings.Contains(out, "Loading") {
+		t.Errorf("animationScreen.View() with no size should show loading placeholder, got %q", out)
+	}
+}
+
+// TestAnimationScreenTickAdvancesFrame proves the intro tick logic now lives in
+// the handler: a tickMsg advances animFrame and re-issues the tick (a non-nil
+// continuation) until the final frame, where it transitions instead.
+func TestAnimationScreenTickAdvancesFrame(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
+	ctx.app.animFrame = 0
+
+	screen := NewAnimationScreen(ctx)
+
+	// A mid-animation tick advances the frame and re-arms the tick.
+	next, cmd := screen.Update(tickMsg(time.Now()))
+	if next != screen {
+		t.Fatalf("animationScreen should remain current on a mid-animation tick")
+	}
+	if ctx.app.animFrame != 1 {
+		t.Errorf("animFrame = %d, want 1 after one tickMsg", ctx.app.animFrame)
+	}
+	if cmd == nil {
+		t.Fatal("mid-animation tickMsg should return a non-nil continuation (tickAnimation)")
+	}
+
+	// At the final frame, the tick transitions via postIntroTransition (which sets
+	// animationDone and routes to the post-intro screen). This context has no
+	// ScreenManager wired (NewApp without WithScreenFactory), so the transition
+	// command is nil in the legacy fallback; assert the state transition instead.
+	ctx.app.animFrame = introAnimationFrames
+	ctx.app.animationDone = false
+	screen.Update(tickMsg(time.Now()))
+	if !ctx.app.animationDone {
+		t.Error("final-frame tickMsg should trigger the post-intro transition (animationDone=true)")
+	}
+}
+
+// TestAnimationScreenTickNoSizeHolds verifies the guard: a tickMsg before a
+// window size is known does NOT advance the frame (prevents fast-forward).
+func TestAnimationScreenTickNoSizeHolds(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = 0, 0
+	ctx.app.animFrame = 0
+
+	screen := NewAnimationScreen(ctx)
+	_, cmd := screen.Update(tickMsg(time.Now()))
+	if ctx.app.animFrame != 0 {
+		t.Errorf("animFrame = %d, want 0 (must not advance before a window size)", ctx.app.animFrame)
+	}
+	if cmd == nil {
+		t.Error("tickMsg with no size should still re-arm the tick")
+	}
+}
+
+// TestAnimationScreenInit verifies Init() issues the intro tick + durdraw probe.
+func TestAnimationScreenInit(t *testing.T) {
+	ctx := newGoldenContext(t)
+	screen := NewAnimationScreen(ctx)
+	if cmd := screen.Init(); cmd == nil {
+		t.Fatal("animationScreen.Init() should return a batch (tickAnimation + checkDurdraw)")
+	}
+}
+
+// TestAnimationScreenReachableViaManager verifies an App built with the manager
+// enters managed mode on NavigateTo(ScreenAnimation) and renders the intro.
+func TestAnimationScreenReachableViaManager(t *testing.T) {
+	app := NewApp(true, WithScreenFactory())
+	if app.screenMgr == nil {
+		t.Fatal("WithScreenFactory should initialize screenMgr")
+	}
+	app.screenMgr.SetSize(80, 24)
+	app.width, app.height = 80, 24
+	app.animFrame = 10
+
+	if _, handled := app.screenMgr.Update(NavigateTo(ScreenAnimation)()); !handled {
+		t.Fatal("manager should handle the NavigateMsg to ScreenAnimation")
+	}
+	if app.screenMgr.IsLegacyMode() {
+		t.Fatal("manager should be in managed mode after navigating to ScreenAnimation")
+	}
+	if app.screenMgr.Current().ID() != ScreenAnimation {
+		t.Fatalf("manager current screen ID = %v, want ScreenAnimation", app.screenMgr.Current().ID())
+	}
+	if view := app.screenMgr.View(); !strings.Contains(view, "skip") {
+		t.Errorf("managed animationScreen should render the intro card\n---\n%s\n---", view)
+	}
+}
+
+// TestProgressScreenNotStartedGolden is a regression guard for the migrated
+// progressScreen before the install begins: it shows the step list and the
+// "Press ENTER to start" prompt.
+func TestProgressScreenNotStartedGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
+	ctx.app.installRunning = false
+	ctx.app.installComplete = false
+	ctx.app.installOutput = nil
+
+	screen := NewProgressScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("progressScreen.View() returned empty output")
+	}
+	wantSubstrings := []string{
+		"Installing...",
+		"Installing packages",
+		"Configuring zsh",
+		"Press ENTER to start",
+		"[ENTER] Start",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("progressScreen.View() (not started) missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenProgress {
+		t.Errorf("progressScreen.ID() = %v, want ScreenProgress", screen.ID())
+	}
+}
+
+// TestProgressScreenRunningGolden verifies the running state renders the live
+// output lines and the in-progress footer.
+func TestProgressScreenRunningGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
+	ctx.app.installRunning = true
+	ctx.app.installComplete = false
+	ctx.app.installStep = 2
+	ctx.app.installOutput = []string{"▶ Installing tmux...", "  ✓ tmux installed successfully"}
+
+	screen := NewProgressScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	wantSubstrings := []string{
+		"Installing...",
+		"Installing tmux",          // live output line
+		"installed successfully",   // live output line
+		"Installation in progress", // running footer
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("progressScreen.View() (running) missing %q\n---\n%s\n---", want, out)
+		}
+	}
+}
+
+// TestProgressScreenCompleteGolden verifies the complete state renders the
+// success title and the continue footer.
+func TestProgressScreenCompleteGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
+	ctx.app.installRunning = false
+	ctx.app.installComplete = true
+
+	screen := NewProgressScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	wantSubstrings := []string{
+		"Installation Complete",
+		"[ENTER] Continue",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("progressScreen.View() (complete) missing %q\n---\n%s\n---", want, out)
+		}
+	}
+}
+
+// TestProgressScreenInstallEventStreams is the key streaming proof: an
+// installEventMsg applied to the Progress handler updates App state AND returns a
+// non-nil continuation (the listen cmd) so the event stream keeps flowing.
+func TestProgressScreenInstallEventStreams(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.installRunning = true
+	ctx.app.installComplete = false
+	ctx.app.installStep = 0
+	ctx.app.installOutput = nil
+	// A live channel so the re-issued listen cmd has something to read from.
+	ctx.app.installEvents = make(chan installEventMsg, 1)
+
+	screen := NewProgressScreen(ctx)
+
+	// A line+step event updates state and re-arms the listen cmd.
+	next, cmd := screen.Update(installEventMsg{line: "▶ Installing ghostty...", stepInc: true})
+	if next != screen {
+		t.Fatalf("progressScreen should remain current after installEventMsg")
+	}
+	if len(ctx.app.installOutput) != 1 || ctx.app.installOutput[0] != "▶ Installing ghostty..." {
+		t.Errorf("installEventMsg should append the output line, got %v", ctx.app.installOutput)
+	}
+	if ctx.app.installStep != 1 {
+		t.Errorf("installStep = %d, want 1 after a stepInc event", ctx.app.installStep)
+	}
+	if cmd == nil {
+		t.Fatal("non-done installEventMsg must return a non-nil continuation (listenInstallEventsCmd) to keep the stream flowing")
+	}
+
+	// The 20-line display cap is preserved.
+	ctx.app.installOutput = nil
+	for i := 0; i < 25; i++ {
+		screen.Update(installEventMsg{line: "line"})
+	}
+	if len(ctx.app.installOutput) != 20 {
+		t.Errorf("installOutput should be capped at 20 lines, got %d", len(ctx.app.installOutput))
+	}
+}
+
+// TestProgressScreenInstallDoneSuccess verifies a done event clears the channel,
+// marks complete, and does not error on success.
+func TestProgressScreenInstallDoneSuccess(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.installRunning = true
+	ctx.app.installEvents = make(chan installEventMsg, 1)
+
+	screen := NewProgressScreen(ctx)
+	next, _ := screen.Update(installEventMsg{done: true, err: nil})
+	if next != screen {
+		t.Fatalf("progressScreen should remain current after a done installEventMsg")
+	}
+	if ctx.app.installRunning {
+		t.Error("done event should clear installRunning")
+	}
+	if !ctx.app.installComplete {
+		t.Error("done event should set installComplete")
+	}
+	if ctx.app.installEvents != nil {
+		t.Error("done event should nil out installEvents")
+	}
+}
+
+// TestProgressScreenInstallDoneError verifies a failing done event records the
+// error (with context) and returns a navigation command to the error screen.
+func TestProgressScreenInstallDoneError(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.installRunning = true
+
+	screen := NewProgressScreen(ctx)
+	screen.Update(installEventMsg{done: true, err: errors.New("boom"), context: "last lines"})
+	if ctx.app.lastError == nil || !strings.Contains(ctx.app.lastError.Error(), "boom") {
+		t.Errorf("done error event should record lastError, got %v", ctx.app.lastError)
+	}
+	if !strings.Contains(ctx.app.lastError.Error(), "last lines") {
+		t.Errorf("done error event should include the output context, got %v", ctx.app.lastError)
+	}
+	// In this no-manager context, showError() falls back to setting a.screen
+	// (returns a nil cmd); the error-screen routing with a non-nil NavigateTo cmd
+	// is covered by the *ReachableViaManager tests. Here we assert the error state
+	// and the legacy fallback target.
+	if ctx.app.screen != ScreenError {
+		t.Errorf("done error event should route to the error screen, a.screen = %v", ctx.app.screen)
+	}
+}
+
+// TestProgressScreenReachableViaManager verifies an App built with the manager
+// enters managed mode on NavigateTo(ScreenProgress) and renders the progress
+// screen through the factory. (Init triggers the install; on a non-Linux host
+// startInstallation runs without a sudo prompt, so the render is still safe.)
+func TestProgressScreenReachableViaManager(t *testing.T) {
+	app := NewApp(true, WithScreenFactory())
+	if app.screenMgr == nil {
+		t.Fatal("WithScreenFactory should initialize screenMgr")
+	}
+	app.screenMgr.SetSize(80, 24)
+	app.width, app.height = 80, 24
+	// Pre-mark as running so Init() no-ops (it guards on installRunning) and the
+	// render is deterministic without kicking off a real package install.
+	app.installRunning = true
+
+	if _, handled := app.screenMgr.Update(NavigateTo(ScreenProgress)()); !handled {
+		t.Fatal("manager should handle the NavigateMsg to ScreenProgress")
+	}
+	if app.screenMgr.IsLegacyMode() {
+		t.Fatal("manager should be in managed mode after navigating to ScreenProgress")
+	}
+	if app.screenMgr.Current().ID() != ScreenProgress {
+		t.Fatalf("manager current screen ID = %v, want ScreenProgress", app.screenMgr.Current().ID())
+	}
+	if view := app.screenMgr.View(); !strings.Contains(view, "Installing") {
+		t.Errorf("managed progressScreen should render the progress screen\n---\n%s\n---", view)
+	}
+}
+
+// TestProgressScreenInitNoOpWhileRunning verifies Init() does not re-trigger the
+// install when one is already running (idempotent guard).
+func TestProgressScreenInitNoOpWhileRunning(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.installRunning = true
+
+	screen := NewProgressScreen(ctx)
+	if cmd := screen.Init(); cmd != nil {
+		t.Error("progressScreen.Init() should be a no-op while an install is already running")
+	}
+}
+
+// ============================================================================
+// Migrated management screen: Users (dual-pane)
+// ============================================================================
+
+// TestUsersScreenEmptyGolden is a regression guard for the migrated usersScreen
+// with an empty (loaded) user list.
+func TestUsersScreenEmptyGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
+	ctx.app.usersLoaded = true
+	ctx.app.usersItems = nil
+
+	screen := NewUsersScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("usersScreen.View() returned empty output")
+	}
+	wantSubstrings := []string{
+		"User Profiles",     // left pane header
+		"No user profiles.", // empty-state message
+		"create one",        // empty-state hint
+		"n:new",             // status bar help
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("usersScreen.View() (empty) missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenUsers {
+		t.Errorf("usersScreen.ID() = %v, want ScreenUsers", screen.ID())
+	}
+}
+
+// TestUsersScreenPopulatedGolden verifies the populated list renders the user
+// rows, the active indicator, and the settings pane fields.
+func TestUsersScreenPopulatedGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
+	ctx.app.usersLoaded = true
+	ctx.app.usersIndex = 0
+	ctx.app.usersPane = usersPaneSettings
+	ctx.app.usersItems = []userItem{
+		{name: "alice", theme: "dracula", navStyle: "vim", keyboard: "macos", isActive: true},
+		{name: "bob", theme: "nord", navStyle: "emacs", keyboard: "linux", isActive: false},
+	}
+
+	screen := NewUsersScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	wantSubstrings := []string{
+		"alice",
+		"bob",
+		"Settings: alice", // settings pane header for the selected user
+		"Theme",
+		"Navigation",
+		"Keyboard",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("usersScreen.View() (populated) missing %q\n---\n%s\n---", want, out)
+		}
+	}
+}
+
+// TestUsersScreenAsyncInHandler proves the async-in-handler wiring: feeding a
+// userLoadedMsg to the handler's Update updates App state and the rendered list,
+// with no App.Update involvement.
+func TestUsersScreenAsyncInHandler(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
+	ctx.app.usersItems = nil
+
+	screen := NewUsersScreen(ctx)
+
+	loaded := userLoadedMsg{users: []userItem{
+		{name: "async-user", theme: "nord", navStyle: "emacs", keyboard: "linux"},
+	}}
+	next, _ := screen.Update(loaded)
+	if next != screen {
+		t.Fatalf("usersScreen should remain current after userLoadedMsg")
+	}
+	if len(ctx.app.usersItems) != 1 || ctx.app.usersItems[0].name != "async-user" {
+		t.Fatalf("userLoadedMsg should populate usersItems, got %+v", ctx.app.usersItems)
+	}
+	if out := screen.View(ctx.Width, ctx.Height); !strings.Contains(out, "async-user") {
+		t.Errorf("usersScreen.View() should render the async-loaded user\n---\n%s\n---", out)
+	}
+}
+
+// TestUsersScreenDeleteClearsActive proves the Phase B fix path is preserved:
+// after a userDeletedMsg, the handler reloads the list (returns loadUsersCmd) and
+// decrements the index when appropriate.
+func TestUsersScreenDeleteAdjustsIndexAndReloads(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.usersIndex = 1
+
+	screen := NewUsersScreen(ctx)
+	_, cmd := screen.Update(userDeletedMsg{name: "bob"})
+	if ctx.app.usersIndex != 0 {
+		t.Errorf("usersIndex = %d, want 0 after deleting at index 1", ctx.app.usersIndex)
+	}
+	if cmd == nil {
+		t.Fatal("userDeletedMsg should return loadUsersCmd to refresh the list")
+	}
+	if !strings.Contains(ctx.app.usersStatus, "Deleted bob") {
+		t.Errorf("usersStatus = %q, want a 'Deleted bob' message", ctx.app.usersStatus)
+	}
+}
+
+// TestUsersScreenEscNavigatesToMainMenu verifies esc routes back through the
+// ScreenManager to the main menu.
+func TestUsersScreenEscNavigatesToMainMenu(t *testing.T) {
+	ctx := newGoldenContext(t)
+	screen := NewUsersScreen(ctx)
+
+	_, cmd := screen.Update(keyMsg("esc"))
+	if cmd == nil {
+		t.Fatal("esc should return a navigation command")
+	}
+	nav, ok := cmd().(NavigateMsg)
+	if !ok {
+		t.Fatalf("expected NavigateMsg from esc, got %T", cmd())
+	}
+	if nav.To != ScreenMainMenu {
+		t.Errorf("esc should NavigateTo(ScreenMainMenu), got %v", nav.To)
+	}
+}
+
+// TestUsersScreenInitLoads verifies Init() kicks the user-list load when not yet
+// loaded, and is idempotent when already loaded.
+func TestUsersScreenInitLoads(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.usersLoaded = false
+
+	screen := NewUsersScreen(ctx)
+	if cmd := screen.Init(); cmd == nil {
+		t.Fatal("usersScreen.Init() should return loadUsersCmd when not loaded")
+	}
+	if !ctx.app.usersLoaded {
+		t.Error("usersScreen.Init() should set usersLoaded")
+	}
+	// Idempotent: already loaded -> no new command.
+	if cmd := screen.Init(); cmd != nil {
+		t.Error("usersScreen.Init() should be a no-op when already loaded")
+	}
+}
+
+// TestUsersScreenReachableViaManager verifies an App built with the manager
+// enters managed mode on NavigateTo(ScreenUsers) and renders the dual-pane
+// through the factory.
+func TestUsersScreenReachableViaManager(t *testing.T) {
+	app := NewApp(true, WithScreenFactory())
+	if app.screenMgr == nil {
+		t.Fatal("WithScreenFactory should initialize screenMgr")
+	}
+	app.screenMgr.SetSize(80, 24)
+	app.width, app.height = 80, 24
+	// Mark loaded with an empty list so the render is deterministic (no disk).
+	app.usersLoaded = true
+	app.usersItems = nil
+
+	if _, handled := app.screenMgr.Update(NavigateTo(ScreenUsers)()); !handled {
+		t.Fatal("manager should handle the NavigateMsg to ScreenUsers")
+	}
+	if app.screenMgr.IsLegacyMode() {
+		t.Fatal("manager should be in managed mode after navigating to ScreenUsers")
+	}
+	if app.screenMgr.Current().ID() != ScreenUsers {
+		t.Fatalf("manager current screen ID = %v, want ScreenUsers", app.screenMgr.Current().ID())
+	}
+	if view := app.screenMgr.View(); !strings.Contains(view, "User Profiles") {
+		t.Errorf("managed usersScreen should render the user list\n---\n%s\n---", view)
+	}
+}

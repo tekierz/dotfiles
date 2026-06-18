@@ -38,6 +38,7 @@ func (a *App) startInstallation() tea.Cmd {
 	}
 
 	a.installRunning = true
+	a.installComplete = false // reset so a retry re-renders as "installing", not "complete"
 	a.installStep = 0
 	a.installOutput = []string{}
 

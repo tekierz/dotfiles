@@ -392,24 +392,20 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{}
 	// Drive the start screen through the ScreenManager so migrated screens enter
-	// managed mode. For unmigrated start screens (e.g. the intro animation),
-	// NavigateTo falls back harmlessly to legacy mode.
+	// managed mode and their Init() runs. The intro animation
+	// (animationScreen.Init) issues tickAnimation()+checkDurdraw(); the Update
+	// screen (updateScreen.Init) kicks the update check; the Progress screen
+	// (progressScreen.Init) triggers the install. App.Init therefore must NOT
+	// duplicate those, or they would double-fire.
 	if a.screenMgr != nil {
 		cmds = append(cmds, NavigateTo(a.screen))
 	}
 	if a.animationsEnabled {
 		cmds = append(cmds, tickUI())
 	}
-	if a.screen == ScreenAnimation {
-		cmds = append(cmds, tickAnimation(), checkDurdraw())
-	}
-	// Start update check if starting directly on Update screen
-	if a.screen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
-		a.updateChecking = true
-		cmds = append(cmds, checkUpdatesCmd())
-	}
-	// Preload install cache immediately on startup for faster Deep Dive/Manage transitions
-	// By loading during intro animation, cache is ready when user navigates to those screens
+	// Preload install cache immediately on startup for faster Deep Dive/Manage transitions.
+	// By loading during the intro animation, the cache is ready when the user
+	// navigates to those screens.
 	if cmd := a.startInstallCacheLoad(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -811,169 +807,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return a.handleMouse(msg)
 
-	case tickMsg:
-		if a.screen == ScreenAnimation {
-			// If we don't have a window size yet, don't advance frames. This prevents
-			// the intro from "fast-forwarding" on terminals that deliver WindowSizeMsg
-			// a little late.
-			if a.width == 0 || a.height == 0 {
-				return a, tickAnimation()
-			}
-
-			a.animFrame++
-			// Animation runs for a short burst and then transitions to the wizard.
-			if a.animFrame >= introAnimationFrames {
-				return a, a.postIntroTransition()
-			}
-			return a, tickAnimation()
-		}
-
-	case durdrawAvailableMsg:
-		// Store durdraw availability if needed
-		return a, nil
-
-	case animationDoneMsg:
-		return a, a.postIntroTransition()
-
-	case sudoRequiredMsg:
-		// Need to prompt for sudo - use tea.Exec to exit alt screen
-		return a, tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
-			return sudoCachedMsg{err: err}
-		})
-
-	case sudoCachedMsg:
-		if msg.err != nil {
-			a.lastError = msg.err
-			return a, a.showError(msg.err)
-		}
-		// Sudo cached successfully, start installation
-		return a, a.startInstallation()
-
-	case installStartMsg:
-		// Check if we need sudo first
-		if runner.NeedsSudo() && !runner.CheckSudoCached() {
-			return a, func() tea.Msg { return sudoRequiredMsg{} }
-		}
-		return a, a.startInstallation()
-
-	case installOutputMsg:
-		a.installOutput = append(a.installOutput, msg.line.Text)
-		// Keep only the last 20 lines for display (using copy to avoid memory leak)
-		const maxOutputLines = 20
-		if len(a.installOutput) > maxOutputLines {
-			copy(a.installOutput, a.installOutput[len(a.installOutput)-maxOutputLines:])
-			a.installOutput = a.installOutput[:maxOutputLines]
-		}
-		// Update step based on output type
-		if msg.line.Type == runner.OutputStep {
-			a.installStep++
-		}
-		return a, nil
-
-	case installEventMsg:
-		// Streamed progress from the install worker goroutine, applied here on
-		// the main loop so the worker never touches shared App state.
-		if msg.line != "" {
-			a.installOutput = append(a.installOutput, msg.line)
-			// Keep only the last 20 lines for display (copy to avoid memory leak)
-			const maxOutputLines = 20
-			if len(a.installOutput) > maxOutputLines {
-				copy(a.installOutput, a.installOutput[len(a.installOutput)-maxOutputLines:])
-				a.installOutput = a.installOutput[:maxOutputLines]
-			}
-		}
-		if msg.stepInc {
-			a.installStep++
-		}
-		if msg.done {
-			a.installEvents = nil
-			return a.Update(installDoneMsg{err: msg.err, context: msg.context})
-		}
-		// Re-subscribe for the next event.
-		return a, a.listenInstallEventsCmd()
-
-	case installDoneMsg:
-		a.installRunning = false
-		a.installComplete = true
-		if msg.err != nil {
-			// Include context in error message for better debugging
-			if msg.context != "" {
-				a.lastError = fmt.Errorf("%v\n\nOutput:\n%s", msg.err, msg.context)
-			} else {
-				a.lastError = msg.err
-			}
-			return a, a.showError(a.lastError)
-		}
-		return a, nil
-
-	case userLoadedMsg:
-		if msg.err != nil {
-			a.usersStatus = fmt.Sprintf("Load failed: %v", msg.err)
-		} else {
-			a.usersItems = msg.users
-			a.usersStatus = ""
-		}
-		return a, nil
-
-	case userSavedMsg:
-		if msg.err != nil {
-			a.usersStatus = fmt.Sprintf("Save failed: %v", msg.err)
-		} else {
-			a.usersStatus = fmt.Sprintf("Saved %s ✓", msg.name)
-			// Reload user list
-			return a, loadUsersCmd()
-		}
-		return a, nil
-
-	case userDeletedMsg:
-		if msg.err != nil {
-			a.usersStatus = fmt.Sprintf("Delete failed: %v", msg.err)
-		} else {
-			a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
-			// Reload user list and adjust index
-			if a.usersIndex > 0 {
-				a.usersIndex--
-			}
-			return a, loadUsersCmd()
-		}
-		return a, nil
-
-	case userSwitchedMsg:
-		if msg.err != nil {
-			a.usersStatus = fmt.Sprintf("Switch failed: %v", msg.err)
-		} else {
-			a.usersStatus = fmt.Sprintf("Switched to %s ✓", msg.name)
-			// Reload user list to update active indicator
-			return a, loadUsersCmd()
-		}
-		return a, nil
-
-	case installLogMsg:
-		// Shared install/update streaming log line. The Manage streaming install
-		// uses the collect-then-message pattern (manageInstallWithLogsMsg), so this
-		// is currently emitted by neither path; it stays here (global) so any future
-		// per-line streamer works regardless of the active screen.
-		a.appendInstallLog(msg.line)
-		return a, nil
-
+		// Note: the intro animation (tickMsg / durdrawAvailableMsg / animationDoneMsg),
+		// the install flow (installStartMsg / sudoRequiredMsg / sudoCachedMsg /
+		// installOutputMsg / installEventMsg / installDoneMsg / installLogMsg) and the
+		// Users async results (userLoadedMsg / userSavedMsg / userDeletedMsg /
+		// userSwitchedMsg) are all handled by their migrated ScreenHandlers
+		// (animationScreen, progressScreen, usersScreen) via the ScreenManager, which
+		// delegates every non-navigation message to the active handler before this
+		// dispatch is reached. They therefore no longer appear here.
 	}
 
 	return a, nil
 }
 
 func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	// Note: ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
+	// All mouse-handling screens are now migrated to ScreenHandlers
+	// (ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
 	// ScreenFileTree, ScreenDeepDiveMenu, ALL ScreenConfig* screens, and the
-	// migrated management screens (ScreenManage, ScreenHotkeys, ScreenUpdate,
-	// ScreenBackups) are migrated to ScreenHandlers; the ScreenManager delegates
-	// their mouse events to the handler's Update before reaching this legacy
-	// dispatch, so they intentionally no longer appear here.
-	switch a.screen {
-	case ScreenUsers:
-		return a.handleUsersMouse(msg)
-	default:
-		return a, nil
-	}
+	// migrated management screens ScreenManage, ScreenUsers, ScreenHotkeys,
+	// ScreenUpdate, ScreenBackups). The ScreenManager delegates their mouse events
+	// to the handler's Update before reaching this legacy dispatch. The remaining
+	// legacy ScreenManage* detail screens have no mouse handling. This is kept as a
+	// no-op fallback for any non-managed legacy screen.
+	return a, nil
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -991,21 +847,22 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Delegate to screen-specific handlers
 	switch a.screen {
-	// Wizard screens
-	case ScreenAnimation, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
-		ScreenFileTree, ScreenProgress, ScreenSummary, ScreenError:
+	// Wizard screens (only Summary/Error remain legacy; ScreenAnimation,
+	// ScreenProgress, ScreenWelcome, ScreenThemePicker, ScreenNavPicker and
+	// ScreenFileTree are migrated to ScreenHandlers and handled by the manager).
+	case ScreenSummary, ScreenError:
 		return a.handleWizardKey(msg)
 
-	// Management screens
-	case ScreenUsers,
-		ScreenManageGhostty, ScreenManageTmux, ScreenManageZsh, ScreenManageNeovim,
+	// Management config detail screens (still legacy). ScreenUsers is now a
+	// migrated ScreenHandler and handled by the manager, so it is no longer here.
+	case ScreenManageGhostty, ScreenManageTmux, ScreenManageZsh, ScreenManageNeovim,
 		ScreenManageGit, ScreenManageYazi, ScreenManageFzf, ScreenManageLazyGit,
 		ScreenManageLazyDocker, ScreenManageBtop, ScreenManageGlow, ScreenManageClaudeCode:
 		return a.handleManagementKey(msg)
 
 		// Note: ScreenMainMenu, ScreenManage (live dual-pane), ScreenDeepDiveMenu,
 		// ALL ScreenConfig* screens, and the migrated management screens
-		// (ScreenHotkeys, ScreenUpdate, ScreenBackups) are migrated to
+		// (ScreenUsers, ScreenHotkeys, ScreenUpdate, ScreenBackups) are migrated to
 		// ScreenHandlers and handled by the ScreenManager before reaching this
 		// dispatch, so they intentionally no longer appear here.
 	}
@@ -1025,15 +882,11 @@ func (a *App) View() string {
 	// Note: ScreenWelcome, ScreenThemePicker, ScreenNavPicker, ScreenFileTree,
 	// ScreenMainMenu, ScreenSummary/ScreenError, ScreenDeepDiveMenu, the migrated
 	// config screens (ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,Fzf,Utilities,
-	// MacApps,...}), and the migrated management screens (ScreenManage,
-	// ScreenHotkeys, ScreenUpdate, ScreenBackups) are migrated to ScreenHandlers
-	// and rendered by the ScreenManager above; they no longer appear in this legacy
-	// switch.
+	// MacApps,...}), the migrated management screens (ScreenManage, ScreenHotkeys,
+	// ScreenUpdate, ScreenBackups, ScreenUsers), and the migrated wizard screens
+	// (ScreenAnimation, ScreenProgress) are migrated to ScreenHandlers and rendered
+	// by the ScreenManager above; they no longer appear in this legacy switch.
 	switch a.screen {
-	case ScreenAnimation:
-		return a.renderAnimation()
-	case ScreenProgress:
-		return a.renderProgress()
 	case ScreenSummary:
 		return a.renderSummary()
 	case ScreenError:
@@ -1063,8 +916,6 @@ func (a *App) View() string {
 		return a.renderManageGlow()
 	case ScreenManageClaudeCode:
 		return a.renderManageClaudeCode()
-	case ScreenUsers:
-		return a.renderUsersDualPane()
 	default:
 		return "Unknown screen"
 	}

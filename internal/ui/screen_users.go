@@ -176,37 +176,162 @@ func switchUserCmd(name string) tea.Cmd {
 	}
 }
 
-// handleUsersKey handles keyboard input on the Users screen
-func (a *App) handleUsersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// usersScreen is the migrated ScreenHandler for the Users dual-pane screen (the
+// management-tab "Users" entry: profile list + per-profile settings).
+//
+// State stays on App: the cached profile list (usersItems), the selection
+// (usersIndex / usersPane / usersFieldIndex), the load flag (usersLoaded), the
+// transient input modes (usersCreating / usersNewName / usersDeleting) and the
+// status line (usersStatus) are read/written through s.App(). The render helpers
+// (renderUsersListPane, renderUsersSettingsPane, renderUsersStatusBar) and the
+// field helpers (getUserFields, cycleUserFieldOption) remain methods on *App and
+// are reused unchanged.
+//
+// On-enter load: Init() loads the profile list via loadUsersCmd when it has not
+// already been loaded, mirroring the legacy on-enter trigger. The shared
+// startTabTargetLoad (used by tab navigation in the Manage/Users handlers) also
+// kicks this load before navigating, and both guard on usersLoaded, so the list
+// loads exactly once however the screen is entered.
+//
+// Async-in-handler: because the ScreenManager delegates every non-navigation
+// message to this handler while it is active, the Users async results are
+// handled here (not in App.Update): userLoadedMsg, userSavedMsg, userDeletedMsg,
+// userSwitchedMsg. The save/delete/switch results re-issue loadUsersCmd to
+// refresh the list. Deleting the active user clears ActiveUser inside
+// deleteUserCmd (the Phase B fix), preserved here.
+type usersScreen struct {
+	BaseScreen
+}
+
+// NewUsersScreen creates a new Users dual-pane screen handler.
+func NewUsersScreen(ctx *ScreenContext) *usersScreen {
+	s := &usersScreen{}
+	s.SetContext(ctx)
+	return s
+}
+
+// ID returns the screen identifier.
+func (s *usersScreen) ID() Screen { return ScreenUsers }
+
+// Init loads the profile list on entry (idempotent against usersLoaded).
+func (s *usersScreen) Init() tea.Cmd {
+	a := s.App()
+	if a == nil {
+		return nil
+	}
+	if !a.usersLoaded {
+		a.usersLoaded = true
+		return loadUsersCmd()
+	}
+	return nil
+}
+
+// navigateTab routes a management-tab switch through the ScreenManager and kicks
+// the destination's on-enter load (shared with the legacy tab navigation).
+func (s *usersScreen) navigateTab(target Screen) tea.Cmd {
+	a := s.App()
+	return tea.Batch(NavigateTo(target), startTabTargetLoad(a, target))
+}
+
+// Update handles keyboard, mouse, and the Users async result messages.
+func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
+	a := s.App()
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return s, tea.Quit
+		}
+		// 'q' quits except while typing a new user name (so it doesn't quit
+		// mid-entry). This mirrors the legacy global quit guard, which only
+		// special-cased ScreenManage's inline editor; here the name-entry mode is
+		// the equivalent text-capture state for Users.
+		if msg.String() == "q" && !a.usersCreating {
+			return s, tea.Quit
+		}
+		return s, s.handleKey(msg)
+
+	case tea.MouseMsg:
+		return s, s.handleMouse(msg)
+
+	// --- Async results (delegated here while this screen is active) ---
+	case userLoadedMsg:
+		if msg.err != nil {
+			a.usersStatus = fmt.Sprintf("Load failed: %v", msg.err)
+		} else {
+			a.usersItems = msg.users
+			a.usersStatus = ""
+		}
+		return s, nil
+
+	case userSavedMsg:
+		if msg.err != nil {
+			a.usersStatus = fmt.Sprintf("Save failed: %v", msg.err)
+		} else {
+			a.usersStatus = fmt.Sprintf("Saved %s ✓", msg.name)
+			// Reload user list.
+			return s, loadUsersCmd()
+		}
+		return s, nil
+
+	case userDeletedMsg:
+		if msg.err != nil {
+			a.usersStatus = fmt.Sprintf("Delete failed: %v", msg.err)
+		} else {
+			a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
+			// Reload user list and adjust index.
+			if a.usersIndex > 0 {
+				a.usersIndex--
+			}
+			return s, loadUsersCmd()
+		}
+		return s, nil
+
+	case userSwitchedMsg:
+		if msg.err != nil {
+			a.usersStatus = fmt.Sprintf("Switch failed: %v", msg.err)
+		} else {
+			a.usersStatus = fmt.Sprintf("Switched to %s ✓", msg.name)
+			// Reload user list to update active indicator.
+			return s, loadUsersCmd()
+		}
+		return s, nil
+	}
+	return s, nil
+}
+
+// handleKey ports the legacy handleUsersKey, returning a tea.Cmd and routing
+// navigation through the ScreenManager (NavigateTo) instead of poking a.screen.
+func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
+	a := s.App()
 	key := msg.String()
 
-	// Handle new user name input
+	// Handle new user name input.
 	if a.usersCreating {
 		switch key {
 		case "esc":
 			a.usersCreating = false
 			a.usersNewName = ""
-			return a, nil
+			return nil
 		case "enter":
 			if a.usersNewName != "" {
 				if err := config.ValidateUsername(a.usersNewName); err != nil {
 					a.usersStatus = fmt.Sprintf("Invalid: %v", err)
-					return a, nil
+					return nil
 				}
-				// Create with defaults
+				// Create with defaults.
 				a.usersCreating = false
 				name := a.usersNewName
 				a.usersNewName = ""
-				return a, saveUserCmd(name, "catppuccin-mocha", "emacs", "linux")
+				return saveUserCmd(name, "catppuccin-mocha", "emacs", "linux")
 			}
-			return a, nil
+			return nil
 		case "backspace":
 			if len(a.usersNewName) > 0 {
 				a.usersNewName = a.usersNewName[:len(a.usersNewName)-1]
 			}
-			return a, nil
+			return nil
 		default:
-			// Add character to name (only alphanumeric, underscore, hyphen)
+			// Add character to name (only alphanumeric, underscore, hyphen).
 			if len(key) == 1 && len(a.usersNewName) < 32 {
 				c := key[0]
 				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -215,41 +340,45 @@ func (a *App) handleUsersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					a.usersNewName += key
 				}
 			}
-			return a, nil
+			return nil
 		}
 	}
 
-	// Handle delete confirmation
+	// Handle delete confirmation.
 	if a.usersDeleting {
 		switch key {
 		case "y", "Y":
 			a.usersDeleting = false
 			if a.usersIndex < len(a.usersItems) {
 				name := a.usersItems[a.usersIndex].name
-				return a, deleteUserCmd(name)
+				return deleteUserCmd(name)
 			}
-			return a, nil
+			return nil
 		case "n", "N", "esc":
 			a.usersDeleting = false
-			return a, nil
+			return nil
 		}
-		return a, nil
+		return nil
 	}
 
-	// Tab navigation (number keys for tabs)
-	if handled, cmd := a.handleTabNavigationWithCmd(key); handled {
-		return a, cmd
+	// Tab navigation (number keys for tabs). A number key for the already-active
+	// tab is a no-op.
+	if target, ok := tabNavigationTarget(key); ok {
+		if target == s.ID() {
+			return nil
+		}
+		return s.navigateTab(target)
 	}
 
 	switch key {
 	case "tab", "shift+tab":
-		// Toggle pane
+		// Toggle pane.
 		if a.usersPane == usersPaneList {
 			a.usersPane = usersPaneSettings
 		} else {
 			a.usersPane = usersPaneList
 		}
-		return a, nil
+		return nil
 
 	case "up", "k":
 		if a.usersPane == usersPaneList {
@@ -261,7 +390,7 @@ func (a *App) handleUsersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.usersFieldIndex--
 			}
 		}
-		return a, nil
+		return nil
 
 	case "down", "j":
 		if a.usersPane == usersPaneList {
@@ -274,7 +403,7 @@ func (a *App) handleUsersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.usersFieldIndex++
 			}
 		}
-		return a, nil
+		return nil
 
 	case "left", "h":
 		if a.usersPane == usersPaneSettings {
@@ -283,11 +412,11 @@ func (a *App) handleUsersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				f := fields[a.usersFieldIndex]
 				if f.kind == userFieldOption {
 					a.cycleUserFieldOption(f, -1)
-					return a, nil
+					return nil
 				}
 			}
 		}
-		return a, nil
+		return nil
 
 	case "right", "l":
 		if a.usersPane == usersPaneSettings {
@@ -296,21 +425,21 @@ func (a *App) handleUsersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				f := fields[a.usersFieldIndex]
 				if f.kind == userFieldOption {
 					a.cycleUserFieldOption(f, 1)
-					return a, nil
+					return nil
 				}
 			}
 		}
-		return a, nil
+		return nil
 
 	case "enter":
 		if a.usersPane == usersPaneList {
-			// Switch to selected user
+			// Switch to selected user.
 			if a.usersIndex < len(a.usersItems) {
 				name := a.usersItems[a.usersIndex].name
-				return a, switchUserCmd(name)
+				return switchUserCmd(name)
 			}
 		} else {
-			// Cycle option field
+			// Cycle option field.
 			fields := a.getUserFields()
 			if a.usersFieldIndex < len(fields) {
 				f := fields[a.usersFieldIndex]
@@ -319,39 +448,40 @@ func (a *App) handleUsersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return a, nil
+		return nil
 
 	case "n", "a":
-		// New user
+		// New user.
 		a.usersCreating = true
 		a.usersNewName = ""
-		return a, nil
+		return nil
 
 	case "d", "x":
-		// Delete user (with confirmation)
+		// Delete user (with confirmation).
 		if len(a.usersItems) > 0 && a.usersIndex < len(a.usersItems) {
 			a.usersDeleting = true
 		}
-		return a, nil
+		return nil
 
 	case "s":
-		// Save current user's settings
+		// Save current user's settings.
 		if len(a.usersItems) > 0 && a.usersIndex < len(a.usersItems) {
 			item := a.usersItems[a.usersIndex]
-			return a, saveUserCmd(item.name, item.theme, item.navStyle, item.keyboard)
+			return saveUserCmd(item.name, item.theme, item.navStyle, item.keyboard)
 		}
-		return a, nil
+		return nil
 
 	case "r":
-		// Refresh user list
-		return a, loadUsersCmd()
+		// Refresh user list.
+		return loadUsersCmd()
 
-	case "q", "esc":
-		// ScreenMainMenu is migrated; route through the ScreenManager.
-		return a, NavigateTo(ScreenMainMenu)
+	case "esc":
+		// ScreenMainMenu is migrated; route through the ScreenManager. ('q' is
+		// handled as quit in Update, matching the legacy global quit.)
+		return NavigateTo(ScreenMainMenu)
 	}
 
-	return a, nil
+	return nil
 }
 
 // getUserFields returns the editable fields for the current user
@@ -430,11 +560,22 @@ func (a *App) cycleUserFieldOption(f userField, delta int) {
 	a.usersStatus = "Modified (press 's' to save)"
 }
 
-// handleUsersMouse handles mouse input on the Users screen
-func (a *App) handleUsersMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	// Tab bar is a single line at Y=0 (see RenderTabBar in styles.go).
-	if msg.Y == 0 {
-		return a.handleTabBarMouse(msg)
+// handleMouse ports the legacy handleUsersMouse. Tab-bar clicks route through
+// the ScreenManager (NavigateTo via navigateTab); list/field clicks update the
+// selection. The hit detection matches what View draws.
+func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
+	a := s.App()
+	m := tea.MouseEvent(msg)
+
+	// Tab bar is a single line at Y=0 (see RenderTabBar in styles.go). Ignore a
+	// click on the already-active tab (this screen).
+	if m.Y == 0 {
+		if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+			if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+				return s.navigateTab(screen)
+			}
+		}
+		return nil
 	}
 
 	// Row of the first selectable item within either pane. The layout is:
@@ -444,21 +585,21 @@ func (a *App) handleUsersMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// the first row.
 	const firstRowY = usersTabBarRows + usersHeaderRows
 
-	// Handle list clicks
-	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-		// Check if click is in the left pane (user list)
+	// Handle list clicks.
+	if m.Button == tea.MouseButtonLeft && m.Action == tea.MouseActionPress {
+		// Check if click is in the left pane (user list).
 		leftPaneWidth := a.width / 3
-		if msg.X < leftPaneWidth {
+		if m.X < leftPaneWidth {
 			a.usersPane = usersPaneList
 			// Calculate which user was clicked (accounting for header).
-			userIdx := msg.Y - firstRowY
+			userIdx := m.Y - firstRowY
 			if userIdx >= 0 && userIdx < len(a.usersItems) {
 				a.usersIndex = userIdx
 			}
 		} else {
 			a.usersPane = usersPaneSettings
 			// Calculate which field was clicked.
-			fieldIdx := msg.Y - firstRowY
+			fieldIdx := m.Y - firstRowY
 			fields := a.getUserFields()
 			if fieldIdx >= 0 && fieldIdx < len(fields) {
 				a.usersFieldIndex = fieldIdx
@@ -466,18 +607,24 @@ func (a *App) handleUsersMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	return a, nil
+	return nil
 }
 
-// renderUsersDualPane renders the Users management screen
-func (a *App) renderUsersDualPane() string {
-	// Load users if not already loaded
-	if !a.usersLoaded {
-		a.usersLoaded = true
-		// Trigger async load - will be handled via message
+// View renders the Users management screen. It ports renderUsersDualPane,
+// reading the live App state (the layout uses a.width/a.height, kept in sync
+// with the manager's ctx on WindowSizeMsg). The width/height args are accepted
+// for interface conformance and used as a fallback when the App dimensions are
+// not yet set.
+func (s *usersScreen) View(width, height int) string {
+	a := s.App()
+	if a.width == 0 || a.height == 0 {
+		if width <= 0 || height <= 0 {
+			return "Loading..."
+		}
+		a.width, a.height = width, height
 	}
 
-	// Tab bar at top
+	// Tab bar at top.
 	tabBar := RenderTabBar(ScreenUsers, a.width)
 
 	// Calculate pane dimensions
