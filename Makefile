@@ -1,8 +1,7 @@
-.PHONY: build build-all install test clean run dev
+.PHONY: build install test clean run dev
 
 # Binary names
 DOTFILES_BIN = bin/dotfiles
-INSTALLER_BIN = bin/dotfiles-installer
 SETUP_SCRIPT = bin/dotfiles-setup
 
 # Go build flags
@@ -13,11 +12,6 @@ VERSION = 2.0.1
 build:
 	@echo "Building dotfiles CLI..."
 	go build -ldflags "$(LDFLAGS) -X main.version=$(VERSION)" -o $(DOTFILES_BIN) ./cmd/dotfiles
-
-# Build both the new CLI and legacy installer
-build-all: build
-	@echo "Building legacy installer..."
-	go build -ldflags "$(LDFLAGS)" -o $(INSTALLER_BIN) ./cmd/installer
 
 # Build for development (with debug info)
 dev:
@@ -62,7 +56,7 @@ test-coverage:
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	rm -f $(INSTALLER_BIN)
+	rm -f $(DOTFILES_BIN)
 	rm -f coverage.out coverage.html
 
 # Format code
@@ -97,9 +91,9 @@ release:
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  build        - Build the installer binary"
+	@echo "  build        - Build the dotfiles CLI binary"
 	@echo "  dev          - Build with debug info"
-	@echo "  run          - Build and run the installer"
+	@echo "  run          - Build and run the dotfiles CLI"
 	@echo "  run-quick    - Run without intro animation"
 	@echo "  install      - Install to /usr/local/bin"
 	@echo "  test         - Run tests"
