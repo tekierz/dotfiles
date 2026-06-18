@@ -7,38 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// handleTabBarMouse handles tab-bar clicks for the still-legacy screens that use
-// the management tab bar (currently the Users screen). For migrated tab
-// destinations (Hotkeys, Update, Backups) it routes through the ScreenManager
-// via NavigateTo so the manager enters managed mode; for legacy destinations it
-// switches a.screen directly. Either way it kicks the destination's on-enter
-// load.
-func (a *App) handleTabBarMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	m := tea.MouseEvent(msg)
-
-	// Only handle left clicks
-	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
-		return a, nil
-	}
-
-	// Tab bar is at Y=0 (first line)
-	if m.Y != 0 {
-		return a, nil
-	}
-
-	// Check if click is on a tab
-	if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != a.screen {
-		load := startTabTargetLoad(a, screen)
-		if isManagedScreen(screen) {
-			return a, tea.Batch(NavigateTo(screen), load)
-		}
-		a.screen = screen
-		return a, load
-	}
-
-	return a, nil
-}
-
 // detectTabClick determines which management tab was clicked based on the X
 // position, returning the target screen (or 0 if no tab was clicked).
 //

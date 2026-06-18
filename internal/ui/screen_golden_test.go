@@ -578,9 +578,9 @@ func TestConfigMacAppsToggleAndBack(t *testing.T) {
 // NavigateTo(ScreenConfigGhostty) and renders the Ghostty config through the
 // factory.
 func TestConfigGhosttyReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
 	// Pre-populate cache so any install-aware screens render deterministically.
@@ -943,9 +943,9 @@ func TestConfigClaudeCodeToggleAndBack(t *testing.T) {
 // NavigateTo(ScreenConfigClaudeCode) and renders the Claude Code MCP config
 // through the factory.
 func TestConfigClaudeCodeReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
 	app.manageInstalled = map[string]bool{}
@@ -970,9 +970,9 @@ func TestConfigClaudeCodeReachableViaManager(t *testing.T) {
 // with the ScreenManager enters managed mode on NavigateTo(ScreenWelcome) and
 // renders the welcome content through the factory.
 func TestWelcomeReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
 
@@ -1005,12 +1005,12 @@ func TestWelcomeReachableViaManager(t *testing.T) {
 // built with the ScreenManager enters managed mode on NavigateTo(ScreenError)
 // and renders the real error through the factory (fixes finding #40 end-to-end).
 func TestMigratedScreensReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	if app.screenFactory == nil {
-		t.Fatal("WithScreenFactory should initialize screenFactory")
+		t.Fatal("NewApp should always initialize screenFactory")
 	}
 	if app.screenMgr.Context().app != app {
 		t.Fatal("ScreenContext.app should be wired to the App")
@@ -1460,9 +1460,9 @@ func TestManageScreenInstalledBadge(t *testing.T) {
 // built with the ScreenManager enters managed mode on NavigateTo(ScreenManage)
 // and renders the dual-pane through the factory.
 func TestManageScreenReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
 	app.width, app.height = 80, 24
@@ -1618,9 +1618,9 @@ func TestManageScreenInitLoadsCache(t *testing.T) {
 // the three migrated management screens: an App built with the ScreenManager
 // enters managed mode on NavigateTo and renders each through the factory.
 func TestManagementScreensReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
 
@@ -1751,9 +1751,8 @@ func TestAnimationScreenTickAdvancesFrame(t *testing.T) {
 	}
 
 	// At the final frame, the tick transitions via postIntroTransition (which sets
-	// animationDone and routes to the post-intro screen). This context has no
-	// ScreenManager wired (NewApp without WithScreenFactory), so the transition
-	// command is nil in the legacy fallback; assert the state transition instead.
+	// animationDone and routes to the post-intro screen through the ScreenManager).
+	// Assert the state transition (animationDone) rather than the returned command.
 	ctx.app.animFrame = introAnimationFrames
 	ctx.app.animationDone = false
 	screen.Update(tickMsg(time.Now()))
@@ -1791,9 +1790,9 @@ func TestAnimationScreenInit(t *testing.T) {
 // TestAnimationScreenReachableViaManager verifies an App built with the manager
 // enters managed mode on NavigateTo(ScreenAnimation) and renders the intro.
 func TestAnimationScreenReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
 	app.width, app.height = 80, 24
@@ -1964,19 +1963,22 @@ func TestProgressScreenInstallDoneError(t *testing.T) {
 	ctx.app.installRunning = true
 
 	screen := NewProgressScreen(ctx)
-	screen.Update(installEventMsg{done: true, err: errors.New("boom"), context: "last lines"})
+	_, cmd := screen.Update(installEventMsg{done: true, err: errors.New("boom"), context: "last lines"})
 	if ctx.app.lastError == nil || !strings.Contains(ctx.app.lastError.Error(), "boom") {
 		t.Errorf("done error event should record lastError, got %v", ctx.app.lastError)
 	}
 	if !strings.Contains(ctx.app.lastError.Error(), "last lines") {
 		t.Errorf("done error event should include the output context, got %v", ctx.app.lastError)
 	}
-	// In this no-manager context, showError() falls back to setting a.screen
-	// (returns a nil cmd); the error-screen routing with a non-nil NavigateTo cmd
-	// is covered by the *ReachableViaManager tests. Here we assert the error state
-	// and the legacy fallback target.
-	if ctx.app.screen != ScreenError {
-		t.Errorf("done error event should route to the error screen, a.screen = %v", ctx.app.screen)
+	// showError now always routes through the ScreenManager: it sets the error on
+	// the factory and returns a NavigateTo(ScreenError) command. Assert the error
+	// state and that the returned command navigates to the error screen.
+	if cmd == nil {
+		t.Fatal("done error event should return a NavigateTo(ScreenError) command")
+	}
+	nav, ok := cmd().(NavigateMsg)
+	if !ok || nav.To != ScreenError {
+		t.Errorf("done error event should navigate to ScreenError, got %#v", cmd())
 	}
 }
 
@@ -1985,9 +1987,9 @@ func TestProgressScreenInstallDoneError(t *testing.T) {
 // screen through the factory. (Init triggers the install; on a non-Linux host
 // startInstallation runs without a sudo prompt, so the render is still safe.)
 func TestProgressScreenReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
 	app.width, app.height = 80, 24
@@ -2174,9 +2176,9 @@ func TestUsersScreenInitLoads(t *testing.T) {
 // enters managed mode on NavigateTo(ScreenUsers) and renders the dual-pane
 // through the factory.
 func TestUsersScreenReachableViaManager(t *testing.T) {
-	app := NewApp(true, WithScreenFactory())
+	app := NewApp(true)
 	if app.screenMgr == nil {
-		t.Fatal("WithScreenFactory should initialize screenMgr")
+		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
 	app.width, app.height = 80, 24

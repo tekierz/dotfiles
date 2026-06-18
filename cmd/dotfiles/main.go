@@ -342,7 +342,7 @@ func main() {
 
 // launchTUI launches the TUI at a specific screen
 func launchTUI(screen ui.Screen) {
-	app := ui.NewApp(skipIntro, ui.WithScreenFactory())
+	app := ui.NewApp(skipIntro)
 	app.SetStartScreen(screen)
 
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
@@ -354,7 +354,7 @@ func launchTUI(screen ui.Screen) {
 
 // launchToolConfig launches TUI for a specific tool config
 func launchToolConfig(tool string) {
-	app := ui.NewApp(true, ui.WithScreenFactory())
+	app := ui.NewApp(true)
 
 	screen, ok := ui.GetToolConfigScreen(tool)
 	if !ok {
@@ -374,7 +374,7 @@ func launchToolConfig(tool string) {
 
 // launchHotkeysFiltered launches hotkey viewer filtered to a tool
 func launchHotkeysFiltered(tool string) {
-	app := ui.NewApp(true, ui.WithScreenFactory())
+	app := ui.NewApp(true)
 	app.SetStartScreen(ui.ScreenHotkeys)
 	app.SetHotkeyFilter(tool)
 

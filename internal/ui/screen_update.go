@@ -287,8 +287,8 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// handleMouse handles tab-bar clicks on the update screen (mirrors the legacy
-// handleTabBarMouse, but routes through the ScreenManager via NavigateTo).
+// handleMouse handles tab-bar clicks on the update screen (routes through the
+// ScreenManager via NavigateTo).
 func (s *updateScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	a := s.App()
 	m := tea.MouseEvent(msg)

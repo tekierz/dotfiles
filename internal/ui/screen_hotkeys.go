@@ -68,9 +68,8 @@ func (s *hotkeysScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 }
 
 // navigateTab routes a management-tab switch through the ScreenManager and
-// triggers any on-enter async load the target needs (mirrors the legacy
-// handleTabNavigationWithCmd behavior, but via NavigateTo so migrated siblings
-// enter managed mode and legacy siblings fall back).
+// triggers any on-enter async load the target needs (via NavigateTo so the
+// sibling tab enters managed mode).
 func (s *hotkeysScreen) navigateTab(target Screen) tea.Cmd {
 	a := s.App()
 	return tea.Batch(NavigateTo(target), startTabTargetLoad(a, target))

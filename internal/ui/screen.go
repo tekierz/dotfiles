@@ -63,10 +63,10 @@ type ScreenContext struct {
 	// Dependencies (injected)
 	Deps *Dependencies
 
-	// app is the owning App instance. During the incremental ScreenHandler
-	// migration, handlers reach shared App state (e.g. deepDiveConfig,
-	// manageConfig, theme) through this. It is unexported so external packages
-	// cannot depend on it; it is wired in WithScreenFactory.
+	// app is the owning App instance. Screen handlers reach shared App state
+	// (e.g. deepDiveConfig, manageConfig, theme) through this. It is unexported
+	// so external packages cannot depend on it; it is wired by NewApp when it
+	// initializes the ScreenManager.
 	app *App
 
 	// Shared state that screens can read/modify

@@ -38,7 +38,7 @@ func NewClaudeCodeTool() *ClaudeCodeTool {
 			},
 			// UI metadata
 			uiGroup:        UIGroupCLITools,
-			configScreen:   43, // ScreenConfigClaudeCode - has dedicated MCP config screen
+			configScreen:   32, // ScreenConfigClaudeCode - has dedicated MCP config screen
 			defaultEnabled: false,
 		},
 	}

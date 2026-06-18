@@ -64,20 +64,7 @@ const (
 	ScreenConfigLazyDocker
 	ScreenConfigBtop
 	ScreenConfigGlow
-	// Management config screens (detailed)
-	ScreenManageGhostty
-	ScreenManageTmux
-	ScreenManageZsh
-	ScreenManageNeovim
-	ScreenManageGit
-	ScreenManageYazi
-	ScreenManageFzf
-	ScreenManageLazyGit
-	ScreenManageLazyDocker
-	ScreenManageBtop
-	ScreenManageGlow
 	ScreenConfigClaudeCode
-	ScreenManageClaudeCode
 )
 
 // Available themes
@@ -245,54 +232,42 @@ type App struct {
 // AppOption configures optional App parameters
 type AppOption func(*App)
 
-// WithScreenFactory enables the ScreenManager for migrated screens, backed by
-// the App's own Factory. The App owns the Factory so transition sites can set
+// initScreenManager wires the App's Factory and ScreenManager. Every live
+// screen is a migrated ScreenHandler, so the manager is mandatory and is built
+// during NewApp. The App owns the Factory so transition sites can set
 // per-screen data (such as the error to display) before navigating.
-func WithScreenFactory() AppOption {
-	return func(a *App) {
-		if a.screenFactory == nil {
-			a.screenFactory = NewFactory()
-		}
-		deps := NewDependencies()
-		ctx := NewScreenContext(deps)
-		// Connect the context to this App so handlers can reach shared App
-		// state (theme, deepDiveConfig, etc.) through ScreenContext.app.
-		ctx.app = a
-		ctx.Theme = a.theme
-		ctx.NavStyle = a.navStyle
-		ctx.AnimationsEnabled = a.animationsEnabled
-		a.screenMgr = NewScreenManager(ctx, a.screenFactory.CreateFactory())
+func (a *App) initScreenManager() {
+	if a.screenFactory == nil {
+		a.screenFactory = NewFactory()
 	}
+	deps := NewDependencies()
+	ctx := NewScreenContext(deps)
+	// Connect the context to this App so handlers can reach shared App
+	// state (theme, deepDiveConfig, etc.) through ScreenContext.app.
+	ctx.app = a
+	ctx.Theme = a.theme
+	ctx.NavStyle = a.navStyle
+	ctx.AnimationsEnabled = a.animationsEnabled
+	a.screenMgr = NewScreenManager(ctx, a.screenFactory.CreateFactory())
 }
 
-// showError transitions to the error screen. When the ScreenManager is active
-// it sets the error on the factory and navigates through the manager (so the
-// migrated ErrorScreen renders with the real error); otherwise it falls back to
-// the legacy screen field. The caller is responsible for setting a.lastError.
+// showError transitions to the error screen: it sets the error on the factory
+// and navigates through the manager so the ErrorScreen renders with the real
+// error. The caller is responsible for setting a.lastError.
 func (a *App) showError(err error) tea.Cmd {
-	if a.screenMgr != nil && a.screenFactory != nil {
-		a.screenFactory.SetError(err)
-		return NavigateTo(ScreenError)
-	}
-	a.screen = ScreenError
-	return nil
+	a.screenFactory.SetError(err)
+	return NavigateTo(ScreenError)
 }
 
-// showSummary transitions to the summary screen, preferring the managed
-// ScreenManager path and falling back to the legacy screen field.
+// showSummary transitions to the summary screen through the ScreenManager.
 func (a *App) showSummary() tea.Cmd {
-	if a.screenMgr != nil && a.screenFactory != nil {
-		return NavigateTo(ScreenSummary)
-	}
-	a.screen = ScreenSummary
-	return nil
+	return NavigateTo(ScreenSummary)
 }
 
 // postIntroTransition lands on the post-intro screen after the intro animation
 // finishes (or is skipped). It routes navigation through the ScreenManager so
-// migrated post-intro screens (Welcome, MainMenu, ThemePicker) enter managed
-// mode, and batches any on-enter async load the destination needs. When the
-// manager is not wired it falls back to setting the legacy screen field.
+// the post-intro screen (Welcome, MainMenu, ThemePicker) enters managed mode,
+// and batches any on-enter async load the destination needs.
 func (a *App) postIntroTransition() tea.Cmd {
 	a.animationDone = true
 	target := a.postIntroScreen
@@ -308,17 +283,11 @@ func (a *App) postIntroTransition() tea.Cmd {
 		async = a.startInstallCacheLoad()
 	}
 
-	if a.screenMgr != nil {
-		nav := NavigateTo(target)
-		if async != nil {
-			return tea.Batch(nav, async)
-		}
-		return nav
+	nav := NavigateTo(target)
+	if async != nil {
+		return tea.Batch(nav, async)
 	}
-
-	// Legacy fallback (manager not wired, e.g. some tests).
-	a.screen = target
-	return async
+	return nav
 }
 
 // NewApp creates a new application instance
@@ -380,10 +349,18 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		app.screen = ScreenAnimation
 	}
 
-	// Apply options (e.g., screen factory)
+	// Apply any options before wiring the manager so they can set fields the
+	// manager's context reads (theme, nav style, animations).
 	for _, opt := range opts {
 		opt(app)
 	}
+
+	// Every live screen is a migrated ScreenHandler, so the ScreenManager is
+	// mandatory. Wire it and eagerly enter managed mode on the start screen so
+	// the first rendered frame (which Bubble Tea draws before Init's command is
+	// processed) is never blank.
+	app.initScreenManager()
+	app.screenMgr.Navigate(app.screen)
 
 	return app
 }
@@ -391,15 +368,13 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 // Init initializes the application
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{}
-	// Drive the start screen through the ScreenManager so migrated screens enter
-	// managed mode and their Init() runs. The intro animation
-	// (animationScreen.Init) issues tickAnimation()+checkDurdraw(); the Update
-	// screen (updateScreen.Init) kicks the update check; the Progress screen
-	// (progressScreen.Init) triggers the install. App.Init therefore must NOT
-	// duplicate those, or they would double-fire.
-	if a.screenMgr != nil {
-		cmds = append(cmds, NavigateTo(a.screen))
-	}
+	// Drive the start screen through the ScreenManager so the screen's Init()
+	// runs. The intro animation (animationScreen.Init) issues
+	// tickAnimation()+checkDurdraw(); the Update screen (updateScreen.Init) kicks
+	// the update check; the Progress screen (progressScreen.Init) triggers the
+	// install. App.Init therefore must NOT duplicate those, or they would
+	// double-fire.
+	cmds = append(cmds, NavigateTo(a.screen))
 	if a.animationsEnabled {
 		cmds = append(cmds, tickUI())
 	}
@@ -756,24 +731,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		a.width = wsm.Width
 		a.height = wsm.Height
-		if a.screenMgr != nil {
-			a.screenMgr.SetSize(wsm.Width, wsm.Height)
-		}
+		a.screenMgr.SetSize(wsm.Width, wsm.Height)
 		return a, nil
 	}
 
-	// uiTickMsg drives the global animation frame counter for ALL screens
-	// (legacy and managed). It must be handled before delegating to the manager:
-	// in managed mode the manager would consume the message and the tickUI() chain
-	// would never be re-issued, freezing the animated header on migrated screens.
+	// uiTickMsg drives the global animation frame counter for all screens. It
+	// must be handled before delegating to the manager: the manager would
+	// otherwise consume the message and the tickUI() chain would never be
+	// re-issued, freezing the animated header.
 	if _, ok := msg.(uiTickMsg); ok {
 		if !a.animationsEnabled {
 			return a, nil
 		}
 		a.uiFrame++
-		if a.screenMgr != nil {
-			a.screenMgr.IncrementUIFrame()
-		}
+		a.screenMgr.IncrementUIFrame()
 		return a, tickUI()
 	}
 
@@ -789,136 +760,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Delegate to screen manager for navigation messages and migrated screens
-	if a.screenMgr != nil {
-		if cmd, handled := a.screenMgr.Update(msg); handled {
-			// Sync legacy screen field with manager's current legacy screen
-			if a.screenMgr.IsLegacyMode() {
-				a.screen = a.screenMgr.LegacyScreen()
-			}
-			return a, cmd
-		}
-	}
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		return a.handleKey(msg)
-
-	case tea.MouseMsg:
-		return a.handleMouse(msg)
-
-		// Note: the intro animation (tickMsg / durdrawAvailableMsg / animationDoneMsg),
-		// the install flow (installStartMsg / sudoRequiredMsg / sudoCachedMsg /
-		// installOutputMsg / installEventMsg / installDoneMsg / installLogMsg) and the
-		// Users async results (userLoadedMsg / userSavedMsg / userDeletedMsg /
-		// userSwitchedMsg) are all handled by their migrated ScreenHandlers
-		// (animationScreen, progressScreen, usersScreen) via the ScreenManager, which
-		// delegates every non-navigation message to the active handler before this
-		// dispatch is reached. They therefore no longer appear here.
-	}
-
-	return a, nil
+	// Every live screen is a migrated ScreenHandler, so the ScreenManager owns
+	// all input and async messages. In managed mode it handles every message
+	// (returning handled=true), including the per-screen ctrl+c/q quit. Any
+	// message it does not claim (e.g. before the first navigation lands) is a
+	// no-op here.
+	//
+	// Note: the intro animation (tickMsg / durdrawAvailableMsg / animationDoneMsg),
+	// the install flow (installStartMsg / sudoRequiredMsg / sudoCachedMsg /
+	// installOutputMsg / installEventMsg / installDoneMsg / installLogMsg) and the
+	// Users async results (userLoadedMsg / userSavedMsg / userDeletedMsg /
+	// userSwitchedMsg) are all handled by their migrated ScreenHandlers via the
+	// ScreenManager, which delegates every non-navigation message to the active
+	// handler.
+	cmd, _ := a.screenMgr.Update(msg)
+	return a, cmd
 }
 
-func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	// All mouse-handling screens are now migrated to ScreenHandlers
-	// (ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
-	// ScreenFileTree, ScreenDeepDiveMenu, ALL ScreenConfig* screens, and the
-	// migrated management screens ScreenManage, ScreenUsers, ScreenHotkeys,
-	// ScreenUpdate, ScreenBackups). The ScreenManager delegates their mouse events
-	// to the handler's Update before reaching this legacy dispatch. The remaining
-	// legacy ScreenManage* detail screens have no mouse handling. This is kept as a
-	// no-op fallback for any non-managed legacy screen.
-	return a, nil
-}
-
-func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
-	// Global quit handlers
-	if key == "ctrl+c" {
-		return a, tea.Quit
-	}
-
-	// 'q' quits from any screen except during installation
-	if key == "q" && !a.installRunning && !(a.screen == ScreenManage && a.manageEditing) {
-		return a, tea.Quit
-	}
-
-	// Delegate to screen-specific handlers
-	switch a.screen {
-	// Wizard screens (only Summary/Error remain legacy; ScreenAnimation,
-	// ScreenProgress, ScreenWelcome, ScreenThemePicker, ScreenNavPicker and
-	// ScreenFileTree are migrated to ScreenHandlers and handled by the manager).
-	case ScreenSummary, ScreenError:
-		return a.handleWizardKey(msg)
-
-	// Management config detail screens (still legacy). ScreenUsers is now a
-	// migrated ScreenHandler and handled by the manager, so it is no longer here.
-	case ScreenManageGhostty, ScreenManageTmux, ScreenManageZsh, ScreenManageNeovim,
-		ScreenManageGit, ScreenManageYazi, ScreenManageFzf, ScreenManageLazyGit,
-		ScreenManageLazyDocker, ScreenManageBtop, ScreenManageGlow, ScreenManageClaudeCode:
-		return a.handleManagementKey(msg)
-
-		// Note: ScreenMainMenu, ScreenManage (live dual-pane), ScreenDeepDiveMenu,
-		// ALL ScreenConfig* screens, and the migrated management screens
-		// (ScreenUsers, ScreenHotkeys, ScreenUpdate, ScreenBackups) are migrated to
-		// ScreenHandlers and handled by the ScreenManager before reaching this
-		// dispatch, so they intentionally no longer appear here.
-	}
-
-	return a, nil
-}
-
-// View renders the UI
+// View renders the UI through the ScreenManager. Every live screen is a
+// migrated ScreenHandler, so the manager always renders the current screen.
 func (a *App) View() string {
-	// Try screen manager for migrated screens first
-	if a.screenMgr != nil && !a.screenMgr.IsLegacyMode() {
-		if view := a.screenMgr.View(); view != "" {
-			return view
-		}
+	// Defensive: if no navigation has landed yet (manager still in its initial
+	// legacy state), enter managed mode on the start screen so the first frame
+	// is never blank. App.Init also navigates to run the handler's Init command.
+	if a.screenMgr.IsLegacyMode() {
+		a.screenMgr.Navigate(a.screen)
 	}
-
-	// Note: ScreenWelcome, ScreenThemePicker, ScreenNavPicker, ScreenFileTree,
-	// ScreenMainMenu, ScreenSummary/ScreenError, ScreenDeepDiveMenu, the migrated
-	// config screens (ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,Fzf,Utilities,
-	// MacApps,...}), the migrated management screens (ScreenManage, ScreenHotkeys,
-	// ScreenUpdate, ScreenBackups, ScreenUsers), and the migrated wizard screens
-	// (ScreenAnimation, ScreenProgress) are migrated to ScreenHandlers and rendered
-	// by the ScreenManager above; they no longer appear in this legacy switch.
-	switch a.screen {
-	case ScreenSummary:
-		return a.renderSummary()
-	case ScreenError:
-		return a.renderError()
-	// Management platform screens
-	case ScreenManageGhostty:
-		return a.renderManageGhostty()
-	case ScreenManageTmux:
-		return a.renderManageTmux()
-	case ScreenManageZsh:
-		return a.renderManageZsh()
-	case ScreenManageNeovim:
-		return a.renderManageNeovim()
-	case ScreenManageGit:
-		return a.renderManageGit()
-	case ScreenManageYazi:
-		return a.renderManageYazi()
-	case ScreenManageFzf:
-		return a.renderManageFzf()
-	case ScreenManageLazyGit:
-		return a.renderManageLazyGit()
-	case ScreenManageLazyDocker:
-		return a.renderManageLazyDocker()
-	case ScreenManageBtop:
-		return a.renderManageBtop()
-	case ScreenManageGlow:
-		return a.renderManageGlow()
-	case ScreenManageClaudeCode:
-		return a.renderManageClaudeCode()
-	default:
-		return "Unknown screen"
-	}
+	return a.screenMgr.View()
 }
 
 // execCommand wraps exec.Cmd to implement tea.ExecCommand
