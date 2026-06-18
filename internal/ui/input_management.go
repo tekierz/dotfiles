@@ -14,44 +14,8 @@ func (a *App) handleManagementKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	switch a.screen {
-	// Main menu navigation
-	case ScreenMainMenu:
-		items := GetMainMenuItems()
-		switch key {
-		case "up", "k":
-			if a.mainMenuIndex > 0 {
-				a.mainMenuIndex--
-			}
-		case "down", "j":
-			if a.mainMenuIndex < len(items)-1 {
-				a.mainMenuIndex++
-			}
-		case "enter":
-			targetScreen := items[a.mainMenuIndex].Screen
-			a.screen = targetScreen
-			// Start async operations for screens that need it
-			switch targetScreen {
-			case ScreenManage:
-				if cmd := a.startInstallCacheLoad(); cmd != nil {
-					return a, cmd
-				}
-			case ScreenBackups:
-				if !a.backupsLoading && !a.backupsLoaded {
-					a.backupsLoading = true
-					return a, loadBackupsCmd()
-				}
-			case ScreenUpdate:
-				if !a.updateChecking && !a.updateCheckDone {
-					a.updateChecking = true
-					return a, checkUpdatesCmd()
-				}
-			case ScreenUsers:
-				if !a.usersLoaded {
-					a.usersLoaded = true
-					return a, loadUsersCmd()
-				}
-			}
-		}
+	// Note: ScreenMainMenu is migrated to a ScreenHandler (screen_mainmenu.go)
+	// and is driven by the ScreenManager, so it is no longer handled here.
 
 	// Update screen navigation
 	case ScreenUpdate:
@@ -142,7 +106,8 @@ func (a *App) handleManagementKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "esc":
-			a.screen = ScreenMainMenu
+			// ScreenMainMenu is migrated; route through the ScreenManager.
+			return a, NavigateTo(ScreenMainMenu)
 		}
 
 	// Hotkeys screen navigation - delegates to existing handler
@@ -273,7 +238,8 @@ func (a *App) handleManagementKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.backupError = nil
 			return a, loadBackupsCmd()
 		case "esc":
-			a.screen = ScreenMainMenu
+			// ScreenMainMenu is migrated; route through the ScreenManager.
+			return a, NavigateTo(ScreenMainMenu)
 		}
 	}
 

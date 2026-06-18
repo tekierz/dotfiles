@@ -233,7 +233,8 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	items := a.manageItems()
 	if len(items) == 0 {
 		if key == "esc" {
-			a.screen = ScreenMainMenu
+			// ScreenMainMenu is migrated; route through the ScreenManager.
+			return a, NavigateTo(ScreenMainMenu)
 		}
 		return a, nil
 	}
@@ -305,8 +306,8 @@ func (a *App) handleManageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.manageStatus = ""
 		a.manageCancelEditing()
 		a.managePane = managePaneTools
-		a.screen = ScreenMainMenu
-		return a, nil
+		// ScreenMainMenu is migrated; route through the ScreenManager.
+		return a, NavigateTo(ScreenMainMenu)
 
 	case "tab":
 		if a.managePane == managePaneTools {

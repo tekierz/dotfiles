@@ -27,14 +27,15 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if a.deepDiveMenuIndex == maxIdx {
-				// "Continue to Installation" selected
-				a.screen = ScreenThemePicker
-			} else {
-				// Navigate to specific config screen
-				a.screen = menuItems[a.deepDiveMenuIndex].Screen
+				// "Continue to Installation" selected. ScreenThemePicker is
+				// migrated; route through the ScreenManager.
+				return a, NavigateTo(ScreenThemePicker)
 			}
+			// Navigate to specific (legacy) config screen.
+			a.screen = menuItems[a.deepDiveMenuIndex].Screen
 		case "esc":
-			a.screen = ScreenWelcome
+			// ScreenWelcome is migrated; route through the ScreenManager.
+			return a, NavigateTo(ScreenWelcome)
 		}
 
 	// Ghostty config

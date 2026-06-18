@@ -11,60 +11,6 @@ import (
 )
 
 // =====================================
-// Main Menu Screen
-// =====================================
-
-func (a *App) renderMainMenu() string {
-	items := GetMainMenuItems()
-
-	maxLineW := maxInt(20, a.width-10)
-
-	title := TitleStyle.Render("Dotfiles Management")
-	subtitle := lipgloss.NewStyle().
-		Foreground(ColorTextMuted).
-		Italic(true).
-		Render(truncateVisible("Terminal environment management platform", maxLineW))
-
-	// Menu items
-	var menuLines []string
-	for i, item := range items {
-		cursor := "  "
-		itemStyle := lipgloss.NewStyle().Foreground(ColorText)
-		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-
-		if i == a.mainMenuIndex {
-			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
-			itemStyle = itemStyle.Foreground(ColorCyan).Bold(true)
-			descStyle = descStyle.Foreground(ColorText)
-		}
-
-		line := fmt.Sprintf("%s%s %s  %s",
-			cursor,
-			item.Icon,
-			itemStyle.Render(item.Name),
-			descStyle.Render(item.Description))
-		menuLines = append(menuLines, truncateVisible(line, maxLineW))
-	}
-
-	menu := strings.Join(menuLines, "\n")
-
-	help := HelpStyle.Render(truncateVisible("↑↓ navigate • enter select • q quit", maxLineW))
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		subtitle,
-		"",
-		menu,
-		"",
-		help,
-	)
-
-	return lipgloss.Place(a.width, a.height,
-		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(content))
-}
-
-// =====================================
 // Update Screen
 // =====================================
 
@@ -592,69 +538,6 @@ func (a *App) renderBackups() string {
 // =====================================
 // Mouse Handlers
 // =====================================
-
-// handleMainMenuMouse handles mouse clicks on the main menu
-func (a *App) handleMainMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	m := tea.MouseEvent(msg)
-
-	// Only handle left clicks
-	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
-		return a, nil
-	}
-
-	items := GetMainMenuItems()
-	if len(items) == 0 {
-		return a, nil
-	}
-
-	// The main menu is centered. Calculate the content boundaries.
-	// Content structure: title(1), subtitle(1), empty(1), menu items(n), empty(1), help(1)
-	// Total content height = 5 + len(items)
-	contentH := 5 + len(items)
-	startY := (a.height - contentH) / 2 // Center vertically
-
-	// Menu items start at line 3 (after title, subtitle, empty)
-	menuStartY := startY + 3
-
-	// Check if click is within menu area
-	for i := range items {
-		itemY := menuStartY + i
-		if m.Y == itemY {
-			// Select this item
-			a.mainMenuIndex = i
-			// Trigger enter action
-			targetScreen := items[i].Screen
-			a.screen = targetScreen
-			// Start async operations for screens that need it
-			switch targetScreen {
-			case ScreenManage:
-				if cmd := a.startInstallCacheLoad(); cmd != nil {
-					return a, cmd
-				}
-			case ScreenBackups:
-				if !a.backupsLoading && !a.backupsLoaded {
-					a.backupsLoading = true
-					return a, loadBackupsCmd()
-				}
-			case ScreenUpdate:
-				if !a.updateChecking && !a.updateCheckDone {
-					a.updateChecking = true
-					return a, checkUpdatesCmd()
-				}
-			case ScreenUsers:
-				if !a.usersLoaded {
-					a.usersLoaded = true
-					return a, loadUsersCmd()
-				}
-			case ScreenHotkeys:
-				a.hotkeysReturn = ScreenMainMenu
-			}
-			return a, nil
-		}
-	}
-
-	return a, nil
-}
 
 // handleBackupsMouse handles mouse clicks on the backups screen
 func (a *App) handleBackupsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {

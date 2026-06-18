@@ -288,6 +288,39 @@ func (a *App) showSummary() tea.Cmd {
 	return nil
 }
 
+// postIntroTransition lands on the post-intro screen after the intro animation
+// finishes (or is skipped). It routes navigation through the ScreenManager so
+// migrated post-intro screens (Welcome, MainMenu, ThemePicker) enter managed
+// mode, and batches any on-enter async load the destination needs. When the
+// manager is not wired it falls back to setting the legacy screen field.
+func (a *App) postIntroTransition() tea.Cmd {
+	a.animationDone = true
+	target := a.postIntroScreen
+
+	var async tea.Cmd
+	switch target {
+	case ScreenUpdate:
+		if !a.updateChecking && !a.updateCheckDone {
+			a.updateChecking = true
+			async = checkUpdatesCmd()
+		}
+	case ScreenManage, ScreenHotkeys:
+		async = a.startInstallCacheLoad()
+	}
+
+	if a.screenMgr != nil {
+		nav := NavigateTo(target)
+		if async != nil {
+			return tea.Batch(nav, async)
+		}
+		return nav
+	}
+
+	// Legacy fallback (manager not wired, e.g. some tests).
+	a.screen = target
+	return async
+}
+
 // NewApp creates a new application instance
 func NewApp(skipIntro bool, opts ...AppOption) *App {
 	// Fail fast if the tool->screen mapping has drifted from the tools registry
@@ -358,6 +391,12 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 // Init initializes the application
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{}
+	// Drive the start screen through the ScreenManager so migrated screens enter
+	// managed mode. For unmigrated start screens (e.g. the intro animation),
+	// NavigateTo falls back harmlessly to legacy mode.
+	if a.screenMgr != nil {
+		cmds = append(cmds, NavigateTo(a.screen))
+	}
 	if a.animationsEnabled {
 		cmds = append(cmds, tickUI())
 	}
@@ -757,20 +796,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.animFrame++
 			// Animation runs for a short burst and then transitions to the wizard.
 			if a.animFrame >= introAnimationFrames {
-				a.animationDone = true
-				a.screen = a.postIntroScreen
-				// Trigger update check if transitioning to Update screen
-				if a.postIntroScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
-					a.updateChecking = true
-					return a, checkUpdatesCmd()
-				}
-				// Trigger install cache load if transitioning to Manage or Hotkeys screen
-				if a.postIntroScreen == ScreenManage || a.postIntroScreen == ScreenHotkeys {
-					if cmd := a.startInstallCacheLoad(); cmd != nil {
-						return a, cmd
-					}
-				}
-				return a, nil
+				return a, a.postIntroTransition()
 			}
 			return a, tickAnimation()
 		}
@@ -790,20 +816,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case animationDoneMsg:
-		a.animationDone = true
-		a.screen = a.postIntroScreen
-		// Trigger update check if transitioning to Update screen
-		if a.postIntroScreen == ScreenUpdate && !a.updateChecking && !a.updateCheckDone {
-			a.updateChecking = true
-			return a, checkUpdatesCmd()
-		}
-		// Trigger install cache load if transitioning to Manage or Hotkeys screen
-		if a.postIntroScreen == ScreenManage || a.postIntroScreen == ScreenHotkeys {
-			if cmd := a.startInstallCacheLoad(); cmd != nil {
-				return a, cmd
-			}
-		}
-		return a, nil
+		return a, a.postIntroTransition()
 
 	case sudoRequiredMsg:
 		// Need to prompt for sudo - use tea.Exec to exit alt screen
@@ -1144,9 +1157,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Note: ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker and
+	// ScreenFileTree are migrated to ScreenHandlers; the ScreenManager delegates
+	// their mouse events to the handler's Update before reaching this legacy
+	// dispatch, so they intentionally no longer appear here.
 	switch a.screen {
-	case ScreenMainMenu:
-		return a.handleMainMenuMouse(msg)
 	case ScreenManage:
 		return a.handleManageMouse(msg)
 	case ScreenHotkeys:
@@ -1157,16 +1172,8 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a.handleBackupsMouse(msg)
 	case ScreenUpdate:
 		return a.handleTabBarMouse(msg)
-	case ScreenWelcome:
-		return a.handleWelcomeMouse(msg)
-	case ScreenThemePicker:
-		return a.handleThemePickerMouse(msg)
-	case ScreenNavPicker:
-		return a.handleNavPickerMouse(msg)
 	case ScreenDeepDiveMenu:
 		return a.handleDeepDiveMenuMouse(msg)
-	case ScreenFileTree, ScreenSummary:
-		return a.handleSummaryMouse(msg)
 	case ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh, ScreenConfigNeovim,
 		ScreenConfigGit, ScreenConfigYazi, ScreenConfigFzf, ScreenConfigUtilities,
 		ScreenConfigMacApps, ScreenConfigApps, ScreenConfigCLITools, ScreenConfigGUIApps,
@@ -1226,17 +1233,13 @@ func (a *App) View() string {
 		}
 	}
 
+	// Note: ScreenWelcome, ScreenThemePicker, ScreenNavPicker, ScreenFileTree,
+	// ScreenMainMenu and ScreenSummary/ScreenError are migrated to ScreenHandlers
+	// and rendered by the ScreenManager above; they no longer appear in this
+	// legacy switch.
 	switch a.screen {
 	case ScreenAnimation:
 		return a.renderAnimation()
-	case ScreenWelcome:
-		return a.renderWelcome()
-	case ScreenThemePicker:
-		return a.renderThemePicker()
-	case ScreenNavPicker:
-		return a.renderNavPicker()
-	case ScreenFileTree:
-		return a.renderFileTree()
 	case ScreenProgress:
 		return a.renderProgress()
 	case ScreenSummary:
@@ -1281,8 +1284,6 @@ func (a *App) View() string {
 	case ScreenConfigCLIUtilities:
 		return a.renderConfigCLIUtilities()
 	// Management platform screens
-	case ScreenMainMenu:
-		return a.renderMainMenu()
 	case ScreenManage:
 		return a.renderManageDualPane()
 	case ScreenManageGhostty:

@@ -347,8 +347,8 @@ func (a *App) handleUsersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, loadUsersCmd()
 
 	case "q", "esc":
-		a.screen = ScreenMainMenu
-		return a, nil
+		// ScreenMainMenu is migrated; route through the ScreenManager.
+		return a, NavigateTo(ScreenMainMenu)
 	}
 
 	return a, nil

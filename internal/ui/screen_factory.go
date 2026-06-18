@@ -33,6 +33,16 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewErrorScreen(ctx, f.data.Error)
 	case ScreenSummary:
 		return NewSummaryScreen(ctx)
+	case ScreenWelcome:
+		return NewWelcomeScreen(ctx)
+	case ScreenThemePicker:
+		return NewThemePickerScreen(ctx)
+	case ScreenNavPicker:
+		return NewNavPickerScreen(ctx)
+	case ScreenFileTree:
+		return NewFileTreeScreen(ctx)
+	case ScreenMainMenu:
+		return NewMainMenuScreen(ctx)
 	default:
 		// Not migrated yet - return nil to use legacy handling
 		return nil
