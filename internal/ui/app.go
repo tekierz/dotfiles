@@ -177,6 +177,7 @@ type App struct {
 	installRunning  bool
 	installComplete bool
 	installCmd      *exec.Cmd
+	installEvents   chan installEventMsg // streamed progress from the install worker goroutine
 	runner          *runner.Runner
 
 	// Management platform state (new)
@@ -803,6 +804,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case installEventMsg:
+		// Streamed progress from the install worker goroutine, applied here on
+		// the main loop so the worker never touches shared App state.
+		if msg.line != "" {
+			a.installOutput = append(a.installOutput, msg.line)
+			// Keep only the last 20 lines for display (copy to avoid memory leak)
+			const maxOutputLines = 20
+			if len(a.installOutput) > maxOutputLines {
+				copy(a.installOutput, a.installOutput[len(a.installOutput)-maxOutputLines:])
+				a.installOutput = a.installOutput[:maxOutputLines]
+			}
+		}
+		if msg.stepInc {
+			a.installStep++
+		}
+		if msg.done {
+			a.installEvents = nil
+			return a.Update(installDoneMsg{err: msg.err, context: msg.context})
+		}
+		// Re-subscribe for the next event.
+		return a, a.listenInstallEventsCmd()
+
 	case installDoneMsg:
 		a.installRunning = false
 		a.installComplete = true
@@ -833,6 +856,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
 		} else {
 			a.manageStatus = "Installed ✓"
+		}
+		// Actually reload the cache so the Manage screen reflects the new
+		// install status without requiring the user to navigate away and back.
+		// startInstallCacheLoad guards against double-loading.
+		if cmd := a.startInstallCacheLoad(); cmd != nil {
+			return a, cmd
 		}
 		return a, nil
 
@@ -975,8 +1004,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
 		} else {
 			a.manageStatus = "Installed successfully ✓"
-			// Refresh install status cache
+			// Refresh install status cache, then actually reload it so the
+			// Manage screen reflects the newly installed tool immediately.
+			// startInstallCacheLoad guards against double-loading.
 			a.manageInstalledReady = false
+			if cmd := a.startInstallCacheLoad(); cmd != nil {
+				return a, cmd
+			}
 		}
 		return a, nil
 

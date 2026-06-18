@@ -15,7 +15,23 @@ import (
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-// startInstallation begins the installation process using the Go-based package manager
+// installEventMsg is a single event emitted by the install worker goroutine.
+// The worker NEVER mutates App state directly; instead it sends these events
+// over a.installEvents and the Update loop applies them on the main goroutine.
+// This is the standard Bubble Tea channel + "listen" Cmd streaming pattern and
+// avoids the data race between the worker and Update/View.
+type installEventMsg struct {
+	line    string // a line of output to append (empty if none)
+	stepInc bool   // advance the progress step counter
+	done    bool   // the install/configure sequence finished
+	err     error  // final error (only meaningful when done)
+	context string // last few output lines for error context (only when done)
+}
+
+// startInstallation begins the installation process using the Go-based package
+// manager. State is reset here on the main goroutine (safe: this is called from
+// Update). The actual work runs in a detached worker goroutine that only writes
+// to the events channel, and the returned Cmd starts listening for those events.
 func (a *App) startInstallation() tea.Cmd {
 	if a.installRunning {
 		return nil
@@ -31,320 +47,373 @@ func (a *App) startInstallation() tea.Cmd {
 	// Collect all selected tools from deep dive config
 	selectedTools := a.collectSelectedTools()
 
+	// Buffered channel so the worker can make progress without blocking on a
+	// slow consumer; the listen Cmd drains it one event at a time.
+	events := make(chan installEventMsg, 64)
+	a.installEvents = events
+
+	// Snapshot the values the worker needs so it never reads App fields after
+	// this point (they may be mutated by the Update loop concurrently). The
+	// deep-dive config is copied by value; the install progress screen does not
+	// allow editing it, so the shared maps inside are effectively immutable here.
+	cfg := *a.deepDiveConfig
+	theme := a.theme
+
+	go runInstallWorker(events, selectedTools, cfg, theme)
+
+	return a.listenInstallEventsCmd()
+}
+
+// listenInstallEventsCmd reads the next event from the install channel and
+// returns it as a message. Update re-subscribes by returning this Cmd again
+// until it sees a `done` event.
+func (a *App) listenInstallEventsCmd() tea.Cmd {
+	ch := a.installEvents
 	return func() tea.Msg {
-		if len(selectedTools) == 0 {
-			a.installOutput = append(a.installOutput, "No tools selected for installation")
-			return installDoneMsg{err: nil}
+		if ch == nil {
+			return installDoneMsg{}
 		}
-
-		// Auto-backup before making changes (if enabled)
-		if err := autoBackupIfEnabled(); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("⚠ Auto-backup failed: %v", err))
-		} else {
-			globalCfg, _ := config.LoadGlobalConfig()
-			if globalCfg != nil && globalCfg.AutoBackup {
-				a.installOutput = append(a.installOutput, "✓ Auto-backup created before installation")
-			}
+		ev, ok := <-ch
+		if !ok {
+			// Channel closed without a done event; treat as completion.
+			return installDoneMsg{}
 		}
-
-		// Detect package manager
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return installDoneMsg{err: fmt.Errorf("no package manager detected")}
-		}
-
-		platform := pkg.DetectPlatform()
-		reg := tools.GetRegistry()
-
-		a.installOutput = append(a.installOutput, fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
-
-		var lastErr error
-		successCount := 0
-		for _, toolID := range selectedTools {
-			a.installStep++
-			a.installOutput = append(a.installOutput, fmt.Sprintf("▶ Installing %s...", toolID))
-
-			t, ok := reg.Get(toolID)
-			if !ok {
-				a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
-				continue
-			}
-
-			// Skip if already installed
-			if t.IsInstalled() {
-				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✓ %s already installed", toolID))
-				successCount++
-				continue
-			}
-
-			// Get packages for this platform
-			pkgs := t.Packages()[platform]
-			if len(pkgs) == 0 {
-				pkgs = t.Packages()["all"]
-			}
-			if len(pkgs) == 0 {
-				a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
-				continue
-			}
-
-			// Install using streaming command
-			ctx := context.Background()
-			cmd, err := mgr.InstallStreaming(ctx, pkgs...)
-			if err != nil {
-				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✗ Failed to start install: %v", err))
-				lastErr = err
-				continue
-			}
-
-			// Collect output
-			for line := range cmd.Output {
-				a.installOutput = append(a.installOutput, "  "+line)
-				// Keep last 20 lines for display (using copy to avoid memory leak)
-				const maxOutputLines = 20
-				if len(a.installOutput) > maxOutputLines {
-					copy(a.installOutput, a.installOutput[len(a.installOutput)-maxOutputLines:])
-					a.installOutput = a.installOutput[:maxOutputLines]
-				}
-			}
-
-			if err := cmd.Wait(); err != nil {
-				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
-				lastErr = err
-			} else {
-				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✓ %s installed successfully", toolID))
-				successCount++
-			}
-		}
-
-		if successCount == len(selectedTools) {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("\n✓ All %d tools installed successfully!", successCount))
-		} else {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("\n✓ Installed %d/%d tools", successCount, len(selectedTools)))
-		}
-
-		// Install dotfiles binary and utilities to ~/.local/bin
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Installing dotfiles utilities...")
-		if err := installUtilities(a.deepDiveConfig.Utilities); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to install utilities: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ Utilities installed to ~/.local/bin")
-		}
-
-		// Configure tmux with TPM plugins
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring tmux...")
-		tmuxCfg := tools.TmuxConfig{
-			Prefix:           a.deepDiveConfig.TmuxPrefix,
-			SplitBinds:       a.deepDiveConfig.TmuxSplitBinds,
-			StatusBar:        a.deepDiveConfig.TmuxStatusBar,
-			MouseMode:        a.deepDiveConfig.TmuxMouseMode,
-			TPMEnabled:       a.deepDiveConfig.TmuxTPMEnabled,
-			PluginSensible:   a.deepDiveConfig.TmuxPluginSensible,
-			PluginResurrect:  a.deepDiveConfig.TmuxPluginResurrect,
-			PluginContinuum:  a.deepDiveConfig.TmuxPluginContinuum,
-			PluginYank:       a.deepDiveConfig.TmuxPluginYank,
-			ContinuumSaveMin: a.deepDiveConfig.TmuxContinuumSaveMin,
-		}
-		if err := tools.SetupTPM(tmuxCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure tmux: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ Tmux configured with ~/.tmux.conf")
-			if tmuxCfg.TPMEnabled {
-				if tools.IsTPMInstalled() {
-					a.installOutput = append(a.installOutput, "  ✓ TPM plugins ready (run prefix+I in tmux to install)")
-				} else {
-					a.installOutput = append(a.installOutput, "  ⚠ TPM installed but plugins pending")
-				}
-			}
-		}
-
-		// Apply Claude Code MCP configuration if claude-code was selected
-		if a.deepDiveConfig.CLITools["claude-code"] || a.deepDiveConfig.Utilities["claude-code"] {
-			a.installStep++
-			a.installOutput = append(a.installOutput, "\n▶ Configuring Claude Code MCP servers...")
-			claudeTool := tools.NewClaudeCodeTool()
-			// Use user's MCP selections from deep dive config
-			if err := claudeTool.ApplyConfigWithMCPs(a.deepDiveConfig.ClaudeCodeMCPs); err != nil {
-				a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Claude MCP: %v", err))
-				lastErr = err
-			} else {
-				// Count enabled MCPs for status message
-				enabledCount := 0
-				for _, enabled := range a.deepDiveConfig.ClaudeCodeMCPs {
-					if enabled {
-						enabledCount++
-					}
-				}
-				a.installOutput = append(a.installOutput, fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
-			}
-		}
-
-		// Configure Ghostty
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring Ghostty...")
-		ghosttyCfg := tools.GhosttyConfig{
-			FontSize:        a.deepDiveConfig.GhosttyFontSize,
-			FontFamily:      a.deepDiveConfig.GhosttyFontFamily,
-			Opacity:         a.deepDiveConfig.GhosttyOpacity,
-			BlurRadius:      a.deepDiveConfig.GhosttyBlurRadius,
-			TabBindings:     a.deepDiveConfig.GhosttyTabBindings,
-			ScrollbackLines: a.deepDiveConfig.GhosttyScrollbackLines,
-			CursorStyle:     a.deepDiveConfig.GhosttyCursorStyle,
-		}
-		if err := tools.WriteGhosttyConfig(ghosttyCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Ghostty: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ Ghostty configured")
-		}
-
-		// Configure Zsh
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring Zsh...")
-		zshCfg := tools.ZshConfig{
-			PromptStyle:     a.deepDiveConfig.ZshPromptStyle,
-			Plugins:         a.deepDiveConfig.ZshPlugins,
-			Aliases:         a.deepDiveConfig.ZshAliases,
-			HistorySize:     a.deepDiveConfig.ZshHistorySize,
-			AutoCD:          a.deepDiveConfig.ZshAutoCD,
-			SyntaxHighlight: a.deepDiveConfig.ZshSyntaxHighlight,
-			Autosuggestions: a.deepDiveConfig.ZshAutosuggestions,
-		}
-		if err := tools.WriteZshConfig(zshCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Zsh: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ Zsh configured with ~/.zshrc")
-		}
-
-		// Configure Neovim
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring Neovim...")
-		neovimCfg := tools.NeovimConfig{
-			ConfigPreset: a.deepDiveConfig.NeovimConfig,
-			LSPs:         a.deepDiveConfig.NeovimLSPs,
-			Plugins:      a.deepDiveConfig.NeovimPlugins,
-			TabWidth:     a.deepDiveConfig.NeovimTabWidth,
-			Wrap:         a.deepDiveConfig.NeovimWrap,
-			CursorLine:   a.deepDiveConfig.NeovimCursorLine,
-			Clipboard:    a.deepDiveConfig.NeovimClipboard,
-		}
-		if err := tools.WriteNeovimConfig(neovimCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Neovim: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ✓ Neovim configured (%s)", neovimCfg.ConfigPreset))
-		}
-
-		// Configure Git
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring Git...")
-		gitCfg := tools.GitConfig{
-			DeltaSideBySide:  a.deepDiveConfig.GitDeltaSideBySide,
-			DefaultBranch:    a.deepDiveConfig.GitDefaultBranch,
-			Aliases:          a.deepDiveConfig.GitAliases,
-			PullRebase:       a.deepDiveConfig.GitPullRebase,
-			SignCommits:      a.deepDiveConfig.GitSignCommits,
-			CredentialHelper: a.deepDiveConfig.GitCredentialHelper,
-		}
-		if err := tools.WriteGitConfig(gitCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Git: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ Git configured with ~/.gitconfig")
-		}
-
-		// Configure Yazi
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring Yazi...")
-		yaziCfg := tools.YaziConfig{
-			Keymap:      a.deepDiveConfig.YaziKeymap,
-			ShowHidden:  a.deepDiveConfig.YaziShowHidden,
-			PreviewMode: a.deepDiveConfig.YaziPreviewMode,
-		}
-		if err := tools.WriteYaziConfig(yaziCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Yazi: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ Yazi configured")
-		}
-
-		// Configure FZF
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring FZF...")
-		fzfCfg := tools.FzfConfig{
-			Preview: a.deepDiveConfig.FzfPreview,
-			Height:  a.deepDiveConfig.FzfHeight,
-			Layout:  a.deepDiveConfig.FzfLayout,
-		}
-		if err := tools.WriteFzfConfig(fzfCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure FZF: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ FZF configured")
-		}
-
-		// Configure LazyGit
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring LazyGit...")
-		lazygitCfg := tools.LazyGitConfig{
-			SideBySide: a.deepDiveConfig.LazyGitSideBySide,
-			MouseMode:  a.deepDiveConfig.LazyGitMouseMode,
-			Theme:      a.deepDiveConfig.LazyGitTheme,
-		}
-		if err := tools.WriteLazyGitConfig(lazygitCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure LazyGit: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ LazyGit configured")
-		}
-
-		// Configure Btop
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring Btop...")
-		btopCfg := tools.BtopConfig{
-			Theme:     a.deepDiveConfig.BtopTheme,
-			UpdateMs:  a.deepDiveConfig.BtopUpdateMs,
-			ShowTemp:  a.deepDiveConfig.BtopShowTemp,
-			GraphType: a.deepDiveConfig.BtopGraphType,
-		}
-		if err := tools.WriteBtopConfig(btopCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Btop: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ Btop configured")
-		}
-
-		// Configure Glow
-		a.installStep++
-		a.installOutput = append(a.installOutput, "\n▶ Configuring Glow...")
-		glowCfg := tools.GlowConfig{
-			Pager: a.deepDiveConfig.GlowPager,
-			Style: a.deepDiveConfig.GlowStyle,
-			Width: a.deepDiveConfig.GlowWidth,
-		}
-		if err := tools.WriteGlowConfig(glowCfg, a.theme); err != nil {
-			a.installOutput = append(a.installOutput, fmt.Sprintf("  ⚠ Failed to configure Glow: %v", err))
-			lastErr = err
-		} else {
-			a.installOutput = append(a.installOutput, "  ✓ Glow configured")
-		}
-
-		// Build context from last few output lines for error display
-		var context string
-		if lastErr != nil && len(a.installOutput) > 0 {
-			start := 0
-			if len(a.installOutput) > 8 {
-				start = len(a.installOutput) - 8
-			}
-			context = strings.Join(a.installOutput[start:], "\n")
-		}
-
-		return installDoneMsg{err: lastErr, context: context}
+		return ev
 	}
+}
+
+// runInstallWorker performs the entire install/configure sequence on a detached
+// goroutine, emitting progress as installEventMsg values. It MUST NOT touch any
+// App field. It closes the channel when finished.
+func runInstallWorker(events chan<- installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string) {
+	defer close(events)
+
+	emit := func(line string) { events <- installEventMsg{line: line} }
+	step := func(line string) { events <- installEventMsg{line: line, stepInc: true} }
+
+	// output accumulates every line emitted so we can build error context that
+	// matches the lines the user has seen, without reading App state.
+	var output []string
+	emitLine := func(line string) {
+		output = append(output, line)
+		emit(line)
+	}
+	stepLine := func(line string) {
+		output = append(output, line)
+		step(line)
+	}
+
+	finish := func(err error) {
+		var context string
+		if err != nil && len(output) > 0 {
+			start := 0
+			if len(output) > 8 {
+				start = len(output) - 8
+			}
+			context = strings.Join(output[start:], "\n")
+		}
+		events <- installEventMsg{done: true, err: err, context: context}
+	}
+
+	if len(selectedTools) == 0 {
+		emitLine("No tools selected for installation")
+		finish(nil)
+		return
+	}
+
+	// Auto-backup before making changes (if enabled)
+	if err := autoBackupIfEnabled(); err != nil {
+		emitLine(fmt.Sprintf("⚠ Auto-backup failed: %v", err))
+	} else {
+		globalCfg, _ := config.LoadGlobalConfig()
+		if globalCfg != nil && globalCfg.AutoBackup {
+			emitLine("✓ Auto-backup created before installation")
+		}
+	}
+
+	// Detect package manager
+	mgr := pkg.DetectManager()
+	if mgr == nil {
+		finish(fmt.Errorf("no package manager detected"))
+		return
+	}
+
+	platform := pkg.DetectPlatform()
+	reg := tools.GetRegistry()
+
+	emitLine(fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
+
+	// failures aggregates every failed step so the final error reports how many
+	// phases failed rather than silently overwriting a single lastErr.
+	var failures []error
+	noteFailure := func(err error) { failures = append(failures, err) }
+
+	successCount := 0
+	for _, toolID := range selectedTools {
+		stepLine(fmt.Sprintf("▶ Installing %s...", toolID))
+
+		t, ok := reg.Get(toolID)
+		if !ok {
+			emitLine(fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
+			continue
+		}
+
+		// Skip if already installed
+		if t.IsInstalled() {
+			emitLine(fmt.Sprintf("  ✓ %s already installed", toolID))
+			successCount++
+			continue
+		}
+
+		// Get packages for this platform
+		pkgs := t.Packages()[platform]
+		if len(pkgs) == 0 {
+			pkgs = t.Packages()["all"]
+		}
+		if len(pkgs) == 0 {
+			emitLine(fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
+			continue
+		}
+
+		// Install using streaming command
+		ctx := context.Background()
+		cmd, err := mgr.InstallStreaming(ctx, pkgs...)
+		if err != nil {
+			emitLine(fmt.Sprintf("  ✗ Failed to start install: %v", err))
+			noteFailure(fmt.Errorf("%s: %w", toolID, err))
+			continue
+		}
+
+		// Collect output
+		for line := range cmd.Output {
+			emitLine("  " + line)
+		}
+
+		if err := cmd.Wait(); err != nil {
+			emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
+			noteFailure(fmt.Errorf("%s: %w", toolID, err))
+		} else {
+			emitLine(fmt.Sprintf("  ✓ %s installed successfully", toolID))
+			successCount++
+		}
+	}
+
+	if successCount == len(selectedTools) {
+		emitLine(fmt.Sprintf("\n✓ All %d tools installed successfully!", successCount))
+	} else {
+		emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", successCount, len(selectedTools)))
+	}
+
+	// configPhase runs a single configuration step, emitting a header line,
+	// advancing the progress step, and recording any failure.
+	configPhase := func(header string, run func() error, okLine string) {
+		stepLine(header)
+		if err := run(); err != nil {
+			emitLine(fmt.Sprintf("  ⚠ %v", err))
+			noteFailure(err)
+		} else if okLine != "" {
+			emitLine(okLine)
+		}
+	}
+
+	// Install dotfiles binary and utilities to ~/.local/bin
+	configPhase("\n▶ Installing dotfiles utilities...", func() error {
+		if err := installUtilities(cfg.Utilities); err != nil {
+			return fmt.Errorf("Failed to install utilities: %w", err)
+		}
+		return nil
+	}, "  ✓ Utilities installed to ~/.local/bin")
+
+	// Configure tmux with TPM plugins
+	tmuxCfg := tools.TmuxConfig{
+		Prefix:           cfg.TmuxPrefix,
+		SplitBinds:       cfg.TmuxSplitBinds,
+		StatusBar:        cfg.TmuxStatusBar,
+		MouseMode:        cfg.TmuxMouseMode,
+		TPMEnabled:       cfg.TmuxTPMEnabled,
+		PluginSensible:   cfg.TmuxPluginSensible,
+		PluginResurrect:  cfg.TmuxPluginResurrect,
+		PluginContinuum:  cfg.TmuxPluginContinuum,
+		PluginYank:       cfg.TmuxPluginYank,
+		ContinuumSaveMin: cfg.TmuxContinuumSaveMin,
+	}
+	stepLine("\n▶ Configuring tmux...")
+	if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
+		emitLine(fmt.Sprintf("  ⚠ Failed to configure tmux: %v", err))
+		noteFailure(fmt.Errorf("Failed to configure tmux: %w", err))
+	} else {
+		emitLine("  ✓ Tmux configured with ~/.tmux.conf")
+		if tmuxCfg.TPMEnabled {
+			if tools.IsTPMInstalled() {
+				emitLine("  ✓ TPM plugins ready (run prefix+I in tmux to install)")
+			} else {
+				emitLine("  ⚠ TPM installed but plugins pending")
+			}
+		}
+	}
+
+	// Apply Claude Code MCP configuration if claude-code was selected
+	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
+		stepLine("\n▶ Configuring Claude Code MCP servers...")
+		claudeTool := tools.NewClaudeCodeTool()
+		// Use user's MCP selections from deep dive config
+		if err := claudeTool.ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs); err != nil {
+			emitLine(fmt.Sprintf("  ⚠ Failed to configure Claude MCP: %v", err))
+			noteFailure(fmt.Errorf("Failed to configure Claude MCP: %w", err))
+		} else {
+			// Count enabled MCPs for status message
+			enabledCount := 0
+			for _, enabled := range cfg.ClaudeCodeMCPs {
+				if enabled {
+					enabledCount++
+				}
+			}
+			emitLine(fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
+		}
+	}
+
+	// Configure Ghostty
+	configPhase("\n▶ Configuring Ghostty...", func() error {
+		ghosttyCfg := tools.GhosttyConfig{
+			FontSize:        cfg.GhosttyFontSize,
+			FontFamily:      cfg.GhosttyFontFamily,
+			Opacity:         cfg.GhosttyOpacity,
+			BlurRadius:      cfg.GhosttyBlurRadius,
+			TabBindings:     cfg.GhosttyTabBindings,
+			ScrollbackLines: cfg.GhosttyScrollbackLines,
+			CursorStyle:     cfg.GhosttyCursorStyle,
+		}
+		if err := tools.WriteGhosttyConfig(ghosttyCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure Ghostty: %w", err)
+		}
+		return nil
+	}, "  ✓ Ghostty configured")
+
+	// Configure Zsh
+	configPhase("\n▶ Configuring Zsh...", func() error {
+		zshCfg := tools.ZshConfig{
+			PromptStyle:     cfg.ZshPromptStyle,
+			Plugins:         cfg.ZshPlugins,
+			Aliases:         cfg.ZshAliases,
+			HistorySize:     cfg.ZshHistorySize,
+			AutoCD:          cfg.ZshAutoCD,
+			SyntaxHighlight: cfg.ZshSyntaxHighlight,
+			Autosuggestions: cfg.ZshAutosuggestions,
+		}
+		if err := tools.WriteZshConfig(zshCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure Zsh: %w", err)
+		}
+		return nil
+	}, "  ✓ Zsh configured with ~/.zshrc")
+
+	// Configure Neovim
+	neovimCfg := tools.NeovimConfig{
+		ConfigPreset: cfg.NeovimConfig,
+		LSPs:         cfg.NeovimLSPs,
+		Plugins:      cfg.NeovimPlugins,
+		TabWidth:     cfg.NeovimTabWidth,
+		Wrap:         cfg.NeovimWrap,
+		CursorLine:   cfg.NeovimCursorLine,
+		Clipboard:    cfg.NeovimClipboard,
+	}
+	configPhase("\n▶ Configuring Neovim...", func() error {
+		if err := tools.WriteNeovimConfig(neovimCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure Neovim: %w", err)
+		}
+		return nil
+	}, fmt.Sprintf("  ✓ Neovim configured (%s)", neovimCfg.ConfigPreset))
+
+	// Configure Git
+	configPhase("\n▶ Configuring Git...", func() error {
+		gitCfg := tools.GitConfig{
+			DeltaSideBySide:  cfg.GitDeltaSideBySide,
+			DefaultBranch:    cfg.GitDefaultBranch,
+			Aliases:          cfg.GitAliases,
+			PullRebase:       cfg.GitPullRebase,
+			SignCommits:      cfg.GitSignCommits,
+			CredentialHelper: cfg.GitCredentialHelper,
+		}
+		if err := tools.WriteGitConfig(gitCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure Git: %w", err)
+		}
+		return nil
+	}, "  ✓ Git configured with ~/.gitconfig")
+
+	// Configure Yazi
+	configPhase("\n▶ Configuring Yazi...", func() error {
+		yaziCfg := tools.YaziConfig{
+			Keymap:      cfg.YaziKeymap,
+			ShowHidden:  cfg.YaziShowHidden,
+			PreviewMode: cfg.YaziPreviewMode,
+		}
+		if err := tools.WriteYaziConfig(yaziCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure Yazi: %w", err)
+		}
+		return nil
+	}, "  ✓ Yazi configured")
+
+	// Configure FZF
+	configPhase("\n▶ Configuring FZF...", func() error {
+		fzfCfg := tools.FzfConfig{
+			Preview: cfg.FzfPreview,
+			Height:  cfg.FzfHeight,
+			Layout:  cfg.FzfLayout,
+		}
+		if err := tools.WriteFzfConfig(fzfCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure FZF: %w", err)
+		}
+		return nil
+	}, "  ✓ FZF configured")
+
+	// Configure LazyGit
+	configPhase("\n▶ Configuring LazyGit...", func() error {
+		lazygitCfg := tools.LazyGitConfig{
+			SideBySide: cfg.LazyGitSideBySide,
+			MouseMode:  cfg.LazyGitMouseMode,
+			Theme:      cfg.LazyGitTheme,
+		}
+		if err := tools.WriteLazyGitConfig(lazygitCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure LazyGit: %w", err)
+		}
+		return nil
+	}, "  ✓ LazyGit configured")
+
+	// Configure Btop
+	configPhase("\n▶ Configuring Btop...", func() error {
+		btopCfg := tools.BtopConfig{
+			Theme:     cfg.BtopTheme,
+			UpdateMs:  cfg.BtopUpdateMs,
+			ShowTemp:  cfg.BtopShowTemp,
+			GraphType: cfg.BtopGraphType,
+		}
+		if err := tools.WriteBtopConfig(btopCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure Btop: %w", err)
+		}
+		return nil
+	}, "  ✓ Btop configured")
+
+	// Configure Glow
+	configPhase("\n▶ Configuring Glow...", func() error {
+		glowCfg := tools.GlowConfig{
+			Pager: cfg.GlowPager,
+			Style: cfg.GlowStyle,
+			Width: cfg.GlowWidth,
+		}
+		if err := tools.WriteGlowConfig(glowCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure Glow: %w", err)
+		}
+		return nil
+	}, "  ✓ Glow configured")
+
+	// Surface all failures: report the count and the first failing step so the
+	// Error screen makes clear that one or more phases failed (not just the last).
+	var finalErr error
+	if len(failures) == 1 {
+		finalErr = failures[0]
+	} else if len(failures) > 1 {
+		finalErr = fmt.Errorf("%d steps failed; first: %w", len(failures), failures[0])
+	}
+	finish(finalErr)
 }
 
 // installUtilities copies the dotfiles binary and shell utilities to ~/.local/bin
@@ -404,7 +473,9 @@ func installUtilities(utilities map[string]bool) error {
 			continue
 		}
 		scriptPath := filepath.Join(binDir, name)
-		if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		// Private per-user executables: owner-only (rwx) per the project's
+		// documented permission policy (config dirs 700, settings 600).
+		if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil {
 			return fmt.Errorf("cannot write %s: %w", name, err)
 		}
 	}
