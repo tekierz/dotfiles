@@ -766,6 +766,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	// uiTickMsg drives the global animation frame counter for ALL screens
+	// (legacy and managed). It must be handled before delegating to the manager:
+	// in managed mode the manager would consume the message and the tickUI() chain
+	// would never be re-issued, freezing the animated header on migrated screens.
+	if _, ok := msg.(uiTickMsg); ok {
+		if !a.animationsEnabled {
+			return a, nil
+		}
+		a.uiFrame++
+		if a.screenMgr != nil {
+			a.screenMgr.IncrementUIFrame()
+		}
+		return a, tickUI()
+	}
+
 	// Delegate to screen manager for navigation messages and migrated screens
 	if a.screenMgr != nil {
 		if cmd, handled := a.screenMgr.Update(msg); handled {
@@ -800,16 +815,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, tickAnimation()
 		}
-
-	case uiTickMsg:
-		if !a.animationsEnabled {
-			return a, nil
-		}
-		a.uiFrame++
-		if a.screenMgr != nil {
-			a.screenMgr.IncrementUIFrame()
-		}
-		return a, tickUI()
 
 	case durdrawAvailableMsg:
 		// Store durdraw availability if needed
