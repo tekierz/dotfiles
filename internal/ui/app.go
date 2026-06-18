@@ -781,6 +781,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tickUI()
 	}
 
+	// installCacheDoneMsg carries the result of the app-wide install-status cache,
+	// which is preloaded at startup and shared by the deep-dive/manage screens. It
+	// can complete while ANY screen is active, so apply it globally before
+	// delegating to the manager (managed screens would otherwise drop it and the
+	// cache would never mark ready).
+	if m, ok := msg.(installCacheDoneMsg); ok {
+		a.manageInstalled = m.installed
+		a.manageInstalledReady = true
+		a.installCacheLoading = false
+		return a, nil
+	}
+
 	// Delegate to screen manager for navigation messages and migrated screens
 	if a.screenMgr != nil {
 		if cmd, handled := a.screenMgr.Update(msg); handled {
@@ -959,12 +971,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Reload user list to update active indicator
 			return a, loadUsersCmd()
 		}
-		return a, nil
-
-	case installCacheDoneMsg:
-		a.manageInstalled = msg.installed
-		a.manageInstalledReady = true
-		a.installCacheLoading = false
 		return a, nil
 
 	case installLogMsg:
