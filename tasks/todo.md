@@ -33,11 +33,14 @@ Source: comprehensive audit (71 confirmed findings) + user direction (maximal sc
 - [ ] backup.go: harden symlink-escape guard with EvalSymlinks on parent (lexical HasPrefix today)
 - [ ] input_deepdive: deeper fix = ordered registry accessor keyed by stable ID (bounds-check landed)
 
-## Phase C — Complete ScreenManager migration (sequential, high-risk)
-- [ ] Characterization (golden) tests for representative screens first
-- [ ] Migrate all 45 screens to ScreenHandler; wire Dependencies/Provider DI
-- [ ] Make ScreenManager the real dispatch path; remove legacy switch
-- [ ] Move dead screens/ subpackage into the live path; fix ErrorScreen/SummaryScreen theme
+## Phase C — Complete ScreenManager migration — DONE
+- [x] Golden/characterization tests added per batch
+- [x] Foundation: handlers in package ui, ScreenContext.app, screens/ subpackage absorbed, tool magic-int validated
+- [x] Migrated all live screens (wizard, deep-dive/config x19, hotkeys/backups/update, Manage, progress/users/animation)
+- [x] ScreenManager always-on; legacy View/key/mouse dispatch removed
+- [x] Fixed migration-introduced bugs: global uiTick + installCacheDoneMsg dropped in managed mode
+- [x] Deleted 12 dead ScreenManageX screens + dead render clusters (~1,316 lines)
+- NOTE: screen count dropped (12 dead removed) — re-sync docs in Phase F (AGENTS.md still says 45 screens)
 
 ## Phase D — Verbosity / duplication / dead code (post-migration)
 - [ ] Consolidate ~30 near-identical tool files into a data table
