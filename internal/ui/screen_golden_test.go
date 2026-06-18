@@ -607,6 +607,364 @@ func TestConfigGhosttyReachableViaManager(t *testing.T) {
 	}
 }
 
+// TestConfigCLIToolsScreenGolden is a regression guard for the migrated CLI
+// tools selection screen. The install cache is pre-populated so the render does
+// not depend on the host's package manager.
+func TestConfigCLIToolsScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.cliToolIndex = 0
+	screen := NewConfigCLIToolsScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configCLIToolsScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"CLI Tools",
+		"LazyGit",
+		"LazyDocker",
+		"btop",
+		"Glow",
+		"Claude Code", // context row, rendered but not navigable
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configCLIToolsScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigCLITools {
+		t.Errorf("configCLIToolsScreen.ID() = %v, want ScreenConfigCLITools", screen.ID())
+	}
+}
+
+// TestConfigCLIToolsToggleAndBack verifies list navigation: space toggles the
+// focused (not-installed) tool, the cursor cannot reach the claude-code context
+// row, and esc resets the index and navigates back.
+func TestConfigCLIToolsToggleAndBack(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.cliToolIndex = 0
+	firstID := cliToolItems[0].id
+	before := ctx.app.deepDiveConfig.CLITools[firstID]
+
+	screen := NewConfigCLIToolsScreen(ctx)
+	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.CLITools[firstID] == before {
+		t.Errorf("space should toggle CLITools[%q] from %v", firstID, before)
+	}
+
+	// Down should stop at the last navigable tool (index navigableCLIToolCount-1),
+	// never reaching the claude-code context row.
+	for i := 0; i < len(cliToolItems)+2; i++ {
+		_, _ = screen.Update(keyMsg("down"))
+	}
+	if ctx.app.cliToolIndex != navigableCLIToolCount-1 {
+		t.Errorf("cliToolIndex = %d, want %d (cursor must not reach claude-code row)",
+			ctx.app.cliToolIndex, navigableCLIToolCount-1)
+	}
+
+	_, cmd := screen.Update(keyMsg("esc"))
+	if cmd == nil {
+		t.Fatal("esc should return a navigation command")
+	}
+	if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenDeepDiveMenu {
+		t.Errorf("esc should NavigateTo(ScreenDeepDiveMenu), got %#v", cmd())
+	}
+	if ctx.app.cliToolIndex != 0 {
+		t.Errorf("cliToolIndex = %d, want 0 reset on back", ctx.app.cliToolIndex)
+	}
+}
+
+// TestConfigCLIUtilitiesScreenGolden is a regression guard for the migrated CLI
+// utilities checkbox-list screen.
+func TestConfigCLIUtilitiesScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.cliUtilityIndex = 0
+	screen := NewConfigCLIUtilitiesScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configCLIUtilitiesScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"CLI Utilities",
+		"bat",
+		"eza",
+		"zoxide",
+		"ripgrep",
+		"fswatch",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configCLIUtilitiesScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigCLIUtilities {
+		t.Errorf("configCLIUtilitiesScreen.ID() = %v, want ScreenConfigCLIUtilities", screen.ID())
+	}
+}
+
+// TestConfigGUIAppsScreenGolden is a regression guard for the migrated GUI apps
+// checkbox-list screen.
+func TestConfigGUIAppsScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.guiAppIndex = 0
+	screen := NewConfigGUIAppsScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configGUIAppsScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"GUI Apps",
+		"Zen Browser",
+		"Cursor",
+		"OBS Studio",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configGUIAppsScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigGUIApps {
+		t.Errorf("configGUIAppsScreen.ID() = %v, want ScreenConfigGUIApps", screen.ID())
+	}
+}
+
+// TestConfigLazyGitScreenGolden is a regression guard for the migrated LazyGit
+// field-based config screen.
+func TestConfigLazyGitScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	screen := NewConfigLazyGitScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configLazyGitScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"LazyGit",
+		"Side-by-Side Diff",
+		"Mouse Mode",
+		"Theme",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configLazyGitScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigLazyGit {
+		t.Errorf("configLazyGitScreen.ID() = %v, want ScreenConfigLazyGit", screen.ID())
+	}
+}
+
+// TestConfigLazyGitToggleAndBack verifies the shared field navigation: space
+// toggles the focused boolean field and esc navigates back, resetting the index.
+func TestConfigLazyGitToggleAndBack(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.configFieldIndex = 0 // Side-by-Side Diff
+	before := ctx.app.deepDiveConfig.LazyGitSideBySide
+
+	screen := NewConfigLazyGitScreen(ctx)
+	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.LazyGitSideBySide == before {
+		t.Errorf("space should toggle LazyGitSideBySide from %v", before)
+	}
+
+	// Move to the Theme field and adjust it with 'right'.
+	ctx.app.configFieldIndex = 2
+	themeBefore := ctx.app.deepDiveConfig.LazyGitTheme
+	if _, _ = screen.Update(keyMsg("right")); ctx.app.deepDiveConfig.LazyGitTheme == themeBefore {
+		t.Errorf("right should cycle LazyGitTheme from %q", themeBefore)
+	}
+
+	_, cmd := screen.Update(keyMsg("esc"))
+	if cmd == nil {
+		t.Fatal("esc should return a navigation command")
+	}
+	if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenDeepDiveMenu {
+		t.Errorf("esc should NavigateTo(ScreenDeepDiveMenu), got %#v", cmd())
+	}
+	if ctx.app.configFieldIndex != 0 {
+		t.Errorf("configFieldIndex = %d, want 0 reset on back", ctx.app.configFieldIndex)
+	}
+}
+
+// TestConfigBtopScreenGolden is a regression guard for the migrated Btop
+// field-based config screen.
+func TestConfigBtopScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	screen := NewConfigBtopScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configBtopScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"Btop",
+		"Theme",
+		"Update Interval",
+		"Show CPU Temp",
+		"Graph Type",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configBtopScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigBtop {
+		t.Errorf("configBtopScreen.ID() = %v, want ScreenConfigBtop", screen.ID())
+	}
+}
+
+// TestConfigGlowScreenGolden is a regression guard for the migrated Glow
+// field-based config screen.
+func TestConfigGlowScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	screen := NewConfigGlowScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configGlowScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"Glow",
+		"Style",
+		"Pager",
+		"Width",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configGlowScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigGlow {
+		t.Errorf("configGlowScreen.ID() = %v, want ScreenConfigGlow", screen.ID())
+	}
+}
+
+// TestConfigClaudeCodeScreenGolden is a regression guard for the migrated Claude
+// Code MCP configuration screen.
+func TestConfigClaudeCodeScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.configFieldIndex = -1 // install toggle focused
+	screen := NewConfigClaudeCodeScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configClaudeCodeScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"Claude Code",
+		"Install Claude Code",
+		"MCP Servers",
+		"Context7",
+		"(recommended)",
+		"Task Master",
+		"Sequential Thinking",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configClaudeCodeScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigClaudeCode {
+		t.Errorf("configClaudeCodeScreen.ID() = %v, want ScreenConfigClaudeCode", screen.ID())
+	}
+}
+
+// TestConfigClaudeCodeToggleAndBack verifies the custom navigation: focus index
+// -1 toggles the install flag, MCP indices toggle their server, navigation stops
+// at -1 (up) and len-1 (down), and esc resets the index and navigates back.
+func TestConfigClaudeCodeToggleAndBack(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	screen := NewConfigClaudeCodeScreen(ctx)
+
+	// Index -1: space toggles the Claude Code install flag.
+	ctx.app.configFieldIndex = -1
+	installBefore := ctx.app.deepDiveConfig.CLITools["claude-code"]
+	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.CLITools["claude-code"] == installBefore {
+		t.Errorf("space at index -1 should toggle CLITools[claude-code] from %v", installBefore)
+	}
+
+	// 'up' should not go below -1.
+	if _, _ = screen.Update(keyMsg("up")); ctx.app.configFieldIndex != -1 {
+		t.Errorf("up at index -1 should stay at -1, got %d", ctx.app.configFieldIndex)
+	}
+
+	// Index 0: space toggles the first MCP server (context7).
+	ctx.app.configFieldIndex = 0
+	mcpID := claudeCodeMCPItems[0].id
+	mcpBefore := ctx.app.deepDiveConfig.ClaudeCodeMCPs[mcpID]
+	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.ClaudeCodeMCPs[mcpID] == mcpBefore {
+		t.Errorf("space at index 0 should toggle ClaudeCodeMCPs[%q] from %v", mcpID, mcpBefore)
+	}
+
+	// 'down' should not exceed the last MCP index.
+	for i := 0; i < len(claudeCodeMCPItems)+3; i++ {
+		_, _ = screen.Update(keyMsg("down"))
+	}
+	if ctx.app.configFieldIndex != len(claudeCodeMCPItems)-1 {
+		t.Errorf("down should cap at %d, got %d", len(claudeCodeMCPItems)-1, ctx.app.configFieldIndex)
+	}
+
+	_, cmd := screen.Update(keyMsg("esc"))
+	if cmd == nil {
+		t.Fatal("esc should return a navigation command")
+	}
+	if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenDeepDiveMenu {
+		t.Errorf("esc should NavigateTo(ScreenDeepDiveMenu), got %#v", cmd())
+	}
+	if ctx.app.configFieldIndex != 0 {
+		t.Errorf("configFieldIndex = %d, want 0 reset on back", ctx.app.configFieldIndex)
+	}
+}
+
+// TestConfigClaudeCodeReachableViaManager verifies the navigation backbone: an
+// App built with the ScreenManager enters managed mode on
+// NavigateTo(ScreenConfigClaudeCode) and renders the Claude Code MCP config
+// through the factory.
+func TestConfigClaudeCodeReachableViaManager(t *testing.T) {
+	app := NewApp(true, WithScreenFactory())
+	if app.screenMgr == nil {
+		t.Fatal("WithScreenFactory should initialize screenMgr")
+	}
+	app.screenMgr.SetSize(80, 24)
+	app.manageInstalled = map[string]bool{}
+	app.manageInstalledReady = true
+
+	if _, handled := app.screenMgr.Update(NavigateTo(ScreenConfigClaudeCode)()); !handled {
+		t.Fatal("manager should handle the NavigateMsg to ScreenConfigClaudeCode")
+	}
+	if app.screenMgr.IsLegacyMode() {
+		t.Fatal("manager should be in managed mode after navigating to ScreenConfigClaudeCode")
+	}
+
+	view := app.screenMgr.View()
+	for _, want := range []string{"Claude Code", "MCP Servers", "Context7"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("managed configClaudeCodeScreen should render %q\n---\n%s\n---", want, view)
+		}
+	}
+}
+
 // TestWelcomeReachableViaManager verifies the navigation backbone: an App built
 // with the ScreenManager enters managed mode on NavigateTo(ScreenWelcome) and
 // renders the welcome content through the factory.

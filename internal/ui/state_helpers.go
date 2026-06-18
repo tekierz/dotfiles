@@ -133,41 +133,6 @@ func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 	return "pending" // None installed (grey)
 }
 
-// getConfigScreenMaxFields returns the number of fields for the current config screen
-func (a *App) getConfigScreenMaxFields() int {
-	switch a.screen {
-	case ScreenConfigGhostty:
-		return 7
-	case ScreenConfigTmux:
-		if a.deepDiveConfig.TmuxTPMEnabled {
-			return 13
-		}
-		return 8
-	case ScreenConfigZsh:
-		return 13
-	case ScreenConfigNeovim:
-		return 14
-	case ScreenConfigGit:
-		return 5
-	case ScreenConfigYazi:
-		return 3
-	case ScreenConfigFzf:
-		return 3
-	case ScreenConfigMacApps:
-		return len(a.deepDiveConfig.MacApps)
-	case ScreenConfigGUIApps:
-		return 6
-	case ScreenConfigCLITools:
-		return 5
-	case ScreenConfigCLIUtilities:
-		return 7
-	case ScreenConfigUtilities:
-		return 3
-	default:
-		return 10
-	}
-}
-
 // togglePlugin adds or removes a plugin from the list
 func togglePlugin(plugins *[]string, plugin string) {
 	for i, p := range *plugins {

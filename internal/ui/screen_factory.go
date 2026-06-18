@@ -63,6 +63,24 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewConfigUtilitiesScreen(ctx)
 	case ScreenConfigMacApps:
 		return NewConfigMacAppsScreen(ctx)
+	case ScreenConfigApps:
+		return NewConfigAppsScreen(ctx)
+	case ScreenConfigCLITools:
+		return NewConfigCLIToolsScreen(ctx)
+	case ScreenConfigGUIApps:
+		return NewConfigGUIAppsScreen(ctx)
+	case ScreenConfigCLIUtilities:
+		return NewConfigCLIUtilitiesScreen(ctx)
+	case ScreenConfigLazyGit:
+		return NewConfigLazyGitScreen(ctx)
+	case ScreenConfigLazyDocker:
+		return NewConfigLazyDockerScreen(ctx)
+	case ScreenConfigBtop:
+		return NewConfigBtopScreen(ctx)
+	case ScreenConfigGlow:
+		return NewConfigGlowScreen(ctx)
+	case ScreenConfigClaudeCode:
+		return NewConfigClaudeCodeScreen(ctx)
 	default:
 		// Not migrated yet - return nil to use legacy handling
 		return nil

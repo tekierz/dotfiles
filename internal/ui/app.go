@@ -1158,8 +1158,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Note: ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
-	// ScreenFileTree, ScreenDeepDiveMenu and the migrated config screens
-	// (ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,Fzf,Utilities,MacApps}) are
+	// ScreenFileTree, ScreenDeepDiveMenu and ALL ScreenConfig* screens are
 	// migrated to ScreenHandlers; the ScreenManager delegates their mouse events
 	// to the handler's Update before reaching this legacy dispatch, so they
 	// intentionally no longer appear here.
@@ -1174,10 +1173,6 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a.handleBackupsMouse(msg)
 	case ScreenUpdate:
 		return a.handleTabBarMouse(msg)
-	case ScreenConfigApps, ScreenConfigCLITools, ScreenConfigGUIApps,
-		ScreenConfigCLIUtilities, ScreenConfigLazyGit, ScreenConfigLazyDocker,
-		ScreenConfigBtop, ScreenConfigGlow, ScreenConfigClaudeCode:
-		return a.handleConfigScreenMouse(msg)
 	default:
 		return a, nil
 	}
@@ -1210,13 +1205,9 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ScreenManageLazyDocker, ScreenManageBtop, ScreenManageGlow, ScreenManageClaudeCode:
 		return a.handleManagementKey(msg)
 
-	// Deep dive screens (not yet migrated; the migrated ScreenDeepDiveMenu and
-	// ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,Fzf,Utilities,MacApps} are
-	// handled by the ScreenManager before reaching this dispatch).
-	case ScreenConfigCLITools, ScreenConfigGUIApps, ScreenConfigCLIUtilities,
-		ScreenConfigLazyGit, ScreenConfigLazyDocker, ScreenConfigBtop,
-		ScreenConfigGlow, ScreenConfigClaudeCode:
-		return a.handleDeepDiveKey(msg)
+		// Note: ScreenDeepDiveMenu and ALL ScreenConfig* screens are migrated to
+		// ScreenHandlers and handled by the ScreenManager before reaching this
+		// dispatch, so they intentionally no longer appear here.
 	}
 
 	return a, nil
@@ -1245,23 +1236,6 @@ func (a *App) View() string {
 		return a.renderSummary()
 	case ScreenError:
 		return a.renderError()
-	// Deep dive screens (not yet migrated)
-	case ScreenConfigCLITools:
-		return a.renderConfigCLITools()
-	case ScreenConfigGUIApps:
-		return a.renderConfigGUIApps()
-	case ScreenConfigLazyGit:
-		return a.renderConfigLazyGit()
-	case ScreenConfigLazyDocker:
-		return a.renderConfigLazyDocker()
-	case ScreenConfigBtop:
-		return a.renderConfigBtop()
-	case ScreenConfigGlow:
-		return a.renderConfigGlow()
-	case ScreenConfigClaudeCode:
-		return a.renderConfigClaudeCode()
-	case ScreenConfigCLIUtilities:
-		return a.renderConfigCLIUtilities()
 	// Management platform screens
 	case ScreenManage:
 		return a.renderManageDualPane()
