@@ -1157,10 +1157,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	// Note: ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker and
-	// ScreenFileTree are migrated to ScreenHandlers; the ScreenManager delegates
-	// their mouse events to the handler's Update before reaching this legacy
-	// dispatch, so they intentionally no longer appear here.
+	// Note: ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
+	// ScreenFileTree, ScreenDeepDiveMenu and the migrated config screens
+	// (ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,Fzf,Utilities,MacApps}) are
+	// migrated to ScreenHandlers; the ScreenManager delegates their mouse events
+	// to the handler's Update before reaching this legacy dispatch, so they
+	// intentionally no longer appear here.
 	switch a.screen {
 	case ScreenManage:
 		return a.handleManageMouse(msg)
@@ -1172,11 +1174,7 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a.handleBackupsMouse(msg)
 	case ScreenUpdate:
 		return a.handleTabBarMouse(msg)
-	case ScreenDeepDiveMenu:
-		return a.handleDeepDiveMenuMouse(msg)
-	case ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh, ScreenConfigNeovim,
-		ScreenConfigGit, ScreenConfigYazi, ScreenConfigFzf, ScreenConfigUtilities,
-		ScreenConfigMacApps, ScreenConfigApps, ScreenConfigCLITools, ScreenConfigGUIApps,
+	case ScreenConfigApps, ScreenConfigCLITools, ScreenConfigGUIApps,
 		ScreenConfigCLIUtilities, ScreenConfigLazyGit, ScreenConfigLazyDocker,
 		ScreenConfigBtop, ScreenConfigGlow, ScreenConfigClaudeCode:
 		return a.handleConfigScreenMouse(msg)
@@ -1212,12 +1210,12 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ScreenManageLazyDocker, ScreenManageBtop, ScreenManageGlow, ScreenManageClaudeCode:
 		return a.handleManagementKey(msg)
 
-	// Deep dive screens
-	case ScreenDeepDiveMenu, ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh,
-		ScreenConfigNeovim, ScreenConfigGit, ScreenConfigYazi, ScreenConfigFzf,
-		ScreenConfigMacApps, ScreenConfigUtilities, ScreenConfigCLITools,
-		ScreenConfigGUIApps, ScreenConfigCLIUtilities, ScreenConfigLazyGit,
-		ScreenConfigLazyDocker, ScreenConfigBtop, ScreenConfigGlow, ScreenConfigClaudeCode:
+	// Deep dive screens (not yet migrated; the migrated ScreenDeepDiveMenu and
+	// ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,Fzf,Utilities,MacApps} are
+	// handled by the ScreenManager before reaching this dispatch).
+	case ScreenConfigCLITools, ScreenConfigGUIApps, ScreenConfigCLIUtilities,
+		ScreenConfigLazyGit, ScreenConfigLazyDocker, ScreenConfigBtop,
+		ScreenConfigGlow, ScreenConfigClaudeCode:
 		return a.handleDeepDiveKey(msg)
 	}
 
@@ -1234,9 +1232,10 @@ func (a *App) View() string {
 	}
 
 	// Note: ScreenWelcome, ScreenThemePicker, ScreenNavPicker, ScreenFileTree,
-	// ScreenMainMenu and ScreenSummary/ScreenError are migrated to ScreenHandlers
-	// and rendered by the ScreenManager above; they no longer appear in this
-	// legacy switch.
+	// ScreenMainMenu, ScreenSummary/ScreenError, ScreenDeepDiveMenu and the
+	// migrated config screens (ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,
+	// Fzf,Utilities,MacApps}) are migrated to ScreenHandlers and rendered by the
+	// ScreenManager above; they no longer appear in this legacy switch.
 	switch a.screen {
 	case ScreenAnimation:
 		return a.renderAnimation()
@@ -1246,27 +1245,7 @@ func (a *App) View() string {
 		return a.renderSummary()
 	case ScreenError:
 		return a.renderError()
-	// Deep dive screens
-	case ScreenDeepDiveMenu:
-		return a.renderDeepDiveMenu()
-	case ScreenConfigGhostty:
-		return a.renderConfigGhostty()
-	case ScreenConfigTmux:
-		return a.renderConfigTmux()
-	case ScreenConfigZsh:
-		return a.renderConfigZsh()
-	case ScreenConfigNeovim:
-		return a.renderConfigNeovim()
-	case ScreenConfigGit:
-		return a.renderConfigGit()
-	case ScreenConfigYazi:
-		return a.renderConfigYazi()
-	case ScreenConfigFzf:
-		return a.renderConfigFzf()
-	case ScreenConfigMacApps:
-		return a.renderConfigMacApps()
-	case ScreenConfigUtilities:
-		return a.renderConfigUtilities()
+	// Deep dive screens (not yet migrated)
 	case ScreenConfigCLITools:
 		return a.renderConfigCLITools()
 	case ScreenConfigGUIApps:

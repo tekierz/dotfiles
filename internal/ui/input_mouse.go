@@ -75,58 +75,9 @@ func (a *App) detectTabClick(x int) (Screen, tea.Cmd) {
 	return 0, nil
 }
 
-// handleDeepDiveMenuMouse handles mouse clicks on the deep dive menu
-func (a *App) handleDeepDiveMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	m := tea.MouseEvent(msg)
-
-	// Handle scroll wheel
-	if m.Button == tea.MouseButtonWheelUp {
-		if a.deepDiveMenuIndex > 0 {
-			a.deepDiveMenuIndex--
-		}
-		return a, nil
-	}
-	if m.Button == tea.MouseButtonWheelDown {
-		items := GetFilteredDeepDiveMenuItems()
-		if a.deepDiveMenuIndex < len(items)-1 {
-			a.deepDiveMenuIndex++
-		}
-		return a, nil
-	}
-
-	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
-		return a, nil
-	}
-
-	// Menu items are in a centered container. Use the same filtered/visible
-	// list that the renderer (renderDeepDiveMenu) and keyboard nav
-	// (handleDeepDiveKey) use, so the clicked row maps to the correct item
-	// on platforms where some items are filtered out (e.g. macOS Apps).
-	items := GetFilteredDeepDiveMenuItems()
-	contentHeight := len(items) + 10 // items + headers + padding
-	startY := (a.height - contentHeight) / 2
-	listStartY := startY + 4 // After title and instructions
-
-	// Account for category headers (they take up a line but aren't clickable)
-	clickableY := listStartY
-	for i, item := range items {
-		if item.Category != "" {
-			clickableY++ // Category header takes a line
-		}
-		if m.Y == clickableY {
-			a.deepDiveMenuIndex = i
-			// Double-click or single click to enter
-			a.configFieldIndex = 0
-			a.screen = item.Screen
-			return a, nil
-		}
-		clickableY++
-	}
-
-	return a, nil
-}
-
-// handleConfigScreenMouse handles mouse clicks on config screens
+// handleConfigScreenMouse handles mouse clicks on the deep dive config screens
+// that have NOT yet been migrated to ScreenHandlers. The migrated config screens
+// handle their own mouse events through the manager (see screen_config_base.go).
 func (a *App) handleConfigScreenMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m := tea.MouseEvent(msg)
 

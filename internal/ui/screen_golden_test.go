@@ -314,6 +314,299 @@ func TestMainMenuScreenGolden(t *testing.T) {
 	}
 }
 
+// newDeepDiveContext builds a deterministic ScreenContext for the deep-dive
+// screens. It pre-populates the install cache (so DeepDiveMenu renders the menu
+// instead of the loading spinner, and the install-aware list screens render
+// deterministically regardless of the host environment) and ensures a fresh
+// NewDeepDiveConfig() is present.
+func newDeepDiveContext(t *testing.T) *ScreenContext {
+	t.Helper()
+	ctx := newGoldenContext(t)
+	// NewApp already sets a NewDeepDiveConfig(); assert it for clarity.
+	if ctx.app.deepDiveConfig == nil {
+		ctx.app.deepDiveConfig = NewDeepDiveConfig()
+	}
+	ctx.app.manageInstalled = map[string]bool{}
+	ctx.app.manageInstalledReady = true
+	ctx.app.installCacheLoading = false
+	return ctx
+}
+
+// TestDeepDiveMenuScreenGolden is a regression guard for the migrated
+// deepDiveMenuScreen. With the install cache pre-populated it renders the tool
+// menu (not the loading spinner).
+func TestDeepDiveMenuScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.deepDiveMenuIndex = 0
+
+	screen := NewDeepDiveMenuScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("deepDiveMenuScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"DEEP DIVE CONFIGURATION",
+		"Ghostty",
+		"Tmux",
+		"Zsh",
+		"Neovim",
+		"Continue to Installation",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("deepDiveMenuScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenDeepDiveMenu {
+		t.Errorf("deepDiveMenuScreen.ID() = %v, want ScreenDeepDiveMenu", screen.ID())
+	}
+}
+
+// TestDeepDiveMenuLoadingGolden verifies the loading spinner is shown while the
+// install cache is still populating.
+func TestDeepDiveMenuLoadingGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.installCacheLoading = true
+
+	screen := NewDeepDiveMenuScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if !strings.Contains(out, "Loading installation status") {
+		t.Errorf("deepDiveMenuScreen.View() should show loading state\n---\n%s\n---", out)
+	}
+}
+
+// TestDeepDiveMenuNavigatesToConfig verifies that pressing enter on the first
+// menu item produces a NavigateMsg to that item's config screen.
+func TestDeepDiveMenuNavigatesToConfig(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.deepDiveMenuIndex = 0
+
+	screen := NewDeepDiveMenuScreen(ctx)
+	_, cmd := screen.Update(keyMsg("enter"))
+	if cmd == nil {
+		t.Fatal("enter on a config item should return a navigation command")
+	}
+	msg := cmd()
+	nav, ok := msg.(NavigateMsg)
+	if !ok {
+		t.Fatalf("expected NavigateMsg, got %T", msg)
+	}
+	want := GetFilteredDeepDiveMenuItems()[0].Screen
+	if nav.To != want {
+		t.Errorf("NavigateMsg.To = %v, want %v", nav.To, want)
+	}
+}
+
+// TestConfigGhosttyScreenGolden is a regression guard for the migrated Ghostty
+// config screen.
+func TestConfigGhosttyScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	screen := NewConfigGhosttyScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configGhosttyScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"Ghostty",
+		"Font Family",
+		"Font Size",
+		"Background Opacity",
+		"Cursor Style",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configGhosttyScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigGhostty {
+		t.Errorf("configGhosttyScreen.ID() = %v, want ScreenConfigGhostty", screen.ID())
+	}
+}
+
+// TestConfigGhosttyAdjustAndBack verifies the shared field navigation: right
+// adjusts the focused field and esc navigates back to the deep-dive menu.
+func TestConfigGhosttyAdjustAndBack(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.configFieldIndex = 1 // Font Size
+	before := ctx.app.deepDiveConfig.GhosttyFontSize
+
+	screen := NewConfigGhosttyScreen(ctx)
+	if _, _ = screen.Update(keyMsg("right")); ctx.app.deepDiveConfig.GhosttyFontSize != before+1 {
+		t.Errorf("GhosttyFontSize = %d, want %d after 'right'", ctx.app.deepDiveConfig.GhosttyFontSize, before+1)
+	}
+
+	_, cmd := screen.Update(keyMsg("esc"))
+	if cmd == nil {
+		t.Fatal("esc should return a navigation command")
+	}
+	nav, ok := cmd().(NavigateMsg)
+	if !ok || nav.To != ScreenDeepDiveMenu {
+		t.Errorf("esc should NavigateTo(ScreenDeepDiveMenu), got %#v", cmd())
+	}
+	if ctx.app.configFieldIndex != 0 {
+		t.Errorf("configFieldIndex = %d, want 0 reset on back", ctx.app.configFieldIndex)
+	}
+}
+
+// TestConfigZshScreenGolden is a regression guard for the migrated Zsh config
+// screen.
+func TestConfigZshScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	screen := NewConfigZshScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configZshScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"Zsh",
+		"Prompt Style",
+		"Powerlevel10k",
+		"Shell Options",
+		"Plugins",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configZshScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigZsh {
+		t.Errorf("configZshScreen.ID() = %v, want ScreenConfigZsh", screen.ID())
+	}
+}
+
+// TestConfigNeovimScreenGolden is a regression guard for the migrated Neovim
+// config screen.
+func TestConfigNeovimScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	screen := NewConfigNeovimScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configNeovimScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"Neovim",
+		"Configuration",
+		"Kickstart.nvim",
+		"Editor Settings",
+		"LSP Servers",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configNeovimScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigNeovim {
+		t.Errorf("configNeovimScreen.ID() = %v, want ScreenConfigNeovim", screen.ID())
+	}
+}
+
+// TestConfigMacAppsScreenGolden is a regression guard for the migrated macOS
+// apps selection screen. The install cache is pre-populated so the render does
+// not depend on the host's package manager.
+func TestConfigMacAppsScreenGolden(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.macAppIndex = 0
+	screen := NewConfigMacAppsScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("configMacAppsScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"macOS Apps",
+		"Rectangle",
+		"Raycast",
+		"AppCleaner",
+		"navigate",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("configMacAppsScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenConfigMacApps {
+		t.Errorf("configMacAppsScreen.ID() = %v, want ScreenConfigMacApps", screen.ID())
+	}
+}
+
+// TestConfigMacAppsToggleAndBack verifies list navigation: space toggles the
+// focused (not-installed) app, and esc resets the index and navigates back.
+func TestConfigMacAppsToggleAndBack(t *testing.T) {
+	ctx := newDeepDiveContext(t)
+	ctx.app.macAppIndex = 0
+	firstID := macAppItems[0].id
+	before := ctx.app.deepDiveConfig.MacApps[firstID]
+
+	screen := NewConfigMacAppsScreen(ctx)
+	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.MacApps[firstID] == before {
+		t.Errorf("space should toggle MacApps[%q] from %v", firstID, before)
+	}
+
+	ctx.app.macAppIndex = 3
+	_, cmd := screen.Update(keyMsg("esc"))
+	if cmd == nil {
+		t.Fatal("esc should return a navigation command")
+	}
+	if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenDeepDiveMenu {
+		t.Errorf("esc should NavigateTo(ScreenDeepDiveMenu), got %#v", cmd())
+	}
+	if ctx.app.macAppIndex != 0 {
+		t.Errorf("macAppIndex = %d, want 0 reset on back", ctx.app.macAppIndex)
+	}
+}
+
+// TestConfigGhosttyReachableViaManager verifies the navigation backbone: an App
+// built with the ScreenManager enters managed mode on
+// NavigateTo(ScreenConfigGhostty) and renders the Ghostty config through the
+// factory.
+func TestConfigGhosttyReachableViaManager(t *testing.T) {
+	app := NewApp(true, WithScreenFactory())
+	if app.screenMgr == nil {
+		t.Fatal("WithScreenFactory should initialize screenMgr")
+	}
+	app.screenMgr.SetSize(80, 24)
+	// Pre-populate cache so any install-aware screens render deterministically.
+	app.manageInstalled = map[string]bool{}
+	app.manageInstalledReady = true
+
+	if _, handled := app.screenMgr.Update(NavigateTo(ScreenConfigGhostty)()); !handled {
+		t.Fatal("manager should handle the NavigateMsg to ScreenConfigGhostty")
+	}
+	if app.screenMgr.IsLegacyMode() {
+		t.Fatal("manager should be in managed mode after navigating to ScreenConfigGhostty")
+	}
+
+	view := app.screenMgr.View()
+	if !strings.Contains(view, "Font Family") {
+		t.Errorf("managed configGhosttyScreen should render Ghostty config\n---\n%s\n---", view)
+	}
+
+	// DeepDiveMenu should likewise be reachable through the manager.
+	if _, handled := app.screenMgr.Update(NavigateTo(ScreenDeepDiveMenu)()); !handled {
+		t.Fatal("manager should handle the NavigateMsg to ScreenDeepDiveMenu")
+	}
+	if mv := app.screenMgr.View(); !strings.Contains(mv, "DEEP DIVE CONFIGURATION") {
+		t.Errorf("managed deepDiveMenuScreen should render menu\n---\n%s\n---", mv)
+	}
+}
+
 // TestWelcomeReachableViaManager verifies the navigation backbone: an App built
 // with the ScreenManager enters managed mode on NavigateTo(ScreenWelcome) and
 // renders the welcome content through the factory.

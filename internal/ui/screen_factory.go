@@ -43,6 +43,26 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewFileTreeScreen(ctx)
 	case ScreenMainMenu:
 		return NewMainMenuScreen(ctx)
+	case ScreenDeepDiveMenu:
+		return NewDeepDiveMenuScreen(ctx)
+	case ScreenConfigGhostty:
+		return NewConfigGhosttyScreen(ctx)
+	case ScreenConfigTmux:
+		return NewConfigTmuxScreen(ctx)
+	case ScreenConfigZsh:
+		return NewConfigZshScreen(ctx)
+	case ScreenConfigNeovim:
+		return NewConfigNeovimScreen(ctx)
+	case ScreenConfigGit:
+		return NewConfigGitScreen(ctx)
+	case ScreenConfigYazi:
+		return NewConfigYaziScreen(ctx)
+	case ScreenConfigFzf:
+		return NewConfigFzfScreen(ctx)
+	case ScreenConfigUtilities:
+		return NewConfigUtilitiesScreen(ctx)
+	case ScreenConfigMacApps:
+		return NewConfigMacAppsScreen(ctx)
 	default:
 		// Not migrated yet - return nil to use legacy handling
 		return nil
