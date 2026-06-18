@@ -163,13 +163,39 @@ func (a *App) hotkeyCategories() []hotkeys.Category {
 	return cats
 }
 
-// getCurrentUsername returns the active user name from global config, or "default" if none set.
-func (a *App) getCurrentUsername() string {
+// hotkeysCurrentUserCache caches the active username resolved from global.json
+// for the duration of a single hotkeys event/frame. It is refreshed once per
+// entry into the hotkeys screen handlers/renderer via refreshHotkeysCurrentUser
+// so that favorites/alias lookups (called once per visible row, every frame)
+// don't re-read and re-parse global.json from disk per item. The empty string
+// means "not yet resolved this frame", which triggers a one-time disk read.
+var (
+	hotkeysCurrentUserCache  string
+	hotkeysCurrentUserCached bool
+)
+
+// refreshHotkeysCurrentUser re-resolves the active username from global config
+// and caches it for the current event/frame. Called at the top of the hotkeys
+// screen entry points so a user switch elsewhere is reflected on the next frame
+// while per-item lookups within a frame stay free of disk access.
+func (a *App) refreshHotkeysCurrentUser() {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil || cfg == nil || cfg.ActiveUser == "" {
-		return "default"
+		hotkeysCurrentUserCache = "default"
+	} else {
+		hotkeysCurrentUserCache = cfg.ActiveUser
 	}
-	return cfg.ActiveUser
+	hotkeysCurrentUserCached = true
+}
+
+// getCurrentUsername returns the active user name from global config, or "default"
+// if none set. It serves the value cached by refreshHotkeysCurrentUser for the
+// current frame, falling back to a disk read only if the cache is cold.
+func (a *App) getCurrentUsername() string {
+	if !hotkeysCurrentUserCached {
+		a.refreshHotkeysCurrentUser()
+	}
+	return hotkeysCurrentUserCache
 }
 
 // getCurrentUserHotkeys returns the hotkeys config for the current user.
@@ -198,6 +224,10 @@ func (a *App) toggleHotkeyFavorite(categoryID, itemKey string) {
 }
 
 func (a *App) handleHotkeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Resolve the active user once per event so favorite lookups below don't
+	// hit disk per item.
+	a.refreshHotkeysCurrentUser()
+
 	key := msg.String()
 
 	// Handle alias input mode first (captures all keys)
@@ -536,6 +566,10 @@ func (a *App) hotkeysCancelAlias() {
 }
 
 func (a *App) handleHotkeysMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Resolve the active user once per event so favorite lookups below don't
+	// hit disk per item.
+	a.refreshHotkeysCurrentUser()
+
 	m := tea.MouseEvent(msg)
 	if a.width <= 0 || a.height <= 0 {
 		return a, nil
@@ -639,6 +673,10 @@ func (a *App) renderHotkeysDualPane() string {
 	if a.width == 0 || a.height == 0 {
 		return "Loading..."
 	}
+
+	// Resolve the active user once per frame so the per-row favorite lookups
+	// below don't re-read and re-parse global.json from disk per item.
+	a.refreshHotkeysCurrentUser()
 
 	layout := a.hotkeysLayout()
 	cats := a.hotkeyCategories()

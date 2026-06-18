@@ -419,10 +419,12 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.macAppIndex++
 			}
 		case " ":
-			app := apps[a.macAppIndex]
-			// Don't allow toggling if already installed
-			if !a.manageInstalled[app] {
-				a.deepDiveConfig.MacApps[app] = !a.deepDiveConfig.MacApps[app]
+			if a.macAppIndex >= 0 && a.macAppIndex < len(apps) {
+				app := apps[a.macAppIndex]
+				// Don't allow toggling if already installed
+				if !a.manageInstalled[app] {
+					a.deepDiveConfig.MacApps[app] = !a.deepDiveConfig.MacApps[app]
+				}
 			}
 		case "esc", "enter":
 			a.macAppIndex = 0
@@ -442,10 +444,12 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.utilityIndex++
 			}
 		case " ":
-			util := utilities[a.utilityIndex]
-			// Don't allow toggling if already installed
-			if !a.manageInstalled[util] {
-				a.deepDiveConfig.Utilities[util] = !a.deepDiveConfig.Utilities[util]
+			if a.utilityIndex >= 0 && a.utilityIndex < len(utilities) {
+				util := utilities[a.utilityIndex]
+				// Don't allow toggling if already installed
+				if !a.manageInstalled[util] {
+					a.deepDiveConfig.Utilities[util] = !a.deepDiveConfig.Utilities[util]
+				}
 			}
 		case "esc", "enter":
 			a.utilityIndex = 0
@@ -465,10 +469,12 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.cliToolIndex++
 			}
 		case " ":
-			tool := tools[a.cliToolIndex]
-			// Don't allow toggling if already installed
-			if !a.manageInstalled[tool] {
-				a.deepDiveConfig.CLITools[tool] = !a.deepDiveConfig.CLITools[tool]
+			if a.cliToolIndex >= 0 && a.cliToolIndex < len(tools) {
+				tool := tools[a.cliToolIndex]
+				// Don't allow toggling if already installed
+				if !a.manageInstalled[tool] {
+					a.deepDiveConfig.CLITools[tool] = !a.deepDiveConfig.CLITools[tool]
+				}
 			}
 		case "esc", "enter":
 			a.cliToolIndex = 0
@@ -488,10 +494,12 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.guiAppIndex++
 			}
 		case " ":
-			app := apps[a.guiAppIndex]
-			// Don't allow toggling if already installed
-			if !a.manageInstalled[app] {
-				a.deepDiveConfig.GUIApps[app] = !a.deepDiveConfig.GUIApps[app]
+			if a.guiAppIndex >= 0 && a.guiAppIndex < len(apps) {
+				app := apps[a.guiAppIndex]
+				// Don't allow toggling if already installed
+				if !a.manageInstalled[app] {
+					a.deepDiveConfig.GUIApps[app] = !a.deepDiveConfig.GUIApps[app]
+				}
 			}
 		case "esc", "enter":
 			a.guiAppIndex = 0
@@ -511,10 +519,12 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.cliUtilityIndex++
 			}
 		case " ":
-			util := utilities[a.cliUtilityIndex]
-			// Don't allow toggling if already installed
-			if !a.manageInstalled[util] {
-				a.deepDiveConfig.CLIUtilities[util] = !a.deepDiveConfig.CLIUtilities[util]
+			if a.cliUtilityIndex >= 0 && a.cliUtilityIndex < len(utilities) {
+				util := utilities[a.cliUtilityIndex]
+				// Don't allow toggling if already installed
+				if !a.manageInstalled[util] {
+					a.deepDiveConfig.CLIUtilities[util] = !a.deepDiveConfig.CLIUtilities[util]
+				}
 			}
 		case "esc", "enter":
 			a.cliUtilityIndex = 0
@@ -664,7 +674,7 @@ func (a *App) handleDeepDiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Toggle Claude Code installation
 				current := a.deepDiveConfig.CLITools["claude-code"]
 				a.deepDiveConfig.CLITools["claude-code"] = !current
-			} else {
+			} else if a.configFieldIndex >= 0 && a.configFieldIndex < len(mcps) {
 				// Toggle MCP server
 				mcp := mcps[a.configFieldIndex]
 				a.deepDiveConfig.ClaudeCodeMCPs[mcp] = !a.deepDiveConfig.ClaudeCodeMCPs[mcp]

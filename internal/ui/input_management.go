@@ -74,7 +74,9 @@ func (a *App) handleManagementKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.updateIndex--
 			}
 		case "down", "j":
-			a.updateIndex++
+			if a.updateIndex < len(a.updateResults)-1 {
+				a.updateIndex++
+			}
 		case " ": // Toggle selection for batch update
 			if len(a.updateResults) > 0 && a.updateIndex < len(a.updateResults) {
 				if a.updateSelected[a.updateIndex] {

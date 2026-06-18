@@ -658,15 +658,38 @@ func (a *App) renderProgress() string {
 		{"Finalizing"},
 	}
 
+	// a.installStep is an opaque, monotonically increasing counter (one tick per
+	// installed tool plus one per config phase), so it does not line up with the
+	// fixed 10-entry display list and routinely exceeds len(steps). Map it onto a
+	// bounded "current phase" so the list never renders every step as complete
+	// while the install is still running.
+	currentPhase := a.installStep
+	if a.installComplete {
+		// Everything done: mark all steps complete.
+		currentPhase = len(steps)
+	} else if a.installRunning {
+		// In progress: keep an active step visible and never let the whole list
+		// flip to complete (clamp to the last step at most).
+		if currentPhase > len(steps)-1 {
+			currentPhase = len(steps) - 1
+		}
+		if currentPhase < 0 {
+			currentPhase = 0
+		}
+	} else {
+		// Not started yet.
+		currentPhase = 0
+	}
+
 	var stepList strings.Builder
 	for i, s := range steps {
 		var status string
 		var style lipgloss.Style
 
-		if i < a.installStep {
+		if i < currentPhase {
 			status = "✓"
 			style = lipgloss.NewStyle().Foreground(ColorGreen)
-		} else if i == a.installStep && a.installRunning {
+		} else if i == currentPhase && a.installRunning {
 			status = "▶"
 			style = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 		} else {
@@ -676,10 +699,15 @@ func (a *App) renderProgress() string {
 		stepList.WriteString(style.Render(fmt.Sprintf("  %s %s\n", status, s.name)))
 	}
 
-	// Calculate progress
-	progressPercent := float64(a.installStep) / float64(len(steps))
+	// Calculate progress, clamped to [0,1] (currentPhase can equal len(steps)).
+	progressPercent := float64(currentPhase) / float64(len(steps))
 	if a.installComplete {
 		progressPercent = 1.0
+	}
+	if progressPercent < 0 {
+		progressPercent = 0
+	} else if progressPercent > 1 {
+		progressPercent = 1
 	}
 	progressW := min(50, maxInt(20, a.width-30))
 	progress := ProgressBar(progressPercent, progressW)

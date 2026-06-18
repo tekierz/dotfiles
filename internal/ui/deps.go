@@ -192,11 +192,17 @@ func NewScreenContext(deps *Dependencies) *ScreenContext {
 		Height:            24,
 	}
 
-	// Load persisted settings if available
+	// Load persisted settings if available. Only override the defaults above when
+	// the persisted value is set, so a partial/hand-edited config that omits
+	// theme/nav_style doesn't clobber the sensible defaults with empty strings.
 	if deps != nil && deps.Config != nil {
 		if cfg, err := deps.Config.LoadGlobalConfig(); err == nil {
-			ctx.Theme = cfg.Theme
-			ctx.NavStyle = cfg.NavStyle
+			if cfg.Theme != "" {
+				ctx.Theme = cfg.Theme
+			}
+			if cfg.NavStyle != "" {
+				ctx.NavStyle = cfg.NavStyle
+			}
 			ctx.AnimationsEnabled = !cfg.DisableAnimations
 		}
 	}
