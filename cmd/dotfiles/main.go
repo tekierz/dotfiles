@@ -109,7 +109,7 @@ Available tools: ghostty, tmux, zsh, neovim, git, yazi, fzf, apps, utilities`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			// No tool specified: show help
-			cmd.Help()
+			_ = cmd.Help()
 			return
 		}
 

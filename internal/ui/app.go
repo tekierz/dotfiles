@@ -468,7 +468,7 @@ func loadBackupsCmd() tea.Cmd {
 // countBackupFiles counts files in a backup directory
 func countBackupFiles(path string) int {
 	count := 0
-	filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
+	_ = filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
 		if info != nil && !info.IsDir() {
 			count++
 		}
@@ -480,7 +480,7 @@ func countBackupFiles(path string) int {
 // calcDirSize calculates the total size of files in a directory
 func calcDirSize(path string) int64 {
 	var size int64
-	filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
+	_ = filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
 		if info != nil && !info.IsDir() {
 			size += info.Size()
 		}
@@ -584,7 +584,7 @@ func createBackupCmd() tea.Cmd {
 		// Write manifest
 		manifest := strings.Join(backedUp, "\n")
 		manifestPath := filepath.Join(backupDir, backup.ManifestName)
-		os.WriteFile(manifestPath, []byte(manifest), 0600)
+		_ = os.WriteFile(manifestPath, []byte(manifest), 0600)
 
 		// Run backup cleanup based on settings
 		cleanupBackups()

@@ -132,9 +132,9 @@ func (a *AptManager) Update(packages ...string) error {
 		return nil
 	}
 
-	// Update package lists first
+	// Update package lists first (best-effort: install proceeds even if this fails)
 	updateCmd := exec.Command("sudo", "apt", "update")
-	updateCmd.Run()
+	_ = updateCmd.Run()
 
 	// Install specific packages (will upgrade if already installed)
 	args := []string{"apt", "install", "-y"}

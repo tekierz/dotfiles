@@ -116,7 +116,7 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 		aurCmd.Stdout = &aurOut
 		// `pacman -Qua` exits non-zero when there are no foreign updates, so
 		// the error is intentionally ignored and we parse whatever it emits.
-		aurCmd.Run()
+		_ = aurCmd.Run()
 
 		packages = append(packages, parsePacmanUpdates(aurOut.String(), "aur")...)
 	}

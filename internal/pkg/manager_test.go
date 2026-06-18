@@ -265,10 +265,10 @@ func TestMockPackageManager_Reset(t *testing.T) {
 	mock := NewMockPackageManager()
 
 	// Make some calls
-	mock.Install("vim")
-	mock.Uninstall("vim")
-	mock.Update("git")
-	mock.UpdateAll()
+	_ = mock.Install("vim")
+	_ = mock.Uninstall("vim")
+	_ = mock.Update("git")
+	_ = mock.UpdateAll()
 
 	// Verify calls were tracked
 	if len(mock.InstallCalls) != 1 {
