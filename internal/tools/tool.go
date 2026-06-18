@@ -105,18 +105,32 @@ func (t *BaseTool) ConfigScreen() int            { return t.configScreen }
 func (t *BaseTool) DefaultEnabled() bool         { return t.defaultEnabled }
 func (t *BaseTool) PlatformFilter() pkg.Platform { return t.platformFilter }
 
+// PackagesForPlatform resolves the package names for a given platform from a
+// tool's package map. Resolution order is: exact platform, then (for a
+// Raspberry Pi, which uses Debian packages) the Debian entry, then the "all"
+// fallback key. This is the single source of truth for package resolution and
+// must be used everywhere packages are looked up so that documented platforms
+// like the Raspberry Pi are never silently skipped.
+func PackagesForPlatform(packages map[pkg.Platform][]string, platform pkg.Platform) []string {
+	if pkgs := packages[platform]; len(pkgs) > 0 {
+		return pkgs
+	}
+	// Raspberry Pi reuses Debian packages (same apt manager).
+	if platform == pkg.PlatformPi {
+		if pkgs := packages[pkg.PlatformDebian]; len(pkgs) > 0 {
+			return pkgs
+		}
+	}
+	return packages["all"]
+}
+
 func (t *BaseTool) IsInstalled() bool {
-	platform := pkg.DetectPlatform()
 	mgr := pkg.DetectManager()
 	if mgr == nil {
 		return false
 	}
 
-	pkgs := t.packages[platform]
-	if len(pkgs) == 0 {
-		// Try "all" platform
-		pkgs = t.packages["all"]
-	}
+	pkgs := PackagesForPlatform(t.packages, pkg.DetectPlatform())
 	if len(pkgs) == 0 {
 		return false
 	}
@@ -126,11 +140,7 @@ func (t *BaseTool) IsInstalled() bool {
 }
 
 func (t *BaseTool) Install(mgr pkg.PackageManager) error {
-	platform := pkg.DetectPlatform()
-	pkgs := t.packages[platform]
-	if len(pkgs) == 0 {
-		pkgs = t.packages["all"]
-	}
+	pkgs := PackagesForPlatform(t.packages, pkg.DetectPlatform())
 	if len(pkgs) == 0 {
 		return nil // No packages to install for this platform
 	}

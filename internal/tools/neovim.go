@@ -215,7 +215,7 @@ func writeMinimalNeovimConfig(cfg NeovimConfig, theme, nvimDir string) error {
 func (t *NeovimTool) GenerateConfig(theme string) string {
 	cfg := NeovimConfig{
 		ConfigPreset: "kickstart",
-		LSPs:         []string{"lua_ls", "pyright", "tsserver", "gopls"},
+		LSPs:         []string{"lua_ls", "pyright", "ts_ls", "gopls"},
 		Plugins:      []string{"telescope", "treesitter", "lsp", "cmp"},
 		TabWidth:     4,
 		Wrap:         false,
@@ -229,7 +229,7 @@ func (t *NeovimTool) GenerateConfig(theme string) string {
 func (t *NeovimTool) ApplyConfig(theme string) error {
 	cfg := NeovimConfig{
 		ConfigPreset: "kickstart",
-		LSPs:         []string{"lua_ls", "pyright", "tsserver", "gopls"},
+		LSPs:         []string{"lua_ls", "pyright", "ts_ls", "gopls"},
 		Plugins:      []string{"telescope", "treesitter", "lsp", "cmp"},
 		TabWidth:     4,
 		Wrap:         false,

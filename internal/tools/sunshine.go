@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"os/exec"
+
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
@@ -30,4 +32,23 @@ func NewSunshineTool() *SunshineTool {
 			defaultEnabled: false,
 		},
 	}
+}
+
+// IsInstalled checks if Sunshine is available (command, app bundle, or package).
+// Sunshine is a Homebrew cask / GUI app, so detect out-of-band installs the same
+// way the other GUI apps do before falling back to the package manager.
+func (t *SunshineTool) IsInstalled() bool {
+	if _, err := exec.LookPath("sunshine"); err == nil {
+		return true
+	}
+	// Check desktop entry (Linux)
+	if hasDesktopEntry("sunshine", "Sunshine") {
+		return true
+	}
+	// Check macOS app bundle
+	if hasMacOSApp("Sunshine") {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
 }

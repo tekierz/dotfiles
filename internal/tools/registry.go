@@ -209,11 +209,8 @@ func (r *Registry) NotInstalledForPlatform() []Tool {
 	platform := pkg.DetectPlatform()
 	var tools []Tool
 	for _, t := range r.tools {
-		// Check if tool has packages for this platform (or "all")
-		pkgs := t.Packages()[platform]
-		if len(pkgs) == 0 {
-			pkgs = t.Packages()["all"]
-		}
+		// Check if tool has packages for this platform (or fallbacks)
+		pkgs := PackagesForPlatform(t.Packages(), platform)
 		// Skip tools with no packages for this platform
 		if len(pkgs) == 0 {
 			continue
@@ -233,11 +230,7 @@ func (r *Registry) CountForPlatform() int {
 	platform := pkg.DetectPlatform()
 	count := 0
 	for _, t := range r.tools {
-		pkgs := t.Packages()[platform]
-		if len(pkgs) == 0 {
-			pkgs = t.Packages()["all"]
-		}
-		if len(pkgs) > 0 {
+		if len(PackagesForPlatform(t.Packages(), platform)) > 0 {
 			count++
 		}
 	}
@@ -280,11 +273,8 @@ func (r *Registry) NotInstalledForSystem() []Tool {
 		if lightweight && t.IsHeavy() {
 			continue
 		}
-		// Check if tool has packages for this platform (or "all")
-		pkgs := t.Packages()[platform]
-		if len(pkgs) == 0 {
-			pkgs = t.Packages()["all"]
-		}
+		// Check if tool has packages for this platform (or fallbacks)
+		pkgs := PackagesForPlatform(t.Packages(), platform)
 		// Skip tools with no packages for this platform
 		if len(pkgs) == 0 {
 			continue

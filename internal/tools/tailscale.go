@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"os/exec"
+
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
@@ -30,4 +32,15 @@ func NewTailscaleTool() *TailscaleTool {
 			defaultEnabled: false,
 		},
 	}
+}
+
+// IsInstalled checks if Tailscale is available. The `tailscale` CLI may be
+// installed out-of-band (official installer, macOS app bundle) where the
+// package-manager check would miss it, so probe the CLI first.
+func (t *TailscaleTool) IsInstalled() bool {
+	if _, err := exec.LookPath("tailscale"); err == nil {
+		return true
+	}
+	// Fall back to package manager check
+	return t.BaseTool.IsInstalled()
 }

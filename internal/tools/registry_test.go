@@ -225,6 +225,83 @@ func TestToolPackages(t *testing.T) {
 	}
 }
 
+func TestPackagesForPlatform(t *testing.T) {
+	packages := map[pkg.Platform][]string{
+		pkg.PlatformMacOS:  {"node"},
+		pkg.PlatformArch:   {"nodejs", "npm"},
+		pkg.PlatformDebian: {"nodejs", "npm"},
+	}
+
+	tests := []struct {
+		name     string
+		packages map[pkg.Platform][]string
+		platform pkg.Platform
+		want     []string
+	}{
+		{
+			name:     "exact platform match",
+			packages: packages,
+			platform: pkg.PlatformMacOS,
+			want:     []string{"node"},
+		},
+		{
+			name:     "raspberry pi falls back to debian packages",
+			packages: packages,
+			platform: pkg.PlatformPi,
+			want:     []string{"nodejs", "npm"},
+		},
+		{
+			name:     "pi prefers its own entry over debian when present",
+			packages: map[pkg.Platform][]string{pkg.PlatformPi: {"pi-pkg"}, pkg.PlatformDebian: {"deb-pkg"}},
+			platform: pkg.PlatformPi,
+			want:     []string{"pi-pkg"},
+		},
+		{
+			name:     "all key used as final fallback",
+			packages: map[pkg.Platform][]string{"all": {"universal"}},
+			platform: pkg.PlatformMacOS,
+			want:     []string{"universal"},
+		},
+		{
+			name:     "no packages for platform returns empty",
+			packages: map[pkg.Platform][]string{pkg.PlatformMacOS: {"node"}},
+			platform: pkg.PlatformArch,
+			want:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PackagesForPlatform(tt.packages, tt.platform)
+			if len(got) != len(tt.want) {
+				t.Fatalf("PackagesForPlatform() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("PackagesForPlatform()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestRegistryToolsResolveOnPi verifies that every registered tool with packages
+// for Debian also resolves a non-empty package list on a Raspberry Pi, so the
+// installer never silently skips every tool on a Pi (regression for tools-1).
+func TestRegistryToolsResolveOnPi(t *testing.T) {
+	r := NewRegistry()
+	for _, tool := range r.All() {
+		debPkgs := tool.Packages()[pkg.PlatformDebian]
+		if len(debPkgs) == 0 {
+			continue
+		}
+		piPkgs := PackagesForPlatform(tool.Packages(), pkg.PlatformPi)
+		if len(piPkgs) == 0 {
+			t.Errorf("tool %s has Debian packages but resolves no packages on Raspberry Pi", tool.ID())
+		}
+	}
+}
+
 func TestToolConfigPaths(t *testing.T) {
 	r := NewRegistry()
 
