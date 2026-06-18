@@ -659,7 +659,16 @@ ask_user() {
     else
         echo -ne "${CYAN}?${NC} $prompt [y/N]: "
     fi
-    read -r reply
+    # When piped (e.g. `curl ... | bash`) stdin is the script stream, not a TTY,
+    # so a bare `read` would hit EOF and silently use the default. Read from the
+    # controlling terminal if one is available; otherwise fall back to default.
+    if [[ -t 0 ]]; then
+        read -r reply
+    elif [[ -e /dev/tty ]]; then
+        read -r reply < /dev/tty
+    else
+        reply=""
+    fi
     reply=${reply:-$default}
     [[ "$reply" =~ ^[Yy]$ ]]
 }
@@ -742,7 +751,7 @@ safe_write_config() {
     local description="${3:-config}"
 
     # Backup existing file if it exists
-    if [[ -n "$BACKUP_SESSION_DIR" ]]; then
+    if [[ -n "${BACKUP_SESSION_DIR:-}" ]]; then
         backup_file "$file"
     fi
 
@@ -775,6 +784,31 @@ list_backups() {
     if [[ $count -eq 0 ]]; then
         echo "  No backups found"
     fi
+}
+
+# Validate that a manifest destination path is safe to act on during restore.
+# Returns 0 only if the (canonicalized) path stays within the user's $HOME,
+# mirroring the HasPrefix(dstPath, home) guard in the Go restore path. This is
+# defense-in-depth against a corrupted/tampered manifest carrying a stray
+# absolute path like "/" or "/etc/passwd".
+is_safe_restore_path() {
+    local target="$1"
+    # Reject empty, relative, or traversal-bearing paths outright.
+    [[ -z "$target" ]] && return 1
+    [[ "$target" != /* ]] && return 1
+    case "$target" in
+        *..*) return 1 ;;
+    esac
+
+    # The manifest stores destinations as literal "$HOME/..." paths, but $HOME may
+    # itself be a symlink, so also accept the canonicalized home. The target may
+    # not exist yet during a restore, so compare lexically rather than resolving it.
+    local canon_home
+    canon_home=$(cd "$HOME" 2>/dev/null && pwd -P) || canon_home="$HOME"
+
+    # The path must be $HOME (literal or canonical) itself or live beneath it.
+    [[ "$target" == "$HOME" || "$target" == "$HOME"/* ]] && return 0
+    [[ "$target" == "$canon_home" || "$target" == "$canon_home"/* ]]
 }
 
 # Restore from a backup session
@@ -815,6 +849,13 @@ restore_backup() {
         # Skip comments and empty lines
         [[ "$original" =~ ^# ]] && continue
         [[ -z "$original" ]] && continue
+
+        # Refuse to rm/cp paths that escape $HOME (corrupted/tampered manifest).
+        if ! is_safe_restore_path "$original"; then
+            print_warning "Skipping unsafe restore path: $original"
+            ((errors++))
+            continue
+        fi
 
         if [[ "$existed" == "yes" ]]; then
             # File existed before - restore it
@@ -1293,8 +1334,9 @@ if command -v fd &> /dev/null; then
   export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
 fi
 
-# fzf colors (set by dotfiles - do not edit, use 'dotfiles theme' to change)
+# >>> dotfiles fzf colors (do not edit, use 'dotfiles theme' to change)
 # FZF_COLORS_PLACEHOLDER
+# <<< dotfiles fzf colors
 
 # Preview files with bat in fzf
 if command -v bat &> /dev/null; then
@@ -2878,11 +2920,26 @@ update_fzf() {
   --prompt='  ' --pointer='▶' --marker='✓'\""
 
     if [[ -f ~/.zshrc ]]; then
-        # Remove old fzf colors and replace
-        sed_i '/^export FZF_DEFAULT_OPTS=.*--color=/d' ~/.zshrc
-        sed_i '/^  --color=/d' ~/.zshrc
-        # Add new colors after the placeholder comment
-        sed_i "s|# fzf colors.*|# fzf colors ($THEME)\n$fzf_colors|" ~/.zshrc
+        # Migrate legacy unmarked blocks (pre-marker installs): the old format was
+        # a "# fzf colors" comment followed by a multi-line export that could not be
+        # replaced idempotently. Convert it to the marker-delimited region once.
+        if ! grep -q '^# >>> dotfiles fzf colors' ~/.zshrc && grep -q '^# fzf colors' ~/.zshrc; then
+            # Drop the stale multi-line export (opening line + indented continuations)
+            sed_i '/^export FZF_DEFAULT_OPTS="\$FZF_DEFAULT_OPTS/d' ~/.zshrc
+            sed_i '/^  --color=/d' ~/.zshrc
+            sed_i '/^  --prompt=/d' ~/.zshrc
+            # Replace the legacy comment with the marker-delimited region
+            sed_i "s|^# fzf colors.*|# >>> dotfiles fzf colors (do not edit, use 'dotfiles theme' to change)\n# <<< dotfiles fzf colors|" ~/.zshrc
+        fi
+        # Replace the marker-delimited fzf block idempotently: clear everything
+        # between the >>> and <<< markers (keeping the markers), then re-insert
+        # the freshly generated block after the opening marker. This avoids the
+        # multi-line block leaking stale/duplicate exports on repeated switches.
+        sed_i '/^# >>> dotfiles fzf colors/,/^# <<< dotfiles fzf colors/{/^# >>> dotfiles fzf colors/b
+/^# <<< dotfiles fzf colors/b
+d
+}' ~/.zshrc
+        sed_i "s|^# >>> dotfiles fzf colors.*|&\n$fzf_colors|" ~/.zshrc
     fi
 }
 
@@ -3200,6 +3257,13 @@ restore_backup() {
         [[ "$original" =~ ^# ]] && continue
         [[ -z "$original" ]] && continue
 
+        # Refuse to rm/cp paths that escape $HOME (corrupted/tampered manifest).
+        if ! is_safe_restore_path "$original"; then
+            echo -e "${YELLOW}⚠${NC} Skipping unsafe restore path: $original"
+            ((errors++))
+            continue
+        fi
+
         if [[ "$existed" == "yes" ]]; then
             if [[ "$type" == "directory" ]]; then
                 if [[ -d "$backup" ]]; then
@@ -3392,11 +3456,21 @@ setup_nvim() {
         [[ -n "${BACKUP_SESSION_DIR:-}" ]] && backup_directory "$HOME/.config/nvim"
 
         print_step "Cloning Kickstart.nvim..."
-        rm -rf ~/.config/nvim
-        git clone https://github.com/nvim-lua/kickstart.nvim.git ~/.config/nvim
-        print_success "Kickstart.nvim installed"
-        print_warning "Run 'nvim' to complete plugin installation"
-        print_warning "Add Catppuccin theme: edit ~/.config/nvim/init.lua"
+        # Clone into a temp dir first and only replace the existing config on
+        # success. This avoids destroying ~/.config/nvim before a network op that
+        # could fail (which, under set -e, would abort with no nvim config left).
+        local nvim_tmp
+        nvim_tmp=$(mktemp -d)
+        if git clone --depth 1 https://github.com/nvim-lua/kickstart.nvim.git "$nvim_tmp"; then
+            rm -rf ~/.config/nvim
+            mv "$nvim_tmp" ~/.config/nvim
+            print_success "Kickstart.nvim installed"
+            print_warning "Run 'nvim' to complete plugin installation"
+            print_warning "Add Catppuccin theme: edit ~/.config/nvim/init.lua"
+        else
+            rm -rf "$nvim_tmp"
+            print_error "nvim clone failed; existing config left intact"
+        fi
     else
         print_success "Neovim config already exists"
     fi
@@ -3411,13 +3485,33 @@ set_default_shell() {
 
     if [[ "$SHELL" != *"zsh"* ]]; then
         print_step "Changing default shell to zsh..."
+        local zsh_path
         if [[ "$OS" == "macos" ]]; then
-            chsh -s /bin/zsh
+            zsh_path="/bin/zsh"
         else
-            chsh -s "$(which zsh)"
+            # `|| true` so a missing zsh does not abort under set -e before the
+            # empty-path check below can handle it.
+            zsh_path=$(command -v zsh || true)
         fi
-        print_success "Default shell changed to zsh"
-        print_warning "Log out and back in for changes to take effect"
+
+        if [[ -z "$zsh_path" ]]; then
+            print_warning "zsh not found on PATH; skipping default shell change"
+            return 0
+        fi
+
+        # chsh refuses any shell not registered in /etc/shells (common for a
+        # brew/cargo zsh on Linux). Register it first, then change the shell
+        # without aborting the whole run if it still fails.
+        if ! grep -qxF "$zsh_path" /etc/shells 2>/dev/null; then
+            echo "$zsh_path" | sudo tee -a /etc/shells >/dev/null 2>&1 || true
+        fi
+
+        if chsh -s "$zsh_path"; then
+            print_success "Default shell changed to zsh"
+            print_warning "Log out and back in for changes to take effect"
+        else
+            print_warning "Could not change shell automatically; run: chsh -s $zsh_path"
+        fi
     else
         print_success "Zsh is already the default shell"
     fi
