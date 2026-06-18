@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
@@ -454,62 +455,30 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// restoreBackupCmd restores files from a backup
-func restoreBackupCmd(backup BackupEntry) tea.Cmd {
+// restoreBackupCmd restores files from a backup. The path mapping, traversal
+// guard, and mode preservation are shared with the CLI via the
+// internal/backup package so the two paths cannot diverge.
+func restoreBackupCmd(b BackupEntry) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := os.ReadDir(backup.Path)
-		if err != nil {
-			return backupRestoreDoneMsg{name: backup.Name, err: err}
-		}
-
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return backupRestoreDoneMsg{name: backup.Name, err: err}
+			return backupRestoreDoneMsg{name: b.Name, err: err}
 		}
 
-		restored := 0
-		for _, entry := range entries {
-			if entry.IsDir() || entry.Name() == "manifest.txt" {
-				continue
-			}
-
-			srcPath := filepath.Join(backup.Path, entry.Name())
-			// Backup files are named with underscores replacing slashes
-			relPath := strings.ReplaceAll(entry.Name(), "_", string(os.PathSeparator))
-			dstPath := filepath.Clean(filepath.Join(home, relPath))
-
-			// Security: Prevent path traversal attacks
-			if !strings.HasPrefix(dstPath, home+string(os.PathSeparator)) && dstPath != home {
-				continue
-			}
-
-			// Ensure destination directory exists
-			if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-				continue
-			}
-
-			// Read source and write to destination
-			data, err := os.ReadFile(srcPath)
-			if err != nil {
-				continue
-			}
-
-			if err := os.WriteFile(dstPath, data, 0600); err != nil {
-				continue
-			}
-
-			restored++
+		result, err := backup.Restore(b.Path, home)
+		if err != nil {
+			return backupRestoreDoneMsg{name: b.Name, err: err}
 		}
 
-		return backupRestoreDoneMsg{name: backup.Name, count: restored, err: nil}
+		return backupRestoreDoneMsg{name: b.Name, count: result.Count(), err: nil}
 	}
 }
 
 // deleteBackupCmd deletes a backup directory
-func deleteBackupCmd(backup BackupEntry) tea.Cmd {
+func deleteBackupCmd(b BackupEntry) tea.Cmd {
 	return func() tea.Msg {
-		err := os.RemoveAll(backup.Path)
-		return backupDeleteDoneMsg{name: backup.Name, err: err}
+		err := os.RemoveAll(b.Path)
+		return backupDeleteDoneMsg{name: b.Name, err: err}
 	}
 }
 
@@ -541,7 +510,8 @@ func createBackupCmd() tea.Cmd {
 		backedUp := []string{}
 		for _, relPath := range filesToBackup {
 			srcPath := filepath.Join(home, relPath)
-			if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+			info, err := os.Stat(srcPath)
+			if err != nil {
 				continue
 			}
 
@@ -550,20 +520,22 @@ func createBackupCmd() tea.Cmd {
 				continue
 			}
 
-			// Replace path separators with underscores for flat storage
-			safeName := strings.ReplaceAll(relPath, string(os.PathSeparator), "_")
-			dstPath := filepath.Join(backupDir, safeName)
+			// Flat storage name (human-readable); the manifest is the
+			// authoritative source for the original path on restore.
+			dstPath := filepath.Join(backupDir, backup.EncodeName(relPath))
 
 			if err := os.WriteFile(dstPath, data, 0600); err != nil {
 				continue
 			}
 
-			backedUp = append(backedUp, relPath)
+			// Record the original path and mode so restore can reconstruct
+			// both exactly (the underscore encoding is lossy).
+			backedUp = append(backedUp, backup.ManifestLine(relPath, info.Mode()))
 		}
 
 		// Write manifest
 		manifest := strings.Join(backedUp, "\n")
-		manifestPath := filepath.Join(backupDir, "manifest.txt")
+		manifestPath := filepath.Join(backupDir, backup.ManifestName)
 		os.WriteFile(manifestPath, []byte(manifest), 0600)
 
 		// Run backup cleanup based on settings
@@ -612,7 +584,7 @@ func cleanupBackups() {
 	})
 
 	now := time.Now()
-	for i, backup := range backups {
+	for i, bk := range backups {
 		shouldDelete := false
 
 		// Delete if exceeds max count (and max count is set)
@@ -622,14 +594,14 @@ func cleanupBackups() {
 
 		// Delete if exceeds max age (and max age is set)
 		if cfg.BackupMaxAgeDays > 0 {
-			age := now.Sub(backup.modTime)
+			age := now.Sub(bk.modTime)
 			if age > time.Duration(cfg.BackupMaxAgeDays)*24*time.Hour {
 				shouldDelete = true
 			}
 		}
 
 		if shouldDelete {
-			backupPath := filepath.Join(backupsDir, backup.name)
+			backupPath := filepath.Join(backupsDir, bk.name)
 			os.RemoveAll(backupPath)
 		}
 	}
@@ -671,7 +643,8 @@ func autoBackupIfEnabled() error {
 	backedUp := []string{}
 	for _, relPath := range filesToBackup {
 		srcPath := filepath.Join(home, relPath)
-		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+		info, err := os.Stat(srcPath)
+		if err != nil {
 			continue
 		}
 
@@ -680,20 +653,22 @@ func autoBackupIfEnabled() error {
 			continue
 		}
 
-		// Replace path separators with underscores for flat storage
-		safeName := strings.ReplaceAll(relPath, string(os.PathSeparator), "_")
-		dstPath := filepath.Join(backupDir, safeName)
+		// Flat storage name (human-readable); the manifest is the
+		// authoritative source for the original path on restore.
+		dstPath := filepath.Join(backupDir, backup.EncodeName(relPath))
 
 		if err := os.WriteFile(dstPath, data, 0600); err != nil {
 			continue
 		}
 
-		backedUp = append(backedUp, relPath)
+		// Record the original path and mode so restore can reconstruct
+		// both exactly (the underscore encoding is lossy).
+		backedUp = append(backedUp, backup.ManifestLine(relPath, info.Mode()))
 	}
 
 	// Write manifest
 	manifest := strings.Join(backedUp, "\n")
-	manifestPath := filepath.Join(backupDir, "manifest.txt")
+	manifestPath := filepath.Join(backupDir, backup.ManifestName)
 	os.WriteFile(manifestPath, []byte(manifest), 0600)
 
 	// Run cleanup after creating backup

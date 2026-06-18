@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
+	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -162,7 +163,9 @@ var restoreCmd = &cobra.Command{
 			launchTUI(ui.ScreenBackups)
 		} else {
 			// CLI mode: restore specific backup
-			restoreBackup(args[0])
+			if _, err := restoreBackup(args[0]); err != nil {
+				os.Exit(1)
+			}
 		}
 	},
 }
@@ -598,8 +601,12 @@ func listBackups() {
 	fmt.Println("To restore: dotfiles restore <backup-name>")
 }
 
-// restoreBackup restores a specific backup
-func restoreBackup(name string) {
+// restoreBackup restores a specific backup. It returns the number of files
+// successfully restored and a fatal error for failures that prevent any
+// restore (missing/invalid backup, unreadable backup dir, unknown home). The
+// path mapping, traversal guard, and mode preservation are shared with the TUI
+// via the internal/backup package so the two paths cannot diverge.
+func restoreBackup(name string) (int, error) {
 	backupDir := filepath.Join(config.ConfigDir(), "backups", name)
 
 	info, err := os.Stat(backupDir)
@@ -607,83 +614,40 @@ func restoreBackup(name string) {
 		if os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "Backup '%s' not found.\n", name)
 			fmt.Println("Run 'dotfiles backups' to see available backups.")
-			return
+			return 0, err
 		}
 		fmt.Fprintf(os.Stderr, "Error accessing backup: %v\n", err)
-		return
+		return 0, err
 	}
 
 	if !info.IsDir() {
 		fmt.Fprintf(os.Stderr, "'%s' is not a valid backup directory.\n", name)
-		return
-	}
-
-	// Read manifest if it exists
-	manifestPath := filepath.Join(backupDir, "manifest.txt")
-	manifest, _ := os.ReadFile(manifestPath)
-
-	fmt.Printf("Restoring backup: %s\n", name)
-	if len(manifest) > 0 {
-		fmt.Printf("Manifest:\n%s\n", string(manifest))
-	}
-
-	// Walk backup directory and restore files
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading backup: %v\n", err)
-		return
+		return 0, fmt.Errorf("%q is not a valid backup directory", name)
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
-		return
+		return 0, err
 	}
 
-	restored := 0
-	for _, entry := range entries {
-		if entry.IsDir() || entry.Name() == "manifest.txt" {
-			continue
-		}
+	fmt.Printf("Restoring backup: %s\n", name)
 
-		srcPath := filepath.Join(backupDir, entry.Name())
-		// Backup files are named with underscores replacing slashes
-		// e.g., ".config_dotfiles_settings.json" -> ".config/dotfiles/settings.json"
-		relPath := strings.ReplaceAll(entry.Name(), "_", string(os.PathSeparator))
-		dstPath := filepath.Clean(filepath.Join(home, relPath))
+	result, err := backup.Restore(backupDir, home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading backup: %v\n", err)
+		return 0, err
+	}
 
-		// Security: Prevent path traversal attacks. A malicious backup file named
-		// ".._.._etc_passwd" would be converted to "../../etc/passwd", allowing
-		// arbitrary file overwrites outside the home directory. We validate that
-		// the final destination path stays within the user's home directory.
-		if !strings.HasPrefix(dstPath, home+string(os.PathSeparator)) && dstPath != home {
-			fmt.Fprintf(os.Stderr, "  Warning: Skipping %s - path traversal detected\n", entry.Name())
-			continue
-		}
-
-		// Ensure destination directory exists
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "  Error creating directory for %s: %v\n", relPath, err)
-			continue
-		}
-
-		// Read source and write to destination
-		data, err := os.ReadFile(srcPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  Error reading %s: %v\n", entry.Name(), err)
-			continue
-		}
-
-		if err := os.WriteFile(dstPath, data, 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "  Error writing %s: %v\n", relPath, err)
-			continue
-		}
-
+	for _, relPath := range result.Restored {
 		fmt.Printf("  Restored: %s\n", relPath)
-		restored++
+	}
+	for item, reason := range result.Skipped {
+		fmt.Fprintf(os.Stderr, "  Warning: Skipping %s - %s\n", item, reason)
 	}
 
-	fmt.Printf("\nRestored %d files from backup.\n", restored)
+	fmt.Printf("\nRestored %d files from backup.\n", result.Count())
+	return result.Count(), nil
 }
 
 // runUninstall removes dotfiles and optionally restores original configuration
@@ -731,7 +695,14 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 		fmt.Println()
 	}
 
-	// Restore from latest backup
+	// Restore from latest backup.
+	//
+	// The backups directory lives *inside* configDir, so removing configDir
+	// below destroys the only copy of the user's original configs. If a
+	// restore was requested but failed (error or 0 files restored), we must
+	// NOT delete the config dir — that would delete the safety net before
+	// confirming the rescue worked. In that case we force keepConfig on so the
+	// backups survive and the user can retry manually.
 	if !noRestore {
 		fmt.Println("Checking for backups...")
 		backupDir := filepath.Join(configDir, "backups")
@@ -747,8 +718,15 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 			}
 			if latestBackup != "" {
 				fmt.Printf("Restoring from backup: %s\n", latestBackup)
-				restoreBackup(latestBackup)
+				count, err := restoreBackup(latestBackup)
 				fmt.Println()
+				if (err != nil || count == 0) && !keepConfig {
+					fmt.Fprintln(os.Stderr, "Restore did not complete successfully; keeping configuration directory so backups are preserved.")
+					fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
+					fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")
+					fmt.Fprintln(os.Stderr)
+					keepConfig = true
+				}
 			}
 		} else {
 			fmt.Println("No backups found to restore.")

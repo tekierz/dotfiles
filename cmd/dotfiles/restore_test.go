@@ -5,83 +5,146 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/backup"
 )
 
-// TestRestoreSecurityPathTraversal tests that path traversal attacks are blocked
-// during backup restoration. Backup files use underscore-separated paths that
-// get converted to OS path separators.
+// TestRestoreSecurityPathTraversal verifies the shared restore guard blocks
+// path-traversal attempts while allowing legitimate in-home paths. The CLI
+// restore (restoreBackup) drives the same backup.Restore -> safeJoin guard, so
+// testing the exported predicate exercises the real code path rather than a
+// re-implementation.
 func TestRestoreSecurityPathTraversal(t *testing.T) {
 	home := t.TempDir()
 
 	tests := []struct {
 		name     string
-		filename string
+		relPath  string
 		wantSafe bool
 	}{
-		// Safe filenames
-		{"simple config file", ".config_dotfiles_settings.json", true},
+		// Safe relative paths.
+		{"simple config file", ".config/dotfiles/settings.json", true},
 		{"zshrc", ".zshrc", true},
-		{"nested config", ".config_nvim_init.lua", true},
-		{"deep nesting", ".config_some_deep_path_file.txt", true},
+		{"nested config", ".config/nvim/init.lua", true},
+		{"underscore in component", ".config/some_tool/config", true},
 
-		// Unsafe filenames (path traversal attempts)
-		{"parent directory traversal", ".._.._etc_passwd", false},
-		{"deep traversal", ".._.._.._.._etc_shadow", false},
-		{"embedded traversal", ".config_.._.._etc_passwd", false},
-		{"single parent traversal", ".._etc_passwd", false},
+		// Unsafe paths (traversal / absolute escape).
+		{"parent directory traversal", "../etc/passwd", false},
+		{"deep traversal", "../../../../etc/shadow", false},
+		{"embedded traversal", ".config/../../etc/passwd", false},
+		{"absolute path", "/etc/passwd", false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			safe := isRestorePathSafe(home, tc.filename)
-			if safe != tc.wantSafe {
-				t.Errorf("isRestorePathSafe(%q, %q) = %v, want %v",
-					home, tc.filename, safe, tc.wantSafe)
+			if got := backup.IsRestorePathSafe(home, tc.relPath); got != tc.wantSafe {
+				t.Errorf("IsRestorePathSafe(%q, %q) = %v, want %v",
+					home, tc.relPath, got, tc.wantSafe)
 			}
 		})
 	}
 }
 
-// isRestorePathSafe validates that a backup filename will not escape
-// the home directory when restored. This mirrors the validation in restoreBackup.
-func isRestorePathSafe(home, filename string) bool {
-	relPath := strings.ReplaceAll(filename, "_", string(os.PathSeparator))
-	dstPath := filepath.Clean(filepath.Join(home, relPath))
-	homePrefix := filepath.Clean(home) + string(os.PathSeparator)
-	return strings.HasPrefix(dstPath, homePrefix) || dstPath == filepath.Clean(home)
-}
-
-// TestRestoreDeeplyNestedPaths tests handling of deeply nested paths
-func TestRestoreDeeplyNestedPaths(t *testing.T) {
+// TestRestoreFilenameRoundTrip is the regression test for cmd-1: a path whose
+// component contains a literal underscore must round-trip back to its exact
+// original location, not be split into extra directory levels. The manifest is
+// the authoritative source for the original path, so a backup written with the
+// manifest restores correctly even though the flat filename encoding is lossy.
+func TestRestoreFilenameRoundTrip(t *testing.T) {
 	home := t.TempDir()
+	backupDir := t.TempDir()
 
-	// Very deep nesting should work fine
-	deepPath := strings.Repeat("dir_", 50) + "file.txt"
-	if !isRestorePathSafe(home, deepPath) {
-		t.Error("Deeply nested path should be safe")
+	// A real-world path with an underscore in a directory component. The old
+	// ReplaceAll("_","/") decode would mangle this to ".config/some/tool/config".
+	relPath := ".config/some_tool/config"
+	content := []byte("user config contents")
+
+	// Write the flat backup file plus a manifest recording the true path/mode.
+	if err := os.WriteFile(filepath.Join(backupDir, backup.EncodeName(relPath)), content, 0o600); err != nil {
+		t.Fatalf("write backup file: %v", err)
+	}
+	manifest := backup.ManifestLine(relPath, 0o600)
+	if err := os.WriteFile(filepath.Join(backupDir, backup.ManifestName), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
 	}
 
-	// But deep traversal should not
-	deepTraversal := strings.Repeat(".._", 50) + "etc_passwd"
-	if isRestorePathSafe(home, deepTraversal) {
-		t.Error("Deep traversal path should not be safe")
+	result, err := backup.Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore returned fatal error: %v", err)
+	}
+	if result.Count() != 1 {
+		t.Fatalf("expected 1 restored file, got %d (skipped: %v)", result.Count(), result.Skipped)
+	}
+
+	// The file must land at the exact original relative path under home.
+	dst := filepath.Join(home, relPath)
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("restored file not at expected path %q: %v", dst, err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("restored content = %q, want %q", got, content)
+	}
+
+	// The old lossy decode would have created this wrong path; it must not exist.
+	wrong := filepath.Join(home, ".config", "some", "tool", "config")
+	if _, err := os.Stat(wrong); err == nil {
+		t.Errorf("file restored to corrupted path %q (underscore split into directories)", wrong)
 	}
 }
 
-// BenchmarkRestorePathValidation benchmarks the path validation function
-func BenchmarkRestorePathValidation(b *testing.B) {
-	home := "/home/testuser"
-	filenames := []string{
-		".config_dotfiles_settings.json",
-		".._.._etc_passwd",
-		".config_nvim_init.lua",
-		strings.Repeat("dir_", 20) + "file.txt",
+// TestRestorePreservesMode is the regression test for cmd-5: restore must honor
+// the mode recorded in the manifest (e.g. 0600 for a credential-bearing file)
+// rather than hardcoding a world-readable 0644.
+func TestRestorePreservesMode(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+
+	relPath := ".gitconfig"
+	if err := os.WriteFile(filepath.Join(backupDir, backup.EncodeName(relPath)), []byte("[user]\n"), 0o600); err != nil {
+		t.Fatalf("write backup file: %v", err)
+	}
+	manifest := backup.ManifestLine(relPath, 0o600)
+	if err := os.WriteFile(filepath.Join(backupDir, backup.ManifestName), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for _, f := range filenames {
-			isRestorePathSafe(home, f)
-		}
+	if _, err := backup.Restore(backupDir, home); err != nil {
+		t.Fatalf("Restore returned fatal error: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(home, relPath))
+	if err != nil {
+		t.Fatalf("stat restored file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("restored file mode = %o, want 0600 (must not be hardcoded 0644)", got)
+	}
+}
+
+// TestRestoreBlocksTraversalEndToEnd verifies that a legacy (manifest-less)
+// backup whose flat filename decodes to a traversal path is skipped and writes
+// nothing outside home. This is the regression test for cmd-2.
+func TestRestoreBlocksTraversalEndToEnd(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+
+	// Legacy-style flat filename that decodes to "../../etc/passwd". No manifest,
+	// so Restore falls back to filename decoding and must reject the traversal.
+	malicious := ".._.._etc_passwd"
+	if err := os.WriteFile(filepath.Join(backupDir, malicious), []byte("pwned"), 0o600); err != nil {
+		t.Fatalf("write malicious backup file: %v", err)
+	}
+
+	result, err := backup.Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore returned fatal error: %v", err)
+	}
+	if result.Count() != 0 {
+		t.Errorf("expected 0 restored files for traversal attempt, got %d", result.Count())
+	}
+	decoded := strings.ReplaceAll(malicious, "_", string(os.PathSeparator))
+	if _, ok := result.Skipped[decoded]; !ok {
+		t.Errorf("expected %q to be reported as skipped, skipped=%v", decoded, result.Skipped)
 	}
 }
