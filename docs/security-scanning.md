@@ -44,17 +44,12 @@ go vet ./...
 
 ### 3. gosec - Security Linting
 
-AST-based security scanning for Go code.
+AST-based security scanning for Go code. In this repo, gosec is **not** installed or run as a standalone CI step. It runs only as one enabled sub-linter inside golangci-lint, configured in `.golangci.yml` (the `gosec` linter). Running it standalone is purely a local/optional convenience:
 
 ```bash
-# Install
+# Optional local-only install + standalone scan (NOT part of CI)
 go install github.com/securego/gosec/v2/cmd/gosec@latest
-
-# Basic scan
 gosec ./...
-
-# Generate SARIF report
-gosec -fmt=sarif -out=results.sarif ./...
 ```
 
 **Common Rules:**
@@ -68,54 +63,88 @@ gosec -fmt=sarif -out=results.sarif ./...
 
 ## GitHub Actions Workflow
 
-Create `.github/workflows/security.yml`:
+Security and lint checks live in the existing `.github/workflows/ci.yml` (there is **no** standalone `security.yml`). CI triggers on `push` to `main`/`master` and on all `pull_request` events — there is no cron/weekly schedule.
+
+Two jobs are relevant:
+
+### `security` job
+
+Runs govulncheck only. Note `continue-on-error: true`, so a vulnerability finding does **not** block merges:
 
 ```yaml
-name: Security Scanning
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: '0 0 * * 1'  # Weekly on Mondays
-
-jobs:
   security:
+    name: Security
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run govulncheck
+        continue-on-error: true  # May have issues with latest Go
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+```
+
+### `lint` job
+
+Runs formatting and static analysis. The gofmt check and `go vet` **hard-fail** the build; golangci-lint (which includes the gosec sub-linter) and staticcheck both use `continue-on-error: true` and do not block merges:
+
+```yaml
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "::error::Code is not formatted. Run 'gofmt -w .'"
+            gofmt -l .
+            exit 1
+          fi
 
       - name: Run go vet
         run: go vet ./...
 
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
-      - name: Run govulncheck
-        run: govulncheck ./...
-
-      - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-
-      - name: Run gosec
-        run: gosec -fmt=sarif -out=results.sarif ./...
-        continue-on-error: true
-
-      - name: Upload SARIF results
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        continue-on-error: true  # May not support latest Go yet
         with:
-          sarif_file: results.sarif
+          version: latest
+          args: --timeout=5m
+
+      - name: Run staticcheck
+        uses: dominikh/staticcheck-action@v1
+        continue-on-error: true  # May not support latest Go yet
+        with:
+          version: latest
+          install-go: false
 ```
 
+> Note: there is no gosec install/run step, no SARIF generation, and no `github/codeql-action/upload-sarif` step in this repo. gosec coverage comes solely from golangci-lint.
+
 ## Makefile Integration
+
+The current `Makefile` does **not** define `security`, `vet`, `vuln`, or `gosec` targets. The only relevant target is `make lint`, which runs golangci-lint (including the gosec sub-linter):
+
+```makefile
+# Lint code (requires golangci-lint)
+lint:
+	golangci-lint run
+```
+
+The following targets are a **suggested/optional** addition (not currently present in the Makefile) if you want one-shot local security checks:
 
 ```makefile
 .PHONY: security vet vuln gosec
@@ -174,10 +203,10 @@ cmd := exec.Command("bash", "-c", "apt " + userInput)
 
 ## Known Exclusions
 
-The following patterns are intentionally allowed:
+The following gosec rules are intentionally excluded in `.golangci.yml` (`gosec.excludes`):
 
-1. **G204 (Subprocess Launch)**: Required for package manager integration
-2. **G104 (Unhandled Errors)**: Some intentional fire-and-forget operations
+1. **G104 (Unhandled Errors)**: Audit errors not checked — too noisy for a TUI with intentional fire-and-forget operations
+2. **G304 (File Path as Taint Input)**: Expected for a dotfiles tool that reads/writes user-supplied config paths
 
 ## References
 

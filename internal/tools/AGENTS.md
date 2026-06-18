@@ -26,6 +26,15 @@ type Tool interface {
     HasConfig() bool                         // Has configurable options
     GenerateConfig(theme string) string      // Generate config content
     ApplyConfig(theme string) error          // Apply configuration
+
+    // Resource requirements
+    IsHeavy() bool                           // Whether tool needs significant resources (skipped on low-memory systems)
+
+    // UI metadata for installer screens (added in v2.1 beta)
+    UIGroup() UIGroup                        // Which installer group (empty = dedicated screen)
+    ConfigScreen() int                       // Which config screen constant (0 = part of group screen)
+    DefaultEnabled() bool                    // Default enabled state in installer
+    PlatformFilter() pkg.Platform            // Empty for all platforms, or specific platform
 }
 ```
 
@@ -44,6 +53,21 @@ const (
 )
 ```
 
+## UI Groups
+
+`UIGroup` (added in v2.1 beta) determines which installer section a tool appears in:
+
+```go
+const (
+    UIGroupNone         UIGroup = ""              // Has a dedicated config screen
+    UIGroupCLITools     UIGroup = "cli-tools"
+    UIGroupCLIUtilities UIGroup = "cli-utilities"
+    UIGroupGUIApps      UIGroup = "gui-apps"
+    UIGroupMacApps      UIGroup = "macos-apps"
+    UIGroupUtilities    UIGroup = "utilities"     // Shell scripts (hk, caff, sshh)
+)
+```
+
 ## Adding a New Tool
 
 1. Create `newtool.go`:
@@ -51,7 +75,12 @@ const (
 ```go
 package tools
 
-import "github.com/tekierz/dotfiles/internal/pkg"
+import (
+    "os"
+    "path/filepath"
+
+    "github.com/tekierz/dotfiles/internal/pkg"
+)
 
 type NewToolTool struct {
     BaseTool
@@ -74,6 +103,10 @@ func NewNewToolTool() *NewToolTool {
             configPaths: []string{
                 filepath.Join(home, ".config", "newtool", "config"),
             },
+            // UI metadata (drives installer group placement)
+            uiGroup:        UIGroupCLIUtilities,
+            configScreen:   0, // 0 = part of group screen (no dedicated config screen)
+            defaultEnabled: true,
         },
     }
 }
@@ -89,16 +122,34 @@ func NewRegistry() *Registry {
 }
 ```
 
+> Note: `NewRegistry()` builds and registers all tools and is primarily for tests
+> that need a fresh registry. For normal operations use the global singleton
+> `GetRegistry()`, which lazily constructs a single shared `Registry` via `sync.Once`.
+
 ## Registry Methods
 
 ```go
-registry.All()           // All tools sorted by name
-registry.ByCategory(cat) // Tools in specific category
-registry.Installed()     // Currently installed tools
-registry.NotInstalled()  // Not installed tools
-registry.Configurable()  // Tools with config options
-registry.Count()         // Total tool count
-registry.InstalledCount()// Installed count
+tools.GetRegistry()      // Global singleton (recommended for normal use)
+tools.NewRegistry()      // Fresh registry (primarily for tests)
+
+registry.All()                    // All tools sorted by name
+registry.ByCategory(cat)          // Tools in specific category
+registry.Installed()              // Currently installed tools
+registry.NotInstalled()           // Not installed tools
+registry.Configurable()           // Tools with config options
+registry.Count()                  // Total tool count
+registry.InstalledCount()         // Installed count
+
+// Platform/system-aware queries (v2.1)
+registry.AllForSystem()           // All tools, excluding heavy ones on low-memory systems
+registry.NotInstalledForSystem()  // Not installed + platform/system appropriate
+registry.NotInstalledForPlatform()// Not installed + available for current platform
+registry.CountForPlatform()       // Tool count for current platform
+registry.HeavyTools()             // Tools marked resource-heavy
+
+// Install cache management (v2.1)
+registry.RefreshCache()           // Invalidate and repopulate the installed cache
+registry.InvalidateCache()        // Clear the cache without repopulating
 ```
 
 ## Platform Packages

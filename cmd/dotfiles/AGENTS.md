@@ -14,15 +14,26 @@ Cobra-based CLI with TUI integration.
 dotfiles                    # Launch TUI main menu
 dotfiles install            # Launch TUI installer
 dotfiles manage             # Launch TUI management
-dotfiles hotkeys            # Launch TUI hotkey viewer
-dotfiles update             # Launch TUI update screen
+dotfiles hotkeys            # Launch TUI hotkey viewer (alias: hk)
+dotfiles update             # Launch interactive TUI update screen
+dotfiles update check       # Print outdated packages (CLI)
 dotfiles status             # Print status (CLI)
 dotfiles backups            # List backups (CLI)
-dotfiles restore <name>     # Restore backup (CLI)
-dotfiles theme              # Theme management
-dotfiles theme --list       # List themes (CLI)
-dotfiles --skip-intro       # Skip intro animation
-dotfiles --version          # Print version
+dotfiles restore            # Launch TUI backup selector (ScreenBackups)
+dotfiles restore <name>     # Restore a specific backup (CLI)
+dotfiles theme              # Launch TUI theme picker
+dotfiles theme list         # List themes (CLI)
+dotfiles theme set <name>   # Set theme directly (CLI)
+dotfiles config <tool>      # Configure a tool (ghostty, tmux, zsh, neovim, git, yazi, fzf, apps, utilities)
+dotfiles version            # Print version information
+dotfiles uninstall          # Remove dotfiles and restore original config
+dotfiles user               # Show current active user
+dotfiles user [name]        # Switch to a user profile (prompts to create if new)
+dotfiles user add <name>    # Create a new user profile
+dotfiles user delete <name> # Delete a user profile (alias: rm, remove)
+dotfiles users              # List all user profiles
+dotfiles --<Username>       # Quick switch to an existing user profile (e.g. dotfiles --Pratik)
+dotfiles --skip-intro       # Skip intro animation (persistent flag)
 ```
 
 ## Adding a New Command
@@ -50,18 +61,31 @@ func init() {
 
 ## Launching TUI
 
+`NewApp` requires a `skipIntro bool` plus functional options. The screen factory
+(built by `createScreenFactory()`) is wired in via the `WithScreenFactory` option.
+
 ```go
-func launchTUI(startScreen ui.Screen) {
-    app := ui.NewApp()
-    app.SetStartScreen(startScreen)
+// createScreenFactory builds the screen factory for the ScreenManager.
+func createScreenFactory() ui.ScreenFactory {
+    factory := screens.NewFactory()
+    return factory.CreateFactory()
+}
+
+func launchTUI(screen ui.Screen) {
+    app := ui.NewApp(skipIntro, ui.WithScreenFactory(createScreenFactory()))
+    app.SetStartScreen(screen)
 
     p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
     if _, err := p.Run(); err != nil {
-        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+        fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
         os.Exit(1)
     }
 }
 ```
+
+`NewApp` is defined as `func NewApp(skipIntro bool, opts ...AppOption) *App`, so
+the `skipIntro` argument is required. `launchToolConfig` and `launchHotkeysFiltered`
+follow the same pattern, passing `true` for `skipIntro`.
 
 ## Flags
 
@@ -69,13 +93,30 @@ func launchTUI(startScreen ui.Screen) {
 var skipIntro bool
 
 func init() {
+    // Global persistent flag
     rootCmd.PersistentFlags().BoolVar(&skipIntro, "skip-intro", false, "Skip intro animation")
+
+    // Per-command flags
+    hotkeysCmd.Flags().String("tool", "", "Filter hotkeys by tool (tmux, zsh, neovim, etc.)")
+
+    uninstallCmd.Flags().Bool("keep-config", false, "Keep ~/.config/dotfiles directory")
+    uninstallCmd.Flags().Bool("keep-binaries", false, "Keep installed binaries")
+    uninstallCmd.Flags().Bool("no-restore", false, "Skip restoring backups")
+    uninstallCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
+
+    userAddCmd.Flags().String("theme", "", "Theme name (e.g., catppuccin-mocha)")
+    userAddCmd.Flags().String("nav", "", "Navigation style: emacs or vim")
+    userAddCmd.Flags().String("keyboard", "", "Keyboard style: macos or linux")
+    userDeleteCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
 }
 ```
 
+`--skip-intro` is the only persistent (global) flag; everything else is scoped to
+its specific subcommand.
+
 ## CLI vs TUI
 
-- **CLI mode**: Print output and exit (status, backups, theme --list)
+- **CLI mode**: Print output and exit (status, backups, theme list, update check)
 - **TUI mode**: Launch interactive Bubble Tea program
 
 Pattern for hybrid commands:

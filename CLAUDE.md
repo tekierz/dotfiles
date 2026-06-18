@@ -7,29 +7,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is **dotfiles**: a cross-platform terminal environment management platform that creates a consistent terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. It includes:
 
 - **Go TUI Application** (`cmd/dotfiles/`) - Interactive installer and management platform using Bubble Tea
-- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,200 lines of bash)
+- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,500 lines of bash)
 
-The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 20+ other terminal tools with unified theming.
+The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 25+ other terminal tools with unified theming. v2.1 added Tailscale (VPN), Sunshine/Moonlight (game streaming), and Claude Code (MCP configuration).
 
 ## Repository Structure
 
 ```
 cmd/
   dotfiles/              # Go CLI entry point (Cobra + Bubble Tea)
+  installer/             # Standalone installer entry point (main.go)
 internal/
   config/                # Configuration loading/saving (JSON)
   hotkeys/               # Hotkey definitions for tools
   pkg/                   # Package manager abstraction (brew/pacman/apt)
   runner/                # Bash script execution
   scripts/               # Embedded utility scripts (hk, caff, sshh)
-  tools/                 # Tool registry (27+ tools)
-  ui/                    # Bubble Tea TUI (~12,600 lines)
+  testutil/              # Shared test helpers (testutil.go)
+  tools/                 # Tool registry (30 tools)
+  ui/                    # Bubble Tea TUI (~14,400 lines)
 bin/
   dotfiles               # Built Go binary
   dotfiles-setup         # Legacy bash script
+  dotfiles-setup.ps1     # Windows PowerShell setup script
 docs/
   tools.md               # Detailed tool reference
   beta.plan              # Planned improvements for next release
+  v2-analysis-plan.md    # v2 analysis / planning notes
+  security-scanning.md   # Security scanning reference
 ```
 
 ## Homebrew Distribution
@@ -50,7 +55,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 | Package | Purpose |
 |---------|---------|
 | `internal/ui/` | Bubble Tea TUI (Model-Update-View pattern) |
-| `internal/tools/` | Tool registry with 27+ tools |
+| `internal/tools/` | Tool registry with 30 tools |
 | `internal/pkg/` | Package manager abstraction |
 | `internal/config/` | JSON configuration management |
 | `internal/hotkeys/` | Hotkey definitions |
@@ -58,7 +63,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 
 ### Screen Navigation
 
-The TUI uses screen-based navigation with 43 screens:
+The TUI uses screen-based navigation with 45 screens:
 - Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
 - Management: MainMenu, Manage, Update, Hotkeys, Backups
 - Config: Per-tool configuration screens
@@ -86,16 +91,21 @@ Neon-seapunk color palette defined in `internal/ui/styles.go`:
 ## CLI Commands
 
 ```bash
-dotfiles                # Launch TUI main menu
-dotfiles install        # Launch TUI installer
-dotfiles manage         # Launch TUI management
-dotfiles hotkeys        # Launch TUI hotkey viewer
-dotfiles status         # Print status (CLI)
-dotfiles backups        # List backups (CLI)
-dotfiles restore <name> # Restore backup (CLI)
-dotfiles theme --list   # List themes (CLI)
-dotfiles update         # Check for updates
-dotfiles uninstall      # Remove dotfiles and restore config
+dotfiles                  # Launch TUI main menu
+dotfiles install          # Launch TUI installer
+dotfiles manage           # Launch TUI management
+dotfiles hotkeys          # Launch TUI hotkey viewer
+dotfiles config <tool>    # Configure a specific tool
+dotfiles status           # Print status (CLI)
+dotfiles backups          # List backups (CLI)
+dotfiles restore <name>   # Restore backup (CLI)
+dotfiles theme list       # List themes (CLI)
+dotfiles theme set <name> # Set theme directly (CLI)
+dotfiles user [name]      # Manage users (add/delete subcommands)
+dotfiles users            # List users (CLI)
+dotfiles update           # Check for updates
+dotfiles version          # Print version
+dotfiles uninstall        # Remove dotfiles and restore config
 ```
 
 ## Key Concepts

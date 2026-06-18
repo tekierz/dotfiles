@@ -2,7 +2,7 @@
 
 A cross-platform terminal environment management platform with **16 customizable themes**.
 
-Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Windows (via WSL). Features an interactive TUI for installation and configuration, or use CLI commands directly.
+Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. Features an interactive TUI for installation and configuration, or use CLI commands directly. A separate native Windows installer (`bin/dotfiles-setup.ps1`, PowerShell) is also available.
 
 ## Quick Start
 
@@ -33,9 +33,14 @@ make build
 | `dotfiles hotkeys` | View keybindings cheatsheet |
 | `dotfiles update` | Check for package updates |
 | `dotfiles status` | Show current configuration |
-| `dotfiles theme --list` | List available themes |
+| `dotfiles theme list` | List available themes |
+| `dotfiles theme set <name>` | Set theme (run `dotfiles install` to apply) |
+| `dotfiles config <tool>` | Configure a specific tool |
+| `dotfiles user <name>` | Switch to / manage a user profile |
+| `dotfiles users` | List all user profiles |
 | `dotfiles backups` | List configuration backups |
-| `dotfiles restore <name>` | Restore from backup |
+| `dotfiles restore [name]` | Restore a backup (opens TUI picker if no name) |
+| `dotfiles version` | Show version information |
 | `dotfiles uninstall` | Remove dotfiles and restore original config |
 
 ## What It Installs & Configures
@@ -137,11 +142,13 @@ All tools share a unified color scheme. Choose from 16 themes:
 **Switch themes anytime:**
 
 ```bash
-dotfiles theme dracula      # Switch to Dracula
-dotfiles theme nord         # Switch to Nord
-dotfiles theme --list       # Show all themes
+dotfiles theme set dracula  # Set theme to Dracula
+dotfiles theme set nord     # Set theme to Nord
+dotfiles theme list         # Show all themes
 dotfiles status             # Show current settings
 ```
+
+> Setting a theme saves it to your config; run `dotfiles install` to apply it across all tools.
 
 Themes apply consistently across:
 - Terminal (Ghostty)
@@ -190,7 +197,7 @@ All existing configs are backed up before modification. Fully reversible install
 
 ```bash
 dotfiles backups              # List available backups
-dotfiles restore              # Restore most recent
+dotfiles restore              # Open backup picker (TUI)
 dotfiles restore 20240102_143052  # Restore specific backup
 ```
 
@@ -203,8 +210,9 @@ Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
 | `dotfiles` | Main management interface |
 | `hk` | Hotkey reference cheatsheet |
 | `caff` | Toggle system sleep (like Caffeine) |
-| `sshh` | Quick SSH connection manager |
 | `y` | Yazi file manager (cd on exit) |
+
+`sshh` (Quick SSH connection manager) is installed from its own Homebrew tap ([github.com/tekierz/sshh](https://github.com/tekierz/sshh)), not bundled or managed by dotfiles.
 
 ### Shell Aliases
 

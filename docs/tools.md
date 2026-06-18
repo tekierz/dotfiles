@@ -1,6 +1,8 @@
 # Tools Reference
 
-This document lists all tools installed by `dotfiles-setup`, organized by platform. Tools marked with **[Default]** are installed automatically; those marked with **[Optional]** require user confirmation or flags.
+This document lists all tools installed by the legacy `dotfiles-setup` bash script (`bin/dotfiles-setup`), organized by platform. Tools marked with **[Default]** are installed automatically; those marked with **[Optional]** require user confirmation or flags.
+
+> **Scope note:** Most sections below describe the **legacy bash script** tool set. The current **Go TUI** manages tools from its own registry (`internal/tools/`, 30 registered tools) which differs from this list. Some tools here (`fastfetch`, `tlrc`, `ncdu`, `duf`, `dust`, `bandwhich`, `gping`, `doggo`, `trippy`, `macmon`) are installed **only by the legacy bash script** and are not part of the Go TUI registry. Conversely, several tools managed by the Go TUI are documented in the new [Go TUI Tool Registry](#go-tui-tool-registry) section near the end.
 
 ---
 
@@ -87,7 +89,7 @@ These small scripts are installed to `~/.local/bin/`:
 | **hk** | Hotkey reference cheatsheet. Displays keybindings for tmux, zsh, yazi, fzf, and other tools in a nicely formatted table. |
 | **caff** | Caffeine toggle to prevent system sleep. `caff on` keeps your machine awake; `caff off` restores normal behavior. Works on both macOS and Linux. |
 | **sshh** | Quick SSH connection manager. Store frequently-used hosts in `~/.sshh` and connect with `sshh 1` or via interactive menu. |
-| **dotfiles** | Theme and user management CLI. Switch themes with `dotfiles theme dracula`, manage user profiles with `dotfiles --Username`. |
+| **dotfiles** | Theme and user management CLI. Switch themes with `dotfiles theme set dracula`, manage user profiles with `dotfiles --Username` (e.g. `dotfiles --Pratik`). |
 
 ### Fonts
 
@@ -137,6 +139,8 @@ These are prompted one-by-one unless using `--macos-apps -y`:
 | **mas** | [Optional] | Mac App Store CLI. Install and update App Store apps from terminal. |
 | **trash** | [Optional] | Move files to Trash from command line instead of permanent deletion. |
 | **switchaudio-osx** | [Optional] | Switch audio input/output devices from command line. |
+
+> **Legacy only:** `mas`, `trash`, and `switchaudio-osx` are installed only by the legacy bash script. They are **not** offered in the Go TUI macOS app picker, which lists only: Rectangle, Raycast, Stats, AltTab, MonitorControl, Mos, Karabiner-Elements, IINA, The Unarchiver, and AppCleaner.
 
 ---
 
@@ -260,7 +264,9 @@ No changes needed—these environments don't typically bind `Super+key` combinat
 
 ---
 
-## Installation Flags Reference
+## Installation Flags Reference (Legacy bash script)
+
+These flags apply to the **legacy `dotfiles-setup` bash script only**. They are not recognized by the Go binary (see the [Go CLI](#go-cli-subcommands--flags) section below).
 
 | Flag | Description |
 |------|-------------|
@@ -275,6 +281,62 @@ No changes needed—these environments don't typically bind `Super+key` combinat
 
 ---
 
+## Go CLI Subcommands & Flags
+
+The current **Go binary** (`dotfiles`) uses subcommands rather than the legacy flags above. Run `dotfiles` with no arguments to launch the TUI main menu.
+
+| Command | Description |
+|---------|-------------|
+| `dotfiles install` | Launch the TUI installer |
+| `dotfiles manage` | Launch the TUI management screen |
+| `dotfiles update [check]` | Check for / apply tool updates |
+| `dotfiles theme set <name>` | Set theme directly (`dotfiles theme list` lists themes; bare `dotfiles theme` opens the picker) |
+| `dotfiles config <tool>` | Configure a specific tool |
+| `dotfiles status` | Print status (CLI) |
+| `dotfiles backups` | List backups |
+| `dotfiles restore [backup-name]` | Restore a backup |
+| `dotfiles hotkeys [--tool <name>]` | View hotkeys |
+| `dotfiles user add <name> [--theme <t>] [--nav <emacs\|vim>] [--keyboard <macos\|linux>]` | Create a user profile |
+| `dotfiles user delete <name> [--force]` | Delete a user profile |
+| `dotfiles users` | List user profiles |
+| `dotfiles --<Username>` | Quick-switch to an existing user profile (e.g. `dotfiles --Pratik`) |
+| `dotfiles uninstall [--keep-config] [--keep-binaries] [--no-restore] [--force]` | Remove dotfiles and restore config |
+| `dotfiles version` | Print version |
+
+Global flag: `--skip-intro` skips the intro animation.
+
+---
+
+## Go TUI Tool Registry
+
+The Go TUI manages tools from its own registry (`internal/tools/`). In addition to the cross-platform CLI tools shared with the legacy list (zsh, tmux, neovim, yazi, git, git-delta, fzf, bat, eza, zoxide, ripgrep, fd, btop), it registers the following tools that are **not** covered by the legacy bash script sections above.
+
+### CLI Tools (Go TUI)
+
+| Tool | Description | Packages |
+|------|-------------|----------|
+| **LazyGit** | Simple terminal UI for Git commands. | `lazygit` (all platforms) |
+| **LazyDocker** | Simple terminal UI for Docker. Resource-heavy; skipped on low-memory systems (e.g. Pi Zero 2). | `lazydocker` (all platforms) |
+| **Glow** | Render markdown on the CLI. | `glow` (all platforms) |
+| **fswatch** | Cross-platform file change monitor. | `fswatch` (all platforms) |
+| **Tailscale** | Mesh VPN for secure networking. | `tailscale` (all platforms) |
+| **Sunshine** | Self-hosted game streaming server. | `sunshine` (all platforms) |
+| **Moonlight** | Open-source game streaming client. | `moonlight` (macOS), `moonlight-qt` (Arch, Debian) |
+| **Claude Code** | AI-powered coding assistant. Installed via npm (`@anthropic-ai/claude-code`); requires `node` (macOS) or `nodejs`+`npm` (Arch, Debian). Has a dedicated MCP configuration screen in the TUI. | `node` (macOS), `nodejs`, `npm` (Arch, Debian) |
+
+### GUI Applications (Go TUI)
+
+| Tool | Description | Packages |
+|------|-------------|----------|
+| **Zen Browser** | Privacy-focused browser based on Firefox. | `zen-browser` (macOS), `zen-browser-bin` (Arch); no Debian package |
+| **Cursor** | AI-first code editor. | `cursor` (macOS), `cursor-bin` (Arch); no Debian package |
+| **LM Studio** | Local LLM runner. | `lm-studio` (macOS, Arch); no Debian package |
+| **OBS Studio** | Streaming and recording software. | `obs` (macOS), `obs-studio` (Arch, Debian) |
+
+> The Go TUI also registers the macOS-only apps Rectangle, Raycast, IINA, and AppCleaner (see the [macOS Quality-of-Life Apps](#optional-quality-of-life-apps) section).
+
+---
+
 ## Post-Install Configuration
 
 After installation, these files contain your tool configurations:
@@ -286,6 +348,11 @@ After installation, these files contain your tool configurations:
 | `~/.config/ghostty/config` | Terminal emulator settings |
 | `~/.config/yazi/` | File manager configuration |
 | `~/.config/bat/config` | Bat theme settings |
+| `~/.config/btop/btop.conf` | btop resource monitor settings (Go TUI) |
+| `~/.config/lazygit/config.yml` | LazyGit configuration (Go TUI) |
+| `~/.config/lazydocker/config.yml` | LazyDocker configuration (Go TUI) |
+| `~/.config/glow/glow.yml` | Glow markdown renderer settings (Go TUI) |
+| `~/.claude/settings.json` | Claude Code MCP settings (Go TUI) |
 | `~/.gitconfig` | Git configuration with delta |
 | `~/.config/dotfiles/settings` | Current theme, navigation style, and active user |
 | `~/.sshh` | SSH hosts for quick connect |

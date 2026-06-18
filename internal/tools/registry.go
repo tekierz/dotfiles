@@ -8,7 +8,7 @@ import (
 )
 
 // Global singleton registry with sync.Once for thread-safe lazy initialization.
-// This avoids creating new registries and registering all 27 tools each time
+// This avoids creating new registries and registering all 30 tools each time
 // NewRegistry() would otherwise be called (15+ times across the codebase).
 var (
 	globalRegistry     *Registry

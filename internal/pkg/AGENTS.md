@@ -10,9 +10,11 @@ Cross-platform package manager interface.
 | `brew.go` | Homebrew implementation (macOS) |
 | `pacman.go` | Pacman/Paru implementation (Arch Linux) |
 | `apt.go` | APT implementation (Debian/Ubuntu) |
-| `update.go` | Update checking utilities |
+| `update.go` | Update/install helpers (`InstallPackage`, `InstallPackages`, `IsPackageInstalled`), `UpdateResult`, the `DotfilesPackages` managed-package list, and update-checking functions (`CheckAllUpdates`, `CheckDotfilesUpdates`) |
 
 ## PackageManager Interface
+
+Requires the `context` and `internal/runner` packages (for the streaming methods).
 
 ```go
 type PackageManager interface {
@@ -27,6 +29,10 @@ type PackageManager interface {
     UpdateAll() error                      // Update all packages
     Search(query string) ([]Package, error)// Search for packages
     ListInstalled() ([]Package, error)     // List all installed
+    NeedsSudo() bool                       // True if operations require elevated privileges
+    InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error)  // Install with real-time output
+    UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error)   // Update with real-time output
+    UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error)                     // Update all with real-time output
 }
 ```
 
@@ -41,6 +47,7 @@ Platforms:
 - `PlatformMacOS` - Darwin, uses Homebrew
 - `PlatformArch` - Arch Linux/CachyOS, uses Pacman/Paru
 - `PlatformDebian` - Debian/Ubuntu, uses APT
+- `PlatformPi` - Raspberry Pi (detected via device-tree model / cpuinfo), uses APT like Debian
 - `PlatformUnknown` - Unsupported
 
 ## Adding a New Package Manager
@@ -64,7 +71,9 @@ func (m *NewMgrManager) IsAvailable() bool { return m.mgrPath != "" }
 // ... implement remaining interface methods
 ```
 
-2. Add to `DetectManager()` in `manager.go`:
+2. Add the new platform constant to the `Platform` const block and to `detectPlatformImpl()` in `manager.go`.
+
+3. Add to `detectManagerImpl()` in `manager.go` (`DetectManager()` is a cached `sync.Once` wrapper that calls `detectManagerImpl()`):
 
 ```go
 case PlatformNewPlatform:
@@ -72,6 +81,8 @@ case PlatformNewPlatform:
         return mgr
     }
 ```
+
+4. Register the new manager in `AllManagers()` too. It returns every available manager, and `CheckAllUpdates()`/`UpdateAllPackages()` iterate over it (a manager missing here is invisible to those functions even if `detectManagerImpl()` returns it).
 
 ## Package Structure
 
@@ -88,8 +99,10 @@ type Package struct {
 
 ## Update Checking
 
+`pkg.DotfilesPackages` is the canonical list of packages managed by dotfiles; `CheckDotfilesUpdates()` iterates over it.
+
 ```go
-// Check all managed packages for updates
+// Check all managed packages for updates (uses pkg.DotfilesPackages)
 updates, err := pkg.CheckDotfilesUpdates()
 
 // Check specific package

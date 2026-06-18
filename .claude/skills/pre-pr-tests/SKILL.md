@@ -13,14 +13,19 @@ These repos are interconnected and may need updates together:
 
 | Repo | Location | Purpose |
 |------|----------|---------|
-| **dotfiles** | `~/projects/dotfiles` | Main project (this repo) |
-| **sshh** | `~/projects/sshh` | SSH connection manager utility |
-| **homebrew-tap** | `~/projects/homebrew-tap` | Homebrew formulas for distribution |
+| **dotfiles** | `~/Desktop/Projects/dotfiles` | Main project (this repo) |
+| **sshh** | `~/Desktop/Projects/sshh` | SSH connection manager utility |
+| **homebrew-tap** | `~/Desktop/Projects/homebrew-tap` | Homebrew formulas for distribution |
+
+> Paths above reflect this checkout's base (`~/Desktop/Projects/`). Adjust to wherever you cloned the repos.
 
 ### Integration Flow
 ```
-dotfiles-setup (bash script)
-    └── installs sshh via: brew install tekierz/tap/sshh
+PRIMARY (current): Go TUI binary `dotfiles`
+homebrew-tap/Formula/dotfiles.rb ──> installs Go binary via: brew install tekierz/tap/dotfiles
+
+LEGACY: dotfiles-setup (bash script, curl | bash)
+    └── on macOS installs sshh via: brew install tekierz/tap/sshh
                                     │
 homebrew-tap/Formula/sshh.rb ───────┘
     └── SHA256 hash points to: github.com/tekierz/sshh/archive/refs/tags/v*.tar.gz
@@ -32,23 +37,35 @@ homebrew-tap/Formula/sshh.rb ───────┘
 
 Copy and run this test script:
 
+> These local checks mirror the GitHub Actions CI workflow (`.github/workflows/ci.yml`, which runs lint/security/test/build jobs). Install the pre-commit hooks once with `bash scripts/install-hooks.sh` so `gofmt`/`go vet` run automatically before each commit.
+
 ```bash
 #!/bin/bash
 set -e
 echo "=== PRE-PR AUTOMATED TESTS ==="
 
 # 1. Build Check
-echo -e "\n[1/7] Building..."
+echo -e "\n[1/9] Building..."
 make clean && make build
 echo "BUILD: PASS"
 
 # 2. Go Vet
-echo -e "\n[2/7] Running go vet..."
+echo -e "\n[2/9] Running go vet..."
 go vet ./...
 echo "GO VET: PASS"
 
-# 3. Format Check
-echo -e "\n[3/7] Checking gofmt..."
+# 3. Lint (golangci-lint via make lint; matches CI lint job)
+echo -e "\n[3/9] Running golangci-lint..."
+make lint
+echo "LINT: PASS"
+
+# 4. Unit Tests
+echo -e "\n[4/9] Running go test..."
+go test ./...
+echo "GO TEST: PASS"
+
+# 5. Format Check
+echo -e "\n[5/9] Checking gofmt..."
 UNFORMATTED=$(gofmt -l ./internal ./cmd 2>/dev/null)
 if [ -n "$UNFORMATTED" ]; then
     echo "GOFMT: FAIL - Unformatted files:"
@@ -57,8 +74,8 @@ if [ -n "$UNFORMATTED" ]; then
 fi
 echo "GOFMT: PASS"
 
-# 4. Security: Check for hardcoded secrets
-echo -e "\n[4/7] Security scan..."
+# 6. Security: Check for hardcoded secrets
+echo -e "\n[6/9] Security scan..."
 if grep -rn "password\s*=\s*[\"']" --include="*.go" ./internal ./cmd 2>/dev/null | grep -v "Password string"; then
     echo "SECURITY: WARNING - Potential hardcoded password found"
 fi
@@ -67,22 +84,22 @@ if grep -rn "api_key\s*=\s*[\"']" --include="*.go" ./internal ./cmd 2>/dev/null;
 fi
 echo "SECURITY: PASS (manual review recommended)"
 
-# 5. CLI Commands Test
-echo -e "\n[5/7] Testing CLI commands..."
+# 7. CLI Commands Test
+echo -e "\n[7/9] Testing CLI commands..."
 ./bin/dotfiles --help > /dev/null && echo "  --help: OK"
 ./bin/dotfiles status > /dev/null 2>&1 && echo "  status: OK"
 ./bin/dotfiles backups > /dev/null 2>&1 && echo "  backups: OK"
-./bin/dotfiles theme --list > /dev/null 2>&1 && echo "  theme --list: OK"
+./bin/dotfiles theme list > /dev/null 2>&1 && echo "  theme list: OK"
 echo "CLI COMMANDS: PASS"
 
-# 6. Binary Size Check
-echo -e "\n[6/7] Binary size..."
+# 8. Binary Size Check
+echo -e "\n[8/9] Binary size..."
 SIZE=$(ls -lh ./bin/dotfiles | awk '{print $5}')
 echo "  Binary size: $SIZE"
 echo "BINARY SIZE: INFO"
 
-# 7. Startup Time
-echo -e "\n[7/7] Startup time..."
+# 9. Startup Time
+echo -e "\n[9/9] Startup time..."
 START=$(date +%s%N)
 timeout 2 ./bin/dotfiles --help > /dev/null 2>&1 || true
 END=$(date +%s%N)
@@ -111,11 +128,13 @@ echo -e "\n=== AUTOMATED TESTS COMPLETE ==="
 - [ ] Intro animation plays smoothly (no flickering)
 - [ ] Logo renders correctly with colors
 - [ ] Press Enter to continue works
-- [ ] Theme selection screen shows all 13 themes
+- [ ] Theme selection screen shows all 16 themes
 - [ ] Arrow keys navigate theme list
 - [ ] Enter selects theme
 - [ ] Navigation style selection works (emacs/vim)
 - [ ] Deep Dive menu shows all tools
+- [ ] v2.1 tools appear in the list: Tailscale, Sunshine, Moonlight
+- [ ] Selecting Claude Code opens its MCP config screen and applies MCP servers (context7 enabled by default) on install
 - [ ] Each tool config screen opens correctly
 - [ ] Esc/Backspace returns to previous screen
 - [ ] Summary screen shows correct selections
@@ -129,6 +148,7 @@ echo -e "\n=== AUTOMATED TESTS COMPLETE ==="
 
 **Checklist:**
 - [ ] Tool list displays with correct icons
+- [ ] v2.1 tools listed: Tailscale, Sunshine, Moonlight, Claude Code (MCP)
 - [ ] Installed/Not Installed status is accurate
 - [ ] Arrow keys navigate tool list
 - [ ] Enter opens tool configuration
@@ -150,6 +170,9 @@ echo -e "\n=== AUTOMATED TESTS COMPLETE ==="
 - [ ] Navigation works (up/down/left/right)
 - [ ] Category switching works
 - [ ] Icons render correctly
+- [ ] `f` toggles favorite on the selected hotkey
+- [ ] `F` toggles favorites-only filter mode (from both panes)
+- [ ] Favorites persist per-user across runs (saved via `config.SaveHotkeysConfig`)
 
 ### Test 4: Animation & Performance
 
@@ -263,12 +286,12 @@ Manual review of these areas:
 
 ### Automated Cross-Repo Check Script
 
-Run this from `~/projects/`:
+Run this from `~/Desktop/Projects/`:
 
 ```bash
 #!/bin/bash
 echo "=== CROSS-REPO COMPATIBILITY CHECK ==="
-cd ~/projects
+cd ~/Desktop/Projects
 
 # 1. Check all repos exist
 echo -e "\n[1/6] Checking repositories..."
@@ -297,11 +320,15 @@ done
 echo -e "\n[3/6] Version numbers..."
 DOTFILES_VER=$(grep -m1 'VERSION=' dotfiles/bin/dotfiles-setup 2>/dev/null | cut -d'"' -f2 || echo "unknown")
 SSHH_VER=$(grep -m1 'VERSION=' sshh/bin/sshh 2>/dev/null | cut -d'"' -f2 || echo "unknown")
-TAP_DOTFILES_VER=$(grep -m1 'version' homebrew-tap/Formula/dotfiles-setup.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+# Primary distribution: the Go-binary 'dotfiles' formula (brew install dotfiles)
+TAP_DOTFILES_VER=$(grep -m1 'version' homebrew-tap/Formula/dotfiles.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+# Legacy bash-script formula (if still present in the tap)
+TAP_DOTFILES_SETUP_VER=$(grep -m1 'version' homebrew-tap/Formula/dotfiles-setup.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "n/a")
 TAP_SSHH_VER=$(grep -m1 'version' homebrew-tap/Formula/sshh.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
 echo "  dotfiles script: v$DOTFILES_VER"
 echo "  sshh script: v$SSHH_VER"
-echo "  homebrew-tap dotfiles formula: v$TAP_DOTFILES_VER"
+echo "  homebrew-tap dotfiles (Go binary) formula: v$TAP_DOTFILES_VER"
+echo "  homebrew-tap dotfiles-setup (legacy) formula: v$TAP_DOTFILES_SETUP_VER"
 echo "  homebrew-tap sshh formula: v$TAP_SSHH_VER"
 
 # 4. Check sshh installation reference in dotfiles
@@ -314,9 +341,9 @@ fi
 
 # 5. Check SHA256 hashes are present (can't verify without release)
 echo -e "\n[5/6] Homebrew formula SHA256 hashes..."
-DOTFILES_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/dotfiles-setup.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
+DOTFILES_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/dotfiles.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
 SSHH_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/sshh.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
-echo "  dotfiles-setup: ${DOTFILES_SHA:0:16}..."
+echo "  dotfiles (Go binary): ${DOTFILES_SHA:0:16}..."
 echo "  sshh: ${SSHH_SHA:0:16}..."
 
 # 6. Check for breaking changes in sshh config format
@@ -356,11 +383,12 @@ curl -sL https://github.com/tekierz/dotfiles/archive/refs/tags/v1.0.1.tar.gz | s
 curl -sL https://github.com/tekierz/sshh/archive/refs/tags/v1.1.0.tar.gz | sha256sum
 
 # 3. Update formulas in homebrew-tap
-# Edit: ~/projects/homebrew-tap/Formula/dotfiles-setup.rb
-# Edit: ~/projects/homebrew-tap/Formula/sshh.rb
+# Edit: ~/Desktop/Projects/homebrew-tap/Formula/dotfiles.rb       # primary Go-binary formula
+# Edit: ~/Desktop/Projects/homebrew-tap/Formula/dotfiles-setup.rb # legacy bash-script formula (if still present)
+# Edit: ~/Desktop/Projects/homebrew-tap/Formula/sshh.rb
 
 # 4. Commit and push
-cd ~/projects/homebrew-tap
+cd ~/Desktop/Projects/homebrew-tap
 git add -A && git commit -m "Update SHA256 for [package] v[version]"
 git push
 ```
@@ -370,7 +398,8 @@ git push
 | Change Type | Files to Update |
 |-------------|-----------------|
 | sshh version bump | `sshh/bin/sshh`, `homebrew-tap/Formula/sshh.rb` |
-| dotfiles version bump | `dotfiles/bin/dotfiles-setup`, `homebrew-tap/Formula/dotfiles-setup.rb` |
+| dotfiles version bump (Go binary) | `homebrew-tap/Formula/dotfiles.rb` (primary, `brew install dotfiles`) |
+| dotfiles version bump (legacy bash) | `dotfiles/bin/dotfiles-setup`, `homebrew-tap/Formula/dotfiles-setup.rb` (legacy `curl \| bash`) |
 | sshh install method | `dotfiles/bin/dotfiles-setup` (grep for "sshh") |
 | Tool registry | `dotfiles/internal/tools/registry.go`, `dotfiles/internal/ui/deepdive.go` |
 
@@ -392,6 +421,10 @@ Watch for these breaking changes:
 Before creating PR:
 
 - [ ] All automated tests pass
+- [ ] `make lint` (golangci-lint) passes
+- [ ] `go test ./...` passes
+- [ ] Pre-commit hooks installed (`bash scripts/install-hooks.sh`)
+- [ ] CI workflow (`.github/workflows/ci.yml`) is green on the branch
 - [ ] Manual TUI tests pass
 - [ ] No visual regressions
 - [ ] Keyboard navigation works
@@ -421,7 +454,7 @@ make build
 # CLI Tests
 ./bin/dotfiles status
 ./bin/dotfiles backups
-./bin/dotfiles theme --list
+./bin/dotfiles theme list
 ./bin/dotfiles --help
 
 # Static Analysis
@@ -432,8 +465,8 @@ gofmt -l ./internal ./cmd
 grep -rn "password" --include="*.go" ./internal ./cmd
 grep -rn "exec.Command" --include="*.go" ./internal ./cmd
 
-# Cross-Repo Commands (run from ~/projects/)
-cd ~/projects
+# Cross-Repo Commands (run from ~/Desktop/Projects/)
+cd ~/Desktop/Projects
 git -C dotfiles status
 git -C sshh status
 git -C homebrew-tap status
@@ -444,5 +477,5 @@ grep VERSION sshh/bin/sshh
 grep version homebrew-tap/Formula/*.rb
 
 # Test sshh independently
-~/projects/sshh/bin/sshh --help
+~/Desktop/Projects/sshh/bin/sshh --help
 ```
