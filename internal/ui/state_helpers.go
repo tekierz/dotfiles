@@ -6,8 +6,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleManageNavigation handles common navigation for management config screens
-func (a *App) handleManageNavigation(key string, maxFields int, backScreen Screen) {
+// handleManageNavigation handles common navigation for management config screens.
+//
+// It returns a tea.Cmd for the back-navigation: when the back-screen is a
+// migrated ScreenHandler (e.g. ScreenManage, the live dual-pane), esc routes
+// through the ScreenManager via NavigateTo so the manager enters managed mode
+// (setting a.screen directly would leave the manager in legacy mode and the
+// migrated screen would not render). For still-legacy back-screens it sets
+// a.screen directly and returns nil.
+func (a *App) handleManageNavigation(key string, maxFields int, backScreen Screen) tea.Cmd {
 	switch key {
 	case "up", "k":
 		if a.configFieldIndex > 0 {
@@ -19,8 +26,13 @@ func (a *App) handleManageNavigation(key string, maxFields int, backScreen Scree
 		}
 	case "esc":
 		a.configFieldIndex = 0
+		if isManagedScreen(backScreen) || backScreen == ScreenManage {
+			// Migrated destination: route through the ScreenManager.
+			return NavigateTo(backScreen)
+		}
 		a.screen = backScreen
 	}
+	return nil
 }
 
 // tabNavigationTarget maps a number key ("1".."4") to the corresponding

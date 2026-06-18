@@ -906,31 +906,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case manageSavedMsg:
-		if msg.err != nil {
-			a.manageStatus = fmt.Sprintf("Save failed: %v", msg.err)
-		} else {
-			a.manageStatus = "Saved ✓"
-		}
-		return a, nil
-
-	case manageInstallDoneMsg:
-		a.manageInstalling = false
-		a.manageInstallID = ""
-		a.manageInstalledReady = false // refresh install status cache
-		if msg.err != nil {
-			a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
-		} else {
-			a.manageStatus = "Installed ✓"
-		}
-		// Actually reload the cache so the Manage screen reflects the new
-		// install status without requiring the user to navigate away and back.
-		// startInstallCacheLoad guards against double-loading.
-		if cmd := a.startInstallCacheLoad(); cmd != nil {
-			return a, cmd
-		}
-		return a, nil
-
 	case userLoadedMsg:
 		if msg.err != nil {
 			a.usersStatus = fmt.Sprintf("Load failed: %v", msg.err)
@@ -974,47 +949,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case installLogMsg:
+		// Shared install/update streaming log line. The Manage streaming install
+		// uses the collect-then-message pattern (manageInstallWithLogsMsg), so this
+		// is currently emitted by neither path; it stays here (global) so any future
+		// per-line streamer works regardless of the active screen.
 		a.appendInstallLog(msg.line)
-		return a, nil
-
-	case manageSudoRequiredMsg:
-		// Need to prompt for sudo before manage install
-		return a, tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
-			if err != nil {
-				return manageInstallDoneMsg{toolID: msg.toolID, err: err}
-			}
-			// Sudo cached, now start the streaming install
-			return manageStartInstallMsg{toolID: msg.toolID}
-		})
-
-	case manageStartInstallMsg:
-		// Start the streaming install (sudo already cached)
-		a.clearInstallLogs()
-		a.manageInstalling = true
-		a.manageInstallID = msg.toolID
-		return a, a.streamingInstallToolCmd(msg.toolID)
-
-	case manageInstallWithLogsMsg:
-		// Install completed with logs
-		a.manageInstalling = false
-		a.installLogAutoScroll = false
-		// Append all logs
-		for _, line := range msg.logs {
-			a.appendInstallLog(line)
-		}
-		// Update install status
-		if msg.err != nil {
-			a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
-		} else {
-			a.manageStatus = "Installed successfully ✓"
-			// Refresh install status cache, then actually reload it so the
-			// Manage screen reflects the newly installed tool immediately.
-			// startInstallCacheLoad guards against double-loading.
-			a.manageInstalledReady = false
-			if cmd := a.startInstallCacheLoad(); cmd != nil {
-				return a, cmd
-			}
-		}
 		return a, nil
 
 	}
@@ -1025,13 +964,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Note: ScreenMainMenu, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
 	// ScreenFileTree, ScreenDeepDiveMenu, ALL ScreenConfig* screens, and the
-	// migrated management screens (ScreenHotkeys, ScreenUpdate, ScreenBackups) are
-	// migrated to ScreenHandlers; the ScreenManager delegates their mouse events
-	// to the handler's Update before reaching this legacy dispatch, so they
-	// intentionally no longer appear here.
+	// migrated management screens (ScreenManage, ScreenHotkeys, ScreenUpdate,
+	// ScreenBackups) are migrated to ScreenHandlers; the ScreenManager delegates
+	// their mouse events to the handler's Update before reaching this legacy
+	// dispatch, so they intentionally no longer appear here.
 	switch a.screen {
-	case ScreenManage:
-		return a.handleManageMouse(msg)
 	case ScreenUsers:
 		return a.handleUsersMouse(msg)
 	default:
@@ -1060,17 +997,17 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleWizardKey(msg)
 
 	// Management screens
-	case ScreenManage, ScreenUsers,
+	case ScreenUsers,
 		ScreenManageGhostty, ScreenManageTmux, ScreenManageZsh, ScreenManageNeovim,
 		ScreenManageGit, ScreenManageYazi, ScreenManageFzf, ScreenManageLazyGit,
 		ScreenManageLazyDocker, ScreenManageBtop, ScreenManageGlow, ScreenManageClaudeCode:
 		return a.handleManagementKey(msg)
 
-		// Note: ScreenMainMenu, ScreenDeepDiveMenu, ALL ScreenConfig* screens, and
-		// the migrated management screens (ScreenHotkeys, ScreenUpdate,
-		// ScreenBackups) are migrated to ScreenHandlers and handled by the
-		// ScreenManager before reaching this dispatch, so they intentionally no
-		// longer appear here.
+		// Note: ScreenMainMenu, ScreenManage (live dual-pane), ScreenDeepDiveMenu,
+		// ALL ScreenConfig* screens, and the migrated management screens
+		// (ScreenHotkeys, ScreenUpdate, ScreenBackups) are migrated to
+		// ScreenHandlers and handled by the ScreenManager before reaching this
+		// dispatch, so they intentionally no longer appear here.
 	}
 
 	return a, nil
@@ -1088,9 +1025,10 @@ func (a *App) View() string {
 	// Note: ScreenWelcome, ScreenThemePicker, ScreenNavPicker, ScreenFileTree,
 	// ScreenMainMenu, ScreenSummary/ScreenError, ScreenDeepDiveMenu, the migrated
 	// config screens (ScreenConfig{Ghostty,Tmux,Zsh,Neovim,Git,Yazi,Fzf,Utilities,
-	// MacApps,...}), and the migrated management screens (ScreenHotkeys,
-	// ScreenUpdate, ScreenBackups) are migrated to ScreenHandlers and rendered by
-	// the ScreenManager above; they no longer appear in this legacy switch.
+	// MacApps,...}), and the migrated management screens (ScreenManage,
+	// ScreenHotkeys, ScreenUpdate, ScreenBackups) are migrated to ScreenHandlers
+	// and rendered by the ScreenManager above; they no longer appear in this legacy
+	// switch.
 	switch a.screen {
 	case ScreenAnimation:
 		return a.renderAnimation()
@@ -1101,8 +1039,6 @@ func (a *App) View() string {
 	case ScreenError:
 		return a.renderError()
 	// Management platform screens
-	case ScreenManage:
-		return a.renderManageDualPane()
 	case ScreenManageGhostty:
 		return a.renderManageGhostty()
 	case ScreenManageTmux:

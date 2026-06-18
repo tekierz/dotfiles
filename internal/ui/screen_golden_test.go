@@ -1335,6 +1335,285 @@ func TestUpdateScreenInitChecks(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Migrated management screen: Manage (live dual-pane)
+// ============================================================================
+
+// newManageContext builds a deterministic ScreenContext for the Manage dual-pane
+// screen: a fresh NewManageConfig() (provided by NewApp), a seeded
+// manageInstalled map, the cache marked ready (so the View renders the panes,
+// not the loading spinner), and a non-zero window size on the App (the dual-pane
+// layout reads a.width/a.height). Animations are off via newGoldenContext.
+func newManageContext(t *testing.T) *ScreenContext {
+	t.Helper()
+	ctx := newGoldenContext(t)
+	// NewApp sets a NewManageConfig(); assert it for clarity.
+	if ctx.app.manageConfig == nil {
+		ctx.app.manageConfig = NewManageConfig()
+	}
+	// Seeded install-status cache (deterministic; no package-manager calls).
+	ctx.app.manageInstalled = map[string]bool{
+		"ghostty": true,
+		"tmux":    true,
+	}
+	ctx.app.manageInstalledReady = true
+	ctx.app.installCacheLoading = false
+	// The dual-pane layout/render reads a.width/a.height directly.
+	ctx.app.width = ctx.Width
+	ctx.app.height = ctx.Height
+	return ctx
+}
+
+// TestManageScreenGolden is a regression guard for the migrated manageScreen.
+// It renders the dual-pane editor: the tools pane (TOOLS header + Global entry)
+// and the settings pane (SETTINGS header + the global Theme/Navigation/Animations
+// fields, since the Global entry is selected by default at index 0).
+func TestManageScreenGolden(t *testing.T) {
+	ctx := newManageContext(t)
+	ctx.app.manageIndex = 0 // Global entry selected -> global fields shown.
+	ctx.app.managePane = managePaneSettings
+
+	screen := NewManageScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("manageScreen.View() returned empty output")
+	}
+
+	wantSubstrings := []string{
+		"TOOLS",      // left pane header
+		"Global",     // left pane: the global entry
+		"SETTINGS",   // right pane header
+		"Theme",      // global field
+		"Navigation", // global field
+		"Animations", // global field
+		"Manage",     // tab bar
+		"Esc back",   // footer hint
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("manageScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+
+	if screen.ID() != ScreenManage {
+		t.Errorf("manageScreen.ID() = %v, want ScreenManage", screen.ID())
+	}
+}
+
+// TestManageScreenLoadingGolden verifies the loading spinner is shown while the
+// install-status cache is still populating.
+func TestManageScreenLoadingGolden(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.width = ctx.Width
+	ctx.app.height = ctx.Height
+	ctx.app.installCacheLoading = true
+
+	screen := NewManageScreen(ctx)
+	out := screen.View(ctx.Width, ctx.Height)
+
+	if !strings.Contains(out, "Loading installation status") {
+		t.Errorf("manageScreen.View() should show loading state\n---\n%s\n---", out)
+	}
+}
+
+// TestManageScreenInstalledBadge verifies the seeded manageInstalled map drives
+// the settings-pane render: selecting an installed tool (ghostty) shows its
+// INSTALLED badge and its fields. Uses a wide window so the settings header
+// (name + description + badge) is not truncated by the narrow-pane layout.
+func TestManageScreenInstalledBadge(t *testing.T) {
+	ctx := newManageContext(t)
+	// Wide window so the badge fits; the dual-pane layout reads a.width/a.height.
+	const w, h = 140, 40
+	ctx.Width, ctx.Height = w, h
+	ctx.app.width, ctx.app.height = w, h
+
+	screen := NewManageScreen(ctx)
+
+	// Navigate the tools cursor to the ghostty entry (seeded installed). Items are
+	// category-sorted with Global first; find ghostty's index from manageItems.
+	items := ctx.app.manageItems()
+	ghosttyIdx := -1
+	for i, it := range items {
+		if it.id == "ghostty" {
+			ghosttyIdx = i
+			break
+		}
+	}
+	if ghosttyIdx < 0 {
+		t.Skip("ghostty not present on this platform's tool list; skipping badge check")
+	}
+	ctx.app.manageIndex = ghosttyIdx
+	ctx.app.managePane = managePaneSettings
+
+	out := screen.View(w, h)
+	if !strings.Contains(out, "INSTALLED") {
+		t.Errorf("manageScreen.View() should show INSTALLED badge for seeded-installed ghostty\n---\n%s\n---", out)
+	}
+	// Ghostty exposes a Font Family field in the manager.
+	if !strings.Contains(out, "Font Family") {
+		t.Errorf("manageScreen.View() should render ghostty fields\n---\n%s\n---", out)
+	}
+}
+
+// TestManageScreenReachableViaManager verifies the navigation backbone: an App
+// built with the ScreenManager enters managed mode on NavigateTo(ScreenManage)
+// and renders the dual-pane through the factory.
+func TestManageScreenReachableViaManager(t *testing.T) {
+	app := NewApp(true, WithScreenFactory())
+	if app.screenMgr == nil {
+		t.Fatal("WithScreenFactory should initialize screenMgr")
+	}
+	app.screenMgr.SetSize(80, 24)
+	app.width, app.height = 80, 24
+	// Seed the cache so the render shows the panes, not the loading spinner.
+	app.manageInstalled = map[string]bool{"ghostty": true}
+	app.manageInstalledReady = true
+	app.installCacheLoading = false
+
+	if _, handled := app.screenMgr.Update(NavigateTo(ScreenManage)()); !handled {
+		t.Fatal("manager should handle the NavigateMsg to ScreenManage")
+	}
+	if app.screenMgr.IsLegacyMode() {
+		t.Fatal("manager should be in managed mode after navigating to ScreenManage")
+	}
+	if app.screenMgr.Current().ID() != ScreenManage {
+		t.Fatalf("manager current screen ID = %v, want ScreenManage", app.screenMgr.Current().ID())
+	}
+
+	view := app.screenMgr.View()
+	for _, want := range []string{"TOOLS", "SETTINGS", "Global"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("managed manageScreen should render %q\n---\n%s\n---", want, view)
+		}
+	}
+}
+
+// TestManageScreenInstallDoneAsyncInHandler proves the async-in-handler wiring
+// for the manage install completion: feeding a manageInstallDoneMsg to the
+// handler's Update updates App state and requests an install-status cache reload
+// (the Phase B fix), with no App.Update involvement.
+func TestManageScreenInstallDoneAsyncInHandler(t *testing.T) {
+	ctx := newManageContext(t)
+	// Simulate an install in progress with a ready cache (so the reload is the
+	// one triggered by the completion, not a pre-existing load).
+	ctx.app.manageInstalling = true
+	ctx.app.manageInstallID = "ghostty"
+	ctx.app.manageInstalledReady = true
+	ctx.app.installCacheLoading = false
+
+	screen := NewManageScreen(ctx)
+	next, cmd := screen.Update(manageInstallDoneMsg{toolID: "ghostty", err: nil})
+	if next != screen {
+		t.Fatalf("manageScreen should remain current after manageInstallDoneMsg")
+	}
+
+	if ctx.app.manageInstalling {
+		t.Error("manageInstallDoneMsg should clear manageInstalling")
+	}
+	if ctx.app.manageInstallID != "" {
+		t.Errorf("manageInstallDoneMsg should clear manageInstallID, got %q", ctx.app.manageInstallID)
+	}
+	if ctx.app.manageStatus != "Installed ✓" {
+		t.Errorf("manageStatus = %q, want \"Installed ✓\"", ctx.app.manageStatus)
+	}
+	// Phase B fix: completion must invalidate the cache and re-issue the reload.
+	if ctx.app.manageInstalledReady {
+		t.Error("manageInstallDoneMsg should set manageInstalledReady=false to force a refresh")
+	}
+	if cmd == nil {
+		t.Fatal("manageInstallDoneMsg should return a cache-reload command (startInstallCacheLoad)")
+	}
+	if !ctx.app.installCacheLoading {
+		t.Error("manageInstallDoneMsg should kick the install-cache reload (installCacheLoading=true)")
+	}
+}
+
+// TestManageScreenInstallWithLogsAsyncInHandler proves the streaming-install
+// terminal message is handled in the handler: manageInstallWithLogsMsg appends
+// the collected logs, clears the installing flag, and (on success) requests a
+// cache reload.
+func TestManageScreenInstallWithLogsAsyncInHandler(t *testing.T) {
+	ctx := newManageContext(t)
+	ctx.app.manageInstalling = true
+	ctx.app.manageInstallID = "ghostty"
+	ctx.app.manageInstalledReady = true
+	ctx.app.installCacheLoading = false
+	ctx.app.clearInstallLogs()
+
+	screen := NewManageScreen(ctx)
+	next, cmd := screen.Update(manageInstallWithLogsMsg{
+		toolID: "ghostty",
+		logs:   []string{"Installing ghostty...", "done"},
+		err:    nil,
+	})
+	if next != screen {
+		t.Fatalf("manageScreen should remain current after manageInstallWithLogsMsg")
+	}
+	if ctx.app.manageInstalling {
+		t.Error("manageInstallWithLogsMsg should clear manageInstalling")
+	}
+	if len(ctx.app.installLogs) != 2 || ctx.app.installLogs[0] != "Installing ghostty..." {
+		t.Errorf("manageInstallWithLogsMsg should append collected logs, got %v", ctx.app.installLogs)
+	}
+	if !strings.Contains(ctx.app.manageStatus, "Installed successfully") {
+		t.Errorf("manageStatus = %q, want a success message", ctx.app.manageStatus)
+	}
+	if ctx.app.manageInstalledReady {
+		t.Error("manageInstallWithLogsMsg success should set manageInstalledReady=false")
+	}
+	if cmd == nil {
+		t.Fatal("manageInstallWithLogsMsg success should return a cache-reload command")
+	}
+}
+
+// TestManageScreenEscNavigatesToMainMenu verifies esc routes back through the
+// ScreenManager to the main menu and resets the pane/status.
+func TestManageScreenEscNavigatesToMainMenu(t *testing.T) {
+	ctx := newManageContext(t)
+	ctx.app.managePane = managePaneSettings
+	ctx.app.manageStatus = "something"
+
+	screen := NewManageScreen(ctx)
+	_, cmd := screen.Update(keyMsg("esc"))
+	if cmd == nil {
+		t.Fatal("esc should return a navigation command")
+	}
+	nav, ok := cmd().(NavigateMsg)
+	if !ok {
+		t.Fatalf("expected NavigateMsg from esc, got %T", cmd())
+	}
+	if nav.To != ScreenMainMenu {
+		t.Errorf("esc should NavigateTo(ScreenMainMenu), got %v", nav.To)
+	}
+	if ctx.app.managePane != managePaneTools {
+		t.Errorf("esc should reset managePane to tools, got %d", ctx.app.managePane)
+	}
+	if ctx.app.manageStatus != "" {
+		t.Errorf("esc should clear manageStatus, got %q", ctx.app.manageStatus)
+	}
+}
+
+// TestManageScreenInitLoadsCache verifies Init() kicks the install-status cache
+// load when not ready, and is idempotent when already ready/loading.
+func TestManageScreenInitLoadsCache(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.manageInstalledReady = false
+	ctx.app.installCacheLoading = false
+
+	screen := NewManageScreen(ctx)
+	if cmd := screen.Init(); cmd == nil {
+		t.Fatal("manageScreen.Init() should return startInstallCacheLoad when cache not ready")
+	}
+	if !ctx.app.installCacheLoading {
+		t.Error("manageScreen.Init() should set installCacheLoading")
+	}
+	// Idempotent: already loading -> no new command.
+	if cmd := screen.Init(); cmd != nil {
+		t.Error("manageScreen.Init() should be a no-op while the cache is already loading")
+	}
+}
+
 // TestManagementScreensReachableViaManager verifies the navigation backbone for
 // the three migrated management screens: an App built with the ScreenManager
 // enters managed mode on NavigateTo and renders each through the factory.

@@ -43,6 +43,8 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewFileTreeScreen(ctx)
 	case ScreenMainMenu:
 		return NewMainMenuScreen(ctx)
+	case ScreenManage:
+		return NewManageScreen(ctx)
 	case ScreenDeepDiveMenu:
 		return NewDeepDiveMenuScreen(ctx)
 	case ScreenHotkeys:

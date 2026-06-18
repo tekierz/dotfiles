@@ -5,68 +5,53 @@ import (
 )
 
 // handleManagementKey handles key events for the still-legacy management
-// screens: ScreenManage, ScreenUsers, and the ScreenManage* config screens
+// screens: ScreenUsers and the ScreenManage* config screens
 // (ScreenManageGhostty, ScreenManageTmux, etc.).
 //
-// Note: ScreenMainMenu, ScreenUpdate, ScreenHotkeys, and ScreenBackups are
-// migrated to ScreenHandlers and driven by the ScreenManager, so they are no
-// longer handled here.
+// Note: ScreenMainMenu, ScreenManage (live dual-pane), ScreenUpdate,
+// ScreenHotkeys, and ScreenBackups are migrated to ScreenHandlers and driven by
+// the ScreenManager, so they are no longer handled here.
 func (a *App) handleManagementKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	switch a.screen {
-	// Manage screen navigation - delegates to existing handler
-	case ScreenManage:
-		return a.handleManageKey(msg)
-
-	// Management config screens
+	// Management config screens. handleManageNavigation routes esc back to
+	// ScreenManage (now a migrated ScreenHandler) through the ScreenManager.
 	case ScreenManageGhostty:
-		maxFields := 7
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 7, ScreenManage)
 
 	case ScreenManageTmux:
-		maxFields := 7
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 7, ScreenManage)
 
 	case ScreenManageZsh:
-		maxFields := 6
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 6, ScreenManage)
 
 	case ScreenManageNeovim:
-		maxFields := 7
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 7, ScreenManage)
 
 	case ScreenManageGit:
-		maxFields := 6
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 6, ScreenManage)
 
 	case ScreenManageYazi:
-		maxFields := 4
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 4, ScreenManage)
 
 	case ScreenManageFzf:
-		maxFields := 4
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 4, ScreenManage)
 
 	case ScreenManageLazyGit:
-		maxFields := 3
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 3, ScreenManage)
 
 	case ScreenManageLazyDocker:
-		maxFields := 1
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 1, ScreenManage)
 
 	case ScreenManageBtop:
-		maxFields := 5
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 5, ScreenManage)
 
 	case ScreenManageGlow:
-		maxFields := 3
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 3, ScreenManage)
 
 	case ScreenManageClaudeCode:
-		maxFields := 7 // Number of MCP toggles
-		a.handleManageNavigation(key, maxFields, ScreenManage)
+		return a, a.handleManageNavigation(key, 7, ScreenManage) // 7 MCP toggles
 
 	// Users screen navigation - delegates to existing handler
 	case ScreenUsers:
