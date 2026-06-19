@@ -52,10 +52,25 @@ func NewNeovimTool() *NeovimTool {
 	}
 }
 
-// neovimConfigRepos maps preset names to their git repositories
+// neovimConfigRepos maps preset names to their git repositories.
+// Every preset listed here is cloned into ~/.config/nvim via setupNeovimPreset.
+// The "custom" preset is intentionally absent — it is non-destructive and
+// preserves whatever config the user already has.
 var neovimConfigRepos = map[string]string{
 	"kickstart": "https://github.com/nvim-lua/kickstart.nvim.git",
 	"lazyvim":   "https://github.com/LazyVim/starter.git",
+	"nvchad":    "https://github.com/NvChad/starter.git",
+}
+
+// ValidNeovimPresets is the authoritative set of preset identifiers that
+// screen_config_neovim.go may offer.  Both the UI option list and
+// WriteNeovimConfig's switch must stay in sync with this set so that
+// adding a new preset requires a deliberate change in exactly one place.
+var ValidNeovimPresets = map[string]struct{}{
+	"kickstart": {},
+	"lazyvim":   {},
+	"nvchad":    {},
+	"custom":    {}, // non-destructive: preserves existing config
 }
 
 // GenerateNeovimConfig builds basic neovim settings as a Lua string.
@@ -121,12 +136,19 @@ func WriteNeovimConfig(cfg NeovimConfig, theme string) error {
 
 	nvimDir := filepath.Join(home, ".config", "nvim")
 
-	// Handle preset configurations
+	// Handle preset configurations.  Every case here must correspond to an entry
+	// in ValidNeovimPresets; adding a new preset requires updating both.
 	switch cfg.ConfigPreset {
-	case "kickstart", "lazyvim":
+	case "kickstart", "lazyvim", "nvchad":
 		return setupNeovimPreset(cfg, theme, nvimDir)
+	case "custom":
+		// "custom" means "leave the user's existing config alone".  Do not write
+		// anything — the user manages their own ~/.config/nvim.
+		return nil
 	default:
-		// For minimal/custom, just write the basic init.lua
+		// Unknown preset: fall back to a minimal standalone config rather than
+		// silently succeeding.  This branch should not be reachable from the UI
+		// because neovimAdjust only sets values from ValidNeovimPresets.
 		return writeMinimalNeovimConfig(cfg, theme, nvimDir)
 	}
 }
