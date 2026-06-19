@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -84,71 +83,79 @@ func (s *configGhosttyScreen) View(width, height int) string {
 	title := renderConfigTitle("󰆍", "Ghostty", "Terminal emulator settings")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(55))
 	fieldIdx := 0
 
+	rec.field(fieldIdx)
 	fontFamilyFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Font Family", fontFamilyFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Font Family", fontFamilyFocused))
+	rec.write(renderOptionSelector(
 		[]string{"JetBrains Mono", "Fira Code", "Hack", "Menlo", "Monaco"},
 		[]string{"JetBrains Mono", "Fira Code", "Hack", "Menlo", "Monaco"},
 		cfg.GhosttyFontFamily,
 		fontFamilyFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	fontFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Font Size", fontFocused))
-	content.WriteString(renderNumberControl(cfg.GhosttyFontSize, 8, 32, fontFocused))
-	content.WriteString("\n\n")
+	rec.write(renderFieldLabel("Font Size", fontFocused))
+	rec.write(renderNumberControl(cfg.GhosttyFontSize, 8, 32, fontFocused))
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	opacityFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Background Opacity", opacityFocused))
-	content.WriteString(renderSliderControl(cfg.GhosttyOpacity, 100, 24, opacityFocused))
-	content.WriteString("\n\n")
+	rec.write(renderFieldLabel("Background Opacity", opacityFocused))
+	rec.write(renderSliderControl(cfg.GhosttyOpacity, 100, 24, opacityFocused))
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	blurFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Blur Radius", blurFocused))
-	content.WriteString(renderSliderControl(cfg.GhosttyBlurRadius, 100, 24, blurFocused))
-	content.WriteString("\n\n")
+	rec.write(renderFieldLabel("Blur Radius", blurFocused))
+	rec.write(renderSliderControl(cfg.GhosttyBlurRadius, 100, 24, blurFocused))
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	scrollFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Scrollback Lines", scrollFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Scrollback Lines", scrollFocused))
+	rec.write(renderOptionSelector(
 		[]string{"1000", "5000", "10000", "50000", "100000"},
 		[]string{"1K", "5K", "10K", "50K", "100K"},
 		fmt.Sprintf("%d", cfg.GhosttyScrollbackLines),
 		scrollFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	cursorFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Cursor Style", cursorFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Cursor Style", cursorFocused))
+	rec.write(renderOptionSelector(
 		[]string{"block", "bar", "underline"},
 		[]string{"█ Block", "│ Bar", "_ Underline"},
 		cfg.GhosttyCursorStyle,
 		cursorFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	tabFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("New Tab Keybinding", tabFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("New Tab Keybinding", tabFocused))
+	rec.write(renderOptionSelector(
 		[]string{"super", "ctrl", "ctrl-shift"},
 		[]string{"⌘/Super+T", "Ctrl+T", "Ctrl+Shift+T"},
 		cfg.GhosttyTabBindings,
 		tabFocused,
 	))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • enter/esc save & back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return PlaceWithBackground(
 		width, height,

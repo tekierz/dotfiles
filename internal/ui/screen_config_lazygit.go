@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -60,29 +58,33 @@ func (s *configLazyGitScreen) View(width, height int) string {
 	title := renderConfigTitle("", "LazyGit", "Simple terminal UI for Git commands")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(50))
 
 	// Side-by-side diff
-	content.WriteString(renderFieldLabel("Side-by-Side Diff", a.configFieldIndex == 0))
-	content.WriteString(renderToggle(cfg.LazyGitSideBySide, a.configFieldIndex == 0))
-	content.WriteString("\n\n")
+	rec.field(0)
+	rec.write(renderFieldLabel("Side-by-Side Diff", a.configFieldIndex == 0))
+	rec.write(renderToggle(cfg.LazyGitSideBySide, a.configFieldIndex == 0))
+	rec.write("\n\n")
 
 	// Mouse mode
-	content.WriteString(renderFieldLabel("Mouse Mode", a.configFieldIndex == 1))
-	content.WriteString(renderToggle(cfg.LazyGitMouseMode, a.configFieldIndex == 1))
-	content.WriteString("\n\n")
+	rec.field(1)
+	rec.write(renderFieldLabel("Mouse Mode", a.configFieldIndex == 1))
+	rec.write(renderToggle(cfg.LazyGitMouseMode, a.configFieldIndex == 1))
+	rec.write("\n\n")
 
 	// Theme
-	content.WriteString(renderFieldLabel("Theme", a.configFieldIndex == 2))
-	content.WriteString(renderOptionSelector(
+	rec.field(2)
+	rec.write(renderFieldLabel("Theme", a.configFieldIndex == 2))
+	rec.write(renderOptionSelector(
 		[]string{"auto", "dark", "light"},
 		[]string{"Auto", "Dark", "Light"},
 		cfg.LazyGitTheme,
 		a.configFieldIndex == 2,
 	))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

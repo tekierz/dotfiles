@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -63,49 +61,55 @@ func (s *configGitScreen) View(width, height int) string {
 	title := renderConfigTitle("", "Git", "Version control settings")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(55))
 	fieldIdx := 0
 
+	rec.field(fieldIdx)
 	deltaFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Delta Diff View", deltaFocused))
-	content.WriteString(renderToggleLabeled(cfg.GitDeltaSideBySide, "Side-by-side", "Unified", deltaFocused))
-	content.WriteString("\n\n")
+	rec.write(renderFieldLabel("Delta Diff View", deltaFocused))
+	rec.write(renderToggleLabeled(cfg.GitDeltaSideBySide, "Side-by-side", "Unified", deltaFocused))
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	branchFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Default Branch", branchFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Default Branch", branchFocused))
+	rec.write(renderOptionSelector(
 		[]string{"main", "master", "develop"},
 		[]string{"main", "master", "develop"},
 		cfg.GitDefaultBranch,
 		branchFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	rebaseFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderCheckbox("Pull with Rebase", cfg.GitPullRebase, rebaseFocused))
-	content.WriteString("\n")
+	rec.write(renderCheckbox("Pull with Rebase", cfg.GitPullRebase, rebaseFocused))
+	rec.write("\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	signFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderCheckbox("GPG Sign Commits", cfg.GitSignCommits, signFocused))
-	content.WriteString("\n\n")
+	rec.write(renderCheckbox("GPG Sign Commits", cfg.GitSignCommits, signFocused))
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	credFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Credential Helper", credFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Credential Helper", credFocused))
+	rec.write(renderOptionSelector(
 		[]string{"cache", "store", "osxkeychain", "none"},
 		[]string{"Cache (temp)", "Store (file)", "macOS Keychain", "None"},
 		cfg.GitCredentialHelper,
 		credFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
-	content.WriteString(sectionHeaderStyle.Render("Included Aliases"))
-	content.WriteString("\n")
+	// Trailing reference section (non-field content): excluded from hit extents.
+	rec.write(sectionHeaderStyle.Render("Included Aliases"))
+	rec.write("\n")
 	aliases := []string{
 		"git st → status",
 		"git co → checkout",
@@ -114,11 +118,12 @@ func (s *configGitScreen) View(width, height int) string {
 		"git lg → log --graph",
 	}
 	for _, alias := range aliases {
-		content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  " + alias + "\n"))
+		rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  " + alias + "\n"))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return PlaceWithBackground(
 		width, height,

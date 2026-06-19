@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -66,38 +65,42 @@ func (s *configGlowScreen) View(width, height int) string {
 	title := renderConfigTitle("", "Glow", "Render markdown on the CLI")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(55))
 
 	// Style
-	content.WriteString(renderFieldLabel("Style", a.configFieldIndex == 0))
-	content.WriteString(renderOptionSelector(
+	rec.field(0)
+	rec.write(renderFieldLabel("Style", a.configFieldIndex == 0))
+	rec.write(renderOptionSelector(
 		[]string{"auto", "dark", "light", "notty"},
 		[]string{"Auto", "Dark", "Light", "No TTY"},
 		cfg.GlowStyle,
 		a.configFieldIndex == 0,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 
 	// Pager
-	content.WriteString(renderFieldLabel("Pager", a.configFieldIndex == 1))
-	content.WriteString(renderOptionSelector(
+	rec.field(1)
+	rec.write(renderFieldLabel("Pager", a.configFieldIndex == 1))
+	rec.write(renderOptionSelector(
 		[]string{"auto", "less", "more", "none"},
 		[]string{"Auto", "Less", "More", "None"},
 		cfg.GlowPager,
 		a.configFieldIndex == 1,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 
 	// Width
-	content.WriteString(renderFieldLabel("Width", a.configFieldIndex == 2))
+	rec.field(2)
+	rec.write(renderFieldLabel("Width", a.configFieldIndex == 2))
 	widthStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 	if a.configFieldIndex == 2 {
 		widthStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 	}
-	content.WriteString(fmt.Sprintf("    ◀ %s ▶", widthStyle.Render(fmt.Sprintf("%d chars", cfg.GlowWidth))))
+	rec.write(fmt.Sprintf("    ◀ %s ▶", widthStyle.Render(fmt.Sprintf("%d chars", cfg.GlowWidth))))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

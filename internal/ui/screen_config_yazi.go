@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -59,34 +57,38 @@ func (s *configYaziScreen) View(width, height int) string {
 	title := renderConfigTitle("󰉋", "Yazi", "File manager settings")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(50))
 
+	rec.field(0)
 	keymapFocused := a.configFieldIndex == 0
-	content.WriteString(renderFieldLabel("Keymap Style", keymapFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Keymap Style", keymapFocused))
+	rec.write(renderOptionSelector(
 		[]string{"vim", "emacs"},
 		[]string{"Vim (hjkl)", "Emacs (arrows)"},
 		cfg.YaziKeymap,
 		keymapFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 
+	rec.field(1)
 	hiddenFocused := a.configFieldIndex == 1
-	content.WriteString(renderFieldLabel("Show Hidden Files", hiddenFocused))
-	content.WriteString(renderToggle(cfg.YaziShowHidden, hiddenFocused))
-	content.WriteString("\n\n")
+	rec.write(renderFieldLabel("Show Hidden Files", hiddenFocused))
+	rec.write(renderToggle(cfg.YaziShowHidden, hiddenFocused))
+	rec.write("\n\n")
 
+	rec.field(2)
 	previewFocused := a.configFieldIndex == 2
-	content.WriteString(renderFieldLabel("File Preview", previewFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("File Preview", previewFocused))
+	rec.write(renderOptionSelector(
 		[]string{"auto", "always", "never"},
 		[]string{"Auto", "Always", "Never"},
 		cfg.YaziPreviewMode,
 		previewFocused,
 	))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

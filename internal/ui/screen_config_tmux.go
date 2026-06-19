@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -155,73 +154,80 @@ func (s *configTmuxScreen) View(width, height int) string {
 	title := renderConfigTitle("", "Tmux", "Terminal multiplexer settings")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(55))
 	fieldIdx := 0
 
+	rec.field(fieldIdx)
 	prefixFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Prefix Key", prefixFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Prefix Key", prefixFocused))
+	rec.write(renderOptionSelector(
 		[]string{"ctrl-a", "ctrl-b", "ctrl-space"},
 		[]string{"Ctrl-A", "Ctrl-B", "Ctrl-Space"},
 		cfg.TmuxPrefix,
 		prefixFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	splitFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Split Pane Keys", splitFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Split Pane Keys", splitFocused))
+	rec.write(renderOptionSelector(
 		[]string{"pipes", "percent"},
 		[]string{"| and − (intuitive)", "% and \" (default)"},
 		cfg.TmuxSplitBinds,
 		splitFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	statusFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Status Bar Position", statusFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Status Bar Position", statusFocused))
+	rec.write(renderOptionSelector(
 		[]string{"bottom", "top"},
 		[]string{"Bottom", "Top"},
 		cfg.TmuxStatusBar,
 		statusFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	mouseFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Mouse Support", mouseFocused))
-	content.WriteString(renderToggle(cfg.TmuxMouseMode, mouseFocused))
-	content.WriteString("\n\n")
+	rec.write(renderFieldLabel("Mouse Support", mouseFocused))
+	rec.write(renderToggle(cfg.TmuxMouseMode, mouseFocused))
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	historyFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("History Limit", historyFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("History Limit", historyFocused))
+	rec.write(renderOptionSelector(
 		[]string{"10000", "25000", "50000", "100000"},
 		[]string{"10K", "25K", "50K", "100K"},
 		fmt.Sprintf("%d", cfg.TmuxHistoryLimit),
 		historyFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	escapeFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Escape Time (ms)", escapeFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Escape Time (ms)", escapeFocused))
+	rec.write(renderOptionSelector(
 		[]string{"0", "10", "50", "100"},
 		[]string{"0ms", "10ms", "50ms", "100ms"},
 		fmt.Sprintf("%d", cfg.TmuxEscapeTime),
 		escapeFocused,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	baseFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Base Index", baseFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Base Index", baseFocused))
+	rec.write(renderOptionSelector(
 		[]string{"0", "1"},
 		[]string{"0 (default)", "1 (starts at 1)"},
 		fmt.Sprintf("%d", cfg.TmuxBaseIndex),
@@ -229,61 +235,69 @@ func (s *configTmuxScreen) View(width, height int) string {
 	))
 	fieldIdx++
 
-	// TPM section.
-	content.WriteString("\n\n")
-	content.WriteString(sectionHeaderStyle.Render("TPM Plugins"))
-	content.WriteString("\n\n")
+	// TPM section. The section header is non-field content, so it is written
+	// without a field() mark and excluded from every field's hit extent.
+	rec.write("\n\n")
+	rec.write(sectionHeaderStyle.Render("TPM Plugins"))
+	rec.write("\n\n")
 
+	rec.field(fieldIdx)
 	tpmFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Enable TPM", tpmFocused))
-	content.WriteString(renderToggle(cfg.TmuxTPMEnabled, tpmFocused))
+	rec.write(renderFieldLabel("Enable TPM", tpmFocused))
+	rec.write(renderToggle(cfg.TmuxTPMEnabled, tpmFocused))
 	fieldIdx++
 
 	if cfg.TmuxTPMEnabled {
-		content.WriteString("\n\n")
+		rec.write("\n\n")
 
+		rec.field(fieldIdx)
 		sensibleFocused := a.configFieldIndex == fieldIdx
-		content.WriteString(renderCheckbox("tmux-sensible", cfg.TmuxPluginSensible, sensibleFocused))
+		rec.write(renderCheckbox("tmux-sensible", cfg.TmuxPluginSensible, sensibleFocused))
 		if sensibleFocused {
-			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Sensible defaults"))
+			rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Sensible defaults"))
 		}
-		content.WriteString("\n")
+		rec.write("\n")
 		fieldIdx++
 
+		rec.field(fieldIdx)
 		resurrectFocused := a.configFieldIndex == fieldIdx
-		content.WriteString(renderCheckbox("tmux-resurrect", cfg.TmuxPluginResurrect, resurrectFocused))
+		rec.write(renderCheckbox("tmux-resurrect", cfg.TmuxPluginResurrect, resurrectFocused))
 		if resurrectFocused {
-			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Session save/restore"))
+			rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Session save/restore"))
 		}
-		content.WriteString("\n")
+		rec.write("\n")
 		fieldIdx++
 
+		rec.field(fieldIdx)
 		continuumFocused := a.configFieldIndex == fieldIdx
-		content.WriteString(renderCheckbox("tmux-continuum", cfg.TmuxPluginContinuum, continuumFocused))
+		rec.write(renderCheckbox("tmux-continuum", cfg.TmuxPluginContinuum, continuumFocused))
 		if continuumFocused {
-			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Auto-save sessions"))
+			rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Auto-save sessions"))
 		}
-		content.WriteString("\n")
+		rec.write("\n")
 		fieldIdx++
 
+		rec.field(fieldIdx)
 		yankFocused := a.configFieldIndex == fieldIdx
-		content.WriteString(renderCheckbox("tmux-yank", cfg.TmuxPluginYank, yankFocused))
+		rec.write(renderCheckbox("tmux-yank", cfg.TmuxPluginYank, yankFocused))
 		if yankFocused {
-			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Clipboard integration"))
+			rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  Clipboard integration"))
 		}
 		fieldIdx++
 
 		if cfg.TmuxPluginContinuum {
-			content.WriteString("\n\n")
+			rec.write("\n\n")
+			rec.field(fieldIdx)
 			intervalFocused := a.configFieldIndex == fieldIdx
-			content.WriteString(renderFieldLabel("Auto-save Interval", intervalFocused))
-			content.WriteString(renderNumberControl(cfg.TmuxContinuumSaveMin, 5, 60, intervalFocused))
-			content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" min"))
+			rec.write(renderFieldLabel("Auto-save Interval", intervalFocused))
+			rec.write(renderNumberControl(cfg.TmuxContinuumSaveMin, 5, 60, intervalFocused))
+			rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" min"))
 		}
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • enter/esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return PlaceWithBackground(
 		width, height,

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -67,11 +66,11 @@ func (s *configZshScreen) View(width, height int) string {
 	title := renderConfigTitle("", "Zsh", "Shell prompt and plugins")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(55))
 	fieldIdx := 0
 
-	content.WriteString(sectionHeaderStyle.Render("Prompt Style"))
-	content.WriteString("\n")
+	rec.write(sectionHeaderStyle.Render("Prompt Style"))
+	rec.write("\n")
 	prompts := []struct {
 		value string
 		label string
@@ -83,44 +82,49 @@ func (s *configZshScreen) View(width, height int) string {
 		{"minimal", "Minimal", "Simple $ prompt"},
 	}
 	for _, p := range prompts {
+		rec.field(fieldIdx)
 		focused := a.configFieldIndex == fieldIdx
 		selected := cfg.ZshPromptStyle == p.value
-		content.WriteString(renderRadioOption(p.label, p.desc, selected, focused))
-		content.WriteString("\n")
+		rec.write(renderRadioOption(p.label, p.desc, selected, focused))
+		rec.write("\n")
 		fieldIdx++
 	}
 
-	content.WriteString(sectionHeaderStyle.Render("Shell Options"))
-	content.WriteString("\n")
+	rec.write(sectionHeaderStyle.Render("Shell Options"))
+	rec.write("\n")
 
+	rec.field(fieldIdx)
 	historyFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("History Size", historyFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("History Size", historyFocused))
+	rec.write(renderOptionSelector(
 		[]string{"1000", "5000", "10000", "50000"},
 		[]string{"1K", "5K", "10K", "50K"},
 		fmt.Sprintf("%d", cfg.ZshHistorySize),
 		historyFocused,
 	))
-	content.WriteString("\n")
+	rec.write("\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	autoCDFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderCheckbox("Auto CD (cd into directories)", cfg.ZshAutoCD, autoCDFocused))
-	content.WriteString("\n")
+	rec.write(renderCheckbox("Auto CD (cd into directories)", cfg.ZshAutoCD, autoCDFocused))
+	rec.write("\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	syntaxFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderCheckbox("Syntax Highlighting", cfg.ZshSyntaxHighlight, syntaxFocused))
-	content.WriteString("\n")
+	rec.write(renderCheckbox("Syntax Highlighting", cfg.ZshSyntaxHighlight, syntaxFocused))
+	rec.write("\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	suggestFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderCheckbox("Auto-suggestions", cfg.ZshAutosuggestions, suggestFocused))
-	content.WriteString("\n")
+	rec.write(renderCheckbox("Auto-suggestions", cfg.ZshAutosuggestions, suggestFocused))
+	rec.write("\n")
 	fieldIdx++
 
-	content.WriteString(sectionHeaderStyle.Render("Plugins"))
-	content.WriteString("\n")
+	rec.write(sectionHeaderStyle.Render("Plugins"))
+	rec.write("\n")
 	plugins := []struct {
 		id   string
 		name string
@@ -132,6 +136,7 @@ func (s *configZshScreen) View(width, height int) string {
 		{"zsh-history-substring-search", "History search"},
 	}
 	for _, p := range plugins {
+		rec.field(fieldIdx)
 		focused := a.configFieldIndex == fieldIdx
 		enabled := false
 		for _, ep := range cfg.ZshPlugins {
@@ -140,13 +145,14 @@ func (s *configZshScreen) View(width, height int) string {
 				break
 			}
 		}
-		content.WriteString(renderCheckbox(p.name, enabled, focused))
-		content.WriteString("\n")
+		rec.write(renderCheckbox(p.name, enabled, focused))
+		rec.write("\n")
 		fieldIdx++
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • space/enter select • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return PlaceWithBackground(
 		width, height,

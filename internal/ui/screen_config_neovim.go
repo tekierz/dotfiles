@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -67,11 +66,11 @@ func (s *configNeovimScreen) View(width, height int) string {
 	title := renderConfigTitle("", "Neovim", "Editor configuration and LSP")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(55))
 	fieldIdx := 0
 
-	content.WriteString(sectionHeaderStyle.Render("Configuration"))
-	content.WriteString("\n")
+	rec.write(sectionHeaderStyle.Render("Configuration"))
+	rec.write("\n")
 	configs := []struct {
 		value string
 		label string
@@ -83,50 +82,55 @@ func (s *configNeovimScreen) View(width, height int) string {
 		{"custom", "Keep existing", "Don't modify config"},
 	}
 	for _, c := range configs {
+		rec.field(fieldIdx)
 		focused := a.configFieldIndex == fieldIdx
 		selected := cfg.NeovimConfig == c.value
-		content.WriteString(renderRadioOption(c.label, c.desc, selected, focused))
-		content.WriteString("\n")
+		rec.write(renderRadioOption(c.label, c.desc, selected, focused))
+		rec.write("\n")
 		fieldIdx++
 	}
 
-	content.WriteString(sectionHeaderStyle.Render("Editor Settings"))
-	content.WriteString("\n")
+	rec.write(sectionHeaderStyle.Render("Editor Settings"))
+	rec.write("\n")
 
+	rec.field(fieldIdx)
 	tabFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Tab Width", tabFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Tab Width", tabFocused))
+	rec.write(renderOptionSelector(
 		[]string{"2", "4", "8"},
 		[]string{"2", "4", "8"},
 		fmt.Sprintf("%d", cfg.NeovimTabWidth),
 		tabFocused,
 	))
-	content.WriteString("\n")
+	rec.write("\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	wrapFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderCheckbox("Line Wrapping", cfg.NeovimWrap, wrapFocused))
-	content.WriteString("\n")
+	rec.write(renderCheckbox("Line Wrapping", cfg.NeovimWrap, wrapFocused))
+	rec.write("\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	cursorFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderCheckbox("Highlight Cursor Line", cfg.NeovimCursorLine, cursorFocused))
-	content.WriteString("\n")
+	rec.write(renderCheckbox("Highlight Cursor Line", cfg.NeovimCursorLine, cursorFocused))
+	rec.write("\n")
 	fieldIdx++
 
+	rec.field(fieldIdx)
 	clipboardFocused := a.configFieldIndex == fieldIdx
-	content.WriteString(renderFieldLabel("Clipboard", clipboardFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Clipboard", clipboardFocused))
+	rec.write(renderOptionSelector(
 		[]string{"unnamedplus", "unnamed", "none"},
 		[]string{"System (+)", "Selection (*)", "None"},
 		cfg.NeovimClipboard,
 		clipboardFocused,
 	))
-	content.WriteString("\n")
+	rec.write("\n")
 	fieldIdx++
 
-	content.WriteString(sectionHeaderStyle.Render("LSP Servers"))
-	content.WriteString("\n")
+	rec.write(sectionHeaderStyle.Render("LSP Servers"))
+	rec.write("\n")
 	lsps := []struct {
 		id   string
 		name string
@@ -139,6 +143,7 @@ func (s *configNeovimScreen) View(width, height int) string {
 		{"clangd", "C/C++"},
 	}
 	for _, l := range lsps {
+		rec.field(fieldIdx)
 		focused := a.configFieldIndex == fieldIdx
 		enabled := false
 		for _, el := range cfg.NeovimLSPs {
@@ -147,13 +152,14 @@ func (s *configNeovimScreen) View(width, height int) string {
 				break
 			}
 		}
-		content.WriteString(renderCheckbox(l.name, enabled, focused))
-		content.WriteString("\n")
+		rec.write(renderCheckbox(l.name, enabled, focused))
+		rec.write("\n")
 		fieldIdx++
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • space/enter select • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return PlaceWithBackground(
 		width, height,

@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -46,14 +44,16 @@ func (s *configLazyDockerScreen) View(width, height int) string {
 	title := renderConfigTitle("", "LazyDocker", "Simple terminal UI for Docker")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(50))
 
 	// Mouse mode (always focused)
-	content.WriteString(renderFieldLabel("Mouse Mode", true))
-	content.WriteString(renderToggle(cfg.LazyDockerMouseMode, true))
+	rec.field(0)
+	rec.write(renderFieldLabel("Mouse Mode", true))
+	rec.write(renderToggle(cfg.LazyDockerMouseMode, true))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("space toggle • enter/esc save & back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

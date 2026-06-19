@@ -173,6 +173,14 @@ type App struct {
 	deepDiveConfig    *DeepDiveConfig
 	configFieldIndex  int // Currently focused field in config screens
 
+	// configFieldLayout records the on-screen geometry of the most recently
+	// rendered field-config screen so the mouse handler can map a click to the
+	// correct field. It is repopulated on every View of a field-config screen
+	// (see fieldLayoutRecorder in screen_config_base.go). Without it, click-to-
+	// select mis-maps because fields render as variable-height blocks (label +
+	// control + blank, with selectors that may wrap) rather than one row each.
+	configFieldLayout fieldLayout
+
 	// configStandalone is true when the app was launched directly into a single
 	// tool's config screen via `dotfiles config <tool>` (not as part of the
 	// install wizard). In that mode there is no later install step to apply the
@@ -222,22 +230,22 @@ type App struct {
 	streamCmd *runner.StreamingCmd
 
 	// Management platform state (new)
-	mainMenuIndex        int                   // Main menu cursor
-	manageIndex          int                   // Manage screen cursor
-	updateIndex          int                   // Update screen cursor
-	hotkeyFilter         string                // Filter hotkeys by tool
-	hotkeyCursor         int                   // Hotkeys screen cursor
-	hotkeyCategory       int                   // Current category in hotkeys
-	hotkeysPane          int                   // 0 = categories, 1 = items
-	hotkeyCatScroll      int                   // Category list scroll
-	hotkeyItemScroll     int                   // Item list scroll
-	hotkeysReturn        Screen                // Screen to return to when leaving hotkeys
-	themeReturn          Screen                // Screen to return to when leaving the theme picker (used for Esc destination)
+	mainMenuIndex    int    // Main menu cursor
+	manageIndex      int    // Manage screen cursor
+	updateIndex      int    // Update screen cursor
+	hotkeyFilter     string // Filter hotkeys by tool
+	hotkeyCursor     int    // Hotkeys screen cursor
+	hotkeyCategory   int    // Current category in hotkeys
+	hotkeysPane      int    // 0 = categories, 1 = items
+	hotkeyCatScroll  int    // Category list scroll
+	hotkeyItemScroll int    // Item list scroll
+	hotkeysReturn    Screen // Screen to return to when leaving hotkeys
+	themeReturn      Screen // Screen to return to when leaving the theme picker (used for Esc destination)
 	// themeStandalone is true when the theme picker was launched as a
 	// standalone "change theme" command (CLI `dotfiles theme` or main-menu
 	// 'Theme'), as opposed to being wizard step 2. It is set/reset at every
 	// picker entry so no path can inherit a stale value (C7, C8).
-	themeStandalone      bool
+	themeStandalone bool
 	// themeStatus holds a transient status message from the last persistTheme
 	// call (empty on success, error text on failure).
 	themeStatus          string

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -105,7 +104,9 @@ func (s *configClaudeCodeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 // handleMouse moves the focus with the scroll wheel within the real navigable
 // range (-1..len-1, where -1 is the install toggle). A left click selects the
-// row under the cursor.
+// row under the cursor using the per-row geometry recorded by View (so the
+// install toggle, the MCP header block, and each MCP row map correctly); clicks
+// outside the box or off every row select nothing.
 func (s *configClaudeCodeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	a := s.App()
 	m := tea.MouseEvent(msg)
@@ -122,6 +123,17 @@ func (s *configClaudeCodeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 		return nil
 	}
+
+	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
+		return nil
+	}
+	fl := a.configFieldLayout
+	if fl.hasXBounds && (m.X < fl.boxLeft || m.X > fl.boxRight) {
+		return nil
+	}
+	if idx, ok := fl.fieldAt(m.Y); ok {
+		a.configFieldIndex = idx
+	}
 	return nil
 }
 
@@ -131,24 +143,26 @@ func (s *configClaudeCodeScreen) View(width, height int) string {
 	title := renderConfigTitle("󰚩", "Claude Code", "AI-powered coding assistant with MCP servers")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(65))
 
 	// Install toggle (focus index -1).
-	content.WriteString(renderFieldLabel("Install Claude Code", a.configFieldIndex == -1))
+	rec.field(-1)
+	rec.write(renderFieldLabel("Install Claude Code", a.configFieldIndex == -1))
 	enabled := cfg.CLITools["claude-code"]
 	installed := a.manageInstalled["claude-code"]
-	content.WriteString(renderCheckboxInlineWithInstallState(enabled, a.configFieldIndex == -1, installed))
+	rec.write(renderCheckboxInlineWithInstallState(enabled, a.configFieldIndex == -1, installed))
 	if installed {
-		content.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)"))
+		rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)"))
 	}
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 
-	// MCP Servers header.
+	// MCP Servers header (non-field content: no extent recorded for it).
 	mcpHeader := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true).Render("MCP Servers")
 	mcpDesc := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" (Model Context Protocol)")
-	content.WriteString(mcpHeader + mcpDesc + "\n\n")
+	rec.write(mcpHeader + mcpDesc + "\n\n")
 
 	for i, mcp := range claudeCodeMCPItems {
+		rec.field(i)
 		focused := a.configFieldIndex == i
 		mcpEnabled := cfg.ClaudeCodeMCPs[mcp.id]
 
@@ -175,7 +189,7 @@ func (s *configClaudeCodeScreen) View(width, height int) string {
 			suffix = lipgloss.NewStyle().Foreground(ColorYellow).Render(" (recommended)")
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
+		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-20s", mcp.name)),
@@ -184,8 +198,9 @@ func (s *configClaudeCodeScreen) View(width, height int) string {
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(65)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

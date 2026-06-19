@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // configFieldNav factors out the field-navigation logic shared by the
@@ -92,8 +95,179 @@ func (s *configFieldNav) handleMsg(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// handleConfigFieldMouse mirrors the legacy handleConfigScreenMouse behavior for
-// the field-based config screens: scroll wheel and click move configFieldIndex.
+// fieldExtent records one rendered field's position in absolute screen
+// coordinates: the field occupies rows [startY, startY+height).
+type fieldExtent struct {
+	index  int // logical field index (the value configFieldIndex takes)
+	startY int // absolute screen Y of the field's first rendered row
+	height int // number of rendered rows the field occupies
+}
+
+// fieldLayout is the geometry of a rendered field-config screen, resolved to
+// absolute screen coordinates. The mouse handler maps a click against it. It is
+// rebuilt on every View via fieldLayoutRecorder; an empty layout (no extents)
+// means "geometry unknown", and the mouse handler falls back to ignoring clicks.
+type fieldLayout struct {
+	extents    []fieldExtent
+	boxLeft    int // absolute X of the box's inner content left edge (inclusive)
+	boxRight   int // absolute X of the box's inner content right edge (inclusive)
+	hasXBounds bool
+}
+
+// fieldAt returns the logical field index whose vertical extent contains y, and
+// true, or 0/false when no field covers that row.
+func (fl fieldLayout) fieldAt(y int) (int, bool) {
+	for _, e := range fl.extents {
+		if y >= e.startY && y < e.startY+e.height {
+			return e.index, true
+		}
+	}
+	return 0, false
+}
+
+// fieldLayoutRecorder accumulates a field-config screen's content while tracking
+// where each logical field begins, so the resulting fieldLayout maps clicks to
+// fields geometry-correctly (handling variable-height fields, wrapped selectors,
+// section headers, and hidden fields — a hidden field simply records no extent).
+//
+// Usage in a View:
+//
+//	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(55))
+//	rec.field(0)                       // mark the start of field 0
+//	rec.write(renderFieldLabel(...))   // write its content
+//	rec.write(renderControl(...))
+//	rec.write("\n\n")
+//	rec.field(1)                       // mark the start of field 1
+//	...
+//	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
+//	... compose title/box/help, then:
+//	a.configFieldLayout = rec.finalize(width, height, title, box, help)
+//
+// Non-field content (section headers, blank lines) is written without a
+// preceding field() call and is correctly excluded from every field's extent.
+type fieldLayoutRecorder struct {
+	boxWidth int
+	content  strings.Builder
+	// innerWidth is the wrap width lipgloss uses inside configBoxStyle, so start
+	// offsets are measured against the same wrapping the box will apply.
+	innerWidth int
+	// marks pairs a logical field index with the rendered line offset (within the
+	// box content) at which it begins.
+	marks []struct {
+		index   int
+		lineOff int
+	}
+}
+
+// configBoxHFrame is the horizontal frame (border + padding) configBoxStyle adds
+// on each side: RoundedBorder() = 1 col + Padding(1, 2) = 2 cols.
+const (
+	configBoxHFrame = 3 // border(1) + horizontal padding(2)
+	configBoxVFrame = 2 // border(1) + vertical padding(1) on each edge (top/bottom)
+)
+
+// newFieldLayoutRecorder creates a recorder for a box of the given outer width.
+func newFieldLayoutRecorder(boxWidth int) *fieldLayoutRecorder {
+	inner := boxWidth - 2*configBoxHFrame
+	if inner < 1 {
+		inner = 1
+	}
+	return &fieldLayoutRecorder{boxWidth: boxWidth, innerWidth: inner}
+}
+
+// field marks that the logical field with the given index begins at the current
+// content position. Call it immediately before writing the field's content.
+func (r *fieldLayoutRecorder) field(index int) {
+	r.marks = append(r.marks, struct {
+		index   int
+		lineOff int
+	}{index: index, lineOff: r.currentLineOffset()})
+}
+
+// write appends content (label/control/blank lines/section headers).
+func (r *fieldLayoutRecorder) write(s string) { r.content.WriteString(s) }
+
+// String returns the accumulated content for rendering inside configBoxStyle.
+func (r *fieldLayoutRecorder) String() string { return r.content.String() }
+
+// currentLineOffset returns the rendered line index (within the box content) at
+// which the next written character lands, accounting for the box's wrapping.
+// This equals the number of line breaks in the width-wrapped content so far —
+// the same rule the box itself uses when it renders.
+func (r *fieldLayoutRecorder) currentLineOffset() int {
+	s := r.content.String()
+	if s == "" {
+		return 0
+	}
+	wrapped := lipgloss.NewStyle().Width(r.innerWidth).Render(s)
+	return strings.Count(wrapped, "\n")
+}
+
+// finalize resolves the recorded per-field offsets to absolute screen
+// coordinates using the composed layout (title, box, help) that the View passes
+// to PlaceWithBackground. It measures the composed pieces so the anchor stays
+// correct regardless of title/help height, and centers exactly as lipgloss.Place
+// does. The last recorded field extends to the bottom of the box content.
+func (r *fieldLayoutRecorder) finalize(width, height int, title, box, help string) fieldLayout {
+	// Compose exactly as the View does: title, blank, box, blank, help.
+	composedH := lipgloss.Height(title) + 1 + lipgloss.Height(box) + 1 + lipgloss.Height(help)
+	composedW := lipgloss.Width(box)
+
+	// lipgloss.Place centers content vertically/horizontally within width x
+	// height by padding the top/left with floor((avail - size) / 2).
+	topPad := (height - composedH) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+	leftPad := (width - composedW) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+
+	// Box content starts after the title block, the blank separator, then the
+	// box's own top border + top padding.
+	boxContentTop := topPad + lipgloss.Height(title) + 1 + configBoxVFrame
+	boxContentRows := lipgloss.Height(box) - 2*configBoxVFrame
+	boxContentBottom := boxContentTop + boxContentRows // exclusive
+
+	// Box inner content horizontal span (absolute X, inclusive both ends).
+	boxInnerLeft := leftPad + configBoxHFrame
+	boxInnerRight := leftPad + composedW - 1 - configBoxHFrame
+
+	fl := fieldLayout{
+		boxLeft:    boxInnerLeft,
+		boxRight:   boxInnerRight,
+		hasXBounds: composedW > 0,
+	}
+
+	for i, mk := range r.marks {
+		startY := boxContentTop + mk.lineOff
+		// A field extends until the next field begins, or to the bottom of the
+		// box content for the last field.
+		var endY int
+		if i+1 < len(r.marks) {
+			endY = boxContentTop + r.marks[i+1].lineOff
+		} else {
+			endY = boxContentBottom
+		}
+		if endY <= startY {
+			endY = startY + 1
+		}
+		fl.extents = append(fl.extents, fieldExtent{
+			index:  mk.index,
+			startY: startY,
+			height: endY - startY,
+		})
+	}
+	return fl
+}
+
+// handleConfigFieldMouse resolves a wheel/click for the field-based config
+// screens. Wheel-scroll moves configFieldIndex by one and intentionally ignores
+// geometry. A left click is mapped against the recorded per-field geometry
+// (a.configFieldLayout, populated by the screen's most recent View) so it
+// selects the field actually under the cursor; clicks outside the box's
+// horizontal span or off every field select nothing.
 func handleConfigFieldMouse(a *App, msg tea.MouseMsg, maxFields int) tea.Cmd {
 	m := tea.MouseEvent(msg)
 
@@ -114,19 +288,13 @@ func handleConfigFieldMouse(a *App, msg tea.MouseMsg, maxFields int) tea.Cmd {
 		return nil
 	}
 
-	// Config screens have fields listed vertically. Approximate click detection
-	// based on Y position (matches the legacy heuristic). maxFields is the
-	// highest valid index, so the field count is maxFields+1.
-	fieldCount := maxFields + 1
-	contentHeight := fieldCount + 8
-	startY := (a.height - contentHeight) / 2
-	fieldStartY := startY + 4 // After title
-
-	if m.Y >= fieldStartY {
-		fieldIdx := m.Y - fieldStartY
-		if fieldIdx >= 0 && fieldIdx <= maxFields {
-			a.configFieldIndex = fieldIdx
-		}
+	fl := a.configFieldLayout
+	// X-bounds: a click outside the centered box selects nothing.
+	if fl.hasXBounds && (m.X < fl.boxLeft || m.X > fl.boxRight) {
+		return nil
+	}
+	if idx, ok := fl.fieldAt(m.Y); ok {
+		a.configFieldIndex = idx
 	}
 	return nil
 }

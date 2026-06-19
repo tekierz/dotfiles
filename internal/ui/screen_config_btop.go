@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -71,43 +70,48 @@ func (s *configBtopScreen) View(width, height int) string {
 	title := renderConfigTitle("", "Btop", "Resource monitor with beautiful TUI")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(55))
 
 	// Theme
-	content.WriteString(renderFieldLabel("Theme", a.configFieldIndex == 0))
-	content.WriteString(renderOptionSelector(
+	rec.field(0)
+	rec.write(renderFieldLabel("Theme", a.configFieldIndex == 0))
+	rec.write(renderOptionSelector(
 		[]string{"auto", "dracula", "gruvbox", "nord", "tokyo-night"},
 		[]string{"Auto", "Dracula", "Gruvbox", "Nord", "Tokyo"},
 		cfg.BtopTheme,
 		a.configFieldIndex == 0,
 	))
-	content.WriteString("\n\n")
+	rec.write("\n\n")
 
 	// Update interval
-	content.WriteString(renderFieldLabel("Update Interval", a.configFieldIndex == 1))
+	rec.field(1)
+	rec.write(renderFieldLabel("Update Interval", a.configFieldIndex == 1))
 	intervalStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 	if a.configFieldIndex == 1 {
 		intervalStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 	}
-	content.WriteString(fmt.Sprintf("    ◀ %s ▶", intervalStyle.Render(fmt.Sprintf("%dms", cfg.BtopUpdateMs))))
-	content.WriteString("\n\n")
+	rec.write(fmt.Sprintf("    ◀ %s ▶", intervalStyle.Render(fmt.Sprintf("%dms", cfg.BtopUpdateMs))))
+	rec.write("\n\n")
 
 	// Show temperature
-	content.WriteString(renderFieldLabel("Show CPU Temp", a.configFieldIndex == 2))
-	content.WriteString(renderToggle(cfg.BtopShowTemp, a.configFieldIndex == 2))
-	content.WriteString("\n\n")
+	rec.field(2)
+	rec.write(renderFieldLabel("Show CPU Temp", a.configFieldIndex == 2))
+	rec.write(renderToggle(cfg.BtopShowTemp, a.configFieldIndex == 2))
+	rec.write("\n\n")
 
 	// Graph type
-	content.WriteString(renderFieldLabel("Graph Type", a.configFieldIndex == 3))
-	content.WriteString(renderOptionSelector(
+	rec.field(3)
+	rec.write(renderFieldLabel("Graph Type", a.configFieldIndex == 3))
+	rec.write(renderOptionSelector(
 		[]string{"braille", "block", "tty"},
 		[]string{"Braille", "Block", "TTY"},
 		cfg.BtopGraphType,
 		a.configFieldIndex == 3,
 	))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(55)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • space toggle • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -61,29 +59,33 @@ func (s *configFzfScreen) View(width, height int) string {
 	title := renderConfigTitle("", "FZF", "Fuzzy finder settings")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(50))
 
+	rec.field(0)
 	previewFocused := a.configFieldIndex == 0
-	content.WriteString(renderFieldLabel("File Preview", previewFocused))
-	content.WriteString(renderToggle(cfg.FzfPreview, previewFocused))
-	content.WriteString("\n\n")
+	rec.write(renderFieldLabel("File Preview", previewFocused))
+	rec.write(renderToggle(cfg.FzfPreview, previewFocused))
+	rec.write("\n\n")
 
+	rec.field(1)
 	heightFocused := a.configFieldIndex == 1
-	content.WriteString(renderFieldLabel("Window Height", heightFocused))
-	content.WriteString(renderSliderControl(cfg.FzfHeight, 100, 24, heightFocused))
-	content.WriteString("\n\n")
+	rec.write(renderFieldLabel("Window Height", heightFocused))
+	rec.write(renderSliderControl(cfg.FzfHeight, 100, 24, heightFocused))
+	rec.write("\n\n")
 
+	rec.field(2)
 	layoutFocused := a.configFieldIndex == 2
-	content.WriteString(renderFieldLabel("Layout", layoutFocused))
-	content.WriteString(renderOptionSelector(
+	rec.write(renderFieldLabel("Layout", layoutFocused))
+	rec.write(renderOptionSelector(
 		[]string{"reverse", "default", "reverse-list"},
 		[]string{"Reverse ↑", "Default ↓", "Reverse List"},
 		cfg.FzfLayout,
 		layoutFocused,
 	))
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(50)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • space toggle • esc back")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,
