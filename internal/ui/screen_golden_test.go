@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
 // keyMsg builds a deterministic tea.KeyMsg for the named keys used by these
@@ -1311,6 +1312,55 @@ func TestUpdateScreenCheckDoneAsyncInHandler(t *testing.T) {
 	}
 	if !ctx.app.updateCheckDone {
 		t.Error("updateCheckDoneMsg should set updateCheckDone")
+	}
+}
+
+// TestUpdateScreenStreamLineLive proves the live-streaming wiring: a streamed
+// update line is appended to installLogs immediately (so it renders during the
+// run, not all at once at the end) and the handler re-arms the listen Cmd to
+// keep the stream flowing.
+func TestUpdateScreenStreamLineLive(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.updateRunning = true
+	ctx.app.updateStream = make(chan updateStreamMsg, 1)
+
+	screen := NewUpdateScreen(ctx)
+	next, cmd := screen.Update(updateStreamMsg{line: "==> Downloading foo"})
+	if next != screen {
+		t.Fatalf("updateScreen should remain current after updateStreamMsg")
+	}
+	if len(ctx.app.installLogs) != 1 || ctx.app.installLogs[0] != "==> Downloading foo" {
+		t.Errorf("streamed line should be appended to installLogs immediately, got %v", ctx.app.installLogs)
+	}
+	if !ctx.app.updateRunning {
+		t.Error("a non-terminal streamed line must not end the run")
+	}
+	if cmd == nil {
+		t.Fatal("a non-terminal streamed line should re-arm the listen Cmd")
+	}
+}
+
+// TestUpdateScreenStreamDoneFinalizes verifies a terminal streamed event ends the
+// run, clears the stream channel, and sets the status from the results.
+func TestUpdateScreenStreamDoneFinalizes(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.updateRunning = true
+	ctx.app.updateStream = make(chan updateStreamMsg, 1)
+
+	screen := NewUpdateScreen(ctx)
+	results := []pkg.UpdateResult{{Success: true}}
+	next, _ := screen.Update(updateStreamMsg{done: true, results: results})
+	if next != screen {
+		t.Fatalf("updateScreen should remain current after a terminal updateStreamMsg")
+	}
+	if ctx.app.updateRunning {
+		t.Error("a terminal streamed event should clear updateRunning")
+	}
+	if ctx.app.updateStream != nil {
+		t.Error("a terminal streamed event should clear the update stream channel")
+	}
+	if !strings.Contains(ctx.app.updateStatus, "Updated 1") {
+		t.Errorf("updateStatus should report the success count, got %q", ctx.app.updateStatus)
 	}
 }
 

@@ -194,6 +194,7 @@ type App struct {
 	installComplete bool
 	installCmd      *exec.Cmd
 	installEvents   chan installEventMsg // streamed progress from the install worker goroutine
+	updateStream    chan updateStreamMsg // streamed progress from the update worker goroutine
 	runner          *runner.Runner
 
 	// Management platform state (new)

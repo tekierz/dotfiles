@@ -134,6 +134,19 @@ type updateWithLogsMsg struct {
 	err     error
 }
 
+// updateStreamMsg is a single event emitted by the update worker goroutine.
+// The worker NEVER mutates App state directly; instead it sends these events
+// over a.updateStream and the Update loop applies them on the main goroutine.
+// This is the same channel + "listen" Cmd streaming pattern the install flow
+// uses (installEventMsg), so update logs render LIVE instead of all at once at
+// the end, and there is no data race between the worker and Update/View.
+type updateStreamMsg struct {
+	line    string             // a line of output to append (empty if none)
+	done    bool               // the update sequence finished
+	results []pkg.UpdateResult // final results (only meaningful when done)
+	err     error              // final error (only meaningful when done)
+}
+
 // tickAnimation returns a command that sends tickMsg on each animation frame
 func tickAnimation() tea.Cmd {
 	return tea.Tick(introAnimationTick, func(t time.Time) tea.Msg {

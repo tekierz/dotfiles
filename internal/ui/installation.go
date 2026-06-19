@@ -620,35 +620,61 @@ func (a *App) streamingInstallToolCmd(toolID string) tea.Cmd {
 	}
 }
 
-// streamingUpdateCmd returns a command that updates packages with output collection
-func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
+// listenUpdateStreamCmd reads the next event from the update stream channel and
+// returns it as a message. Update re-subscribes by returning this Cmd again
+// until it sees a `done` event (mirrors listenInstallEventsCmd).
+func (a *App) listenUpdateStreamCmd() tea.Cmd {
+	ch := a.updateStream
 	return func() tea.Msg {
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return updateWithLogsMsg{err: fmt.Errorf("no package manager detected")}
+		if ch == nil {
+			return updateStreamMsg{done: true}
 		}
-
-		var pkgNames []string
-		for _, p := range packages {
-			pkgNames = append(pkgNames, p.Name)
+		ev, ok := <-ch
+		if !ok {
+			// Channel closed without a done event; treat as completion.
+			return updateStreamMsg{done: true}
 		}
+		return ev
+	}
+}
 
-		ctx := context.Background()
-		cmd, err := mgr.UpdateStreaming(ctx, pkgNames...)
-		if err != nil {
-			return updateWithLogsMsg{err: err}
+// streamingUpdateCmd starts a streaming update of the given packages. The
+// streaming command's output is drained on a detached worker goroutine that
+// writes each line to a.updateStream (so lines render LIVE) and emits a final
+// `done` event with the results/error before closing the channel. The worker
+// MUST NOT touch any App field; all App mutation happens in Update on the main
+// loop. The returned Cmd listens for the first event (re-armed from Update).
+func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
+	mgr := pkg.DetectManager()
+	if mgr == nil {
+		return func() tea.Msg {
+			return updateStreamMsg{done: true, err: fmt.Errorf("no package manager detected")}
 		}
+	}
 
-		// Collect all output
-		var logs []string
+	var pkgNames []string
+	for _, p := range packages {
+		pkgNames = append(pkgNames, p.Name)
+	}
+
+	ctx := context.Background()
+	cmd, err := mgr.UpdateStreaming(ctx, pkgNames...)
+	if err != nil {
+		return func() tea.Msg { return updateStreamMsg{done: true, err: err} }
+	}
+
+	// Buffered so the worker can make progress without blocking on a slow
+	// consumer; the listen Cmd drains it one event at a time.
+	stream := make(chan updateStreamMsg, 64)
+	a.updateStream = stream
+
+	go func() {
+		defer close(stream)
 		for line := range cmd.Output {
-			logs = append(logs, line)
+			stream <- updateStreamMsg{line: line}
 		}
-
-		err = cmd.Wait()
-
-		// Build results
-		var results []pkg.UpdateResult
+		err := cmd.Wait()
+		results := make([]pkg.UpdateResult, 0, len(packages))
 		for _, p := range packages {
 			results = append(results, pkg.UpdateResult{
 				Package: p,
@@ -656,33 +682,41 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 				Error:   err,
 			})
 		}
-		return updateWithLogsMsg{logs: logs, results: results, err: err}
-	}
+		stream <- updateStreamMsg{done: true, results: results, err: err}
+	}()
+
+	return a.listenUpdateStreamCmd()
 }
 
-// streamingUpdateAllCmd returns a command that updates all packages with output collection
+// streamingUpdateAllCmd starts a streaming update of all packages, using the
+// same live-streaming worker pattern as streamingUpdateCmd.
 func (a *App) streamingUpdateAllCmd() tea.Cmd {
-	return func() tea.Msg {
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return updateWithLogsMsg{err: fmt.Errorf("no package manager detected")}
+	mgr := pkg.DetectManager()
+	if mgr == nil {
+		return func() tea.Msg {
+			return updateStreamMsg{done: true, err: fmt.Errorf("no package manager detected")}
 		}
-
-		ctx := context.Background()
-		cmd, err := mgr.UpdateAllStreaming(ctx)
-		if err != nil {
-			return updateWithLogsMsg{err: err}
-		}
-
-		// Collect all output
-		var logs []string
-		for line := range cmd.Output {
-			logs = append(logs, line)
-		}
-
-		err = cmd.Wait()
-		return updateWithLogsMsg{logs: logs, err: err}
 	}
+
+	ctx := context.Background()
+	cmd, err := mgr.UpdateAllStreaming(ctx)
+	if err != nil {
+		return func() tea.Msg { return updateStreamMsg{done: true, err: err} }
+	}
+
+	stream := make(chan updateStreamMsg, 64)
+	a.updateStream = stream
+
+	go func() {
+		defer close(stream)
+		for line := range cmd.Output {
+			stream <- updateStreamMsg{line: line}
+		}
+		err := cmd.Wait()
+		stream <- updateStreamMsg{done: true, err: err}
+	}()
+
+	return a.listenUpdateStreamCmd()
 }
 
 // saveInstallerConfig saves theme and nav style during installer flow
