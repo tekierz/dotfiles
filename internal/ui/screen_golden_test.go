@@ -1317,18 +1317,15 @@ func TestUpdateScreenCheckDoneAsyncInHandler(t *testing.T) {
 
 // TestUpdateScreenStreamLineLive proves the live-streaming wiring: a streamed
 // update line is appended to installLogs immediately (so it renders during the
-// run, not all at once at the end) and the handler re-arms the listen Cmd to
-// keep the stream flowing.
+// run, not all at once at the end) and the global handler re-arms the listen
+// Cmd to keep the stream flowing. The streaming messages are now handled in
+// App.Update (so they survive navigation), so the test drives App.Update.
 func TestUpdateScreenStreamLineLive(t *testing.T) {
 	ctx := newGoldenContext(t)
 	ctx.app.updateRunning = true
 	ctx.app.updateStream = make(chan updateStreamMsg, 1)
 
-	screen := NewUpdateScreen(ctx)
-	next, cmd := screen.Update(updateStreamMsg{line: "==> Downloading foo"})
-	if next != screen {
-		t.Fatalf("updateScreen should remain current after updateStreamMsg")
-	}
+	_, cmd := ctx.app.Update(updateStreamMsg{line: "==> Downloading foo"})
 	if len(ctx.app.installLogs) != 1 || ctx.app.installLogs[0] != "==> Downloading foo" {
 		t.Errorf("streamed line should be appended to installLogs immediately, got %v", ctx.app.installLogs)
 	}
@@ -1341,18 +1338,15 @@ func TestUpdateScreenStreamLineLive(t *testing.T) {
 }
 
 // TestUpdateScreenStreamDoneFinalizes verifies a terminal streamed event ends the
-// run, clears the stream channel, and sets the status from the results.
+// run, clears the stream channel, and sets the status from the results. Handled
+// globally in App.Update.
 func TestUpdateScreenStreamDoneFinalizes(t *testing.T) {
 	ctx := newGoldenContext(t)
 	ctx.app.updateRunning = true
 	ctx.app.updateStream = make(chan updateStreamMsg, 1)
 
-	screen := NewUpdateScreen(ctx)
 	results := []pkg.UpdateResult{{Success: true}}
-	next, _ := screen.Update(updateStreamMsg{done: true, results: results})
-	if next != screen {
-		t.Fatalf("updateScreen should remain current after a terminal updateStreamMsg")
-	}
+	ctx.app.Update(updateStreamMsg{done: true, results: results})
 	if ctx.app.updateRunning {
 		t.Error("a terminal streamed event should clear updateRunning")
 	}
@@ -1539,10 +1533,11 @@ func TestManageScreenReachableViaManager(t *testing.T) {
 	}
 }
 
-// TestManageScreenInstallDoneAsyncInHandler proves the async-in-handler wiring
-// for the manage install completion: feeding a manageInstallDoneMsg to the
-// handler's Update updates App state and requests an install-status cache reload
-// (the Phase B fix), with no App.Update involvement.
+// TestManageScreenInstallDoneAsyncInHandler proves the global-handler wiring for
+// the manage install completion: feeding a manageInstallDoneMsg to App.Update
+// updates App state and requests an install-status cache reload (Phase B + C10
+// fix). The streaming/terminal install messages are handled globally in
+// App.Update so they survive navigation, so the test drives App.Update.
 func TestManageScreenInstallDoneAsyncInHandler(t *testing.T) {
 	ctx := newManageContext(t)
 	// Simulate an install in progress with a ready cache (so the reload is the
@@ -1552,11 +1547,7 @@ func TestManageScreenInstallDoneAsyncInHandler(t *testing.T) {
 	ctx.app.manageInstalledReady = true
 	ctx.app.installCacheLoading = false
 
-	screen := NewManageScreen(ctx)
-	next, cmd := screen.Update(manageInstallDoneMsg{toolID: "ghostty", err: nil})
-	if next != screen {
-		t.Fatalf("manageScreen should remain current after manageInstallDoneMsg")
-	}
+	_, cmd := ctx.app.Update(manageInstallDoneMsg{toolID: "ghostty", err: nil})
 
 	if ctx.app.manageInstalling {
 		t.Error("manageInstallDoneMsg should clear manageInstalling")
@@ -1580,9 +1571,9 @@ func TestManageScreenInstallDoneAsyncInHandler(t *testing.T) {
 }
 
 // TestManageScreenInstallWithLogsAsyncInHandler proves the streaming-install
-// terminal message is handled in the handler: manageInstallWithLogsMsg appends
-// the collected logs, clears the installing flag, and (on success) requests a
-// cache reload.
+// terminal message is handled globally in App.Update: manageInstallWithLogsMsg
+// appends the collected logs, clears the installing flag, and (on success)
+// requests a cache reload. Handled in App.Update so it survives navigation.
 func TestManageScreenInstallWithLogsAsyncInHandler(t *testing.T) {
 	ctx := newManageContext(t)
 	ctx.app.manageInstalling = true
@@ -1591,15 +1582,11 @@ func TestManageScreenInstallWithLogsAsyncInHandler(t *testing.T) {
 	ctx.app.installCacheLoading = false
 	ctx.app.clearInstallLogs()
 
-	screen := NewManageScreen(ctx)
-	next, cmd := screen.Update(manageInstallWithLogsMsg{
+	_, cmd := ctx.app.Update(manageInstallWithLogsMsg{
 		toolID: "ghostty",
 		logs:   []string{"Installing ghostty...", "done"},
 		err:    nil,
 	})
-	if next != screen {
-		t.Fatalf("manageScreen should remain current after manageInstallWithLogsMsg")
-	}
 	if ctx.app.manageInstalling {
 		t.Error("manageInstallWithLogsMsg should clear manageInstalling")
 	}

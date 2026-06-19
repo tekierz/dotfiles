@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tekierz/dotfiles/internal/runner"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 // progressScreen is the migrated ScreenHandler for the installation progress
@@ -83,6 +84,9 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
+			// Cancel the running install worker + (sudo) package-manager subprocess
+			// before quitting so they are not orphaned when the TUI exits (C15).
+			a.teardownStream()
 			return s, tea.Quit
 		case "enter":
 			// Only advance once the installation is complete.
@@ -152,6 +156,10 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case installDoneMsg:
 		a.installRunning = false
 		a.installComplete = true
+		// The install worker has finished; drop the retained cancel handle so a
+		// later teardown (Ctrl+C on the summary) is a harmless no-op.
+		a.streamCancel = nil
+		a.streamCmd = nil
 		if msg.err != nil {
 			if msg.context != "" {
 				a.lastError = fmt.Errorf("%v\n\nOutput:\n%s", msg.err, msg.context)
@@ -160,6 +168,12 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			}
 			return s, a.showError(a.lastError)
 		}
+		// Successful install: the Manage / Deep-Dive install-status caches now
+		// show stale "not installed" for the just-installed tools. Invalidate both
+		// the registry's IsInstalled() cache and the App's manageInstalled cache so
+		// the next navigation triggers a fresh load (C10).
+		tools.GetRegistry().InvalidateCache()
+		a.manageInstalledReady = false
 		return s, nil
 
 	case installLogMsg:

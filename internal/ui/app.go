@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -196,6 +197,14 @@ type App struct {
 	installEvents   chan installEventMsg // streamed progress from the install worker goroutine
 	updateStream    chan updateStreamMsg // streamed progress from the update worker goroutine
 	runner          *runner.Runner
+	// streamCancel cancels the context driving the currently-running install or
+	// update worker (and the underlying StreamingCmd). It is retained on the App
+	// so navigate-away / Ctrl+C can tear the subprocess + worker goroutines down
+	// deterministically rather than orphaning them. nil when nothing streams.
+	streamCancel context.CancelFunc
+	// streamCmd is the StreamingCmd backing the active install/update stream, kept
+	// so its subprocess can be Cancel()ed on teardown. nil when nothing streams.
+	streamCmd *runner.StreamingCmd
 
 	// Management platform state (new)
 	mainMenuIndex        int                   // Main menu cursor
@@ -786,6 +795,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.manageInstalledReady = true
 		a.installCacheLoading = false
 		return a, nil
+	}
+
+	// Streaming/terminal async messages for the package-update and tool-install
+	// flows are handled GLOBALLY here, before delegating, exactly like
+	// installCacheDoneMsg above. Their re-arm/finalize/cache-refresh chain
+	// outlives the originating screen (the worker goroutine + package-manager
+	// subprocess do too), so handling them only in the originating screen's
+	// Update would drop the message when the user has navigated away — wedging
+	// the running flag, dropping the result, and leaking the worker + subprocess
+	// (cluster A: C0, C1, C9). The screen handlers delegate to these same *App
+	// methods, so behavior is identical whether or not the screen is still active.
+	switch m := msg.(type) {
+	case updateStreamMsg:
+		return a, a.handleUpdateStreamMsg(m)
+	case updateStartMsg:
+		return a, a.handleUpdateStartMsg(m)
+	case updateSudoRequiredMsg:
+		return a, a.handleUpdateSudoRequiredMsg(m)
+	case manageInstallWithLogsMsg:
+		return a, a.handleManageInstallWithLogsMsg(m)
+	case manageInstallDoneMsg:
+		return a, a.handleManageInstallDoneMsg(m)
+	case manageStartInstallMsg:
+		return a, a.handleManageStartInstallMsg(m)
+	case manageSudoRequiredMsg:
+		return a, a.handleManageSudoRequiredMsg(m)
 	}
 
 	// Every live screen is a migrated ScreenHandler, so the ScreenManager owns

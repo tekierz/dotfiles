@@ -111,6 +111,117 @@ func TestGhosttyTabBindingOptionsAllGenerate(t *testing.T) {
 	}
 }
 
+// drainCmd runs a tea.Cmd (and any batch it expands into) to completion,
+// returning every message produced. Used to assert that a global handler
+// re-armed a listen Cmd or kicked a cache refresh.
+func drainCmd(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var msgs []tea.Msg
+		for _, c := range batch {
+			msgs = append(msgs, drainCmd(c)...)
+		}
+		return msgs
+	}
+	return []tea.Msg{msg}
+}
+
+// TestStreamingMsgSurvivesNavigation pins down the durable fix for cluster A:
+// the terminal/streaming install & update async messages must be fully
+// processed (running flags reset, cache refresh requested) even when a
+// DIFFERENT screen is active when the message arrives. Before the fix these
+// messages were handled ONLY by the originating screen's Update, so navigating
+// away dropped them, stranded the running flag, and orphaned the worker.
+func TestStreamingMsgSurvivesNavigation(t *testing.T) {
+	t.Run("manageInstallWithLogsMsg resets flag from another screen", func(t *testing.T) {
+		app := NewApp(true)
+		// Simulate an install started on Manage, then the user navigated to the
+		// main menu (a different screen) before the terminal message arrives.
+		app.screenMgr.Navigate(ScreenMainMenu)
+		app.manageInstalling = true
+		app.manageInstallID = "btop"
+		app.manageInstalledReady = true
+
+		_, cmd := app.Update(manageInstallWithLogsMsg{toolID: "btop", logs: []string{"done"}})
+
+		if app.manageInstalling {
+			t.Error("manageInstalling still true after terminal msg delivered to another screen")
+		}
+		if app.manageInstalledReady {
+			t.Error("manageInstalledReady not reset; install-status cache would stay stale")
+		}
+		// A successful install must kick a fresh cache load.
+		if cmd == nil {
+			t.Fatal("expected a cache-refresh command after successful install, got nil")
+		}
+		if !app.installCacheLoading {
+			t.Error("expected installCacheLoading=true (cache refresh kicked)")
+		}
+	})
+
+	t.Run("manageInstallDoneMsg resets flag from another screen", func(t *testing.T) {
+		app := NewApp(true)
+		app.screenMgr.Navigate(ScreenMainMenu)
+		app.manageInstalling = true
+		app.manageInstallID = "btop"
+		app.manageInstalledReady = true
+
+		app.Update(manageInstallDoneMsg{toolID: "btop"})
+
+		if app.manageInstalling {
+			t.Error("manageInstalling still true after manageInstallDoneMsg on another screen")
+		}
+		if app.manageInstallID != "" {
+			t.Error("manageInstallID not cleared")
+		}
+		if app.manageInstalledReady {
+			t.Error("manageInstalledReady not reset")
+		}
+	})
+
+	t.Run("updateStreamMsg done resets updateRunning from another screen", func(t *testing.T) {
+		app := NewApp(true)
+		app.screenMgr.Navigate(ScreenMainMenu)
+		app.updateRunning = true
+
+		app.Update(updateStreamMsg{done: true})
+
+		if app.updateRunning {
+			t.Error("updateRunning still true after streaming done delivered to another screen")
+		}
+	})
+
+	t.Run("updateStreamMsg line re-arms the listen cmd globally", func(t *testing.T) {
+		app := NewApp(true)
+		app.screenMgr.Navigate(ScreenMainMenu)
+		app.updateRunning = true
+		// A live (non-done) line must re-issue listenUpdateStreamCmd so the stream
+		// keeps flowing regardless of the active screen. Closed channel yields a
+		// done event from the listen cmd.
+		ch := make(chan updateStreamMsg)
+		close(ch)
+		app.updateStream = ch
+
+		_, cmd := app.Update(updateStreamMsg{line: "Downloading..."})
+		if cmd == nil {
+			t.Fatal("expected listenUpdateStreamCmd to be re-armed, got nil")
+		}
+		msgs := drainCmd(cmd)
+		found := false
+		for _, m := range msgs {
+			if _, ok := m.(updateStreamMsg); ok {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("re-armed command did not produce an updateStreamMsg; got %v", msgs)
+		}
+	})
+}
+
 // TestNavBlockedWhileStreaming pins down the fix for the streaming-navigation
 // wedge: switching tabs (keyboard or mouse) while an install/update streams
 // would drop the terminal message, strand the running flag, and orphan the

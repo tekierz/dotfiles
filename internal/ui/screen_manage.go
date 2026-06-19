@@ -30,25 +30,23 @@ import (
 // entered. The cache result (installCacheDoneMsg) is applied globally in
 // App.Update before delegation, so it is intentionally NOT handled here.
 //
-// Async-in-handler: because the ScreenManager delegates every non-navigation
-// message to this handler while it is active, the Manage async results are
-// handled here (not in App.Update): manageSavedMsg, manageInstallDoneMsg,
-// manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg. The
-// streaming-install chain is re-issued from the handler:
-//   - manageSudoRequiredMsg -> tea.Exec(sudo prompt) whose callback yields
-//     manageStartInstallMsg (handled here next)
+// Async handling: manageSavedMsg is handled here while this screen is active.
+// The streaming/terminal install messages (manageInstallDoneMsg,
+// manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg) are
+// instead handled GLOBALLY in App.Update before delegation (see streaming.go),
+// so the finalize + cache-refresh chain survives navigation away from this
+// screen (the install worker + package-manager subprocess outlive the screen):
+//   - manageSudoRequiredMsg -> tea.Exec(sudo prompt) -> manageStartInstallMsg
 //   - manageStartInstallMsg -> a.streamingInstallToolCmd(toolID)
-//   - manageInstallWithLogsMsg success -> set manageInstalledReady=false and
-//     re-issue a.startInstallCacheLoad() so the install-status cache refreshes
-//     (the Phase B fix, preserved).
+//   - manageInstallWithLogsMsg success -> InvalidateCache + manageInstalledReady
+//     =false + re-issue a.startInstallCacheLoad() so the install-status cache
+//     refreshes (Phase B + C10 fix).
 //
 // Streaming model / no data race: a.streamingInstallToolCmd runs the package
 // install inside a tea.Cmd closure, collects all output into a local slice, and
 // returns a single terminal manageInstallWithLogsMsg carrying the logs. No
-// goroutine touches shared App state, so the manage install is already the safe
-// collect-then-message pattern (no per-line stream to re-arm, no race). The
-// shared installLogMsg (used by the install/update streaming buffer, currently
-// emitted by neither path) stays in App.Update, matching the Update screen.
+// goroutine touches shared App state, so the manage install is the safe
+// collect-then-message pattern (no per-line stream to re-arm, no race).
 type manageScreen struct {
 	BaseScreen
 }
@@ -87,12 +85,15 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
+			// Tear down any in-flight install worker + subprocess before quitting.
+			a.teardownStream()
 			return s, tea.Quit
 		}
 		// 'q' quits from the Manage screen except while the inline string editor
 		// is active (so typing 'q' into a field doesn't quit). This mirrors the
 		// legacy global quit guard: !(screen == ScreenManage && manageEditing).
 		if msg.String() == "q" && !a.manageEditing {
+			a.teardownStream()
 			return s, tea.Quit
 		}
 		return s, s.handleKey(msg)
@@ -109,64 +110,10 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		}
 		return s, nil
 
-	case manageInstallDoneMsg:
-		a.manageInstalling = false
-		a.manageInstallID = ""
-		a.manageInstalledReady = false // refresh install status cache
-		if msg.err != nil {
-			a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
-		} else {
-			a.manageStatus = "Installed ✓"
-		}
-		// Actually reload the cache so the Manage screen reflects the new install
-		// status without requiring the user to navigate away and back.
-		// startInstallCacheLoad guards against double-loading (Phase B fix).
-		if cmd := a.startInstallCacheLoad(); cmd != nil {
-			return s, cmd
-		}
-		return s, nil
-
-	case manageSudoRequiredMsg:
-		// Need to prompt for sudo before the manage install. Re-issue the
-		// exec+continuation so the streaming-install chain keeps flowing while
-		// this screen is active.
-		return s, tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
-			if err != nil {
-				return manageInstallDoneMsg{toolID: msg.toolID, err: err}
-			}
-			// Sudo cached, now start the streaming install.
-			return manageStartInstallMsg{toolID: msg.toolID}
-		})
-
-	case manageStartInstallMsg:
-		// Start the streaming install (sudo already cached).
-		a.clearInstallLogs()
-		a.manageInstalling = true
-		a.manageInstallID = msg.toolID
-		return s, a.streamingInstallToolCmd(msg.toolID)
-
-	case manageInstallWithLogsMsg:
-		// Install completed with logs.
-		a.manageInstalling = false
-		a.installLogAutoScroll = false
-		// Append all collected logs.
-		for _, line := range msg.logs {
-			a.appendInstallLog(line)
-		}
-		// Update install status.
-		if msg.err != nil {
-			a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
-		} else {
-			a.manageStatus = "Installed successfully ✓"
-			// Refresh the install-status cache, then reload it so the Manage
-			// screen reflects the newly installed tool immediately.
-			// startInstallCacheLoad guards against double-loading (Phase B fix).
-			a.manageInstalledReady = false
-			if cmd := a.startInstallCacheLoad(); cmd != nil {
-				return s, cmd
-			}
-		}
-		return s, nil
+		// The streaming/terminal install messages (manageInstallDoneMsg,
+		// manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg)
+		// are handled GLOBALLY in App.Update before delegation so the
+		// finalize/cache-refresh chain survives navigation; they never reach here.
 	}
 	return s, nil
 }
@@ -562,6 +509,14 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 	layout := a.manageLayout()
 	items := a.manageItems()
+
+	// Bounds guard: the wheel-scroll fields branch indexes items[a.manageIndex],
+	// so an empty list (or a stale index) would panic. Match the click path,
+	// which guards len(items) before indexing.
+	if len(items) == 0 {
+		return nil
+	}
+	a.manageIndex = clampInt(a.manageIndex, 0, len(items)-1)
 
 	// Wheel scroll: choose pane based on mouse X.
 	if m.IsWheel() {

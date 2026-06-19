@@ -53,6 +53,13 @@ func (a *App) startInstallation() tea.Cmd {
 	events := make(chan installEventMsg, 64)
 	a.installEvents = events
 
+	// Cancelable context so Ctrl+C (or any teardown) can stop the running
+	// package-manager subprocess and unblock the worker's bounded-channel sends
+	// instead of orphaning them (C15 / concurrency-medium). Stored on the App so
+	// teardownStream() can cancel it.
+	ctx, cancel := context.WithCancel(context.Background())
+	a.streamCancel = cancel
+
 	// Snapshot the values the worker needs so it never reads App fields after
 	// this point (they may be mutated by the Update loop concurrently). The
 	// deep-dive config is copied by value; the install progress screen does not
@@ -60,7 +67,7 @@ func (a *App) startInstallation() tea.Cmd {
 	cfg := *a.deepDiveConfig
 	theme := a.theme
 
-	go runInstallWorker(events, selectedTools, cfg, theme)
+	go runInstallWorker(ctx, events, selectedTools, cfg, theme)
 
 	return a.listenInstallEventsCmd()
 }
@@ -86,11 +93,24 @@ func (a *App) listenInstallEventsCmd() tea.Cmd {
 // runInstallWorker performs the entire install/configure sequence on a detached
 // goroutine, emitting progress as installEventMsg values. It MUST NOT touch any
 // App field. It closes the channel when finished.
-func runInstallWorker(events chan<- installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string) {
+func runInstallWorker(ctx context.Context, events chan<- installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string) {
 	defer close(events)
 
-	emit := func(line string) { events <- installEventMsg{line: line} }
-	step := func(line string) { events <- installEventMsg{line: line, stepInc: true} }
+	// Sends select on ctx.Done() so a cancelled install (Ctrl+C / teardown)
+	// unblocks the worker instead of parking forever on the bounded channel once
+	// the consumer (the listen Cmd) stops draining it.
+	emit := func(line string) {
+		select {
+		case events <- installEventMsg{line: line}:
+		case <-ctx.Done():
+		}
+	}
+	step := func(line string) {
+		select {
+		case events <- installEventMsg{line: line, stepInc: true}:
+		case <-ctx.Done():
+		}
+	}
 
 	// output accumulates every line emitted so we can build error context that
 	// matches the lines the user has seen, without reading App state.
@@ -105,15 +125,18 @@ func runInstallWorker(events chan<- installEventMsg, selectedTools []string, cfg
 	}
 
 	finish := func(err error) {
-		var context string
+		var errCtx string
 		if err != nil && len(output) > 0 {
 			start := 0
 			if len(output) > 8 {
 				start = len(output) - 8
 			}
-			context = strings.Join(output[start:], "\n")
+			errCtx = strings.Join(output[start:], "\n")
 		}
-		events <- installEventMsg{done: true, err: err, context: context}
+		select {
+		case events <- installEventMsg{done: true, err: err, context: errCtx}:
+		case <-ctx.Done():
+		}
 	}
 
 	if len(selectedTools) == 0 {
@@ -151,6 +174,11 @@ func runInstallWorker(events chan<- installEventMsg, selectedTools []string, cfg
 
 	successCount := 0
 	for _, toolID := range selectedTools {
+		// Stop promptly if the install was cancelled (Ctrl+C / teardown).
+		if ctx.Err() != nil {
+			finish(ctx.Err())
+			return
+		}
 		stepLine(fmt.Sprintf("▶ Installing %s...", toolID))
 
 		t, ok := reg.Get(toolID)
@@ -176,8 +204,8 @@ func runInstallWorker(events chan<- installEventMsg, selectedTools []string, cfg
 			continue
 		}
 
-		// Install using streaming command
-		ctx := context.Background()
+		// Install using streaming command, derived from the cancelable worker
+		// context so Ctrl+C / teardown stops the subprocess.
 		cmd, err := mgr.InstallStreaming(ctx, pkgs...)
 		if err != nil {
 			emitLine(fmt.Sprintf("  ✗ Failed to start install: %v", err))
@@ -657,11 +685,22 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 		pkgNames = append(pkgNames, p.Name)
 	}
 
-	ctx := context.Background()
+	// Cancelable context (derived from a cancelable parent stored on App) so
+	// navigate-away / Ctrl+C / teardownStream() stops the subprocess and unblocks
+	// the worker's bounded-channel sends instead of leaking them.
+	ctx, cancel := context.WithCancel(context.Background())
 	cmd, err := mgr.UpdateStreaming(ctx, pkgNames...)
 	if err != nil {
+		cancel()
 		return func() tea.Msg { return updateStreamMsg{done: true, err: err} }
 	}
+	if cmd == nil {
+		cancel()
+		return func() tea.Msg { return updateStreamMsg{done: true} }
+	}
+	// Retained on App (set here on the main loop) so teardownStream() can cancel.
+	a.streamCmd = cmd
+	a.streamCancel = cancel
 
 	// Buffered so the worker can make progress without blocking on a slow
 	// consumer; the listen Cmd drains it one event at a time.
@@ -671,7 +710,11 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 	go func() {
 		defer close(stream)
 		for line := range cmd.Output {
-			stream <- updateStreamMsg{line: line}
+			select {
+			case stream <- updateStreamMsg{line: line}:
+			case <-ctx.Done():
+				return
+			}
 		}
 		err := cmd.Wait()
 		results := make([]pkg.UpdateResult, 0, len(packages))
@@ -682,7 +725,10 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 				Error:   err,
 			})
 		}
-		stream <- updateStreamMsg{done: true, results: results, err: err}
+		select {
+		case stream <- updateStreamMsg{done: true, results: results, err: err}:
+		case <-ctx.Done():
+		}
 	}()
 
 	return a.listenUpdateStreamCmd()
@@ -698,11 +744,20 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 		}
 	}
 
-	ctx := context.Background()
+	// Cancelable context (see streamingUpdateCmd) so teardown stops the subprocess
+	// and unblocks the worker's bounded-channel sends.
+	ctx, cancel := context.WithCancel(context.Background())
 	cmd, err := mgr.UpdateAllStreaming(ctx)
 	if err != nil {
+		cancel()
 		return func() tea.Msg { return updateStreamMsg{done: true, err: err} }
 	}
+	if cmd == nil {
+		cancel()
+		return func() tea.Msg { return updateStreamMsg{done: true} }
+	}
+	a.streamCmd = cmd
+	a.streamCancel = cancel
 
 	stream := make(chan updateStreamMsg, 64)
 	a.updateStream = stream
@@ -710,10 +765,17 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 	go func() {
 		defer close(stream)
 		for line := range cmd.Output {
-			stream <- updateStreamMsg{line: line}
+			select {
+			case stream <- updateStreamMsg{line: line}:
+			case <-ctx.Done():
+				return
+			}
 		}
 		err := cmd.Wait()
-		stream <- updateStreamMsg{done: true, err: err}
+		select {
+		case stream <- updateStreamMsg{done: true, err: err}:
+		case <-ctx.Done():
+		}
 	}()
 
 	return a.listenUpdateStreamCmd()

@@ -23,25 +23,22 @@ import (
 // startTabTargetLoad / mainMenuScreen.selectItem), and Init() is idempotent, so
 // the check runs exactly once however the screen is entered.
 //
-// Async-in-handler: because the ScreenManager delegates every non-navigation
-// message to this handler while it is active, the update async results are
-// handled here (not in App.Update): updateCheckDoneMsg, updateRunDoneMsg,
-// updateWithLogsMsg, updateSudoRequiredMsg, updateStartMsg. The streaming chain
-// is re-issued from the handler:
-//   - updateSudoRequiredMsg -> tea.Exec(sudo prompt) whose callback yields
-//     updateStartMsg (handled here next)
-//   - updateStartMsg -> a.streamingUpdateCmd / a.streamingUpdateAllCmd
-//   - updateRunDoneMsg / updateWithLogsMsg success -> checkUpdatesCmd to refresh
+// Async handling: the on-enter check result (updateCheckDoneMsg) is handled
+// here while this screen is active. The streaming/terminal update messages
+// (updateSudoRequiredMsg, updateStartMsg, updateStreamMsg) are instead handled
+// GLOBALLY in App.Update before delegation, so the re-arm/finalize/refresh
+// chain survives navigation away from this screen (the worker goroutine +
+// package-manager subprocess outlive the screen). The compatibility terminal
+// messages updateRunDoneMsg / updateWithLogsMsg have no global handler and so
+// finalize here via the shared a.finishUpdate helper.
 //
-// Live streaming: the streaming commands spawn a detached worker goroutine that
-// writes each output line to a.updateStream and a final `done` event before
-// closing the channel (mirroring the install flow's runInstallWorker). This
-// handler applies each updateStreamMsg on the main loop -- appending the line to
-// installLogs so it renders LIVE -- and RE-ISSUES listenUpdateStreamCmd until the
-// `done` event, which finalizes via finishUpdate. The worker never touches shared
-// App state, so there is no data race. The terminal updateWithLogsMsg /
-// updateRunDoneMsg are retained for compatibility and also route through
-// finishUpdate. The shared installLogMsg stays in App.Update.
+// Live streaming (in streaming.go): a.handleUpdateStartMsg spawns a detached
+// worker goroutine that writes each output line to a.updateStream and a final
+// `done` event before closing the channel. a.handleUpdateStreamMsg applies each
+// event on the main loop -- appending the line to installLogs so it renders
+// LIVE -- and RE-ISSUES listenUpdateStreamCmd until the `done` event, which
+// finalizes via a.finishUpdate. The worker never touches shared App state, so
+// there is no data race. The shared installLogMsg stays in App.Update.
 type updateScreen struct {
 	BaseScreen
 }
@@ -75,12 +72,16 @@ func (s *updateScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
+			// Tear down any in-flight update worker + subprocess before quitting so
+			// nothing is orphaned when the TUI exits.
+			a.teardownStream()
 			return s, tea.Quit
 		}
 		// 'q' quits (no inline edit on this screen; allow even mid-update to match
 		// the legacy global quit, which only blocked 'q' during the installer's
 		// installRunning, not update runs).
 		if msg.String() == "q" {
+			a.teardownStream()
 			return s, tea.Quit
 		}
 		return s, s.handleKey(msg)
@@ -96,43 +97,14 @@ func (s *updateScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		a.updateError = msg.err
 		return s, nil
 
-	case updateSudoRequiredMsg:
-		// Need to prompt for sudo before update. Re-issue the exec+continuation so
-		// the streaming update chain keeps going while this screen is active.
-		return s, tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
-			if err != nil {
-				return updateRunDoneMsg{err: err}
-			}
-			// Sudo cached, now start the streaming update.
-			return updateStartMsg{packages: msg.packages, all: msg.all}
-		})
-
-	case updateStartMsg:
-		// Start the streaming update (sudo already cached).
-		a.clearInstallLogs()
-		a.updateRunning = true
-		a.installLogAutoScroll = true // Follow output live while the update runs.
-		if msg.all {
-			return s, a.streamingUpdateAllCmd()
-		}
-		return s, a.streamingUpdateCmd(msg.packages)
-
-	case updateStreamMsg:
-		// Streamed progress from the update worker goroutine, applied here on the
-		// main loop so the worker never touches shared App state. Lines render LIVE.
-		if msg.line != "" {
-			a.appendInstallLog(msg.line)
-		}
-		if msg.done {
-			a.updateStream = nil
-			return s, s.finishUpdate(msg.results, msg.err)
-		}
-		// Re-subscribe for the next event to keep the stream flowing.
-		return s, a.listenUpdateStreamCmd()
-
+	// The streaming/terminal update messages (updateSudoRequiredMsg,
+	// updateStartMsg, updateStreamMsg) are handled GLOBALLY in App.Update before
+	// delegation so the chain survives navigation; they never reach here. The
+	// two compatibility terminal messages below have no global handler (the live
+	// path uses updateStreamMsg), so they finalize through the shared *App helper.
 	case updateRunDoneMsg:
 		// Terminal update result without logs (retained for compatibility).
-		return s, s.finishUpdate(msg.results, msg.err)
+		return s, a.finishUpdate(msg.results, msg.err)
 
 	case updateWithLogsMsg:
 		// Terminal update result with collected logs (retained for compatibility;
@@ -141,44 +113,9 @@ func (s *updateScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		for _, line := range msg.logs {
 			a.appendInstallLog(line)
 		}
-		return s, s.finishUpdate(msg.results, msg.err)
+		return s, a.finishUpdate(msg.results, msg.err)
 	}
 	return s, nil
-}
-
-// finishUpdate finalizes an update run: it stops the run, frees the log scroll,
-// sets the status line from the results, and (on success) refreshes the package
-// list via checkUpdatesCmd. Shared by the live stream (updateStreamMsg done) and
-// the terminal updateWithLogsMsg path so both behave identically.
-func (s *updateScreen) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
-	a := s.App()
-	a.updateRunning = false
-	a.installLogAutoScroll = false // Allow user to scroll through logs.
-	if err != nil {
-		a.updateStatus = fmt.Sprintf("Update failed: %v", err)
-		return nil
-	}
-	successes := 0
-	failures := 0
-	for _, r := range results {
-		if r.Success {
-			successes++
-		} else {
-			failures++
-		}
-	}
-	if failures > 0 {
-		a.updateStatus = fmt.Sprintf("Updated %d, failed %d", successes, failures)
-	} else if successes > 0 {
-		a.updateStatus = fmt.Sprintf("Updated %d package(s) ✓", successes)
-	} else {
-		a.updateStatus = "Update complete ✓"
-	}
-	// Clear selections and refresh the package list.
-	a.updateSelected = make(map[int]bool)
-	a.updateCheckDone = false
-	a.updateChecking = true
-	return checkUpdatesCmd()
 }
 
 // navigateTab routes a management-tab switch through the ScreenManager and kicks
