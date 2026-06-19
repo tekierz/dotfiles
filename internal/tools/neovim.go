@@ -62,16 +62,21 @@ var neovimConfigRepos = map[string]string{
 	"nvchad":    "https://github.com/NvChad/starter.git",
 }
 
-// ValidNeovimPresets is the authoritative set of preset identifiers that
-// screen_config_neovim.go may offer.  Both the UI option list and
-// WriteNeovimConfig's switch must stay in sync with this set so that
-// adding a new preset requires a deliberate change in exactly one place.
-var ValidNeovimPresets = map[string]struct{}{
-	"kickstart": {},
-	"lazyvim":   {},
-	"nvchad":    {},
-	"custom":    {}, // non-destructive: preserves existing config
-}
+// ValidNeovimPresetOrder is the authoritative ordered list of preset identifiers
+// in the order the config screen displays them.  screen_config_neovim.go MUST
+// consume this slice for its option list — that is the compile-time guarantee
+// that UI options and generator dispatch cannot drift independently.
+var ValidNeovimPresetOrder = []string{"kickstart", "lazyvim", "nvchad", "custom"}
+
+// ValidNeovimPresets is derived from ValidNeovimPresetOrder and provides O(1)
+// membership checks.  Do not edit this directly; edit ValidNeovimPresetOrder.
+var ValidNeovimPresets = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(ValidNeovimPresetOrder))
+	for _, p := range ValidNeovimPresetOrder {
+		m[p] = struct{}{}
+	}
+	return m
+}()
 
 // GenerateNeovimConfig builds basic neovim settings as a Lua string.
 // For preset configs (kickstart, lazyvim), this generates a user preferences file.

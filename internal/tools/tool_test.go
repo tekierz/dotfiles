@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -126,16 +127,21 @@ func TestNeovimPresetCoverage(t *testing.T) {
 	})
 
 	t.Run("custom preset is non-destructive (no write to missing nvimDir)", func(t *testing.T) {
-		// WriteNeovimConfig with preset=custom on a system where ~/.config/nvim
-		// does not exist must NOT create a file (non-destructive). We exercise
-		// this by calling WriteNeovimConfig in a temp dir via the package-level
-		// writeMinimalNeovimConfig path — but the simpler unit assertion is that
-		// WriteNeovimConfig("custom") doesn't error AND doesn't call
-		// writeMinimalNeovimConfig by verifying the custom branch returns early.
-		// We achieve this without mocking os by asserting ValidPresets includes
-		// "custom" and the canonical switch expression routes it to early-return.
-		if _, ok := ValidNeovimPresets["custom"]; !ok {
-			t.Error("ValidNeovimPresets must include \"custom\" so the switch can dispatch it")
+		// WriteNeovimConfig with preset=custom must not create any files —
+		// "custom" means the user manages their own ~/.config/nvim.
+		// We redirect HOME to a temp dir so the real home is never touched.
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+
+		cfg := NeovimConfig{ConfigPreset: "custom", TabWidth: 4}
+		if err := WriteNeovimConfig(cfg, "catppuccin-mocha"); err != nil {
+			t.Fatalf("WriteNeovimConfig(custom) returned error: %v", err)
+		}
+
+		// ~/.config/nvim must not exist — no files written.
+		nvimDir := tmpHome + "/.config/nvim"
+		if _, err := os.Stat(nvimDir); err == nil {
+			t.Errorf("WriteNeovimConfig(custom) created %s; custom preset must be non-destructive", nvimDir)
 		}
 	})
 

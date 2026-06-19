@@ -352,12 +352,16 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 		CursorLine:   cfg.NeovimCursorLine,
 		Clipboard:    cfg.NeovimClipboard,
 	}
+	neovimSuccessMsg := fmt.Sprintf("  ✓ Neovim configured (%s)", neovimCfg.ConfigPreset)
+	if neovimCfg.ConfigPreset == "custom" {
+		neovimSuccessMsg = "  ✓ Neovim: using existing config (unchanged)"
+	}
 	configPhase("\n▶ Configuring Neovim...", func() error {
 		if err := tools.WriteNeovimConfig(neovimCfg, theme); err != nil {
 			return fmt.Errorf("Failed to configure Neovim: %w", err)
 		}
 		return nil
-	}, fmt.Sprintf("  ✓ Neovim configured (%s)", neovimCfg.ConfigPreset))
+	}, neovimSuccessMsg)
 
 	// Configure Git
 	configPhase("\n▶ Configuring Git...", func() error {

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 // configNeovimScreen is the migrated ScreenHandler for the Neovim config screen.
@@ -33,9 +34,8 @@ func neovimAdjust(a *App, _ string, fwd bool) {
 	cfg := a.deepDiveConfig
 	idx := a.configFieldIndex
 	switch {
-	case idx < 4: // Config preset selection
-		opts := []string{"kickstart", "lazyvim", "nvchad", "custom"}
-		cfg.NeovimConfig = opts[idx]
+	case idx < len(tools.ValidNeovimPresetOrder): // Config preset selection
+		cfg.NeovimConfig = tools.ValidNeovimPresetOrder[idx]
 	case idx == 4: // Tab width
 		opts := []string{"2", "4", "8"}
 		current := fmt.Sprintf("%d", cfg.NeovimTabWidth)
