@@ -292,6 +292,14 @@ func (s *updateScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	a := s.App()
 	m := tea.MouseEvent(msg)
 
+	// Block navigating away while an update streams. The terminal updateStreamMsg
+	// is only handled by this (active) screen; switching tabs mid-stream would
+	// drop it, strand updateRunning=true, and orphan the package-manager
+	// subprocess. The keyboard path is already guarded the same way.
+	if a.updateRunning {
+		return nil
+	}
+
 	// Only handle left clicks on the tab bar (Y=0).
 	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
 		return nil

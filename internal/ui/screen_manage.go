@@ -316,7 +316,23 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.manageStartEditing(f)
 	}
 
-	// Handle tab navigation first (1-4 keys). A number key for the already-active
+	// Block navigating away while a tool install is streaming: the terminal
+	// manageInstallWithLogsMsg is only handled by this active screen, so leaving
+	// would drop it, strand manageInstalling=true, and orphan the install
+	// subprocess. (The 'i' install trigger is already guarded.)
+	if a.manageInstalling {
+		switch key {
+		case "esc":
+			a.manageStatus = "Install in progress…"
+			return nil
+		}
+		if _, ok := tabNavigationTarget(key); ok {
+			a.manageStatus = "Install in progress…"
+			return nil
+		}
+	}
+
+	// Handle tab navigation first (1-5 keys). A number key for the already-active
 	// tab is a no-op.
 	if target, ok := tabNavigationTarget(key); ok {
 		if target == s.ID() {
@@ -536,8 +552,9 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the
 	// already-active tab (this screen). Migrated destinations enter managed mode;
 	// legacy destinations (Users) fall back to legacy mode harmlessly. Both go
-	// through navigateTab (NavigateTo + on-enter load).
-	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+	// through navigateTab (NavigateTo + on-enter load). Blocked while installing
+	// so the streaming install message can't be dropped by a screen switch.
+	if !a.manageInstalling && m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
 		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}

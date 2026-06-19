@@ -110,3 +110,27 @@ func TestGhosttyTabBindingOptionsAllGenerate(t *testing.T) {
 		}
 	}
 }
+
+// TestNavBlockedWhileStreaming pins down the fix for the streaming-navigation
+// wedge: switching tabs (keyboard or mouse) while an install/update streams
+// would drop the terminal message, strand the running flag, and orphan the
+// subprocess. Navigation must be a no-op while the op is running.
+func TestNavBlockedWhileStreaming(t *testing.T) {
+	t.Run("manage keyboard tab-nav is a no-op while installing", func(t *testing.T) {
+		ctx := newGoldenContext(t)
+		ctx.app.manageInstalling = true
+		s := NewManageScreen(ctx)
+		if _, cmd := s.Update(keyMsg("2")); cmd != nil {
+			t.Error("manage tab-nav while installing returned a command; want nil (no navigation)")
+		}
+	})
+	t.Run("update mouse tab-click is a no-op while running", func(t *testing.T) {
+		ctx := newGoldenContext(t)
+		ctx.app.updateRunning = true
+		s := NewUpdateScreen(ctx)
+		click := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 1, Y: 0}
+		if _, cmd := s.Update(click); cmd != nil {
+			t.Error("update tab-click while running returned a command; want nil (no navigation)")
+		}
+	})
+}
