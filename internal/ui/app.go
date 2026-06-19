@@ -103,13 +103,22 @@ func (a *App) syncThemeIndex() {
 
 // persistTheme saves the currently selected theme to the global config, so a
 // standalone "Change theme" from the main menu actually sticks across runs.
+// On failure it records a brief human-readable message in themeStatus that the
+// view layer can surface to the user instead of silently discarding the error.
 func (a *App) persistTheme() {
 	g, err := config.LoadGlobalConfig()
 	if err != nil || g == nil {
+		if err != nil {
+			a.themeStatus = "Failed to save theme: " + err.Error()
+		}
 		return
 	}
 	g.Theme = a.theme
-	_ = config.SaveGlobalConfig(g)
+	if err := config.SaveGlobalConfig(g); err != nil {
+		a.themeStatus = "Failed to save theme: " + err.Error()
+		return
+	}
+	a.themeStatus = ""
 }
 
 // revertThemeToSaved reverts the in-session theme/preview back to the persisted
@@ -223,7 +232,15 @@ type App struct {
 	hotkeyCatScroll      int                   // Category list scroll
 	hotkeyItemScroll     int                   // Item list scroll
 	hotkeysReturn        Screen                // Screen to return to when leaving hotkeys
-	themeReturn          Screen                // Screen to return to when leaving the theme picker (wizard vs standalone)
+	themeReturn          Screen                // Screen to return to when leaving the theme picker (used for Esc destination)
+	// themeStandalone is true when the theme picker was launched as a
+	// standalone "change theme" command (CLI `dotfiles theme` or main-menu
+	// 'Theme'), as opposed to being wizard step 2. It is set/reset at every
+	// picker entry so no path can inherit a stale value (C7, C8).
+	themeStandalone      bool
+	// themeStatus holds a transient status message from the last persistTheme
+	// call (empty on success, error text on failure).
+	themeStatus          string
 	hotkeysFavorites     *config.HotkeysConfig // User hotkey favorites config
 	hotkeysFavoritesOnly bool                  // Filter to show only favorites
 	// Hotkeys alias editing state
@@ -868,6 +885,16 @@ func (a *App) SetStartScreen(screen Screen) {
 	// the real config files and quits rather than bouncing to the deep-dive menu
 	// (which only exists in the install wizard) and discarding them (C27).
 	a.configStandalone = screenIsToolConfig(screen)
+
+	// CLI `dotfiles theme` routes directly to ScreenThemePicker. Set
+	// themeStandalone=true so Enter persists+quits (the whole TUI was started
+	// just for the picker) instead of advancing into the install wizard (C7).
+	// Do NOT set themeReturn here — the picker uses themeReturn==ScreenMainMenu
+	// to detect an in-TUI standalone call (main menu) vs a CLI call; keeping
+	// the constructor default (ScreenWelcome) signals the CLI path.
+	if screen == ScreenThemePicker {
+		a.themeStandalone = true
+	}
 
 	// Starting explicitly at the animation means "intro → welcome".
 	if screen == ScreenAnimation {

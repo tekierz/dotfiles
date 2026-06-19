@@ -56,7 +56,10 @@ func (s *deepDiveMenuScreen) selectItem(index int) tea.Cmd {
 	items := GetFilteredDeepDiveMenuItems()
 	if index == len(items) {
 		// "Continue to Installation" selected. ScreenThemePicker is migrated;
-		// route through the ScreenManager.
+		// route through the ScreenManager. Explicitly reset themeStandalone so a
+		// previous main-menu Theme visit can't leak into this wizard step (C8).
+		a.themeStandalone = false
+		a.themeReturn = ScreenDeepDiveMenu
 		return NavigateTo(ScreenThemePicker)
 	}
 	if index < 0 || index >= len(items) {

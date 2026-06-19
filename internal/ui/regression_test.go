@@ -25,11 +25,12 @@ func navTarget(t *testing.T, cmd tea.Cmd) Screen {
 
 // TestThemePickerReturnContext pins down the fix for the reported bug where
 // selecting a theme from the main menu dumped the user into the install wizard.
-// The theme picker must branch on themeReturn: standalone (from the main menu)
-// applies-and-returns; wizard advances to the nav picker.
+// The theme picker must branch on themeStandalone: standalone (from the main menu
+// or CLI) applies-and-exits; wizard advances to the nav picker.
 func TestThemePickerReturnContext(t *testing.T) {
 	t.Run("standalone from main menu returns to main menu", func(t *testing.T) {
 		ctx := newGoldenContext(t)
+		ctx.app.themeStandalone = true
 		ctx.app.themeReturn = ScreenMainMenu
 		screen := NewThemePickerScreen(ctx)
 
@@ -46,6 +47,7 @@ func TestThemePickerReturnContext(t *testing.T) {
 
 	t.Run("wizard advances through the install flow", func(t *testing.T) {
 		ctx := newGoldenContext(t)
+		ctx.app.themeStandalone = false
 		ctx.app.themeReturn = ScreenWelcome
 		screen := NewThemePickerScreen(ctx)
 
@@ -57,6 +59,59 @@ func TestThemePickerReturnContext(t *testing.T) {
 		_, escCmd := screen.Update(keyMsg("esc"))
 		if got := navTarget(t, escCmd); got != ScreenWelcome {
 			t.Errorf("Esc (wizard): navigated to %v, want ScreenWelcome", got)
+		}
+	})
+}
+
+// TestThemePickerStandaloneExplicitMode covers the two entry paths called out
+// in the audit (C7, C8) that were previously un-tested:
+//
+//  1. CLI standalone (`dotfiles theme`): Enter must persist and quit (not go to
+//     NavPicker). SetStartScreen(ScreenThemePicker) sets themeStandalone=true, so
+//     the picker quits instead of advancing through the install wizard.
+//
+//  2. Deep-dive "Continue to Installation": Enter must advance to NavPicker (not
+//     bounce back to MainMenu). After a previous main-menu theme visit
+//     (themeReturn=ScreenMainMenu), the deep-dive continue path must reset
+//     themeStandalone=false so the wizard step takes over.
+func TestThemePickerStandaloneExplicitMode(t *testing.T) {
+	t.Run("CLI standalone Enter quits, not NavPicker", func(t *testing.T) {
+		// Simulate SetStartScreen(ScreenThemePicker): themeStandalone=true,
+		// themeReturn=ScreenWelcome (constructor default).
+		ctx := newGoldenContext(t)
+		ctx.app.themeStandalone = true
+		ctx.app.themeReturn = ScreenWelcome // stale default from constructor
+		screen := NewThemePickerScreen(ctx)
+
+		_, enterCmd := screen.Update(keyMsg("enter"))
+		// Enter in CLI standalone must quit (tea.Quit), NOT navigate to NavPicker.
+		if enterCmd == nil {
+			t.Fatal("Enter in standalone CLI: expected tea.Quit command, got nil")
+		}
+		msg := enterCmd()
+		if _, isNav := msg.(NavigateMsg); isNav {
+			nav := msg.(NavigateMsg)
+			t.Errorf("Enter in standalone CLI: got NavigateTo(%v), want tea.Quit (should not enter install wizard)", nav.To)
+		}
+		// The command should be tea.Quit (its message is tea.QuitMsg).
+		if _, isQuit := msg.(tea.QuitMsg); !isQuit {
+			t.Errorf("Enter in standalone CLI: got message type %T, want tea.QuitMsg", msg)
+		}
+	})
+
+	t.Run("deep-dive continue Enter advances to NavPicker, not MainMenu", func(t *testing.T) {
+		// Simulate: user went MainMenu -> Theme (themeReturn=ScreenMainMenu, themeStandalone=true),
+		// then Esc -> Install -> DeepDive -> Continue. The Continue path must reset
+		// themeStandalone=false before navigating to the theme picker.
+		ctx := newGoldenContext(t)
+		// After the explicit-mode fix, deep-dive continue resets themeStandalone.
+		ctx.app.themeStandalone = false
+		ctx.app.themeReturn = ScreenDeepDiveMenu
+		screen := NewThemePickerScreen(ctx)
+
+		_, enterCmd := screen.Update(keyMsg("enter"))
+		if got := navTarget(t, enterCmd); got != ScreenNavPicker {
+			t.Errorf("Enter (deep-dive continue): navigated to %v, want ScreenNavPicker (wizard must advance)", got)
 		}
 	})
 }

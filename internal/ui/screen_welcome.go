@@ -48,7 +48,9 @@ func (s *welcomeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 				return s, NavigateTo(ScreenDeepDiveMenu)
 			}
 			// Entering the theme picker as the wizard's step 2: selecting a theme
-			// should advance to the nav picker (set the return-context to wizard).
+			// should advance to the nav picker. Explicitly clear themeStandalone
+			// so a previous standalone visit can't leak into the wizard (C8).
+			a.themeStandalone = false
 			a.themeReturn = ScreenWelcome
 			return s, NavigateTo(ScreenThemePicker)
 		case "tab", "left", "right", "h", "l":

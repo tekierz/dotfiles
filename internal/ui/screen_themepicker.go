@@ -50,7 +50,14 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
+			return s, tea.Quit
+		case "q":
+			if a.themeStandalone {
+				// Standalone quit: revert the in-session preview so the global
+				// theme palette is not left in a mutated state (q-revert medium).
+				a.revertThemeToSaved()
+			}
 			return s, tea.Quit
 		case "up", "k":
 			if a.themeIndex > 0 {
@@ -61,20 +68,27 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 				s.applyTheme(a.themeIndex + 1)
 			}
 		case "enter":
-			if a.themeReturn == ScreenMainMenu {
-				// Standalone "Change theme" from the main menu: persist the
-				// already-live theme and return, instead of advancing the wizard.
+			if a.themeStandalone {
+				// Standalone mode: persist the already-live theme.
 				a.persistTheme()
-				return s, NavigateTo(ScreenMainMenu)
+				if a.themeReturn == ScreenMainMenu {
+					// In-TUI call (main menu): return to the main menu, stay in TUI.
+					return s, NavigateTo(ScreenMainMenu)
+				}
+				// CLI call (`dotfiles theme`): the whole TUI was just the picker;
+				// quit so the shell regains control.
+				return s, tea.Quit
 			}
+			// Wizard step: advance to nav-style picker.
 			return s, NavigateTo(ScreenNavPicker)
 		case "esc":
-			if a.themeReturn == ScreenMainMenu {
+			if a.themeStandalone {
 				// Cancel the standalone change: revert the preview to the saved
-				// theme and return to the main menu.
+				// theme and return to the caller's screen.
 				a.revertThemeToSaved()
-				return s, NavigateTo(ScreenMainMenu)
+				return s, NavigateTo(a.themeReturn)
 			}
+			// Wizard step: go back to the welcome screen.
 			return s, NavigateTo(ScreenWelcome)
 		}
 
@@ -194,15 +208,19 @@ func (s *themePickerScreen) View(width, height int) string {
 
 	help := HelpStyle.Render("[↑↓/jk] Navigate    [ENTER] Select    [ESC] Back")
 
+	rows := []string{title, "", content, "", help}
+
+	// Surface any save error from the last persistTheme call (error-medium).
+	if a.themeStatus != "" {
+		statusLine := lipgloss.NewStyle().Foreground(ColorRed).Render(a.themeStatus)
+		rows = append(rows, "", statusLine)
+	}
+
 	return PlaceWithBackground(
 		width, height,
 		ContainerStyle.Render(lipgloss.JoinVertical(
 			lipgloss.Left,
-			title,
-			"",
-			content,
-			"",
-			help,
+			rows...,
 		)),
 	)
 }
