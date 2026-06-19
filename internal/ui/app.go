@@ -889,9 +889,10 @@ func (a *App) SetStartScreen(screen Screen) {
 	// CLI `dotfiles theme` routes directly to ScreenThemePicker. Set
 	// themeStandalone=true so Enter persists+quits (the whole TUI was started
 	// just for the picker) instead of advancing into the install wizard (C7).
-	// Do NOT set themeReturn here — the picker uses themeReturn==ScreenMainMenu
-	// to detect an in-TUI standalone call (main menu) vs a CLI call; keeping
-	// the constructor default (ScreenWelcome) signals the CLI path.
+	// themeStandalone is the explicit mode flag for standalone vs wizard.
+	// Within standalone mode, themeReturn==ScreenMainMenu distinguishes an
+	// in-TUI call (main menu "Theme") from a CLI call (constructor default
+	// ScreenWelcome), so we leave themeReturn unchanged here.
 	if screen == ScreenThemePicker {
 		a.themeStandalone = true
 	}

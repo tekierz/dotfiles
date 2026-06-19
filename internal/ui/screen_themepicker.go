@@ -88,8 +88,11 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 				a.revertThemeToSaved()
 				return s, NavigateTo(a.themeReturn)
 			}
-			// Wizard step: go back to the welcome screen.
-			return s, NavigateTo(ScreenWelcome)
+			// Wizard step: go back to the caller's screen. themeReturn is set at
+			// every wizard entry point (ScreenWelcome for the welcome quick-setup
+			// path, ScreenDeepDiveMenu for the deep-dive continue path) so this
+			// is always defined.
+			return s, NavigateTo(a.themeReturn)
 		}
 
 	case tea.MouseMsg:

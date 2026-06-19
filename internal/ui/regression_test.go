@@ -97,6 +97,13 @@ func TestThemePickerStandaloneExplicitMode(t *testing.T) {
 		if _, isQuit := msg.(tea.QuitMsg); !isQuit {
 			t.Errorf("Enter in standalone CLI: got message type %T, want tea.QuitMsg", msg)
 		}
+		// Persist must have been attempted: a successful persist clears themeStatus.
+		// If persistTheme() were removed before tea.Quit, themeStatus could remain
+		// non-empty from a prior error — but its initial value is "", so the more
+		// important invariant is that no persist error was recorded.
+		if ctx.app.themeStatus != "" {
+			t.Errorf("Enter in standalone CLI: themeStatus = %q, want \"\" (persist must not error)", ctx.app.themeStatus)
+		}
 	})
 
 	t.Run("deep-dive continue Enter advances to NavPicker, not MainMenu", func(t *testing.T) {
@@ -112,6 +119,13 @@ func TestThemePickerStandaloneExplicitMode(t *testing.T) {
 		_, enterCmd := screen.Update(keyMsg("enter"))
 		if got := navTarget(t, enterCmd); got != ScreenNavPicker {
 			t.Errorf("Enter (deep-dive continue): navigated to %v, want ScreenNavPicker (wizard must advance)", got)
+		}
+
+		// Esc from the deep-dive wizard entry must return to ScreenDeepDiveMenu,
+		// not the hardcoded ScreenWelcome that existed before the fix.
+		_, escCmd := screen.Update(keyMsg("esc"))
+		if got := navTarget(t, escCmd); got != ScreenDeepDiveMenu {
+			t.Errorf("Esc (deep-dive continue): navigated to %v, want ScreenDeepDiveMenu (must respect themeReturn)", got)
 		}
 	})
 }
