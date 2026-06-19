@@ -17,6 +17,45 @@ func checkUpdatesCmd() tea.Cmd {
 	}
 }
 
+// caskLister is implemented by package managers that distinguish casks (Homebrew).
+// Used to batch cask enumeration in a single subprocess call.
+type caskLister interface {
+	ListInstalledCasks() ([]string, error)
+}
+
+// batchInstalledPackages returns a lookup set of every installed package name
+// using batched subprocess calls (one for formulae, one for casks on brew). This
+// avoids per-tool shell-outs to IsInstalled() during cache build. Returns nil if
+// no manager is available or the batch query fails. Cask enumeration only applies
+// to package managers that support it (Homebrew); apt/pacman are unaffected.
+func batchInstalledPackages(mgr pkg.PackageManager) map[string]bool {
+	if mgr == nil {
+		return nil
+	}
+
+	pkgList, err := mgr.ListInstalled()
+	if err != nil {
+		return nil
+	}
+
+	installedPkgs := make(map[string]bool, len(pkgList))
+	for _, p := range pkgList {
+		installedPkgs[p.Name] = true
+	}
+
+	// Merge in casks (Homebrew only) so cask-backed tools resolve from the
+	// batched result instead of each shelling out via IsInstalled().
+	if cl, ok := mgr.(caskLister); ok {
+		if casks, err := cl.ListInstalledCasks(); err == nil {
+			for _, token := range casks {
+				installedPkgs[token] = true
+			}
+		}
+	}
+
+	return installedPkgs
+}
+
 // loadInstallCacheCmd loads installation status for all tools asynchronously
 // This uses batch checking where supported (brew list --versions) for better performance
 func loadInstallCacheCmd() tea.Cmd {
@@ -29,17 +68,7 @@ func loadInstallCacheCmd() tea.Cmd {
 		mgr := pkg.DetectManager()
 		platform := pkg.DetectPlatform()
 
-		var installedPkgs map[string]bool
-		if mgr != nil {
-			// Get all installed packages in one call
-			pkgList, err := mgr.ListInstalled()
-			if err == nil {
-				installedPkgs = make(map[string]bool, len(pkgList))
-				for _, p := range pkgList {
-					installedPkgs[p.Name] = true
-				}
-			}
-		}
+		installedPkgs := batchInstalledPackages(mgr)
 
 		// Check each tool
 		for _, t := range all {
@@ -122,16 +151,7 @@ func (a *App) ensureInstallCache() {
 	mgr := pkg.DetectManager()
 	platform := pkg.DetectPlatform()
 
-	var installedPkgs map[string]bool
-	if mgr != nil {
-		pkgList, err := mgr.ListInstalled()
-		if err == nil {
-			installedPkgs = make(map[string]bool, len(pkgList))
-			for _, p := range pkgList {
-				installedPkgs[p.Name] = true
-			}
-		}
-	}
+	installedPkgs := batchInstalledPackages(mgr)
 
 	for _, t := range all {
 		found := false

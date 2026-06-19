@@ -223,6 +223,30 @@ func (b *BrewManager) ListInstalled() ([]Package, error) {
 	return packages, nil
 }
 
+// ListInstalledCasks returns all installed Homebrew casks as their cask tokens.
+// This is a single `brew list --cask` call, used to batch cask detection so that
+// cask-backed tools (e.g. sunshine, tailscale) don't each shell out individually.
+func (b *BrewManager) ListInstalledCasks() ([]string, error) {
+	cmd := exec.Command(b.brewPath, "list", "--cask")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	var casks []string
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	for _, line := range lines {
+		token := strings.TrimSpace(line)
+		if token != "" {
+			casks = append(casks, token)
+		}
+	}
+
+	return casks, nil
+}
+
 // NeedsSudo returns false for Homebrew (doesn't require sudo)
 func (b *BrewManager) NeedsSudo() bool {
 	return false
