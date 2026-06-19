@@ -112,7 +112,10 @@ type ManageConfig struct {
 func NewManageConfig() *ManageConfig {
 	return &ManageConfig{
 		// Ghostty
-		GhosttyFontFamily:        "JetBrainsMono Nerd Font",
+		// Use the same default as NewDeepDiveConfig so the two config models do
+		// not disagree on the same setting (C13). "JetBrains Mono" is also the
+		// canonical value cycled by the Ghostty deep-dive config screen.
+		GhosttyFontFamily:        "JetBrains Mono",
 		GhosttyFontSize:          14,
 		GhosttyOpacity:           100,
 		GhosttyBlurRadius:        0,
@@ -160,12 +163,14 @@ func NewManageConfig() *ManageConfig {
 		NeovimUndoFile:    true,
 
 		// Git
-		GitDefaultBranch:    "main",
-		GitAutoSetupRemote:  true,
-		GitPullRebase:       true,
-		GitDiffTool:         "delta",
-		GitMergeTool:        "vimdiff",
-		GitCredentialHelper: "store",
+		GitDefaultBranch:   "main",
+		GitAutoSetupRemote: true,
+		GitPullRebase:      true,
+		GitDiffTool:        "delta",
+		GitMergeTool:       "vimdiff",
+		// Match NewDeepDiveConfig's default (C13). "cache" avoids writing
+		// credentials to disk in plaintext the way "store" does.
+		GitCredentialHelper: "cache",
 		GitSignCommits:      false,
 
 		// Yazi
@@ -202,8 +207,9 @@ func NewManageConfig() *ManageConfig {
 		BtopShownBoxes:  "cpu mem net proc",
 
 		// Glow
+		// Match NewDeepDiveConfig's default of "auto" (C13).
 		GlowStyle: "auto",
-		GlowPager: "less",
+		GlowPager: "auto",
 		GlowWidth: 80,
 		GlowMouse: true,
 

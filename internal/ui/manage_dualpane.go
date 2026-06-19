@@ -116,6 +116,16 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 			return manageSavedMsg{err: err}
 		}
 
+		// Apply the saved preferences to the REAL tool config files (C12). Before
+		// this, the Manage editor only persisted manage.json + global prefs and
+		// claimed "Saved ✓" while no generator ever ran, so font sizes, tmux
+		// prefix, git default branch, etc. never touched the dotfiles. Funnel
+		// through the shared apply path so this stays in sync with the standalone
+		// `dotfiles config <tool>` editor.
+		if errs := applyDeepDiveConfig(manageConfigToDeepDive(cfg), theme); len(errs) > 0 {
+			return manageSavedMsg{err: fmt.Errorf("saved preferences but failed to apply %d config file(s); first: %w", len(errs), errs[0])}
+		}
+
 		return manageSavedMsg{err: nil}
 	}
 }
@@ -600,7 +610,7 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 	case "glow":
 		return []manageField{
 			{key: "style", label: "Style", description: "Style theme for Glow", kind: manageFieldOption, str: &cfg.GlowStyle, options: []string{"auto", "dark", "light", "notty"}},
-			{key: "pager", label: "Pager", description: "Pager program", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"less", "more", "none"}},
+			{key: "pager", label: "Pager", description: "Pager program", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"auto", "less", "never"}},
 			{key: "width", label: "Width", description: "Max render width", kind: manageFieldNumber, n: &cfg.GlowWidth, min: 40, max: 240, step: 5, unit: " chars"},
 			{key: "mouse", label: "Mouse", description: "Enable mouse support in Glow", kind: manageFieldToggle, b: &cfg.GlowMouse},
 		}

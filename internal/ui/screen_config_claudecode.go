@@ -48,10 +48,16 @@ func (s *configClaudeCodeScreen) ID() Screen { return ScreenConfigClaudeCode }
 // Init returns any initial commands (none on entry).
 func (s *configClaudeCodeScreen) Init() tea.Cmd { return nil }
 
-// back resets the focused field and returns to the deep-dive menu.
+// back resets the focused field and returns to the deep-dive menu. When
+// launched standalone (`dotfiles config claude-code`) it persists the edits and
+// quits instead, mirroring configFieldNav.back() (C27).
 func (s *configClaudeCodeScreen) back() tea.Cmd {
-	if a := s.App(); a != nil {
+	a := s.App()
+	if a != nil {
 		a.configFieldIndex = 0
+		if a.configStandalone {
+			return a.applyStandaloneConfigCmd()
+		}
 	}
 	return NavigateTo(ScreenDeepDiveMenu)
 }

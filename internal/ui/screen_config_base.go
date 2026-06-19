@@ -41,9 +41,18 @@ func (s *configFieldNav) Init() tea.Cmd { return nil }
 
 // back resets the focused field and returns to the deep-dive menu through the
 // manager. Mirrors the legacy "esc/enter" behavior (configFieldIndex = 0).
+//
+// When the screen was launched standalone via `dotfiles config <tool>` there is
+// no install step to apply the edits and no deep-dive menu to return to, so we
+// persist the in-memory deepDiveConfig to the real config files (via the shared
+// apply path) and quit instead of discarding the edits (C27).
 func (s *configFieldNav) back() (bool, tea.Cmd) {
-	if a := s.App(); a != nil {
+	a := s.App()
+	if a != nil {
 		a.configFieldIndex = 0
+		if a.configStandalone {
+			return true, a.applyStandaloneConfigCmd()
+		}
 	}
 	return true, NavigateTo(ScreenDeepDiveMenu)
 }

@@ -163,11 +163,18 @@ type App struct {
 	deepDiveMenuIndex int
 	deepDiveConfig    *DeepDiveConfig
 	configFieldIndex  int // Currently focused field in config screens
-	macAppIndex       int // Currently focused app in macOS screen
-	utilityIndex      int // Currently focused utility
-	cliToolIndex      int // Currently focused CLI tool
-	guiAppIndex       int // Currently focused GUI app
-	cliUtilityIndex   int // Currently focused CLI utility (bat, eza, etc.)
+
+	// configStandalone is true when the app was launched directly into a single
+	// tool's config screen via `dotfiles config <tool>` (not as part of the
+	// install wizard). In that mode there is no later install step to apply the
+	// edits, so the config screen's back() persists the edits to the real config
+	// files itself and quits, instead of returning to the deep-dive menu (C27).
+	configStandalone bool
+	macAppIndex      int // Currently focused app in macOS screen
+	utilityIndex     int // Currently focused utility
+	cliToolIndex     int // Currently focused CLI tool
+	guiAppIndex      int // Currently focused GUI app
+	cliUtilityIndex  int // Currently focused CLI utility (bat, eza, etc.)
 
 	// Management state (detailed config)
 	manageConfig *ManageConfig
@@ -856,6 +863,12 @@ func (a *App) SetStartScreen(screen Screen) {
 	// Always land on the requested screen after the intro.
 	a.postIntroScreen = screen
 
+	// If we're being routed straight to a single tool's config screen (i.e.
+	// `dotfiles config <tool>`), remember that so back() persists the edits to
+	// the real config files and quits rather than bouncing to the deep-dive menu
+	// (which only exists in the install wizard) and discarding them (C27).
+	a.configStandalone = screenIsToolConfig(screen)
+
 	// Starting explicitly at the animation means "intro → welcome".
 	if screen == ScreenAnimation {
 		a.postIntroScreen = ScreenWelcome
@@ -891,22 +904,29 @@ func (a *App) SetHotkeyFilter(tool string) {
 	a.hotkeyFilter = tool
 }
 
-// GetToolConfigScreen returns the screen constant for a tool name
+// GetToolConfigScreen returns the dedicated config screen for a tool ID, used by
+// the `dotfiles config <tool>` CLI command.
+//
+// It delegates to the authoritative toolConfigScreens map so the CLI can only
+// open tools that actually have a config screen (and opens the SAME screen the
+// rest of the TUI uses). Previously this kept a private, divergent map that
+// advertised non-existent screens (e.g. "apps", "utilities") and omitted real
+// ones (lazygit, lazydocker, btop, glow, claude-code) — C28.
 func GetToolConfigScreen(tool string) (Screen, bool) {
-	screens := map[string]Screen{
-		"ghostty":   ScreenConfigGhostty,
-		"tmux":      ScreenConfigTmux,
-		"zsh":       ScreenConfigZsh,
-		"neovim":    ScreenConfigNeovim,
-		"git":       ScreenConfigGit,
-		"yazi":      ScreenConfigYazi,
-		"fzf":       ScreenConfigFzf,
-		"apps":      ScreenConfigApps,
-		"utilities": ScreenConfigUtilities,
-	}
-
-	screen, ok := screens[tool]
+	screen, ok := toolConfigScreens[tool]
 	return screen, ok
+}
+
+// ConfigurableToolIDs returns the sorted list of tool IDs that `dotfiles config`
+// can open, derived from the authoritative toolConfigScreens map. Used to build
+// accurate CLI help/error strings (C28).
+func ConfigurableToolIDs() []string {
+	ids := make([]string, 0, len(toolConfigScreens))
+	for id := range toolConfigScreens {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // MainMenuItem represents an item in the main menu

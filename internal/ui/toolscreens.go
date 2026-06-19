@@ -33,6 +33,18 @@ var toolConfigScreens = map[string]Screen{
 	"claude-code": ScreenConfigClaudeCode,
 }
 
+// screenIsToolConfig reports whether the given screen is a dedicated per-tool
+// config screen (i.e. one reachable via `dotfiles config <tool>`). Used to mark
+// standalone config sessions so they persist edits on exit (C27).
+func screenIsToolConfig(screen Screen) bool {
+	for _, s := range toolConfigScreens {
+		if s == screen {
+			return true
+		}
+	}
+	return false
+}
+
 // verifyToolConfigScreens asserts that the authoritative toolConfigScreens map
 // agrees with the raw ConfigScreen() ints declared in the tools registry. It
 // panics on any disagreement so an iota reorder or a stale tool definition is

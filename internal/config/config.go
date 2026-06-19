@@ -129,12 +129,15 @@ func LoadToolConfig[T any](toolName string, defaultFn func() *T) (*T, error) {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
-	var cfg T
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	// Start from the intended defaults so keys absent from an older/partial JSON
+	// file keep their default value instead of decoding to the Go zero value.
+	// json.Unmarshal only overwrites keys that are actually present in the file.
+	cfg := defaultFn()
+	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
 // SaveToolConfig saves a tool config to JSON file

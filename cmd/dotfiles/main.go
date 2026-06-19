@@ -99,13 +99,13 @@ var themeCmd = &cobra.Command{
 	},
 }
 
-// configCmd handles per-tool configuration
+// configCmd handles per-tool configuration. Long is set in init() from the
+// authoritative tool→screen map so help and behavior never diverge (C28).
 var configCmd = &cobra.Command{
 	Use:   "config <tool>",
 	Short: "Configure a specific tool",
-	Long: `Configure a specific tool. Without flags, launches TUI.
-
-Available tools: ghostty, tmux, zsh, neovim, git, yazi, fzf, apps, utilities`,
+	Long: "Configure a specific tool. Without flags, launches TUI.\n\n" +
+		"Available tools: " + strings.Join(ui.ConfigurableToolIDs(), ", "),
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			// No tool specified: show help
@@ -359,7 +359,7 @@ func launchToolConfig(tool string) {
 	screen, ok := ui.GetToolConfigScreen(tool)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Unknown tool: %s\n", tool)
-		fmt.Println("Available: ghostty, tmux, zsh, neovim, git, yazi, fzf, apps, utilities")
+		fmt.Println("Available: " + strings.Join(ui.ConfigurableToolIDs(), ", "))
 		os.Exit(1)
 	}
 
