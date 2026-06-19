@@ -83,10 +83,17 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			return s, NavigateTo(ScreenNavPicker)
 		case "esc":
 			if a.themeStandalone {
-				// Cancel the standalone change: revert the preview to the saved
-				// theme and return to the caller's screen.
+				// Cancel the standalone change: revert the preview to the saved theme,
+				// then route symmetrically with the Enter branch.
+				// In-TUI main-menu entry (themeReturn==ScreenMainMenu): return there.
+				// CLI `dotfiles theme` entry (themeReturn==ScreenWelcome, the
+				// constructor default): quit so the shell regains control rather than
+				// dropping into the install welcome screen.
 				a.revertThemeToSaved()
-				return s, NavigateTo(a.themeReturn)
+				if a.themeReturn == ScreenMainMenu {
+					return s, NavigateTo(ScreenMainMenu)
+				}
+				return s, tea.Quit
 			}
 			// Wizard step: go back to the caller's screen. themeReturn is set at
 			// every wizard entry point (ScreenWelcome for the welcome quick-setup

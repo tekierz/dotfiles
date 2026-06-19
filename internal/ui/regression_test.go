@@ -106,6 +106,28 @@ func TestThemePickerStandaloneExplicitMode(t *testing.T) {
 		}
 	})
 
+	t.Run("CLI standalone Esc quits, not welcome screen", func(t *testing.T) {
+		// Regression: before the fix, Esc in CLI standalone navigated to
+		// a.themeReturn (ScreenWelcome, the constructor default), which dumped
+		// the user into the install wizard welcome screen (C7 cancel case).
+		ctx := newGoldenContext(t)
+		ctx.app.themeStandalone = true
+		ctx.app.themeReturn = ScreenWelcome // constructor default for CLI path
+		screen := NewThemePickerScreen(ctx)
+
+		_, escCmd := screen.Update(keyMsg("esc"))
+		if escCmd == nil {
+			t.Fatal("Esc in standalone CLI: expected a command, got nil")
+		}
+		msg := escCmd()
+		if nav, isNav := msg.(NavigateMsg); isNav {
+			t.Errorf("Esc in standalone CLI: got NavigateTo(%v), want tea.QuitMsg (must not enter install wizard)", nav.To)
+		}
+		if _, isQuit := msg.(tea.QuitMsg); !isQuit {
+			t.Errorf("Esc in standalone CLI: got message type %T, want tea.QuitMsg", msg)
+		}
+	})
+
 	t.Run("deep-dive continue Enter advances to NavPicker, not MainMenu", func(t *testing.T) {
 		// Simulate: user went MainMenu -> Theme (themeReturn=ScreenMainMenu, themeStandalone=true),
 		// then Esc -> Install -> DeepDive -> Continue. The Continue path must reset
