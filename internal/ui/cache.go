@@ -56,6 +56,22 @@ func batchInstalledPackages(mgr pkg.PackageManager) map[string]bool {
 	return installedPkgs
 }
 
+// allPackagesInBatch reports whether every package in pkgs is present in the
+// batched installed-set. Mirrors tools.allPackagesInstalled for the batch path
+// so a partially-installed multi-package tool is not reported installed (C6).
+// An empty pkgs list is never considered installed.
+func allPackagesInBatch(installedPkgs map[string]bool, pkgs []string) bool {
+	if len(pkgs) == 0 {
+		return false
+	}
+	for _, p := range pkgs {
+		if !installedPkgs[p] {
+			return false
+		}
+	}
+	return true
+}
+
 // loadInstallCacheCmd loads installation status for all tools asynchronously
 // This uses batch checking where supported (brew list --versions) for better performance
 func loadInstallCacheCmd() tea.Cmd {
@@ -80,7 +96,7 @@ func loadInstallCacheCmd() tea.Cmd {
 					pkgs = t.Packages()["all"]
 				}
 				if len(pkgs) > 0 {
-					if installedPkgs[pkgs[0]] {
+					if allPackagesInBatch(installedPkgs, pkgs) {
 						installed[t.ID()] = true
 						found = true
 					}
@@ -161,7 +177,7 @@ func (a *App) ensureInstallCache() {
 				pkgs = t.Packages()["all"]
 			}
 			if len(pkgs) > 0 {
-				if installedPkgs[pkgs[0]] {
+				if allPackagesInBatch(installedPkgs, pkgs) {
 					a.manageInstalled[t.ID()] = true
 					found = true
 				}

@@ -108,6 +108,14 @@ func (a *App) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
 	} else {
 		a.updateStatus = "Update complete ✓"
 	}
+	// A successful update changes installed versions (and possibly install
+	// status), so the install-status caches are now stale. Invalidate both the
+	// registry's IsInstalled() cache and the App's manageInstalled cache so
+	// status/version displays refresh on the next navigation (mirrors the
+	// installer-success invalidation in screen_progress.go).
+	tools.GetRegistry().InvalidateCache()
+	a.manageInstalledReady = false
+
 	// Clear selections and refresh the package list.
 	a.updateSelected = make(map[int]bool)
 	a.updateCheckDone = false

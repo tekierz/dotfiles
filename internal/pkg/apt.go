@@ -52,8 +52,17 @@ func (a *AptManager) Uninstall(packages ...string) error {
 }
 
 func (a *AptManager) IsInstalled(pkg string) bool {
-	cmd := exec.Command("dpkg", "-s", pkg)
-	return cmd.Run() == nil
+	// `dpkg -s` exits 0 even for a removed-but-not-purged package (status
+	// "deinstall ok config-files"), which would falsely report it installed.
+	// Query the Status field directly and require "install ok installed",
+	// matching the filter ListInstalled uses (C11).
+	cmd := exec.Command("dpkg-query", "-W", "-f=${Status}", pkg)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return strings.TrimSpace(out.String()) == "install ok installed"
 }
 
 func (a *AptManager) GetVersion(pkg string) (string, error) {

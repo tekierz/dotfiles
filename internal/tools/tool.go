@@ -126,6 +126,24 @@ func PackagesForPlatform(packages map[pkg.Platform][]string, platform pkg.Platfo
 	return packages["all"]
 }
 
+// allPackagesInstalled reports whether EVERY package in pkgs is installed
+// according to mgr. A tool is only "installed" when all of its platform
+// packages are present; a tool with multiple packages (e.g. zsh ->
+// {zsh, zsh-autosuggestions, ...}) that is only partially installed must
+// report false so the install flow does not skip it (C6). An empty pkgs list
+// is never considered installed.
+func allPackagesInstalled(mgr pkg.PackageManager, pkgs []string) bool {
+	if len(pkgs) == 0 {
+		return false
+	}
+	for _, p := range pkgs {
+		if !mgr.IsInstalled(p) {
+			return false
+		}
+	}
+	return true
+}
+
 func (t *BaseTool) IsInstalled() bool {
 	mgr := pkg.DetectManager()
 	if mgr == nil {
@@ -133,12 +151,10 @@ func (t *BaseTool) IsInstalled() bool {
 	}
 
 	pkgs := PackagesForPlatform(t.packages, pkg.DetectPlatform())
-	if len(pkgs) == 0 {
-		return false
-	}
 
-	// Check if primary package is installed
-	return mgr.IsInstalled(pkgs[0])
+	// Require ALL platform packages, not just the primary one. A partially
+	// installed multi-package tool must report false (C6).
+	return allPackagesInstalled(mgr, pkgs)
 }
 
 func (t *BaseTool) Install(mgr pkg.PackageManager) error {

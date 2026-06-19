@@ -103,9 +103,10 @@ type backupsLoadedMsg struct {
 
 // backupRestoreDoneMsg indicates a restore operation completed
 type backupRestoreDoneMsg struct {
-	name  string
-	count int
-	err   error
+	name    string
+	count   int // files successfully restored
+	skipped int // files that could NOT be restored (traversal/symlink/IO errors)
+	err     error
 }
 
 // backupDeleteDoneMsg indicates a delete operation completed

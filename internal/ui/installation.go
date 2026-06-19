@@ -139,98 +139,105 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 		}
 	}
 
-	if len(selectedTools) == 0 {
-		emitLine("No tools selected for installation")
-		finish(nil)
-		return
-	}
-
-	// Auto-backup before making changes (if enabled)
-	if err := autoBackupIfEnabled(); err != nil {
+	// Auto-backup before making changes (if enabled). The result is honest:
+	// it only reports a created backup when at least one file was captured and
+	// the manifest persisted, so we never claim a rollback point exists right
+	// before overwriting the user's dotfiles (C5).
+	backupRes, err := autoBackupIfEnabled()
+	if err != nil {
 		emitLine(fmt.Sprintf("⚠ Auto-backup failed: %v", err))
-	} else {
-		globalCfg, _ := config.LoadGlobalConfig()
-		if globalCfg != nil && globalCfg.AutoBackup {
-			emitLine("✓ Auto-backup created before installation")
+	} else if backupRes.enabled {
+		if backupRes.count > 0 {
+			emitLine(fmt.Sprintf("✓ Auto-backup created before installation (%d file(s))", backupRes.count))
+		} else {
+			emitLine("⚠ Auto-backup captured 0 files (nothing to roll back)")
 		}
 	}
-
-	// Detect package manager
-	mgr := pkg.DetectManager()
-	if mgr == nil {
-		finish(fmt.Errorf("no package manager detected"))
-		return
-	}
-
-	platform := pkg.DetectPlatform()
-	reg := tools.GetRegistry()
-
-	emitLine(fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
 
 	// failures aggregates every failed step so the final error reports how many
 	// phases failed rather than silently overwriting a single lastErr.
 	var failures []error
 	noteFailure := func(err error) { failures = append(failures, err) }
 
-	successCount := 0
-	for _, toolID := range selectedTools {
-		// Stop promptly if the install was cancelled (Ctrl+C / teardown).
-		if ctx.Err() != nil {
-			finish(ctx.Err())
+	// Package installation is skipped when no NEW packages are selected (e.g. a
+	// fully-installed machine), but the configuration phases below ALWAYS run.
+	// runInstallWorker is the only path that writes deep-dive configs, so a
+	// re-run with nothing to install must still re-apply config (C14).
+	if len(selectedTools) == 0 {
+		emitLine("No new tools to install; applying configuration...")
+	} else {
+		// Detect package manager (only needed for the package-install loop).
+		mgr := pkg.DetectManager()
+		if mgr == nil {
+			finish(fmt.Errorf("no package manager detected"))
 			return
 		}
-		stepLine(fmt.Sprintf("▶ Installing %s...", toolID))
 
-		t, ok := reg.Get(toolID)
-		if !ok {
-			emitLine(fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
-			continue
+		platform := pkg.DetectPlatform()
+		reg := tools.GetRegistry()
+
+		emitLine(fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
+
+		successCount := 0
+		for _, toolID := range selectedTools {
+			// Stop promptly if the install was cancelled (Ctrl+C / teardown).
+			if ctx.Err() != nil {
+				finish(ctx.Err())
+				return
+			}
+			stepLine(fmt.Sprintf("▶ Installing %s...", toolID))
+
+			t, ok := reg.Get(toolID)
+			if !ok {
+				emitLine(fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
+				continue
+			}
+
+			// Skip if already installed
+			if t.IsInstalled() {
+				emitLine(fmt.Sprintf("  ✓ %s already installed", toolID))
+				successCount++
+				continue
+			}
+
+			// Get packages for this platform
+			pkgs := t.Packages()[platform]
+			if len(pkgs) == 0 {
+				pkgs = t.Packages()["all"]
+			}
+			if len(pkgs) == 0 {
+				emitLine(fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
+				continue
+			}
+
+			// Install using streaming command, derived from the cancelable worker
+			// context so Ctrl+C / teardown stops the subprocess.
+			cmd, err := mgr.InstallStreaming(ctx, pkgs...)
+			if err != nil {
+				emitLine(fmt.Sprintf("  ✗ Failed to start install: %v", err))
+				noteFailure(fmt.Errorf("%s: %w", toolID, err))
+				continue
+			}
+
+			// Collect output
+			for line := range cmd.Output {
+				emitLine("  " + line)
+			}
+
+			if err := cmd.Wait(); err != nil {
+				emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
+				noteFailure(fmt.Errorf("%s: %w", toolID, err))
+			} else {
+				emitLine(fmt.Sprintf("  ✓ %s installed successfully", toolID))
+				successCount++
+			}
 		}
 
-		// Skip if already installed
-		if t.IsInstalled() {
-			emitLine(fmt.Sprintf("  ✓ %s already installed", toolID))
-			successCount++
-			continue
-		}
-
-		// Get packages for this platform
-		pkgs := t.Packages()[platform]
-		if len(pkgs) == 0 {
-			pkgs = t.Packages()["all"]
-		}
-		if len(pkgs) == 0 {
-			emitLine(fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
-			continue
-		}
-
-		// Install using streaming command, derived from the cancelable worker
-		// context so Ctrl+C / teardown stops the subprocess.
-		cmd, err := mgr.InstallStreaming(ctx, pkgs...)
-		if err != nil {
-			emitLine(fmt.Sprintf("  ✗ Failed to start install: %v", err))
-			noteFailure(fmt.Errorf("%s: %w", toolID, err))
-			continue
-		}
-
-		// Collect output
-		for line := range cmd.Output {
-			emitLine("  " + line)
-		}
-
-		if err := cmd.Wait(); err != nil {
-			emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
-			noteFailure(fmt.Errorf("%s: %w", toolID, err))
+		if successCount == len(selectedTools) {
+			emitLine(fmt.Sprintf("\n✓ All %d tools installed successfully!", successCount))
 		} else {
-			emitLine(fmt.Sprintf("  ✓ %s installed successfully", toolID))
-			successCount++
+			emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", successCount, len(selectedTools)))
 		}
-	}
-
-	if successCount == len(selectedTools) {
-		emitLine(fmt.Sprintf("\n✓ All %d tools installed successfully!", successCount))
-	} else {
-		emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", successCount, len(selectedTools)))
 	}
 
 	// configPhase runs a single configuration step, emitting a header line,

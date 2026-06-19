@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -555,7 +554,16 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 			return backupRestoreDoneMsg{name: b.Name, err: err}
 		}
 
-		return backupRestoreDoneMsg{name: b.Name, count: result.Count(), err: nil}
+		// Surface skipped files (path-traversal rejection, write-through-symlink
+		// refusal, read/mkdir errors) instead of discarding them. A restore where
+		// every file is skipped must NOT report green success (C3); mirrors the
+		// CLI, which prints each skipped reason.
+		return backupRestoreDoneMsg{
+			name:    b.Name,
+			count:   result.Count(),
+			skipped: len(result.Skipped),
+			err:     nil,
+		}
 	}
 }
 
@@ -578,56 +586,31 @@ func createBackupCmd() tea.Cmd {
 		// Create backup directory with timestamp
 		timestamp := time.Now().Format("2006-01-02_15-04-05")
 		backupDir := filepath.Join(config.ConfigDir(), "backups", timestamp)
-		if err := os.MkdirAll(backupDir, 0700); err != nil {
+
+		// backup.Create is the single source of truth for the capture loop and
+		// reports an honest result: an error when zero files were captured or
+		// the manifest write fails, instead of silently claiming success (C4).
+		if _, err := backup.Create(home, backupDir, defaultBackupFiles); err != nil {
 			return backupCreateDoneMsg{err: err}
 		}
-
-		// Files to backup (relative to home)
-		filesToBackup := []string{
-			".zshrc",
-			".tmux.conf",
-			".config/nvim/init.lua",
-			".config/ghostty/config",
-			".config/yazi/yazi.toml",
-			".gitconfig",
-		}
-
-		backedUp := []string{}
-		for _, relPath := range filesToBackup {
-			srcPath := filepath.Join(home, relPath)
-			info, err := os.Stat(srcPath)
-			if err != nil {
-				continue
-			}
-
-			data, err := os.ReadFile(srcPath)
-			if err != nil {
-				continue
-			}
-
-			// Flat storage name (human-readable); the manifest is the
-			// authoritative source for the original path on restore.
-			dstPath := filepath.Join(backupDir, backup.EncodeName(relPath))
-
-			if err := os.WriteFile(dstPath, data, 0600); err != nil {
-				continue
-			}
-
-			// Record the original path and mode so restore can reconstruct
-			// both exactly (the underscore encoding is lossy).
-			backedUp = append(backedUp, backup.ManifestLine(relPath, info.Mode()))
-		}
-
-		// Write manifest
-		manifest := strings.Join(backedUp, "\n")
-		manifestPath := filepath.Join(backupDir, backup.ManifestName)
-		_ = os.WriteFile(manifestPath, []byte(manifest), 0600)
 
 		// Run backup cleanup based on settings
 		cleanupBackups()
 
 		return backupCreateDoneMsg{name: timestamp, err: nil}
 	}
+}
+
+// defaultBackupFiles is the fixed set of dotfiles captured by both the manual
+// "create backup" action and the pre-install auto-backup. Paths are relative
+// to the user's home directory.
+var defaultBackupFiles = []string{
+	".zshrc",
+	".tmux.conf",
+	".config/nvim/init.lua",
+	".config/ghostty/config",
+	".config/yazi/yazi.toml",
+	".gitconfig",
 }
 
 // cleanupBackups removes old backups based on global config settings
@@ -692,74 +675,51 @@ func cleanupBackups() {
 	}
 }
 
-// autoBackupIfEnabled creates a backup if auto-backup is enabled in settings
-func autoBackupIfEnabled() error {
+// autoBackupResult reports what the pre-install auto-backup actually did so the
+// install worker can be honest with the user (C5). enabled is false when
+// auto-backup is turned off (no backup attempted, no warning).
+type autoBackupResult struct {
+	enabled bool // auto-backup is on in settings
+	count   int  // number of files actually captured
+}
+
+// autoBackupIfEnabled creates a backup if auto-backup is enabled in settings.
+// It returns a result describing whether a backup was attempted and how many
+// files were captured, plus an error if the backup was attempted but failed
+// (zero files captured or manifest write failed). The pre-install path overwrites
+// the user's dotfiles, so it MUST NOT claim a backup exists unless at least one
+// file was written and the manifest persisted (C5).
+func autoBackupIfEnabled() (autoBackupResult, error) {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
-		return err
+		return autoBackupResult{}, err
 	}
 
 	if !cfg.AutoBackup {
-		return nil
+		return autoBackupResult{enabled: false}, nil
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return err
+		return autoBackupResult{enabled: true}, err
 	}
 
 	// Create backup directory with timestamp
 	timestamp := time.Now().Format("2006-01-02_15-04-05") + "_auto"
 	backupDir := filepath.Join(config.ConfigDir(), "backups", timestamp)
-	if err := os.MkdirAll(backupDir, 0700); err != nil {
-		return err
+
+	// backup.Create returns an error when zero files were captured or the
+	// manifest write fails, so a "success" here genuinely means a rollback
+	// point exists.
+	count, err := backup.Create(home, backupDir, defaultBackupFiles)
+	if err != nil {
+		return autoBackupResult{enabled: true, count: count}, err
 	}
-
-	// Files to backup (relative to home)
-	filesToBackup := []string{
-		".zshrc",
-		".tmux.conf",
-		".config/nvim/init.lua",
-		".config/ghostty/config",
-		".config/yazi/yazi.toml",
-		".gitconfig",
-	}
-
-	backedUp := []string{}
-	for _, relPath := range filesToBackup {
-		srcPath := filepath.Join(home, relPath)
-		info, err := os.Stat(srcPath)
-		if err != nil {
-			continue
-		}
-
-		data, err := os.ReadFile(srcPath)
-		if err != nil {
-			continue
-		}
-
-		// Flat storage name (human-readable); the manifest is the
-		// authoritative source for the original path on restore.
-		dstPath := filepath.Join(backupDir, backup.EncodeName(relPath))
-
-		if err := os.WriteFile(dstPath, data, 0600); err != nil {
-			continue
-		}
-
-		// Record the original path and mode so restore can reconstruct
-		// both exactly (the underscore encoding is lossy).
-		backedUp = append(backedUp, backup.ManifestLine(relPath, info.Mode()))
-	}
-
-	// Write manifest
-	manifest := strings.Join(backedUp, "\n")
-	manifestPath := filepath.Join(backupDir, backup.ManifestName)
-	os.WriteFile(manifestPath, []byte(manifest), 0600)
 
 	// Run cleanup after creating backup
 	cleanupBackups()
 
-	return nil
+	return autoBackupResult{enabled: true, count: count}, nil
 }
 
 // Update handles messages
