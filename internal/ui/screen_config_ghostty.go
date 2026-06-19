@@ -68,7 +68,7 @@ func ghosttyAdjust(a *App, key string, fwd bool) {
 		opts := []string{"block", "bar", "underline"}
 		cfg.GhosttyCursorStyle = cycleOption(opts, cfg.GhosttyCursorStyle, fwd)
 	case 6: // Tab bindings
-		opts := []string{"super", "ctrl", "alt"}
+		opts := []string{"super", "ctrl", "ctrl-shift"}
 		cfg.GhosttyTabBindings = cycleOption(opts, cfg.GhosttyTabBindings, fwd)
 	}
 }
@@ -141,8 +141,8 @@ func (s *configGhosttyScreen) View(width, height int) string {
 	tabFocused := a.configFieldIndex == fieldIdx
 	content.WriteString(renderFieldLabel("New Tab Keybinding", tabFocused))
 	content.WriteString(renderOptionSelector(
-		[]string{"super", "ctrl", "alt"},
-		[]string{"⌘/Super+N", "Ctrl+N", "Alt+N"},
+		[]string{"super", "ctrl", "ctrl-shift"},
+		[]string{"⌘/Super+T", "Ctrl+T", "Ctrl+Shift+T"},
 		cfg.GhosttyTabBindings,
 		tabFocused,
 	))

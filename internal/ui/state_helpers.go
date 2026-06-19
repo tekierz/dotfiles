@@ -6,25 +6,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// tabNavigationTarget maps a number key ("1".."4") to the corresponding
-// management tab's destination screen. It returns (0, false) for any other key
-// or an out-of-range index. Migrated screen handlers use this to drive tab
-// switches through the ScreenManager (via NavigateTo) instead of poking a.screen.
+// tabNavigationTarget maps a number key ("1".."9") to the corresponding
+// management tab's destination screen (key N -> tab index N-1). It returns
+// (0, false) for any non-digit key or an out-of-range index, so it automatically
+// covers every tab in GetManagementTabs() regardless of count (e.g. the 5th tab,
+// Backups). Migrated screen handlers use this to drive tab switches through the
+// ScreenManager (via NavigateTo) instead of poking a.screen.
 func tabNavigationTarget(key string) (Screen, bool) {
 	tabs := GetManagementTabs()
-	var idx int
-	switch key {
-	case "1":
-		idx = 0
-	case "2":
-		idx = 1
-	case "3":
-		idx = 2
-	case "4":
-		idx = 3
-	default:
+	if len(key) != 1 || key[0] < '1' || key[0] > '9' {
 		return 0, false
 	}
+	idx := int(key[0] - '1')
 	if idx >= len(tabs) {
 		return 0, false
 	}

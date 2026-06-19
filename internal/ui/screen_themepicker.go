@@ -61,8 +61,20 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 				s.applyTheme(a.themeIndex + 1)
 			}
 		case "enter":
+			if a.themeReturn == ScreenMainMenu {
+				// Standalone "Change theme" from the main menu: persist the
+				// already-live theme and return, instead of advancing the wizard.
+				a.persistTheme()
+				return s, NavigateTo(ScreenMainMenu)
+			}
 			return s, NavigateTo(ScreenNavPicker)
 		case "esc":
+			if a.themeReturn == ScreenMainMenu {
+				// Cancel the standalone change: revert the preview to the saved
+				// theme and return to the main menu.
+				a.revertThemeToSaved()
+				return s, NavigateTo(ScreenMainMenu)
+			}
 			return s, NavigateTo(ScreenWelcome)
 		}
 

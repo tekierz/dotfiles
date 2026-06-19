@@ -47,6 +47,9 @@ func (s *welcomeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 				}
 				return s, NavigateTo(ScreenDeepDiveMenu)
 			}
+			// Entering the theme picker as the wizard's step 2: selecting a theme
+			// should advance to the nav picker (set the return-context to wizard).
+			a.themeReturn = ScreenWelcome
 			return s, NavigateTo(ScreenThemePicker)
 		case "tab", "left", "right", "h", "l":
 			a.deepDive = !a.deepDive
@@ -97,7 +100,7 @@ func (s *welcomeScreen) View(width, height int) string {
 		StatusDot("success"),
 		GradientText("SYSTEM READY", GradientCyber),
 		StatusDot("success"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("13 THEMES"),
+		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("16 THEMES"),
 		StatusDot("success"),
 		lipgloss.NewStyle().Foreground(ColorMagenta).Render("ALL TOOLS"),
 	)

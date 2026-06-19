@@ -72,6 +72,10 @@ func (s *mainMenuScreen) selectItem(index int) tea.Cmd {
 		}
 	case ScreenHotkeys:
 		a.hotkeysReturn = ScreenMainMenu
+	case ScreenThemePicker:
+		// Entered standalone from the main menu: selecting a theme should apply
+		// it and return here, NOT advance through the install wizard.
+		a.themeReturn = ScreenMainMenu
 	}
 	return nav
 }

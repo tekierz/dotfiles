@@ -101,6 +101,31 @@ func (a *App) syncThemeIndex() {
 	}
 }
 
+// persistTheme saves the currently selected theme to the global config, so a
+// standalone "Change theme" from the main menu actually sticks across runs.
+func (a *App) persistTheme() {
+	g, err := config.LoadGlobalConfig()
+	if err != nil || g == nil {
+		return
+	}
+	g.Theme = a.theme
+	_ = config.SaveGlobalConfig(g)
+}
+
+// revertThemeToSaved reverts the in-session theme/preview back to the persisted
+// theme (used when the user cancels a standalone theme change with Esc).
+func (a *App) revertThemeToSaved() {
+	g, err := config.LoadGlobalConfig()
+	if err != nil || g == nil || g.Theme == "" {
+		return
+	}
+	a.theme = g.Theme
+	a.syncThemeIndex() // updates themeIndex + applies the palette
+	if a.screenMgr != nil {
+		a.screenMgr.Context().Theme = a.theme
+	}
+}
+
 // App is the main application model
 type App struct {
 	screen        Screen
@@ -182,6 +207,7 @@ type App struct {
 	hotkeyCatScroll      int                   // Category list scroll
 	hotkeyItemScroll     int                   // Item list scroll
 	hotkeysReturn        Screen                // Screen to return to when leaving hotkeys
+	themeReturn          Screen                // Screen to return to when leaving the theme picker (wizard vs standalone)
 	hotkeysFavorites     *config.HotkeysConfig // User hotkey favorites config
 	hotkeysFavoritesOnly bool                  // Filter to show only favorites
 	// Hotkeys alias editing state
@@ -308,6 +334,7 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		managePane:           0,
 		postIntroScreen:      ScreenWelcome,
 		hotkeysReturn:        ScreenMainMenu,
+		themeReturn:          ScreenWelcome,
 		updateSelected:       make(map[int]bool),
 		installLogs:          make([]string, 0, 500),
 		installLogAutoScroll: true,
