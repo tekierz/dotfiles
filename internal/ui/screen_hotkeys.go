@@ -109,7 +109,7 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if a.hotkeysFavoritesOnly {
 		var filtered []hotkeys.Item
 		for _, it := range allItems {
-			if a.isHotkeyFavorite(cat.ID, it.Keys) {
+			if a.isHotkeyFavorite(cat.ID, it.ID) {
 				filtered = append(filtered, it)
 			}
 		}
@@ -219,13 +219,13 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// Toggle favorite for current item
 		if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
 			item := displayItems[a.hotkeyCursor]
-			a.toggleHotkeyFavorite(cat.ID, item.Keys)
+			a.toggleHotkeyFavorite(cat.ID, item.ID)
 			// If in favorites-only mode and we just unfavorited, adjust cursor
 			if a.hotkeysFavoritesOnly {
 				// Recalculate filtered list
 				var newFiltered []hotkeys.Item
 				for _, it := range allItems {
-					if a.isHotkeyFavorite(cat.ID, it.Keys) {
+					if a.isHotkeyFavorite(cat.ID, it.ID) {
 						newFiltered = append(newFiltered, it)
 					}
 				}
@@ -389,7 +389,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			if a.hotkeysFavoritesOnly {
 				var filtered []hotkeys.Item
 				for _, it := range allItems {
-					if a.isHotkeyFavorite(cat.ID, it.Keys) {
+					if a.isHotkeyFavorite(cat.ID, it.ID) {
 						filtered = append(filtered, it)
 					}
 				}
@@ -427,7 +427,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		if a.hotkeysFavoritesOnly {
 			var filtered []hotkeys.Item
 			for _, it := range allItems {
-				if a.isHotkeyFavorite(cat.ID, it.Keys) {
+				if a.isHotkeyFavorite(cat.ID, it.ID) {
 					filtered = append(filtered, it)
 				}
 			}
@@ -482,7 +482,7 @@ func (s *hotkeysScreen) View(width, height int) string {
 		if a.hotkeysFavoritesOnly {
 			var filtered []hotkeys.Item
 			for _, it := range allItems {
-				if a.isHotkeyFavorite(cat.ID, it.Keys) {
+				if a.isHotkeyFavorite(cat.ID, it.ID) {
 					filtered = append(filtered, it)
 				}
 			}
@@ -688,39 +688,30 @@ func (a *App) hotkeyCategories() []hotkeys.Category {
 	return cats
 }
 
-// hotkeysCurrentUserCache caches the active username resolved from global.json
-// for the duration of a single hotkeys event/frame. It is refreshed once per
-// entry into the hotkeys screen handlers/renderer via refreshHotkeysCurrentUser
-// so that favorites/alias lookups (called once per visible row, every frame)
-// don't re-read and re-parse global.json from disk per item. The empty string
-// means "not yet resolved this frame", which triggers a one-time disk read.
-var (
-	hotkeysCurrentUserCache  string
-	hotkeysCurrentUserCached bool
-)
-
 // refreshHotkeysCurrentUser re-resolves the active username from global config
-// and caches it for the current event/frame. Called at the top of the hotkeys
-// screen entry points so a user switch elsewhere is reflected on the next frame
-// while per-item lookups within a frame stay free of disk access.
+// and caches it on the App for the current event/frame. Called at the top of
+// the hotkeys screen entry points so a user switch elsewhere is reflected on the
+// next frame while per-item lookups within a frame stay free of disk access.
+// The cache is per-App (a.hotkeysActiveUser / a.hotkeysActiveUserCached) so
+// two App instances don't share state.
 func (a *App) refreshHotkeysCurrentUser() {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil || cfg == nil || cfg.ActiveUser == "" {
-		hotkeysCurrentUserCache = "default"
+		a.hotkeysActiveUser = "default"
 	} else {
-		hotkeysCurrentUserCache = cfg.ActiveUser
+		a.hotkeysActiveUser = cfg.ActiveUser
 	}
-	hotkeysCurrentUserCached = true
+	a.hotkeysActiveUserCached = true
 }
 
 // getCurrentUsername returns the active user name from global config, or "default"
 // if none set. It serves the value cached by refreshHotkeysCurrentUser for the
 // current frame, falling back to a disk read only if the cache is cold.
 func (a *App) getCurrentUsername() string {
-	if !hotkeysCurrentUserCached {
+	if !a.hotkeysActiveUserCached {
 		a.refreshHotkeysCurrentUser()
 	}
-	return hotkeysCurrentUserCache
+	return a.hotkeysActiveUser
 }
 
 // getCurrentUserHotkeys returns the hotkeys config for the current user.
@@ -988,7 +979,7 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 		var filteredItems []hotkeys.Item
 		var filteredIndices []int
 		for i, it := range items {
-			if a.isHotkeyFavorite(cat.ID, it.Keys) {
+			if a.isHotkeyFavorite(cat.ID, it.ID) {
 				filteredItems = append(filteredItems, it)
 				filteredIndices = append(filteredIndices, i)
 			}
@@ -1028,7 +1019,7 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 		focused := i == a.hotkeyCursor
 
 		// Check if this item is a favorite
-		isFavorite := a.isHotkeyFavorite(cat.ID, it.Keys)
+		isFavorite := a.isHotkeyFavorite(cat.ID, it.ID)
 		starIndicator := "  "
 		if isFavorite {
 			starIndicator = lipgloss.NewStyle().Foreground(ColorYellow).Render("* ")

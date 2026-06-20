@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/tekierz/dotfiles/internal/hotkeys"
 )
 
 // HotkeysConfig stores per-user hotkey customizations
@@ -133,4 +135,77 @@ func (u *UserHotkeys) GetFavoriteCount() int {
 		count += len(items)
 	}
 	return count
+}
+
+// MigrateLegacyFavorites rewrites favorites stored in the old format (keyed by
+// the raw Keys string) to the new format (keyed by the stable item ID).
+//
+// Migration logic:
+//  1. Build a lookup table: for each category, map every known Keys value under
+//     EITHER nav style to that item's stable ID.
+//  2. Walk the existing favorites; for each entry that is NOT already a known
+//     stable ID but IS a known Keys string, replace it with the stable ID.
+//  3. De-duplicate: if two old entries resolve to the same stable ID (e.g. the
+//     emacs and vim Keys for the same action were both saved), emit the ID once.
+//  4. Entries that cannot be matched to any known item OR stable ID are left
+//     in place (not dropped) so no favorite is ever silently lost.
+//
+// Calling this function on an already-migrated map is safe (idempotent).
+func MigrateLegacyFavorites(u *UserHotkeys) {
+	if u == nil || len(u.Favorites) == 0 {
+		return
+	}
+
+	// Build the lookup tables for both nav styles.
+	// keysToID[catID][keysString] = stableID
+	// knownIDs[stableID] = true
+	keysToID := map[string]map[string]string{}
+	knownIDs := map[string]bool{}
+
+	for _, ns := range []string{"emacs", "vim"} {
+		for _, cat := range hotkeys.Categories(ns) {
+			if _, ok := keysToID[cat.ID]; !ok {
+				keysToID[cat.ID] = map[string]string{}
+			}
+			for _, it := range cat.Items {
+				knownIDs[it.ID] = true
+				// Map this nav-style Keys to the stable ID; safe to overwrite since
+				// the same item always maps to the same ID regardless of nav style.
+				keysToID[cat.ID][it.Keys] = it.ID
+			}
+		}
+	}
+
+	for catID, entries := range u.Favorites {
+		catKeys := keysToID[catID] // may be nil if catID is unknown
+
+		seen := map[string]bool{}
+		migrated := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if knownIDs[entry] {
+				// Already a stable ID — keep as-is (idempotent).
+				if !seen[entry] {
+					seen[entry] = true
+					migrated = append(migrated, entry)
+				}
+				continue
+			}
+			// Attempt to resolve via the Keys lookup.
+			if catKeys != nil {
+				if id, ok := catKeys[entry]; ok {
+					if !seen[id] {
+						seen[id] = true
+						migrated = append(migrated, id)
+					}
+					continue
+				}
+			}
+			// Unrecognized entry: preserve it verbatim so no favorite is lost.
+			if !seen[entry] {
+				seen[entry] = true
+				migrated = append(migrated, entry)
+			}
+		}
+		u.Favorites[catID] = migrated
+	}
 }

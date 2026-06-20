@@ -1,9 +1,18 @@
 package hotkeys
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 // Item is a single hotkey/cheatsheet entry.
+//
+// ID is a stable, navStyle-independent identifier for this item within its
+// category, formatted as "<categoryID>.<slug>". It is used as the persistence
+// key for favorites so that favorites survive navigation-style changes (the Keys
+// field changes between emacs/vim, the ID never does).
 type Item struct {
+	ID          string // stable, navStyle-independent identifier: "<catID>.<slug>"
 	Keys        string
 	Description string
 }
@@ -32,6 +41,37 @@ func normalizeNavStyle(s string) NavStyle {
 	return NavEmacs
 }
 
+// slugify converts a description into a lowercase, hyphen-separated slug
+// suitable for use as the suffix of a stable item ID.
+// It lowercases all runes, replaces runs of non-alphanumeric characters with a
+// single hyphen, and trims leading/trailing hyphens.
+func slugify(s string) string {
+	var b strings.Builder
+	inSep := false
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			if inSep && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			inSep = false
+			b.WriteRune(r)
+		} else {
+			inSep = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// makeItem constructs an Item with a stable ID derived from the category ID and
+// the item's description. The Keys field may vary with navStyle; the ID never does.
+func makeItem(catID, keys, description string) Item {
+	return Item{
+		ID:          catID + "." + slugify(description),
+		Keys:        keys,
+		Description: description,
+	}
+}
+
 // Categories returns the hotkey categories for the provided navigation style.
 //
 // This is the single source of truth used by:
@@ -56,6 +96,8 @@ func Categories(navStyle string) []Category {
 		nvimNav = "Arrow keys"
 	}
 
+	mk := makeItem // local alias for brevity
+
 	return []Category{
 		{
 			ID:   "tmux",
@@ -63,34 +105,34 @@ func Categories(navStyle string) []Category {
 			Icon: "",
 			Items: []Item{
 				// Pane management
-				{"Prefix + |", "Split pane vertically"},
-				{"Prefix + -", "Split pane horizontally"},
-				{tmuxNav, "Navigate panes"},
-				{"Prefix + H/J/K/L", "Resize panes"},
-				{"Prefix + z", "Toggle pane zoom"},
-				{"Prefix + x", "Close current pane"},
-				{"Prefix + !", "Convert pane to window"},
-				{"Prefix + q", "Show pane numbers"},
-				{"Prefix + {/}", "Swap pane left/right"},
+				mk("tmux", "Prefix + |", "Split pane vertically"),
+				mk("tmux", "Prefix + -", "Split pane horizontally"),
+				mk("tmux", tmuxNav, "Navigate panes"),
+				mk("tmux", "Prefix + H/J/K/L", "Resize panes"),
+				mk("tmux", "Prefix + z", "Toggle pane zoom"),
+				mk("tmux", "Prefix + x", "Close current pane"),
+				mk("tmux", "Prefix + !", "Convert pane to window"),
+				mk("tmux", "Prefix + q", "Show pane numbers"),
+				mk("tmux", "Prefix + {/}", "Swap pane left/right"),
 				// Window management
-				{"Prefix + c", "New window"},
-				{"Prefix + n/p", "Next/previous window"},
-				{"Prefix + 0-9", "Switch to window N"},
-				{"Prefix + w", "List windows"},
-				{"Prefix + ,", "Rename window"},
-				{"Prefix + &", "Close window"},
-				{"Prefix + l", "Last active window"},
+				mk("tmux", "Prefix + c", "New window"),
+				mk("tmux", "Prefix + n/p", "Next/previous window"),
+				mk("tmux", "Prefix + 0-9", "Switch to window N"),
+				mk("tmux", "Prefix + w", "List windows"),
+				mk("tmux", "Prefix + ,", "Rename window"),
+				mk("tmux", "Prefix + &", "Close window"),
+				mk("tmux", "Prefix + l", "Last active window"),
 				// Session management
-				{"Prefix + s", "List sessions"},
-				{"Prefix + $", "Rename session"},
-				{"Prefix + d", "Detach session"},
-				{"Prefix + (", "Previous session"},
-				{"Prefix + )", "Next session"},
+				mk("tmux", "Prefix + s", "List sessions"),
+				mk("tmux", "Prefix + $", "Rename session"),
+				mk("tmux", "Prefix + d", "Detach session"),
+				mk("tmux", "Prefix + (", "Previous session"),
+				mk("tmux", "Prefix + )", "Next session"),
 				// Copy mode & misc
-				{"Prefix + [", "Copy mode"},
-				{"Prefix + ]", "Paste buffer"},
-				{"Prefix + r", "Reload config"},
-				{"Prefix + ?", "List keybindings"},
+				mk("tmux", "Prefix + [", "Copy mode"),
+				mk("tmux", "Prefix + ]", "Paste buffer"),
+				mk("tmux", "Prefix + r", "Reload config"),
+				mk("tmux", "Prefix + ?", "List keybindings"),
 			},
 		},
 		{
@@ -98,12 +140,12 @@ func Categories(navStyle string) []Category {
 			Name: zshTitle,
 			Icon: "",
 			Items: []Item{
-				{"Ctrl-r", "Search command history"},
-				{"Ctrl-t", "Fuzzy find files (fzf)"},
-				{"Alt-c", "Fuzzy cd to directory"},
-				{"Ctrl-g", "Fuzzy find git files"},
-				{"Tab", "Autocomplete"},
-				{"Ctrl-w", "Delete word backwards"},
+				mk("zsh", "Ctrl-r", "Search command history"),
+				mk("zsh", "Ctrl-t", "Fuzzy find files (fzf)"),
+				mk("zsh", "Alt-c", "Fuzzy cd to directory"),
+				mk("zsh", "Ctrl-g", "Fuzzy find git files"),
+				mk("zsh", "Tab", "Autocomplete"),
+				mk("zsh", "Ctrl-w", "Delete word backwards"),
 			},
 		},
 		{
@@ -111,16 +153,16 @@ func Categories(navStyle string) []Category {
 			Name: "Yazi",
 			Icon: "󰉋",
 			Items: []Item{
-				{yaziNav, "Navigate"},
-				{yaziHidden, "Toggle hidden files"},
-				{"/", "Search"},
-				{"Space", "Toggle selection"},
-				{"y", "Yank (copy)"},
-				{"x", "Cut"},
-				{"p", "Paste"},
-				{"a", "Create file/dir"},
-				{"r", "Rename"},
-				{"q", "Quit"},
+				mk("yazi", yaziNav, "Navigate"),
+				mk("yazi", yaziHidden, "Toggle hidden files"),
+				mk("yazi", "/", "Search"),
+				mk("yazi", "Space", "Toggle selection"),
+				mk("yazi", "y", "Yank (copy)"),
+				mk("yazi", "x", "Cut"),
+				mk("yazi", "p", "Paste"),
+				mk("yazi", "a", "Create file/dir"),
+				mk("yazi", "r", "Rename"),
+				mk("yazi", "q", "Quit"),
 			},
 		},
 		{
@@ -128,10 +170,10 @@ func Categories(navStyle string) []Category {
 			Name: "fzf",
 			Icon: "󰍉",
 			Items: []Item{
-				{"Ctrl-r", "Fuzzy search history"},
-				{"Ctrl-t", "Fuzzy find file"},
-				{"Alt-c", "Fuzzy cd into dir"},
-				{"**<Tab>", "Path completion"},
+				mk("fzf", "Ctrl-r", "Fuzzy search history"),
+				mk("fzf", "Ctrl-t", "Fuzzy find file"),
+				mk("fzf", "Alt-c", "Fuzzy cd into dir"),
+				mk("fzf", "**<Tab>", "Path completion"),
 			},
 		},
 		{
@@ -139,11 +181,11 @@ func Categories(navStyle string) []Category {
 			Name: "Ghostty",
 			Icon: "󰆍",
 			Items: []Item{
-				{"Super-c/v", "Copy/Paste (super)"},
-				{"Super-{/}", "Prev/next tab"},
-				{"Super-1/2/3…", "Switch to tab N"},
-				{"Ctrl-Shift-,", "Reload config"},
-				{"Ctrl-Shift-n", "New window"},
+				mk("ghostty", "Super-c/v", "Copy/Paste (super)"),
+				mk("ghostty", "Super-{/}", "Prev/next tab"),
+				mk("ghostty", "Super-1/2/3…", "Switch to tab N"),
+				mk("ghostty", "Ctrl-Shift-,", "Reload config"),
+				mk("ghostty", "Ctrl-Shift-n", "New window"),
 			},
 		},
 		{
@@ -151,17 +193,17 @@ func Categories(navStyle string) []Category {
 			Name: "Neovim",
 			Icon: "",
 			Items: []Item{
-				{"i", "Insert mode"},
-				{"Esc", "Normal mode"},
-				{nvimNav, "Navigate"},
-				{":w", "Save"},
-				{":q", "Quit"},
-				{":wq", "Save and quit"},
-				{"dd", "Delete line"},
-				{"yy", "Yank line"},
-				{"p", "Paste"},
-				{"/", "Search"},
-				{"n/N", "Next/prev match"},
+				mk("neovim", "i", "Insert mode"),
+				mk("neovim", "Esc", "Normal mode"),
+				mk("neovim", nvimNav, "Navigate"),
+				mk("neovim", ":w", "Save"),
+				mk("neovim", ":q", "Quit"),
+				mk("neovim", ":wq", "Save and quit"),
+				mk("neovim", "dd", "Delete line"),
+				mk("neovim", "yy", "Yank line"),
+				mk("neovim", "p", "Paste"),
+				mk("neovim", "/", "Search"),
+				mk("neovim", "n/N", "Next/prev match"),
 			},
 		},
 		{
@@ -169,16 +211,16 @@ func Categories(navStyle string) []Category {
 			Name: "LazyGit",
 			Icon: "󰊢",
 			Items: []Item{
-				{"Space", "Stage/unstage file"},
-				{"c", "Commit"},
-				{"P", "Push"},
-				{"p", "Pull"},
-				{"b", "Branches menu"},
-				{"m", "Merge"},
-				{"r", "Rebase"},
-				{"/", "Search"},
-				{"?", "Help"},
-				{"q", "Quit"},
+				mk("lazygit", "Space", "Stage/unstage file"),
+				mk("lazygit", "c", "Commit"),
+				mk("lazygit", "P", "Push"),
+				mk("lazygit", "p", "Pull"),
+				mk("lazygit", "b", "Branches menu"),
+				mk("lazygit", "m", "Merge"),
+				mk("lazygit", "r", "Rebase"),
+				mk("lazygit", "/", "Search"),
+				mk("lazygit", "?", "Help"),
+				mk("lazygit", "q", "Quit"),
 			},
 		},
 		{
@@ -186,10 +228,10 @@ func Categories(navStyle string) []Category {
 			Name: "eza",
 			Icon: "󰙅",
 			Items: []Item{
-				{"ls", "List with icons"},
-				{"la", "List all + git"},
-				{"ll", "Long format + git"},
-				{"lt", "Tree view"},
+				mk("eza", "ls", "List with icons"),
+				mk("eza", "la", "List all + git"),
+				mk("eza", "ll", "Long format + git"),
+				mk("eza", "lt", "Tree view"),
 			},
 		},
 		{
@@ -197,9 +239,9 @@ func Categories(navStyle string) []Category {
 			Name: "zoxide",
 			Icon: "󰄛",
 			Items: []Item{
-				{"cd <query>", "Jump to frecent dir"},
-				{"cd -", "Previous dir"},
-				{"zi", "Interactive selection"},
+				mk("zoxide", "cd <query>", "Jump to frecent dir"),
+				mk("zoxide", "cd -", "Previous dir"),
+				mk("zoxide", "zi", "Interactive selection"),
 			},
 		},
 		{
@@ -207,11 +249,11 @@ func Categories(navStyle string) []Category {
 			Name: "Dotfiles",
 			Icon: "󰒓",
 			Items: []Item{
-				{"dotfiles install", "Launch installer wizard"},
-				{"dotfiles manage", "Open dual-pane manager"},
-				{"dotfiles theme", "Change theme"},
-				{"dotfiles hotkeys", "Hotkey reference TUI"},
-				{"dotfiles update", "Package update UI"},
+				mk("dotfiles", "dotfiles install", "Launch installer wizard"),
+				mk("dotfiles", "dotfiles manage", "Open dual-pane manager"),
+				mk("dotfiles", "dotfiles theme", "Change theme"),
+				mk("dotfiles", "dotfiles hotkeys", "Hotkey reference TUI"),
+				mk("dotfiles", "dotfiles update", "Package update UI"),
 			},
 		},
 		{
@@ -219,16 +261,16 @@ func Categories(navStyle string) []Category {
 			Name: "Git",
 			Icon: "",
 			Items: []Item{
-				{"git status", "Show working tree status"},
-				{"git add .", "Stage all changes"},
-				{"git commit -m", "Commit with message"},
-				{"git push", "Push to remote"},
-				{"git pull", "Pull from remote"},
-				{"git log --oneline", "Compact commit history"},
-				{"git diff", "Show unstaged changes"},
-				{"git branch", "List branches"},
-				{"git checkout -b", "Create and switch branch"},
-				{"git stash", "Stash changes"},
+				mk("git", "git status", "Show working tree status"),
+				mk("git", "git add .", "Stage all changes"),
+				mk("git", "git commit -m", "Commit with message"),
+				mk("git", "git push", "Push to remote"),
+				mk("git", "git pull", "Pull from remote"),
+				mk("git", "git log --oneline", "Compact commit history"),
+				mk("git", "git diff", "Show unstaged changes"),
+				mk("git", "git branch", "List branches"),
+				mk("git", "git checkout -b", "Create and switch branch"),
+				mk("git", "git stash", "Stash changes"),
 			},
 		},
 		{
@@ -236,10 +278,10 @@ func Categories(navStyle string) []Category {
 			Name: "Delta",
 			Icon: "",
 			Items: []Item{
-				{"git diff", "Diff with delta styling"},
-				{"git show", "Show commit with delta"},
-				{"git log -p", "Log with patches"},
-				{"delta --help", "Show delta options"},
+				mk("delta", "git diff", "Diff with delta styling"),
+				mk("delta", "git show", "Show commit with delta"),
+				mk("delta", "git log -p", "Log with patches"),
+				mk("delta", "delta --help", "Show delta options"),
 			},
 		},
 		{
@@ -247,15 +289,15 @@ func Categories(navStyle string) []Category {
 			Name: "LazyDocker",
 			Icon: "",
 			Items: []Item{
-				{"d", "Remove container"},
-				{"s", "Stop container"},
-				{"r", "Restart container"},
-				{"a", "Attach to container"},
-				{"l", "View logs"},
-				{"[/]", "Prev/next panel"},
-				{"enter", "Focus panel"},
-				{"?", "Help"},
-				{"q", "Quit"},
+				mk("lazydocker", "d", "Remove container"),
+				mk("lazydocker", "s", "Stop container"),
+				mk("lazydocker", "r", "Restart container"),
+				mk("lazydocker", "a", "Attach to container"),
+				mk("lazydocker", "l", "View logs"),
+				mk("lazydocker", "[/]", "Prev/next panel"),
+				mk("lazydocker", "enter", "Focus panel"),
+				mk("lazydocker", "?", "Help"),
+				mk("lazydocker", "q", "Quit"),
 			},
 		},
 		{
@@ -263,11 +305,11 @@ func Categories(navStyle string) []Category {
 			Name: "Glow",
 			Icon: "󰈙",
 			Items: []Item{
-				{"glow README.md", "Render markdown file"},
-				{"glow -p", "Use pager"},
-				{"glow -s dark", "Dark style"},
-				{"j/k", "Scroll up/down"},
-				{"q", "Quit"},
+				mk("glow", "glow README.md", "Render markdown file"),
+				mk("glow", "glow -p", "Use pager"),
+				mk("glow", "glow -s dark", "Dark style"),
+				mk("glow", "j/k", "Scroll up/down"),
+				mk("glow", "q", "Quit"),
 			},
 		},
 		{
@@ -275,11 +317,11 @@ func Categories(navStyle string) []Category {
 			Name: "bat",
 			Icon: "󰭟",
 			Items: []Item{
-				{"bat file.txt", "View file with syntax highlighting"},
-				{"bat -A", "Show non-printable characters"},
-				{"bat -n", "Show line numbers only"},
-				{"bat --diff", "Show git diff"},
-				{"bat -l json", "Force language"},
+				mk("bat", "bat file.txt", "View file with syntax highlighting"),
+				mk("bat", "bat -A", "Show non-printable characters"),
+				mk("bat", "bat -n", "Show line numbers only"),
+				mk("bat", "bat --diff", "Show git diff"),
+				mk("bat", "bat -l json", "Force language"),
 			},
 		},
 		{
@@ -287,14 +329,14 @@ func Categories(navStyle string) []Category {
 			Name: "btop",
 			Icon: "󰄨",
 			Items: []Item{
-				{"h", "Toggle help"},
-				{"Esc", "Close menu/go back"},
-				{"m", "Toggle memory graph"},
-				{"n", "Toggle network graph"},
-				{"p", "Toggle process view"},
-				{"f", "Filter processes"},
-				{"k", "Kill process"},
-				{"q", "Quit"},
+				mk("btop", "h", "Toggle help"),
+				mk("btop", "Esc", "Close menu/go back"),
+				mk("btop", "m", "Toggle memory graph"),
+				mk("btop", "n", "Toggle network graph"),
+				mk("btop", "p", "Toggle process view"),
+				mk("btop", "f", "Filter processes"),
+				mk("btop", "k", "Kill process"),
+				mk("btop", "q", "Quit"),
 			},
 		},
 		{
@@ -302,13 +344,13 @@ func Categories(navStyle string) []Category {
 			Name: "ripgrep",
 			Icon: "󰈞",
 			Items: []Item{
-				{"rg pattern", "Search for pattern"},
-				{"rg -i pattern", "Case insensitive"},
-				{"rg -w word", "Match whole word"},
-				{"rg -t py pattern", "Search Python files"},
-				{"rg -g '*.js'", "Glob filter"},
-				{"rg -C 3", "Show 3 lines context"},
-				{"rg -l pattern", "List matching files only"},
+				mk("ripgrep", "rg pattern", "Search for pattern"),
+				mk("ripgrep", "rg -i pattern", "Case insensitive"),
+				mk("ripgrep", "rg -w word", "Match whole word"),
+				mk("ripgrep", "rg -t py pattern", "Search Python files"),
+				mk("ripgrep", "rg -g '*.js'", "Glob filter"),
+				mk("ripgrep", "rg -C 3", "Show 3 lines context"),
+				mk("ripgrep", "rg -l pattern", "List matching files only"),
 			},
 		},
 		{
@@ -316,11 +358,11 @@ func Categories(navStyle string) []Category {
 			Name: "fd",
 			Icon: "󰱼",
 			Items: []Item{
-				{"fd pattern", "Find files matching pattern"},
-				{"fd -e js", "Find by extension"},
-				{"fd -t d", "Find directories only"},
-				{"fd -H", "Include hidden files"},
-				{"fd -x cmd", "Execute command on results"},
+				mk("fd", "fd pattern", "Find files matching pattern"),
+				mk("fd", "fd -e js", "Find by extension"),
+				mk("fd", "fd -t d", "Find directories only"),
+				mk("fd", "fd -H", "Include hidden files"),
+				mk("fd", "fd -x cmd", "Execute command on results"),
 			},
 		},
 		{
@@ -328,12 +370,12 @@ func Categories(navStyle string) []Category {
 			Name: "Claude Code",
 			Icon: "󰚩",
 			Items: []Item{
-				{"claude", "Start Claude Code"},
-				{"/help", "Show help"},
-				{"/clear", "Clear conversation"},
-				{"/compact", "Summarize context"},
-				{"Ctrl-C", "Cancel current operation"},
-				{"Esc Esc", "Exit Claude Code"},
+				mk("claude", "claude", "Start Claude Code"),
+				mk("claude", "/help", "Show help"),
+				mk("claude", "/clear", "Clear conversation"),
+				mk("claude", "/compact", "Summarize context"),
+				mk("claude", "Ctrl-C", "Cancel current operation"),
+				mk("claude", "Esc Esc", "Exit Claude Code"),
 			},
 		},
 		{
@@ -341,13 +383,13 @@ func Categories(navStyle string) []Category {
 			Name: "Tailscale",
 			Icon: "󰖂",
 			Items: []Item{
-				{"tailscale status", "Show connection status"},
-				{"tailscale up", "Connect to tailnet"},
-				{"tailscale down", "Disconnect from tailnet"},
-				{"tailscale ip", "Show Tailscale IP addresses"},
-				{"tailscale ssh <host>", "SSH to peer node"},
-				{"tailscale ping <host>", "Ping peer node"},
-				{"tailscale netcheck", "Network diagnostic"},
+				mk("tailscale", "tailscale status", "Show connection status"),
+				mk("tailscale", "tailscale up", "Connect to tailnet"),
+				mk("tailscale", "tailscale down", "Disconnect from tailnet"),
+				mk("tailscale", "tailscale ip", "Show Tailscale IP addresses"),
+				mk("tailscale", "tailscale ssh <host>", "SSH to peer node"),
+				mk("tailscale", "tailscale ping <host>", "Ping peer node"),
+				mk("tailscale", "tailscale netcheck", "Network diagnostic"),
 			},
 		},
 		{
@@ -355,9 +397,9 @@ func Categories(navStyle string) []Category {
 			Name: "Sunshine",
 			Icon: "☀",
 			Items: []Item{
-				{"sunshine", "Start streaming server"},
-				{"sunshine --help", "Show command options"},
-				{"localhost:47990", "Web UI (browser)"},
+				mk("sunshine", "sunshine", "Start streaming server"),
+				mk("sunshine", "sunshine --help", "Show command options"),
+				mk("sunshine", "localhost:47990", "Web UI (browser)"),
 			},
 		},
 		{
@@ -365,10 +407,10 @@ func Categories(navStyle string) []Category {
 			Name: "Moonlight",
 			Icon: "🌙",
 			Items: []Item{
-				{"moonlight", "Launch client"},
-				{"moonlight pair <host>", "Pair with host"},
-				{"moonlight stream <host>", "Stream from host"},
-				{"moonlight list <host>", "List available apps"},
+				mk("moonlight", "moonlight", "Launch client"),
+				mk("moonlight", "moonlight pair <host>", "Pair with host"),
+				mk("moonlight", "moonlight stream <host>", "Stream from host"),
+				mk("moonlight", "moonlight list <host>", "List available apps"),
 			},
 		},
 	}

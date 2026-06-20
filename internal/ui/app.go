@@ -274,6 +274,11 @@ type App struct {
 	themeStatus          string
 	hotkeysFavorites     *config.HotkeysConfig // User hotkey favorites config
 	hotkeysFavoritesOnly bool                  // Filter to show only favorites
+	// Per-App active-username cache for the hotkeys screen. Refreshed once per
+	// event/frame via refreshHotkeysCurrentUser so that per-row lookups within
+	// a single frame don't re-read global.json from disk.
+	hotkeysActiveUser       string // cached username, or "" if not yet resolved
+	hotkeysActiveUserCached bool   // true once the cache has been populated
 	// Hotkeys alias editing state
 	hotkeysAddingAlias  bool   // Currently adding an alias
 	hotkeysAliasName    string // Alias name being entered
@@ -426,8 +431,14 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		app.manageConfig = cfg
 	}
 
-	// Best-effort: load hotkeys favorites config.
+	// Best-effort: load hotkeys favorites config and migrate any legacy
+	// Key-string-keyed favorites to the new stable-ID format.
 	if hkCfg, err := config.LoadHotkeysConfig(); err == nil && hkCfg != nil {
+		for _, uh := range hkCfg.Users {
+			config.MigrateLegacyFavorites(uh)
+		}
+		// Persist the migrated config so the migration is one-time.
+		_ = config.SaveHotkeysConfig(hkCfg)
 		app.hotkeysFavorites = hkCfg
 	} else {
 		app.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]*config.UserHotkeys)}
