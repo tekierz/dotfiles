@@ -575,11 +575,11 @@ func listBackups() {
 			continue
 		}
 
-		// Count files in backup
+		// Count backed-up dotfiles; skip the manifest (metadata, not a dotfile).
 		files, _ := os.ReadDir(filepath.Join(backupDir, b.Name()))
 		fileCount := 0
 		for _, f := range files {
-			if !f.IsDir() {
+			if !f.IsDir() && f.Name() != backup.ManifestName {
 				fileCount++
 			}
 		}
