@@ -272,6 +272,70 @@ func (r *fieldLayoutRecorder) finalize(width, height int, title, box, help strin
 	return fl
 }
 
+// finalizeComposed resolves the recorded per-field offsets to absolute screen
+// coordinates for a screen whose box is embedded in a larger composed block
+// (e.g. extra subtitle/legend rows above/below the box) that is centered with
+// lipgloss.Place / PlaceWithBackground (Center, Center).
+//
+// composed is the full block passed to Place (measured for total height/width
+// to compute the centering pads); box is the rendered configBoxStyle box;
+// rowsAboveBox is the number of rendered rows within composed that precede the
+// box. Unlike finalize (which assumes the fixed title/blank/box/blank/help
+// layout and that the box spans the full composed width), this centers the box
+// horizontally within composed so the X-bounds are correct when other rows are
+// wider or narrower than the box.
+func (r *fieldLayoutRecorder) finalizeComposed(width, height int, composed, box string, rowsAboveBox int) fieldLayout {
+	composedH := lipgloss.Height(composed)
+	composedW := lipgloss.Width(composed)
+	boxW := lipgloss.Width(box)
+
+	topPad := (height - composedH) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+	leftPad := (width - composedW) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+
+	// The box is centered horizontally within composed (JoinVertical(Center)).
+	boxLeftInComposed := (composedW - boxW) / 2
+	if boxLeftInComposed < 0 {
+		boxLeftInComposed = 0
+	}
+
+	boxContentTop := topPad + rowsAboveBox + configBoxVFrame
+	boxContentRows := lipgloss.Height(box) - 2*configBoxVFrame
+	boxContentBottom := boxContentTop + boxContentRows // exclusive
+
+	boxInnerLeft := leftPad + boxLeftInComposed + configBoxHFrame
+	boxInnerRight := leftPad + boxLeftInComposed + boxW - 1 - configBoxHFrame
+
+	fl := fieldLayout{
+		boxLeft:    boxInnerLeft,
+		boxRight:   boxInnerRight,
+		hasXBounds: boxW > 0,
+	}
+	for i, mk := range r.marks {
+		startY := boxContentTop + mk.lineOff
+		var endY int
+		if i+1 < len(r.marks) {
+			endY = boxContentTop + r.marks[i+1].lineOff
+		} else {
+			endY = boxContentBottom
+		}
+		if endY <= startY {
+			endY = startY + 1
+		}
+		fl.extents = append(fl.extents, fieldExtent{
+			index:  mk.index,
+			startY: startY,
+			height: endY - startY,
+		})
+	}
+	return fl
+}
+
 // handleConfigFieldMouse resolves a wheel/click for the field-based config
 // screens. Wheel-scroll moves configFieldIndex by one and intentionally ignores
 // geometry. A left click is mapped against the recorded per-field geometry
@@ -307,6 +371,47 @@ func handleConfigFieldMouse(a *App, msg tea.MouseMsg, maxFields int) tea.Cmd {
 		a.configFieldIndex = idx
 	}
 	return nil
+}
+
+// ContainerStyle frame sizes (RoundedBorder + Padding(1, 2)), used to resolve
+// click geometry for screens wrapped in ContainerStyle and centered with
+// lipgloss.Place / PlaceWithBackground.
+const (
+	containerHFrame = 3 // border(1) + horizontal padding(2)
+	containerVFrame = 2 // border(1) + vertical padding(1)
+)
+
+// centeredContainerListLayout resolves per-row geometry for a one-row-per-item
+// list rendered inside ContainerStyle and centered (lipgloss.Place Center,
+// Center / PlaceWithBackground). container is the fully rendered ContainerStyle
+// box (measured for exact height/width); rowsAboveList is the number of
+// rendered rows inside the container that precede the first list row. width/
+// height are the terminal dimensions the content is centered within.
+func centeredContainerListLayout(width, height int, container string, count, rowsAboveList int) fieldLayout {
+	containerW := lipgloss.Width(container)
+	containerH := lipgloss.Height(container)
+
+	topPad := (height - containerH) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+	leftPad := (width - containerW) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+
+	// First list row: top pad + container top frame + rows above the list.
+	firstRowY := topPad + containerVFrame + rowsAboveList
+
+	fl := fieldLayout{
+		boxLeft:    leftPad + containerHFrame,
+		boxRight:   leftPad + containerW - 1 - containerHFrame,
+		hasXBounds: containerW > 0,
+	}
+	for i := 0; i < count; i++ {
+		fl.extents = append(fl.extents, fieldExtent{index: i, startY: firstRowY + i, height: 1})
+	}
+	return fl
 }
 
 // configListNav factors out the list-selection logic shared by the checkbox-list
@@ -401,15 +506,19 @@ func (s *configListNav) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	maxFields := len(s.itemIDs)
-	contentHeight := maxFields + 8
-	startY := (a.height - contentHeight) / 2
-	fieldStartY := startY + 4
-
-	if m.Y >= fieldStartY {
-		fieldIdx := m.Y - fieldStartY
-		if fieldIdx >= 0 && fieldIdx < maxFields {
-			s.setIndex(a, fieldIdx)
+	// Resolve the click against the per-item geometry recorded by the screen's
+	// most recent View (a.configFieldLayout, shared with the field-config family
+	// and rebuilt every View). The list screens record one extent per navigable
+	// row, so this maps clicks geometry-correctly and is X-bounded to the box —
+	// replacing the old hand-derived contentHeight+4 anchor that ignored the
+	// box border/padding and X entirely.
+	fl := a.configFieldLayout
+	if fl.hasXBounds && (m.X < fl.boxLeft || m.X > fl.boxRight) {
+		return nil
+	}
+	if idx, ok := fl.fieldAt(m.Y); ok {
+		if idx >= 0 && idx < len(s.itemIDs) {
+			s.setIndex(a, idx)
 		}
 	}
 	return nil

@@ -600,6 +600,14 @@ func (a *App) hotkeysLayout() hotkeysLayout {
 		leftW = maxInt(22, a.width-minRight-gap)
 	}
 	rightW := maxInt(0, a.width-leftW-gap)
+	// Cap the items pane width for readability. The render uses this same capped
+	// width, so storing it here keeps the click hit region (inRightList) aligned
+	// with the rendered panel — an uncapped rightW made clicks register in the
+	// empty space to the right of the panel.
+	const maxRightW = 100
+	if rightW > maxRightW {
+		rightW = maxRightW
+	}
 
 	border := 1
 	padX := 1
@@ -951,12 +959,9 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 		borderColor = ColorCyan
 	}
 
-	// Cap right pane width for better readability
-	maxRightW := 100
+	// Right pane width is already capped for readability in hotkeysLayout(), so
+	// the rendered panel width matches the click hit region (inRightList).
 	rightW := layout.rightW
-	if rightW > maxRightW {
-		rightW = maxRightW
-	}
 
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

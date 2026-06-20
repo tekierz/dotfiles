@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -62,9 +61,10 @@ func (s *configUtilitiesScreen) View(width, height int) string {
 	title := renderConfigTitle("", "Utilities", "Helper tools from tekierz/homebrew-tap")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(60))
 
 	for i, util := range utilityItems {
+		rec.field(i)
 		focused := a.utilityIndex == i
 		enabled := cfg.Utilities[util.id]
 		installed := a.manageInstalled[util.id]
@@ -93,7 +93,7 @@ func (s *configUtilitiesScreen) View(width, height int) string {
 			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
+		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-8s", util.name)),
@@ -102,8 +102,9 @@ func (s *configUtilitiesScreen) View(width, height int) string {
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(60)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

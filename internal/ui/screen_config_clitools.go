@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -76,9 +75,18 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 	title := renderConfigTitle("", "CLI Tools", "Terminal-based productivity tools")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(70))
 
 	for i, tool := range cliToolItems {
+		// Only the first navigableCLIToolCount rows participate in selection. Mark
+		// the trailing claude-code context row with a sentinel index (-1) so it
+		// records its own extent (bounding the last navigable field) but a click on
+		// it resolves to nothing (the handler rejects negative indices).
+		if i < navigableCLIToolCount {
+			rec.field(i)
+		} else {
+			rec.field(-1)
+		}
 		focused := a.cliToolIndex == i
 		enabled := cfg.CLITools[tool.id]
 		installed := a.manageInstalled[tool.id]
@@ -107,7 +115,7 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
+		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-14s", tool.name)),
@@ -116,8 +124,9 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(70)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

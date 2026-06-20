@@ -122,15 +122,18 @@ func (s *mainMenuScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	// The main menu is centered. Content structure:
-	// title(1), subtitle(1), empty(1), menu items(n), empty(1), help(1)
-	contentH := 5 + len(items)
-	startY := (s.Height() - contentH) / 2
-	menuStartY := startY + 3 // after title, subtitle, empty
-
-	for i := range items {
-		if m.Y == menuStartY+i {
-			return s.selectItem(i)
+	// Resolve the click against the per-item geometry recorded by the most
+	// recent View (a.mainMenuLayout). It is derived from the actually rendered
+	// container, so it accounts for ContainerStyle's border/padding and the
+	// HelpStyle padding the legacy anchor ignored.
+	a := s.App()
+	fl := a.mainMenuLayout
+	if fl.hasXBounds && (m.X < fl.boxLeft || m.X > fl.boxRight) {
+		return nil
+	}
+	if idx, ok := fl.fieldAt(m.Y); ok {
+		if idx >= 0 && idx < len(items) {
+			return s.selectItem(idx)
 		}
 	}
 	return nil
@@ -184,7 +187,12 @@ func (s *mainMenuScreen) View(width, height int) string {
 		help,
 	)
 
-	return lipgloss.Place(width, height,
-		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(content))
+	container := ContainerStyle.Render(content)
+
+	// Record per-item geometry for the mouse handler. Menu rows live at content
+	// offset title(1)+subtitle(1)+blank(1) = 3.
+	a.mainMenuLayout = centeredContainerListLayout(width, height, container,
+		len(items), lipgloss.Height(title)+lipgloss.Height(subtitle)+1)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, container)
 }

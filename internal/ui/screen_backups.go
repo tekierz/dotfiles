@@ -255,11 +255,28 @@ func (s *backupsScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	// The backup list starts after: tabBar(1), empty(1), title(1), subtitle(1), status?(1), empty(1), header(1), divider(1)
-	// So list items start around Y=7-8 depending on status
-	listStartY := 7
+	// The View is top-aligned (lipgloss.Place(Center, Top)), so the first row is
+	// at Y=0. Derive the first backup row from the same constants the View uses
+	// to compose its content:
+	//   tabBar(1) + blank(1) + title(1) + subtitle(1) + [status(1)] + blank(1) +
+	//   listBox top border(1) + NAME/DATE header(1) + dashes divider(1)
+	// so backup[0] is at Y=8 (no status) / Y=9 (with status). The legacy value
+	// (7/8) pointed at the dashes row, selecting one row too low (C18).
+	listStartY := 8
 	if a.backupStatus != "" {
-		listStartY = 8
+		listStartY = 9
+	}
+
+	// X-bounds: the list box is centered horizontally with width boxOuterW.
+	// Mirror the View's width math and ignore clicks outside the box so a click
+	// anywhere on the row (even off the centered box) no longer selects.
+	boxOuterW := min(92, maxInt(44, a.width-8))
+	boxLeft := (a.width - boxOuterW) / 2
+	if boxLeft < 0 {
+		boxLeft = 0
+	}
+	if m.X < boxLeft || m.X >= boxLeft+boxOuterW {
+		return nil
 	}
 
 	// Check if click is within list area

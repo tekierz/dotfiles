@@ -566,6 +566,14 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 	// Click in right pane fields area: focus + edit/toggle/adjust.
 	if layout.inRightList(m.X, m.Y) {
+		// While the install-log view occupies the right pane, the settings fields
+		// are not rendered (renderManageSettingsPanel swaps to the log panel when
+		// installing or logs exist). Ignore field hit-testing in that state so a
+		// click in the log region does not mutate hidden settings fields.
+		if a.manageInstalling || len(a.installLogs) > 0 {
+			return nil
+		}
+
 		items := a.manageItems()
 		if len(items) == 0 {
 			return nil

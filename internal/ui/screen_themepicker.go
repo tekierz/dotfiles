@@ -128,25 +128,19 @@ func (s *themePickerScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 
 	if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		// The content is centered using PlaceWithBackground + ContainerStyle.
-		// Container has Padding(1, 2) and Border, then title + empty line + themes.
-		containerH := len(themes) + 6 // title + empty + themes + empty + help + padding
-		containerW := 60              // approximate
-		startY := (s.Height() - containerH) / 2
-		startX := (s.Width() - containerW) / 2
-		// Clamp to >= 0 so a negative startX (terminal narrower than the
-		// container) doesn't make the entire row width a hit target.
-		if startX < 0 {
-			startX = 0
+		// Resolve the click against the per-theme geometry recorded by the most
+		// recent View (a.themeListLayout). It is derived from the actually
+		// rendered container (height + width measured with lipgloss), so it
+		// accounts for ContainerStyle's border/padding and HelpStyle's padding
+		// — unlike the legacy hand-derived len(themes)+6 / containerW=60 which
+		// shifted every row by ~2-3 and used a wrong X span (C20).
+		fl := a.themeListLayout
+		if fl.hasXBounds && (m.X < fl.boxLeft || m.X > fl.boxRight) {
+			return nil
 		}
-
-		// Theme list starts after: container border (1) + padding (1) + title (1) + empty (1)
-		listStartY := startY + 4
-
-		if m.Y >= listStartY && m.Y < listStartY+len(themes) && m.X >= startX && m.X < startX+containerW {
-			themeIdx := m.Y - listStartY
-			if themeIdx >= 0 && themeIdx < len(themes) {
-				s.applyTheme(themeIdx)
+		if idx, ok := fl.fieldAt(m.Y); ok {
+			if idx >= 0 && idx < len(themes) {
+				s.applyTheme(idx)
 			}
 		}
 	}
@@ -226,11 +220,13 @@ func (s *themePickerScreen) View(width, height int) string {
 		rows = append(rows, "", statusLine)
 	}
 
-	return PlaceWithBackground(
-		width, height,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			rows...,
-		)),
-	)
+	container := ContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+
+	// Record per-theme geometry for the mouse handler. The theme list rows live
+	// at content offset title(1)+blank(1)=2; the container adds ContainerStyle's
+	// top border(1)+padding(1)=2 before its content; PlaceWithBackground centers
+	// it. Measure the rendered container so the anchor/width are exact.
+	a.themeListLayout = centeredContainerListLayout(width, height, container, len(themes), lipgloss.Height(title)+1)
+
+	return PlaceWithBackground(width, height, container)
 }

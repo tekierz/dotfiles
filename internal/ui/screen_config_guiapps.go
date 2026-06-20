@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -65,9 +64,10 @@ func (s *configGUIAppsScreen) View(width, height int) string {
 	title := renderConfigTitle("", "GUI Apps", "Desktop applications (cross-platform)")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(70))
 
 	for i, app := range guiAppItems {
+		rec.field(i)
 		focused := a.guiAppIndex == i
 		enabled := cfg.GUIApps[app.id]
 		installed := a.manageInstalled[app.id]
@@ -96,7 +96,7 @@ func (s *configGUIAppsScreen) View(width, height int) string {
 			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
+		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-14s", app.name)),
@@ -105,8 +105,9 @@ func (s *configGUIAppsScreen) View(width, height int) string {
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(70)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,

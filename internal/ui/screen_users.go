@@ -598,9 +598,26 @@ func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			}
 		} else {
 			a.usersPane = usersPaneSettings
-			// Calculate which field was clicked.
-			fieldIdx := m.Y - firstRowY
+			// Calculate which field was clicked. renderUsersSettingsPane draws an
+			// EXTRA description line immediately after the currently-SELECTED field
+			// (when it has a non-empty description), so every field rendered BELOW
+			// the selected one is shifted down by one row. Account for that shift
+			// when mapping the click back to a field index (C19).
 			fields := a.getUserFields()
+			fieldIdx := m.Y - firstRowY
+			sel := a.usersFieldIndex
+			if sel >= 0 && sel < len(fields) && fields[sel].description != "" {
+				descRow := sel + 1 // the inserted description line's relative row
+				switch {
+				case fieldIdx == descRow:
+					// Click landed on the selected field's description line: keep the
+					// selection on that field rather than selecting the next one.
+					fieldIdx = sel
+				case fieldIdx > descRow:
+					// Below the inserted line: shift up by one to undo the offset.
+					fieldIdx--
+				}
+			}
 			if fieldIdx >= 0 && fieldIdx < len(fields) {
 				a.usersFieldIndex = fieldIdx
 			}

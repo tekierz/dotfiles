@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -126,21 +125,20 @@ func (s *deepDiveMenuScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	contentHeight := len(items) + 10 // items + headers + padding
-	startY := (a.height - contentHeight) / 2
-	listStartY := startY + 4 // After title and instructions
-
-	// Account for category headers (they take up a line but aren't clickable).
-	clickableY := listStartY
-	for i, item := range items {
-		if item.Category != "" {
-			clickableY++ // Category header takes a line
+	// Resolve the click against the per-item geometry recorded by the most recent
+	// View (a.deepDiveMenuLayout). The recorder marks each item row (after any
+	// category header) and the Continue row, so this maps clicks correctly across
+	// category-header MarginTop blanks and the box border/padding the legacy
+	// anchor ignored. The recorded indices run 0..len(items) (Continue = len).
+	fl := a.deepDiveMenuLayout
+	if fl.hasXBounds && (m.X < fl.boxLeft || m.X > fl.boxRight) {
+		return nil
+	}
+	if idx, ok := fl.fieldAt(m.Y); ok {
+		if idx >= 0 && idx <= len(items) {
+			a.deepDiveMenuIndex = idx
+			return s.selectItem(idx)
 		}
-		if m.Y == clickableY {
-			a.deepDiveMenuIndex = i
-			return s.selectItem(i)
-		}
-		clickableY++
 	}
 	return nil
 }
@@ -180,7 +178,7 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 		Render("Customize each tool before installation")
 
 	items := GetFilteredDeepDiveMenuItems()
-	var menuList strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(64))
 
 	// Category header style.
 	categoryStyle := lipgloss.NewStyle().
@@ -189,13 +187,19 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 		MarginTop(1)
 
 	for i, item := range items {
-		// Render category header if this item starts a new category.
+		// Render category header if this item starts a new category. These rows
+		// are written without a field() mark so they are excluded from every
+		// item's extent (the click handler must not select on a header row).
 		if item.Category != "" {
 			if i > 0 {
-				menuList.WriteString("\n")
+				rec.write("\n")
 			}
-			menuList.WriteString(categoryStyle.Render("  "+item.Category) + "\n")
+			rec.write(categoryStyle.Render("  "+item.Category) + "\n")
 		}
+
+		// Mark the start of this item's own row (after any category header) so the
+		// recorded offset points at the clickable row, not the header.
+		rec.field(i)
 
 		isSelected := i == a.deepDiveMenuIndex
 
@@ -227,7 +231,7 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
 		}
 
-		menuList.WriteString(fmt.Sprintf("%s%s %s %s  %s\n",
+		rec.write(fmt.Sprintf("%s%s %s %s  %s\n",
 			cursor,
 			statusDot,
 			iconStyle.Render(item.Icon),
@@ -245,11 +249,14 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 		continueCursor = lipgloss.NewStyle().Foreground(ColorGreen).Render("▸ ")
 		continueStyle = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
 	}
-	menuList.WriteString("\n")
-	menuList.WriteString(fmt.Sprintf("%s%s\n", continueCursor, continueStyle.Render("▶ Continue to Installation")))
+	// The blank separator before Continue is non-field content; mark the Continue
+	// row itself so a click on it selects the continue index.
+	rec.write("\n")
+	rec.field(continueIdx)
+	rec.write(fmt.Sprintf("%s%s\n", continueCursor, continueStyle.Render("▶ Continue to Installation")))
 
 	// Wrap menu in a box.
-	menuBox := configBoxStyle.Width(a.deepDiveBoxWidth(64)).Render(menuList.String())
+	menuBox := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 
 	// Status legend.
 	legendStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
@@ -272,6 +279,11 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 		"",
 		help,
 	)
+
+	// Record per-item geometry: the menuBox sits below titleBox + subtitle + the
+	// blank separator. finalizeComposed measures the whole centered block.
+	rowsAboveBox := lipgloss.Height(titleBox) + lipgloss.Height(subtitle) + 1
+	a.deepDiveMenuLayout = rec.finalizeComposed(width, height, content, menuBox, rowsAboveBox)
 
 	return PlaceWithBackground(width, height, content)
 }

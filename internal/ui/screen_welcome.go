@@ -70,14 +70,22 @@ func (s *welcomeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	m := tea.MouseEvent(msg)
 
 	if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+		// Mirror the View's layout branch: it stacks the two buttons VERTICALLY on
+		// narrow terminals (width < 78) and lays them out HORIZONTALLY otherwise.
+		// Use a Y-based split when stacked (top half -> Quick Setup, bottom half ->
+		// Deep Dive) and an X-based split when side-by-side, matching the same >=78
+		// threshold the View uses.
 		centerY := s.Height() / 2
-		centerX := s.Width() / 2
-		if m.Y > centerY {
-			if m.X < centerX {
-				a.deepDive = false
-			} else {
-				a.deepDive = true
-			}
+		if m.Y <= centerY {
+			return nil // clicks above the buttons toggle nothing
+		}
+		if s.Width() < 78 {
+			// Stacked: Quick Setup on top, Deep Dive on the bottom. Split the
+			// lower half again so the upper portion is Quick, the lower is Deep.
+			splitY := centerY + (s.Height()-centerY)/2
+			a.deepDive = m.Y >= splitY
+		} else {
+			a.deepDive = m.X >= s.Width()/2
 		}
 	}
 	return nil

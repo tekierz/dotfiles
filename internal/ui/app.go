@@ -162,7 +162,13 @@ type App struct {
 	// User selections
 	themeIndex int
 	theme      string
-	navStyle   string
+	// themeListLayout records the on-screen geometry (per-theme row extents +
+	// horizontal box span) of the most recently rendered theme picker so the
+	// mouse handler can map a click to the correct theme. Repopulated on every
+	// themePickerScreen.View. The legacy handler hand-derived the container
+	// height/width and shifted every row by ~2-3 (C20).
+	themeListLayout fieldLayout
+	navStyle        string
 	// animationsEnabled controls non-essential UI animations (headers/widgets).
 	// When false, we render static UI to reduce motion/jank and CPU usage.
 	animationsEnabled bool
@@ -170,8 +176,13 @@ type App struct {
 
 	// Deep dive state (installer)
 	deepDiveMenuIndex int
-	deepDiveConfig    *DeepDiveConfig
-	configFieldIndex  int // Currently focused field in config screens
+	// deepDiveMenuLayout records per-item geometry of the most recently rendered
+	// deep-dive menu so the mouse handler maps a click to the correct row.
+	// Repopulated on every deepDiveMenuScreen.View; replaces the legacy anchor
+	// that ignored category-header MarginTop blanks and the box border/padding.
+	deepDiveMenuLayout fieldLayout
+	deepDiveConfig     *DeepDiveConfig
+	configFieldIndex   int // Currently focused field in config screens
 
 	// configFieldLayout records the on-screen geometry of the most recently
 	// rendered field-config screen so the mouse handler can map a click to the
@@ -230,7 +241,12 @@ type App struct {
 	streamCmd *runner.StreamingCmd
 
 	// Management platform state (new)
-	mainMenuIndex    int    // Main menu cursor
+	mainMenuIndex int // Main menu cursor
+	// mainMenuLayout records per-row geometry of the most recently rendered main
+	// menu so the mouse handler maps a click to the correct item. Repopulated on
+	// every mainMenuScreen.View; replaces the legacy hand-derived anchor that
+	// ignored ContainerStyle's border/padding and HelpStyle's padding.
+	mainMenuLayout   fieldLayout
 	manageIndex      int    // Manage screen cursor
 	updateIndex      int    // Update screen cursor
 	hotkeyFilter     string // Filter hotkeys by tool

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -69,9 +68,10 @@ func (s *configMacAppsScreen) View(width, height int) string {
 	title := renderConfigTitle("", "macOS Apps", "Optional productivity applications")
 
 	cfg := a.deepDiveConfig
-	var content strings.Builder
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(65))
 
 	for i, app := range macAppItems {
+		rec.field(i)
 		focused := a.macAppIndex == i
 		enabled := cfg.MacApps[app.id]
 		installed := a.manageInstalled[app.id]
@@ -100,7 +100,7 @@ func (s *configMacAppsScreen) View(width, height int) string {
 			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
 		}
 
-		content.WriteString(fmt.Sprintf("%s%s %s%s %s\n",
+		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-16s", app.name)),
@@ -109,8 +109,9 @@ func (s *configMacAppsScreen) View(width, height int) string {
 		))
 	}
 
-	box := configBoxStyle.Width(a.deepDiveBoxWidth(65)).Render(content.String())
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
 		width, height,
