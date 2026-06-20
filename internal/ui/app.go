@@ -239,6 +239,13 @@ type App struct {
 	// streamCmd is the StreamingCmd backing the active install/update stream, kept
 	// so its subprocess can be Cancel()ed on teardown. nil when nothing streams.
 	streamCmd *runner.StreamingCmd
+	// sudoKeepAliveStop terminates the sudo keep-alive goroutine that refreshes
+	// the credential cache for the duration of a Linux install (C16). It is set
+	// by startInstallation() and invoked on BOTH normal completion (installDoneMsg)
+	// and cancel/teardown (teardownStream); it blocks until the goroutine exits so
+	// no keep-alive survives the install. nil when no keep-alive is running (and
+	// always a no-op on non-Linux).
+	sudoKeepAliveStop func()
 
 	// Management platform state (new)
 	mainMenuIndex int // Main menu cursor

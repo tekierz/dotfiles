@@ -160,6 +160,13 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		// later teardown (Ctrl+C on the summary) is a harmless no-op.
 		a.streamCancel = nil
 		a.streamCmd = nil
+		// Stop the sudo keep-alive goroutine on normal completion (C16). The stop
+		// func blocks until the goroutine exits, so no `sudo -v` keeps running after
+		// the install finishes. nil/no-op when none was started (e.g. macOS).
+		if a.sudoKeepAliveStop != nil {
+			a.sudoKeepAliveStop()
+			a.sudoKeepAliveStop = nil
+		}
 		if msg.err != nil {
 			if msg.context != "" {
 				a.lastError = fmt.Errorf("%v\n\nOutput:\n%s", msg.err, msg.context)

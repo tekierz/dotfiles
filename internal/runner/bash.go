@@ -65,6 +65,18 @@ func CacheSudoCredentials() error {
 	return cmd.Run()
 }
 
+// RefreshSudo extends the cached sudo timestamp WITHOUT prompting. It runs
+// `sudo -n -v`, which refreshes the credential cache when it is still valid and
+// fails (rather than prompting) once it has expired. It is used by the install
+// keep-alive loop so a long non-interactive install does not hit an expired
+// sudo timestamp mid-run (C16). stdin is left detached so it can never block
+// waiting for a password.
+func RefreshSudo() error {
+	cmd := exec.Command("sudo", "-n", "-v")
+	cmd.Stdin = nil
+	return cmd.Run()
+}
+
 // StreamingCmd wraps an exec.Cmd with real-time output streaming
 type StreamingCmd struct {
 	Cmd    *exec.Cmd

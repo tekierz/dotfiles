@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/scripts"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
@@ -59,6 +60,17 @@ func (a *App) startInstallation() tea.Cmd {
 	// teardownStream() can cancel it.
 	ctx, cancel := context.WithCancel(context.Background())
 	a.streamCancel = cancel
+
+	// On Linux the install runs many `sudo apt/pacman ...` steps non-interactively
+	// (Stdin=nil), so the sudo timestamp (~5 min default) can expire during a long
+	// multi-package install and a later step fails with "sudo: a password is
+	// required" (C16). When sudo is needed and already cached, start a keep-alive
+	// goroutine that refreshes the timestamp periodically. It is a no-op on macOS
+	// (Homebrew, no sudo) and is stopped on BOTH normal completion (installDoneMsg)
+	// and cancel/teardown (teardownStream), so it never leaks past the install.
+	if runner.NeedsSudo() && runner.CheckSudoCached() {
+		a.sudoKeepAliveStop = startSudoKeepAlive(refreshSudo)
+	}
 
 	// Snapshot the values the worker needs so it never reads App fields after
 	// this point (they may be mutated by the Update loop concurrently). The

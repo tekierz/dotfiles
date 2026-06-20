@@ -39,6 +39,13 @@ func (a *App) teardownStream() {
 		a.streamCancel()
 		a.streamCancel = nil
 	}
+	// Stop the sudo keep-alive goroutine (C16) on cancel/teardown so it never
+	// outlives the install. The stop func blocks until the goroutine exits and is
+	// a no-op when none is running (or on non-Linux).
+	if a.sudoKeepAliveStop != nil {
+		a.sudoKeepAliveStop()
+		a.sudoKeepAliveStop = nil
+	}
 }
 
 // --- Update (package update) streaming -------------------------------------
