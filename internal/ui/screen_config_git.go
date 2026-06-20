@@ -122,7 +122,7 @@ func (s *configGitScreen) View(width, height int) string {
 	}
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
-	help := HelpStyle.Render("↑↓ navigate • ←→ select • space toggle • esc back")
+	help := s.footer()
 	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return PlaceWithBackground(

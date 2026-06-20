@@ -42,6 +42,13 @@ func (s *configFieldNav) ID() Screen { return s.id }
 // Init returns any initial commands (none on entry).
 func (s *configFieldNav) Init() tea.Cmd { return nil }
 
+// footer returns the pre-rendered help line for all field-nav config screens.
+// Accurate to handleMsg: up/down move, left/right/space change, enter/esc back.
+// Do NOT advertise "enter select" — enter calls back(), not adjust().
+func (s *configFieldNav) footer() string {
+	return HelpStyle.Render("↑↓ navigate • ←→/space change • enter/esc back")
+}
+
 // back resets the focused field and returns to the deep-dive menu through the
 // manager. Mirrors the legacy "esc/enter" behavior (configFieldIndex = 0).
 //
@@ -443,6 +450,20 @@ func (s *configListNav) ID() Screen { return s.id }
 
 // Init returns any initial commands (none on entry).
 func (s *configListNav) Init() tea.Cmd { return nil }
+
+// footer returns the pre-rendered help line for list-nav screens.
+// Accurate to handleMsg: up/down move, space toggles, enter/esc back.
+// Do NOT say "save & back" — persistence only occurs in standalone mode (C27).
+func (s *configListNav) footer() string {
+	return HelpStyle.Render("↑↓ navigate • space toggle • enter/esc back")
+}
+
+// footerInstalled returns the pre-rendered help line for list-nav screens that
+// show install-state color coding (macapps, clitools, cliutilities, guiapps,
+// utilities).
+func (s *configListNav) footerInstalled() string {
+	return HelpStyle.Render("↑↓ navigate • space toggle • enter/esc back • yellow = installed")
+}
 
 // back resets the selection index and returns to the deep-dive menu.
 func (s *configListNav) back() tea.Cmd {

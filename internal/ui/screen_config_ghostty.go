@@ -154,7 +154,7 @@ func (s *configGhosttyScreen) View(width, height int) string {
 	))
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
-	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • enter/esc save & back")
+	help := s.footer()
 	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return PlaceWithBackground(

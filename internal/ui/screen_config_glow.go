@@ -99,7 +99,7 @@ func (s *configGlowScreen) View(width, height int) string {
 	rec.write(fmt.Sprintf("    ◀ %s ▶", widthStyle.Render(fmt.Sprintf("%d chars", cfg.GlowWidth))))
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
-	help := HelpStyle.Render("↑↓ navigate • ←→ adjust • esc back")
+	help := s.footer()
 	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(

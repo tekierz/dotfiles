@@ -199,7 +199,8 @@ func (s *configClaudeCodeScreen) View(width, height int) string {
 	}
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
-	help := HelpStyle.Render("↑↓ navigate • space toggle • esc back")
+	// Use the canonical list-nav footer text (matches configListNav.footer()).
+	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc back")
 	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(

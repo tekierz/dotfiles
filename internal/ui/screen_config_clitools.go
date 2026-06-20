@@ -125,7 +125,7 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 	}
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
-	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc save & back • yellow = installed")
+	help := s.footerInstalled()
 	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(
