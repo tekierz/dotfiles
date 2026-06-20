@@ -600,13 +600,14 @@ func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			a.usersPane = usersPaneSettings
 			// Calculate which field was clicked. renderUsersSettingsPane draws an
 			// EXTRA description line immediately after the currently-SELECTED field
-			// (when it has a non-empty description), so every field rendered BELOW
-			// the selected one is shifted down by one row. Account for that shift
-			// when mapping the click back to a field index (C19).
+			// (when it has a non-empty description), but ONLY when the settings pane
+			// is active (usersPane == usersPaneSettings). Guard on that same
+			// condition so the hit map only compensates for a description line that
+			// was actually drawn (C19 first-click guard).
 			fields := a.getUserFields()
 			fieldIdx := m.Y - firstRowY
 			sel := a.usersFieldIndex
-			if sel >= 0 && sel < len(fields) && fields[sel].description != "" {
+			if a.usersPane == usersPaneSettings && sel >= 0 && sel < len(fields) && fields[sel].description != "" {
 				descRow := sel + 1 // the inserted description line's relative row
 				switch {
 				case fieldIdx == descRow:
@@ -627,6 +628,15 @@ func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
+// minUsersWidth/minUsersHeight are the smallest terminal dimensions at which
+// the dual-pane layout can meaningfully render. Below these the screen falls
+// back to a "too small" stub. The thresholds mirror the clamps used by other
+// screens (Manage, Update, Hotkeys) that also have multi-pane layouts.
+const (
+	minUsersWidth  = 10
+	minUsersHeight = 5
+)
+
 // View renders the Users management screen. It ports renderUsersDualPane,
 // reading the live App state (the layout uses a.width/a.height, kept in sync
 // with the manager's ctx on WindowSizeMsg). The width/height args are accepted
@@ -641,13 +651,21 @@ func (s *usersScreen) View(width, height int) string {
 		a.width, a.height = width, height
 	}
 
+	// Guard against tiny positive dimensions that would produce negative derived
+	// widths/heights (and panic in strings.Repeat). Other screens use the same
+	// "too small" fall-through; mirror that idiom here.
+	if a.width < minUsersWidth || a.height < minUsersHeight {
+		return "Loading..."
+	}
+
 	// Tab bar at top.
 	tabBar := RenderTabBar(ScreenUsers, a.width)
 
-	// Calculate pane dimensions
-	leftWidth := a.width / 3
-	rightWidth := a.width - leftWidth - 3 // -3 for separator
-	contentHeight := a.height - 4         // Tab bar + status line
+	// Calculate pane dimensions. Clamp all derived values to ≥0 so that any
+	// future resize race cannot produce a negative strings.Repeat count.
+	leftWidth := maxInt(0, a.width/3)
+	rightWidth := maxInt(0, a.width-leftWidth-3) // -3 for separator
+	contentHeight := maxInt(0, a.height-4)       // Tab bar + status line
 
 	// Left pane: user list
 	leftPane := a.renderUsersListPane(leftWidth, contentHeight)
@@ -655,10 +673,13 @@ func (s *usersScreen) View(width, height int) string {
 	// Right pane: user settings
 	rightPane := a.renderUsersSettingsPane(rightWidth, contentHeight)
 
-	// Separator
-	sep := lipgloss.NewStyle().
-		Foreground(ColorBorder).
-		Render(strings.Repeat("│\n", contentHeight))
+	// Separator — guard against the (now-clamped) zero case.
+	sep := ""
+	if contentHeight > 0 {
+		sep = lipgloss.NewStyle().
+			Foreground(ColorBorder).
+			Render(strings.Repeat("│\n", contentHeight))
+	}
 
 	// Join panes
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, sep, rightPane)
