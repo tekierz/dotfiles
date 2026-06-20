@@ -568,16 +568,35 @@ func loadBackupsCmd() tea.Cmd {
 	}
 }
 
-// countBackupFiles counts files in a backup directory
+// countBackupFiles counts backed-up dotfiles in a backup directory.
+// The manifest (backup.ManifestName) is metadata, not a backed-up dotfile, so
+// it is excluded so the displayed count matches what restore will actually write.
 func countBackupFiles(path string) int {
 	count := 0
 	_ = filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
-		if info != nil && !info.IsDir() {
+		if info != nil && !info.IsDir() && info.Name() != backup.ManifestName {
 			count++
 		}
 		return nil
 	})
 	return count
+}
+
+// makeUniqueBackupDir returns a path inside backupsDir that does not yet exist,
+// starting with baseName. If baseName is already taken, it appends _2, _3, etc.
+// until a free slot is found. This prevents two backups created in the same
+// second from silently overwriting each other.
+func makeUniqueBackupDir(backupsDir, baseName string) string {
+	candidate := filepath.Join(backupsDir, baseName)
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		return candidate
+	}
+	for i := 2; ; i++ {
+		candidate = filepath.Join(backupsDir, fmt.Sprintf("%s_%d", baseName, i))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
 }
 
 // calcDirSize calculates the total size of files in a directory
@@ -650,9 +669,13 @@ func createBackupCmd() tea.Cmd {
 			return backupCreateDoneMsg{err: err}
 		}
 
-		// Create backup directory with timestamp
+		// Derive a unique backup directory: start with the current second as the
+		// name, then append _2, _3, etc. if a same-second backup already exists
+		// so two rapid backups never silently overwrite each other.
 		timestamp := time.Now().Format("2006-01-02_15-04-05")
-		backupDir := filepath.Join(config.ConfigDir(), "backups", timestamp)
+		backupsDir := filepath.Join(config.ConfigDir(), "backups")
+		backupDir := makeUniqueBackupDir(backupsDir, timestamp)
+		backupName := filepath.Base(backupDir)
 
 		// backup.Create is the single source of truth for the capture loop and
 		// reports an honest result: an error when zero files were captured or
@@ -664,7 +687,7 @@ func createBackupCmd() tea.Cmd {
 		// Run backup cleanup based on settings
 		cleanupBackups()
 
-		return backupCreateDoneMsg{name: timestamp, err: nil}
+		return backupCreateDoneMsg{name: backupName, err: nil}
 	}
 }
 
@@ -771,9 +794,13 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 		return autoBackupResult{enabled: true}, err
 	}
 
-	// Create backup directory with timestamp
+	// Derive a unique backup directory (same collision logic as createBackupCmd).
+	// Auto-backups use an "_auto" suffix to distinguish them visually from
+	// manual backups; additional _2, _3, etc. suffixes guard against same-second
+	// collisions (two installs started in the same second).
 	timestamp := time.Now().Format("2006-01-02_15-04-05") + "_auto"
-	backupDir := filepath.Join(config.ConfigDir(), "backups", timestamp)
+	backupsDir := filepath.Join(config.ConfigDir(), "backups")
+	backupDir := makeUniqueBackupDir(backupsDir, timestamp)
 
 	// backup.Create returns an error when zero files were captured or the
 	// manifest write fails, so a "success" here genuinely means a rollback
