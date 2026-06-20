@@ -108,6 +108,21 @@ func (b *BrewManager) CheckOutdated() ([]Package, error) {
 		return nil, err
 	}
 
+	return parseBrewOutdated(out.Bytes())
+}
+
+// parseBrewOutdated parses the JSON emitted by `brew outdated --json=v2
+// --greedy` into Package records. It is extracted from CheckOutdated so that
+// unit tests can exercise the real parsing and filtering logic without
+// shelling out to brew.
+//
+// Rules:
+//   - Pinned formulae are excluded (brew upgrade refuses them and would fail
+//     the whole batch).
+//   - Casks whose current_version is empty are excluded (some auto-updating
+//     casks report "" even with --greedy; including them produces an
+//     unactionable record).
+func parseBrewOutdated(data []byte) ([]Package, error) {
 	var outdated struct {
 		Formulae []struct {
 			Name              string   `json:"name"`
@@ -122,7 +137,7 @@ func (b *BrewManager) CheckOutdated() ([]Package, error) {
 		} `json:"casks"`
 	}
 
-	if err := json.Unmarshal(out.Bytes(), &outdated); err != nil {
+	if err := json.Unmarshal(data, &outdated); err != nil {
 		return nil, err
 	}
 
