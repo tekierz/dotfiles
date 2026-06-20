@@ -161,14 +161,24 @@ type fieldLayoutRecorder struct {
 
 // configBoxHFrame is the horizontal frame (border + padding) configBoxStyle adds
 // on each side: RoundedBorder() = 1 col + Padding(1, 2) = 2 cols.
+//
+// configBoxWrapInset is the horizontal padding only (no border). This is the
+// inset that lipgloss uses when wrapping content: configBoxStyle.Width(w) wraps
+// at w-2*padding = w-4, because the border is rendered OUTSIDE .Width() and
+// does not narrow the content area. Use configBoxHFrame for X-bounds (the
+// border occupies a screen column), but configBoxWrapInset for line-break
+// counting so the recorder matches how the box actually wraps.
 const (
-	configBoxHFrame = 3 // border(1) + horizontal padding(2)
-	configBoxVFrame = 2 // border(1) + vertical padding(1) on each edge (top/bottom)
+	configBoxHFrame    = 3 // border(1) + horizontal padding(2), used for X-bounds
+	configBoxVFrame    = 2 // border(1) + vertical padding(1) on each edge (top/bottom)
+	configBoxWrapInset = 2 // horizontal padding only, used for wrap/line-break counting
 )
 
 // newFieldLayoutRecorder creates a recorder for a box of the given outer width.
 func newFieldLayoutRecorder(boxWidth int) *fieldLayoutRecorder {
-	inner := boxWidth - 2*configBoxHFrame
+	// The border is outside .Width(), so lipgloss wraps content at
+	// boxWidth - 2*padding (not boxWidth - 2*(border+padding)).
+	inner := boxWidth - 2*configBoxWrapInset
 	if inner < 1 {
 		inner = 1
 	}

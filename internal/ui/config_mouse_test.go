@@ -249,6 +249,79 @@ func TestConfigFieldClickFamily(t *testing.T) {
 	}
 }
 
+// TestConfigFieldClickWidthSweep verifies that click-to-select resolves
+// correctly across a wide range of terminal widths (40-120). For each width it
+// renders the Ghostty screen and the Git screen (which has a section header),
+// then asserts that each field's rendered label row falls within the field's
+// recorded extent so a click on that row resolves to that field.
+//
+// Before the wrap-inset fix the recorder wrapped at boxWidth-6 (border+padding)
+// while lipgloss wraps at boxWidth-4 (padding only), causing misalignment at
+// widths such as 41-45 and 89-90 where a selector line falls in the 2-column
+// gap. After the fix (configBoxWrapInset=2) no misalignment occurs.
+func TestConfigFieldClickWidthSweep(t *testing.T) {
+	const h = 60
+
+	type fieldCase struct {
+		label string
+		idx   int
+	}
+
+	screens := []struct {
+		name   string
+		build  func(ctx *ScreenContext) ScreenHandler
+		fields []fieldCase
+	}{
+		{
+			name:  "ghostty",
+			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigGhosttyScreen(ctx) },
+			fields: []fieldCase{
+				{"Font Family", 0},
+				{"Font Size", 1},
+				{"Background Opacity", 2},
+				{"Blur Radius", 3},
+				{"Scrollback Lines", 4},
+				{"Cursor Style", 5},
+				{"New Tab Keybinding", 6},
+			},
+		},
+		{
+			name:  "git",
+			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigGitScreen(ctx) },
+			fields: []fieldCase{
+				{"Delta Diff View", 0},
+				{"Default Branch", 1},
+				{"Pull with Rebase", 2},
+			},
+		},
+	}
+
+	for w := 40; w <= 120; w++ {
+		for _, sc := range screens {
+			ctx := newDeepDiveContext(t)
+			ctx.app.width, ctx.app.height = w, h
+			ctx.Width, ctx.Height = w, h
+			screen := sc.build(ctx)
+			out := screen.View(w, h)
+
+			for _, fc := range sc.fields {
+				y := labelLineY(t, out, fc.label)
+				if y < 0 {
+					// Label not visible at this width (e.g. too narrow); skip.
+					continue
+				}
+
+				ctx.app.configFieldIndex = 999
+				screen.Update(clickAt(w/2, y))
+				if ctx.app.configFieldIndex != fc.idx {
+					t.Errorf("w=%d screen=%s: click on %q (Y=%d) => field %d, want %d",
+						w, sc.name, fc.label, y, ctx.app.configFieldIndex, fc.idx)
+				}
+			}
+		}
+	}
+}
+
 // TestConfigClaudeCodeClick verifies the Claude Code screen's geometry-correct
 // click handler: clicking the install toggle row selects index -1, and clicking
 // an MCP row (below the "MCP Servers" header block) selects that MCP's index.
