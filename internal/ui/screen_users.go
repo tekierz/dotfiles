@@ -587,6 +587,12 @@ func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 	// Handle list clicks.
 	if m.Button == tea.MouseButtonLeft && m.Action == tea.MouseActionPress {
+		// Capture the pane active during the LAST render before any reassignment.
+		// The description-line compensation below must reference this value, not
+		// the post-click pane (which would always be usersPaneSettings after the
+		// assignment on line 600, making the guard a tautology).
+		prevPane := a.usersPane
+
 		// Check if click is in the left pane (user list).
 		leftPaneWidth := a.width / 3
 		if m.X < leftPaneWidth {
@@ -601,13 +607,13 @@ func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			// Calculate which field was clicked. renderUsersSettingsPane draws an
 			// EXTRA description line immediately after the currently-SELECTED field
 			// (when it has a non-empty description), but ONLY when the settings pane
-			// is active (usersPane == usersPaneSettings). Guard on that same
-			// condition so the hit map only compensates for a description line that
-			// was actually drawn (C19 first-click guard).
+			// was active during the last render (prevPane == usersPaneSettings). On a
+			// first click that switches INTO the settings pane (prevPane==usersPaneList)
+			// no description line was drawn, so the shift must NOT apply (C19).
 			fields := a.getUserFields()
 			fieldIdx := m.Y - firstRowY
 			sel := a.usersFieldIndex
-			if a.usersPane == usersPaneSettings && sel >= 0 && sel < len(fields) && fields[sel].description != "" {
+			if prevPane == usersPaneSettings && sel >= 0 && sel < len(fields) && fields[sel].description != "" {
 				descRow := sel + 1 // the inserted description line's relative row
 				switch {
 				case fieldIdx == descRow:
