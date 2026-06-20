@@ -23,7 +23,7 @@ NAV_STYLE="emacs"  # "emacs" (default, beginner-friendly) or "vim"
 THEME="catppuccin-mocha"  # Default theme
 
 # Supported themes
-SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin-macchiato dracula gruvbox-dark gruvbox-light nord tokyo-night solarized-dark solarized-light monokai rose-pine"
+SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin-macchiato dracula gruvbox-dark gruvbox-light nord tokyo-night solarized-dark solarized-light monokai rose-pine everforest"
 
 # Settings directory
 DOTFILES_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
@@ -270,8 +270,26 @@ load_theme_colors() {
             T_BAT_THEME="base16"; T_DELTA_THEME="base16"
             T_IS_LIGHT=false
             ;;
+        everforest)
+            # Everforest Dark Medium - Green, nature-inspired (matches Go TUI)
+            T_BG="#2d353b"; T_FG="#d3c6aa"
+            T_CURSOR="#d3c6aa"; T_CURSOR_TEXT="#2d353b"
+            T_SEL_BG="#475258"; T_SEL_FG="#d3c6aa"
+            T_BLACK="#475258"; T_BRIGHT_BLACK="#4b565c"
+            T_RED="#e67e80"; T_BRIGHT_RED="#e67e80"
+            T_GREEN="#a7c080"; T_BRIGHT_GREEN="#a7c080"
+            T_YELLOW="#dbbc7f"; T_BRIGHT_YELLOW="#dbbc7f"
+            T_BLUE="#7fbbb3"; T_BRIGHT_BLUE="#7fbbb3"
+            T_MAGENTA="#d699b6"; T_BRIGHT_MAGENTA="#d699b6"
+            T_CYAN="#83c092"; T_BRIGHT_CYAN="#83c092"
+            T_WHITE="#d3c6aa"; T_BRIGHT_WHITE="#fffdf5"
+            T_ACCENT="#7fbbb3"; T_ACCENT2="#a7c080"; T_ACCENT3="#e67e80"
+            T_SURFACE="#343f44"; T_OVERLAY="#3d484d"; T_MUTED="#859289"
+            T_BAT_THEME="base16"; T_DELTA_THEME="base16"
+            T_IS_LIGHT=false
+            ;;
         *)
-            echo "Unknown theme: $theme"
+            echo "Unknown theme: $theme" >&2
             return 1
             ;;
     esac
@@ -580,7 +598,7 @@ EOF
             shift
             ;;
         --theme)
-            if [[ -n "$2" && ! "$2" =~ ^- ]]; then
+            if [[ -n "${2:-}" && ! "${2:-}" =~ ^- ]]; then
                 THEME="$2"
                 # Validate theme
                 if [[ ! " $SUPPORTED_THEMES " =~ " $THEME " ]]; then
@@ -775,7 +793,9 @@ list_backups() {
         local name=$(basename "$backup")
         local manifest="$backup/manifest.txt"
         if [[ -f "$manifest" ]]; then
-            local files=$(grep -c "|yes" "$manifest" 2>/dev/null || echo "0")
+            # grep -c already prints 0 (and exits 1) on no match; keep the count
+            # on one line and swallow the exit status so `set -e` stays happy.
+            local files; files=$(grep -c "|yes" "$manifest" 2>/dev/null || true); files=${files:-0}
             echo -e "  ${CYAN}$name${NC} - $files files backed up"
             ((count++))
         fi
@@ -791,6 +811,8 @@ list_backups() {
 # mirroring the HasPrefix(dstPath, home) guard in the Go restore path. This is
 # defense-in-depth against a corrupted/tampered manifest carrying a stray
 # absolute path like "/" or "/etc/passwd".
+# NOTE: kept identical to the same function in the embedded CLI heredoc; long-term
+# both copies should be generated from one source.
 is_safe_restore_path() {
     local target="$1"
     # Reject empty, relative, or traversal-bearing paths outright.
@@ -1300,7 +1322,7 @@ command -v ncdu &> /dev/null && alias diskuse='ncdu'
 command -v bandwhich &> /dev/null && alias bandwidth='bandwhich'
 command -v gping &> /dev/null && alias ping='gping'
 command -v doggo &> /dev/null && alias dig='doggo'
-command -v trippy &> /dev/null && alias trace='trip'
+command -v trip &> /dev/null && alias trace='trip'
 
 # zoxide (smarter cd)
 if command -v zoxide &> /dev/null; then
@@ -1408,10 +1430,23 @@ bindkey '^x^e' edit-command-line
 ZSHRC_EMACS_EOF
     fi
 
-    # Replace FZF colors placeholder with theme-specific colors
-    local fzf_colors
-    fzf_colors=$(generate_fzf_colors)
-    sed_i "s|# FZF_COLORS_PLACEHOLDER|$fzf_colors|" ~/.zshrc
+    # Replace FZF colors placeholder with theme-specific colors.
+    # The generated block is multi-line and contains "\" line-continuations, so
+    # splicing it via `sed s|...|...|` would mangle the backslash/newlines. Read
+    # the block from a temp file and substitute the placeholder line with awk,
+    # which avoids both that breakage and sed delimiter/& injection.
+    local fzf_block_file
+    fzf_block_file=$(mktemp)
+    generate_fzf_colors > "$fzf_block_file"
+    awk -v blockfile="$fzf_block_file" '
+        /# FZF_COLORS_PLACEHOLDER/ {
+            while ((getline line < blockfile) > 0) print line
+            close(blockfile)
+            next
+        }
+        { print }
+    ' ~/.zshrc > ~/.zshrc.tmp && mv ~/.zshrc.tmp ~/.zshrc
+    rm -f "$fzf_block_file"
 
     print_success "Zsh configured ($NAV_STYLE navigation, $THEME theme)"
 }
@@ -2329,7 +2364,7 @@ CAFF_EOF
 VERSION="1.1.0"
 DOTFILES_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
 DOTFILES_USERS_DIR="$DOTFILES_CONFIG_DIR/users"
-SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin-macchiato dracula gruvbox-dark gruvbox-light nord tokyo-night solarized-dark solarized-light monokai rose-pine"
+SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin-macchiato dracula gruvbox-dark gruvbox-light nord tokyo-night solarized-dark solarized-light monokai rose-pine everforest"
 
 # Colors
 RED='\033[0;31m'
@@ -2399,6 +2434,26 @@ load_theme_colors() {
             T_ACCENT="#1e66f5"; T_ACCENT2="#40a02b"; T_ACCENT3="#d20f39"
             T_SURFACE="#ccd0da"; T_OVERLAY="#bcc0cc"; T_MUTED="#8c8fa1"
             T_BAT_THEME="Catppuccin Latte"; T_DELTA_THEME="Catppuccin Latte"; T_IS_LIGHT=true ;;
+        catppuccin-frappe)
+            T_BG="#303446"; T_FG="#c6d0f5"; T_CURSOR="#f2d5cf"; T_CURSOR_TEXT="#303446"
+            T_SEL_BG="#626880"; T_SEL_FG="#c6d0f5"
+            T_BLACK="#51576d"; T_BRIGHT_BLACK="#626880"; T_RED="#e78284"; T_BRIGHT_RED="#e78284"
+            T_GREEN="#a6d189"; T_BRIGHT_GREEN="#a6d189"; T_YELLOW="#e5c890"; T_BRIGHT_YELLOW="#e5c890"
+            T_BLUE="#8caaee"; T_BRIGHT_BLUE="#8caaee"; T_MAGENTA="#f4b8e4"; T_BRIGHT_MAGENTA="#f4b8e4"
+            T_CYAN="#81c8be"; T_BRIGHT_CYAN="#81c8be"; T_WHITE="#b5bfe2"; T_BRIGHT_WHITE="#a5adce"
+            T_ACCENT="#8caaee"; T_ACCENT2="#a6d189"; T_ACCENT3="#e78284"
+            T_SURFACE="#414559"; T_OVERLAY="#51576d"; T_MUTED="#737994"
+            T_BAT_THEME="Catppuccin Frappe"; T_DELTA_THEME="Catppuccin Frappe"; T_IS_LIGHT=false ;;
+        catppuccin-macchiato)
+            T_BG="#24273a"; T_FG="#cad3f5"; T_CURSOR="#f4dbd6"; T_CURSOR_TEXT="#24273a"
+            T_SEL_BG="#5b6078"; T_SEL_FG="#cad3f5"
+            T_BLACK="#494d64"; T_BRIGHT_BLACK="#5b6078"; T_RED="#ed8796"; T_BRIGHT_RED="#ed8796"
+            T_GREEN="#a6da95"; T_BRIGHT_GREEN="#a6da95"; T_YELLOW="#eed49f"; T_BRIGHT_YELLOW="#eed49f"
+            T_BLUE="#8aadf4"; T_BRIGHT_BLUE="#8aadf4"; T_MAGENTA="#f5bde6"; T_BRIGHT_MAGENTA="#f5bde6"
+            T_CYAN="#8bd5ca"; T_BRIGHT_CYAN="#8bd5ca"; T_WHITE="#b8c0e0"; T_BRIGHT_WHITE="#a5adcb"
+            T_ACCENT="#8aadf4"; T_ACCENT2="#a6da95"; T_ACCENT3="#ed8796"
+            T_SURFACE="#363a4f"; T_OVERLAY="#494d64"; T_MUTED="#6e738d"
+            T_BAT_THEME="Catppuccin Macchiato"; T_DELTA_THEME="Catppuccin Macchiato"; T_IS_LIGHT=false ;;
         dracula)
             T_BG="#282a36"; T_FG="#f8f8f2"; T_CURSOR="#f8f8f2"; T_CURSOR_TEXT="#282a36"
             T_SEL_BG="#44475a"; T_SEL_FG="#f8f8f2"
@@ -2489,8 +2544,19 @@ load_theme_colors() {
             T_ACCENT="#c4a7e7"; T_ACCENT2="#9ccfd8"; T_ACCENT3="#eb6f92"
             T_SURFACE="#1f1d2e"; T_OVERLAY="#26233a"; T_MUTED="#6e6a86"
             T_BAT_THEME="base16"; T_DELTA_THEME="base16"; T_IS_LIGHT=false ;;
-        *) # Default catppuccin variants
-            load_theme_colors "catppuccin-mocha" ;;
+        everforest)
+            T_BG="#2d353b"; T_FG="#d3c6aa"; T_CURSOR="#d3c6aa"; T_CURSOR_TEXT="#2d353b"
+            T_SEL_BG="#475258"; T_SEL_FG="#d3c6aa"
+            T_BLACK="#475258"; T_BRIGHT_BLACK="#4b565c"; T_RED="#e67e80"; T_BRIGHT_RED="#e67e80"
+            T_GREEN="#a7c080"; T_BRIGHT_GREEN="#a7c080"; T_YELLOW="#dbbc7f"; T_BRIGHT_YELLOW="#dbbc7f"
+            T_BLUE="#7fbbb3"; T_BRIGHT_BLUE="#7fbbb3"; T_MAGENTA="#d699b6"; T_BRIGHT_MAGENTA="#d699b6"
+            T_CYAN="#83c092"; T_BRIGHT_CYAN="#83c092"; T_WHITE="#d3c6aa"; T_BRIGHT_WHITE="#fffdf5"
+            T_ACCENT="#7fbbb3"; T_ACCENT2="#a7c080"; T_ACCENT3="#e67e80"
+            T_SURFACE="#343f44"; T_OVERLAY="#3d484d"; T_MUTED="#859289"
+            T_BAT_THEME="base16"; T_DELTA_THEME="base16"; T_IS_LIGHT=false ;;
+        *)
+            echo "Unknown theme: $theme" >&2
+            return 1 ;;
     esac
 }
 
@@ -2933,13 +2999,26 @@ update_fzf() {
         fi
         # Replace the marker-delimited fzf block idempotently: clear everything
         # between the >>> and <<< markers (keeping the markers), then re-insert
-        # the freshly generated block after the opening marker. This avoids the
-        # multi-line block leaking stale/duplicate exports on repeated switches.
-        sed_i '/^# >>> dotfiles fzf colors/,/^# <<< dotfiles fzf colors/{/^# >>> dotfiles fzf colors/b
-/^# <<< dotfiles fzf colors/b
-d
-}' ~/.zshrc
-        sed_i "s|^# >>> dotfiles fzf colors.*|&\n$fzf_colors|" ~/.zshrc
+        # the freshly generated block after the opening marker. The block is
+        # multi-line with "\" line-continuations, so we splice it with awk reading
+        # from a temp file instead of `sed s|...|&\n$fzf_colors|`, which would
+        # mangle the backslash/newlines and is fragile to &/delimiter injection.
+        local fzf_block_file
+        fzf_block_file=$(mktemp)
+        printf '%s\n' "$fzf_colors" > "$fzf_block_file"
+        awk -v blockfile="$fzf_block_file" '
+            /^# <<< dotfiles fzf colors/ { skip=0 }
+            skip { next }
+            /^# >>> dotfiles fzf colors/ {
+                print
+                while ((getline line < blockfile) > 0) print line
+                close(blockfile)
+                skip=1
+                next
+            }
+            { print }
+        ' ~/.zshrc > ~/.zshrc.tmp && mv ~/.zshrc.tmp ~/.zshrc
+        rm -f "$fzf_block_file"
     fi
 }
 
@@ -3210,7 +3289,9 @@ list_backups() {
         local name=$(basename "$backup")
         local manifest="$backup/manifest.txt"
         if [[ -f "$manifest" ]]; then
-            local files=$(grep -c "|yes" "$manifest" 2>/dev/null || echo "0")
+            # grep -c already prints 0 (and exits 1) on no match; keep the count
+            # on one line and swallow the exit status so `set -e` stays happy.
+            local files; files=$(grep -c "|yes" "$manifest" 2>/dev/null || true); files=${files:-0}
             echo -e "  ${CYAN}$name${NC} - $files files backed up"
             ((count++))
         fi
@@ -3219,6 +3300,33 @@ list_backups() {
     if [[ $count -eq 0 ]]; then
         echo "  No backups found"
     fi
+}
+
+# Validate that a manifest destination path is safe to act on during restore.
+# Returns 0 only if the (canonicalized) path stays within the user's $HOME,
+# mirroring the HasPrefix(dstPath, home) guard in the Go restore path. This is
+# defense-in-depth against a corrupted/tampered manifest carrying a stray
+# absolute path like "/" or "/etc/passwd".
+# NOTE: kept identical to the same function in dotfiles-setup; long-term both
+# copies should be generated from one source.
+is_safe_restore_path() {
+    local target="$1"
+    # Reject empty, relative, or traversal-bearing paths outright.
+    [[ -z "$target" ]] && return 1
+    [[ "$target" != /* ]] && return 1
+    case "$target" in
+        *..*) return 1 ;;
+    esac
+
+    # The manifest stores destinations as literal "$HOME/..." paths, but $HOME may
+    # itself be a symlink, so also accept the canonicalized home. The target may
+    # not exist yet during a restore, so compare lexically rather than resolving it.
+    local canon_home
+    canon_home=$(cd "$HOME" 2>/dev/null && pwd -P) || canon_home="$HOME"
+
+    # The path must be $HOME (literal or canonical) itself or live beneath it.
+    [[ "$target" == "$HOME" || "$target" == "$HOME"/* ]] && return 0
+    [[ "$target" == "$canon_home" || "$target" == "$canon_home"/* ]]
 }
 
 # Restore from a backup session
