@@ -164,7 +164,10 @@ func IsPackageInstalled(name string) bool {
 	return mgr.IsInstalled(name)
 }
 
-// DotfilesPackages returns the list of packages managed by dotfiles
+// DotfilesPackages is the canonical dotfiles package allow-list using macOS/Arch
+// names. On Debian/Pi several packages use different names (e.g. fd -> fd-find);
+// use DotfilesDebianPackages for that platform and CheckDotfilesUpdates for
+// platform-aware filtering.
 var DotfilesPackages = []string{
 	// Core shell
 	"zsh",
@@ -200,16 +203,62 @@ var DotfilesPackages = []string{
 	"fswatch",
 }
 
-// CheckDotfilesUpdates checks for updates only for dotfiles-managed packages
+// DotfilesDebianPackages is the Debian/Pi variant of the allow-list, using the
+// stock Debian package names. Packages unavailable in stock repos are omitted
+// so the filter does not match phantom updates (glow, lazygit, lazydocker).
+var DotfilesDebianPackages = []string{
+	// Core shell
+	"zsh",
+	"zsh-syntax-highlighting",
+	"zsh-autosuggestions",
+	// zsh-completions not packaged separately on Debian
+
+	// Terminal tools
+	"tmux",
+	"neovim",
+	"fzf",
+	"ripgrep",
+	"fd-find", // Debian name for fd
+	"bat",
+	"eza",
+	"zoxide",
+	"btop",
+	// glow omitted: not in stock Debian repos (Charm keyring required)
+
+	// Git tools
+	"git",
+	"git-delta",
+	// lazygit omitted: not in stock Debian repos
+	// lazydocker omitted: not in stock Debian repos
+
+	// Utilities
+	"fastfetch",
+	"ncdu",
+	"fswatch",
+	// tlrc, duf, dust omitted: not in stock Debian repos
+}
+
+// CheckDotfilesUpdates checks for updates only for dotfiles-managed packages.
+// On Debian/Pi, Debian-specific package names (e.g., fd-find instead of fd)
+// are used for filtering so renamed packages are not silently dropped.
 func CheckDotfilesUpdates() ([]Package, error) {
 	allUpdates, err := CheckAllUpdates()
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter to only dotfiles packages
-	dotfilesSet := make(map[string]bool)
-	for _, pkg := range DotfilesPackages {
+	// Pick the allow-list appropriate for the current platform so that
+	// Debian-renamed packages (fd-find etc.) are recognised correctly.
+	var allowList []string
+	switch DetectPlatform() {
+	case PlatformDebian, PlatformPi:
+		allowList = DotfilesDebianPackages
+	default:
+		allowList = DotfilesPackages
+	}
+
+	dotfilesSet := make(map[string]bool, len(allowList))
+	for _, pkg := range allowList {
 		dotfilesSet[pkg] = true
 	}
 

@@ -129,7 +129,11 @@ func NewLMStudioTool() *LMStudioTool {
 			category:    CategoryApp,
 			packages: map[pkg.Platform][]string{
 				pkg.PlatformMacOS: {"lm-studio"},
-				pkg.PlatformArch:  {"lm-studio"},
+				// lm-studio is AUR-only on Arch; use the actual AUR package name so
+				// paru can locate and build it. Plain pacman will not find this in
+				// official repos, but the installer already guards AUR installs behind
+				// the paru availability check.
+				pkg.PlatformArch: {"lmstudio-bin"},
 			},
 			configPaths: []string{},
 			// UI metadata

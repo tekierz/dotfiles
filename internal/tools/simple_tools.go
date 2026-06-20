@@ -139,9 +139,10 @@ var simpleTools = []simpleToolSpec{
 		icon:        "",
 		category:    CategoryContainer,
 		packages: map[pkg.Platform][]string{
-			pkg.PlatformMacOS:  {"lazydocker"},
-			pkg.PlatformArch:   {"lazydocker"},
-			pkg.PlatformDebian: {"lazydocker"},
+			pkg.PlatformMacOS: {"lazydocker"},
+			pkg.PlatformArch:  {"lazydocker"},
+			// lazydocker is not in stock Debian/Ubuntu repos; install via Go or
+			// manually — omitting the Debian entry prevents a guaranteed-failing apt.
 		},
 		configPath:     []string{".config", "lazydocker", "config.yml"},
 		heavy:          true, // Skip on low-memory systems (Pi Zero 2)

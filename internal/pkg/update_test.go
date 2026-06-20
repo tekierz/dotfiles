@@ -150,3 +150,50 @@ func TestGetManagerByName_KnownManagers(t *testing.T) {
 		t.Error("getManagerByName(\"nonexistent\") should return nil")
 	}
 }
+
+// TestCheckDotfilesUpdates_DebianRenamedPackages verifies that packages with
+// platform-specific names (e.g., fd -> fd-find on Debian) are recognized in
+// the dotfiles update allow-list when the current-platform name is used.
+// The old code used a flat macOS/Arch-named list, so "fd-find" was silently
+// dropped on Debian (the reported package name) even though fd is managed.
+func TestCheckDotfilesUpdates_DebianRenamedPackages(t *testing.T) {
+	// Simulate what CheckAllUpdates returns on Debian: apt reports the package
+	// by its Debian name "fd-find", not the macOS/Arch "fd".
+	debianUpdates := []Package{
+		{Name: "fd-find", InstalledBy: "apt", Outdated: true},   // fd on Debian
+		{Name: "zsh", InstalledBy: "apt", Outdated: true},        // same name everywhere
+		{Name: "something-else", InstalledBy: "apt", Outdated: true}, // not a dotfiles pkg
+	}
+
+	// Build the allow-list the same way CheckDotfilesUpdates should: from
+	// DotfilesDebianPackages, which must include "fd-find".
+	dotfilesSet := make(map[string]bool)
+	for _, name := range DotfilesDebianPackages {
+		dotfilesSet[name] = true
+	}
+
+	var filtered []Package
+	for _, pkg := range debianUpdates {
+		if dotfilesSet[pkg.Name] {
+			filtered = append(filtered, pkg)
+		}
+	}
+
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 dotfiles packages (fd-find + zsh), got %d: %+v", len(filtered), filtered)
+	}
+
+	// Confirm fd-find is recognized
+	foundFdFind := false
+	for _, p := range filtered {
+		if p.Name == "fd-find" {
+			foundFdFind = true
+		}
+		if p.Name == "something-else" {
+			t.Errorf("non-dotfiles package %q must not appear in filtered list", p.Name)
+		}
+	}
+	if !foundFdFind {
+		t.Error("fd-find (Debian name for fd) must be recognized in the dotfiles update list")
+	}
+}

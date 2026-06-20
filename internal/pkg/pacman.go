@@ -230,35 +230,63 @@ func (p *PacmanManager) Search(query string) ([]Package, error) {
 		return nil, err
 	}
 
+	return parsePacmanSearch(out.String()), nil
+}
+
+// parsePacmanSearch parses `pacman -Ss` / `paru -Ss` output into Package
+// records. The output format is line-based: header lines have the shape
+// "repo/name version [flags...]" (first field contains '/') and description
+// lines start with whitespace. The old stride-by-2 approach broke when
+// output contained leading blank lines or when paru emitted extra lines.
+// This parser detects headers by the presence of '/' in the first field and
+// accumulates description lines until the next header.
+func parsePacmanSearch(output string) []Package {
 	var packages []Package
-	lines := strings.Split(out.String(), "\n")
-	for i := 0; i < len(lines); i += 2 {
-		if lines[i] == "" {
+	var current *Package
+
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if line == "" {
 			continue
 		}
-		// First line: repo/name version
-		parts := strings.Fields(lines[i])
-		if len(parts) >= 2 {
-			nameParts := strings.Split(parts[0], "/")
-			name := parts[0]
+
+		// A header line's first field contains '/' (e.g. "core/linux 6.9.0-1")
+		fields := strings.Fields(line)
+		if len(fields) >= 1 && strings.Contains(fields[0], "/") {
+			// Flush previous package before starting a new one
+			if current != nil {
+				packages = append(packages, *current)
+			}
+
+			nameParts := strings.SplitN(fields[0], "/", 2)
+			name := fields[0]
 			if len(nameParts) == 2 {
 				name = nameParts[1]
 			}
-
-			desc := ""
-			if i+1 < len(lines) {
-				desc = strings.TrimSpace(lines[i+1])
-			}
-
-			packages = append(packages, Package{
+			current = &Package{
 				Name:        name,
-				Description: desc,
 				InstalledBy: "pacman",
-			})
+			}
+			continue
+		}
+
+		// A description line starts with whitespace; accumulate it
+		if current != nil && len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+			desc := strings.TrimSpace(line)
+			if current.Description == "" {
+				current.Description = desc
+			} else {
+				current.Description += " " + desc
+			}
 		}
 	}
 
-	return packages, nil
+	// Flush last package
+	if current != nil {
+		packages = append(packages, *current)
+	}
+
+	return packages
 }
 
 func (p *PacmanManager) ListInstalled() ([]Package, error) {

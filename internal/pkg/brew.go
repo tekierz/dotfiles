@@ -98,7 +98,9 @@ func (b *BrewManager) GetVersion(pkg string) (string, error) {
 }
 
 func (b *BrewManager) CheckOutdated() ([]Package, error) {
-	cmd := exec.Command(b.brewPath, "outdated", "--json=v2")
+	// --greedy includes auto-updating casks that would otherwise be skipped
+	// by `brew outdated` (they report as up-to-date without this flag).
+	cmd := exec.Command(b.brewPath, "outdated", "--json=v2", "--greedy")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -148,6 +150,11 @@ func (b *BrewManager) CheckOutdated() ([]Package, error) {
 	}
 
 	for _, c := range outdated.Casks {
+		// Guard against auto-updating casks that report an empty current_version
+		// (brew returns "" for some auto-update casks even with --greedy).
+		if c.CurrentVersion == "" {
+			continue
+		}
 		packages = append(packages, Package{
 			Name:           c.Name,
 			CurrentVersion: c.InstalledVersion,

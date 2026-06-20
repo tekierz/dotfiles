@@ -90,11 +90,11 @@ func loadInstallCacheCmd() tea.Cmd {
 		for _, t := range all {
 			found := false
 			if installedPkgs != nil {
-				// Use batch result - check if primary package is installed
-				pkgs := t.Packages()[platform]
-				if len(pkgs) == 0 {
-					pkgs = t.Packages()["all"]
-				}
+				// Use batch result - resolve packages via PackagesForPlatform so
+				// that Raspberry Pi (PlatformPi) falls back to Debian package names
+				// and benefits from the single batched dpkg-query rather than
+				// falling through to per-tool shell-outs.
+				pkgs := tools.PackagesForPlatform(t.Packages(), platform)
 				if len(pkgs) > 0 {
 					if allPackagesInBatch(installedPkgs, pkgs) {
 						installed[t.ID()] = true
@@ -172,10 +172,9 @@ func (a *App) ensureInstallCache() {
 	for _, t := range all {
 		found := false
 		if installedPkgs != nil {
-			pkgs := t.Packages()[platform]
-			if len(pkgs) == 0 {
-				pkgs = t.Packages()["all"]
-			}
+			// Use PackagesForPlatform so Raspberry Pi resolves to the Debian
+			// package set and hits the batched dpkg-query path.
+			pkgs := tools.PackagesForPlatform(t.Packages(), platform)
 			if len(pkgs) > 0 {
 				if allPackagesInBatch(installedPkgs, pkgs) {
 					a.manageInstalled[t.ID()] = true

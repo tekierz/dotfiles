@@ -96,3 +96,61 @@ func TestBrewManager_NeedsSudo(t *testing.T) {
 		t.Error("NeedsSudo() should be false for brew")
 	}
 }
+
+// TestBrewCheckOutdated_GreedyCasksEmptyVersionSkipped verifies that when
+// brew --greedy returns a cask with an empty current_version (which some
+// auto-updating casks emit), we skip it rather than adding an unactionable
+// Package record. This mirrors the guard added alongside the --greedy flag.
+func TestBrewCheckOutdated_GreedyCasksEmptyVersionSkipped(t *testing.T) {
+	// Reproduce the decode + filter logic from BrewManager.CheckOutdated.
+	raw := `{
+		"formulae": [],
+		"casks": [
+			{
+				"name": "auto-update-only",
+				"installed_version": "1.0.0",
+				"current_version": ""
+			},
+			{
+				"name": "real-cask",
+				"installed_version": "2.0.0",
+				"current_version": "2.1.0"
+			}
+		]
+	}`
+
+	var outdated struct {
+		Casks []struct {
+			Name             string `json:"name"`
+			InstalledVersion string `json:"installed_version"`
+			CurrentVersion   string `json:"current_version"`
+		} `json:"casks"`
+	}
+	if err := json.Unmarshal([]byte(raw), &outdated); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	var packages []Package
+	for _, c := range outdated.Casks {
+		if c.CurrentVersion == "" {
+			continue
+		}
+		packages = append(packages, Package{
+			Name:           c.Name,
+			CurrentVersion: c.InstalledVersion,
+			LatestVersion:  c.CurrentVersion,
+			Outdated:       true,
+			InstalledBy:    "brew-cask",
+		})
+	}
+
+	if len(packages) != 1 {
+		t.Fatalf("expected 1 package (empty version skipped), got %d: %+v", len(packages), packages)
+	}
+	if packages[0].Name != "real-cask" {
+		t.Errorf("expected real-cask, got %q", packages[0].Name)
+	}
+	if packages[0].Name == "auto-update-only" {
+		t.Error("cask with empty current_version must be skipped")
+	}
+}

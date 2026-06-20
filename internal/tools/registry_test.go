@@ -107,7 +107,7 @@ var expectedTools = map[string]toolSpec{
 		name: "Glow", description: "Render markdown on the CLI", category: CategoryUtility, icon: "\U000f0219",
 		uiGroup: UIGroupCLITools, configScreen: 31, isHeavy: false, defaultEnabled: true, platformFilter: "",
 		hasConfig: false, configPaths: 0,
-		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"glow"}, pkg.PlatformDebian: {"glow"}, pkg.PlatformMacOS: {"glow"}},
+		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"glow"}, pkg.PlatformMacOS: {"glow"}},
 	},
 	"iina": {
 		name: "IINA", description: "Modern media player for macOS", category: CategoryApp, icon: "\U000f057c",
@@ -119,19 +119,19 @@ var expectedTools = map[string]toolSpec{
 		name: "LazyDocker", description: "Simple terminal UI for Docker", category: CategoryContainer, icon: "",
 		uiGroup: UIGroupCLITools, configScreen: 29, isHeavy: true, defaultEnabled: true, platformFilter: "",
 		hasConfig: true, configPaths: 1,
-		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"lazydocker"}, pkg.PlatformDebian: {"lazydocker"}, pkg.PlatformMacOS: {"lazydocker"}},
+		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"lazydocker"}, pkg.PlatformMacOS: {"lazydocker"}},
 	},
 	"lazygit": {
 		name: "LazyGit", description: "Simple terminal UI for Git commands", category: CategoryGit, icon: "\U000f02a2",
 		uiGroup: UIGroupCLITools, configScreen: 28, isHeavy: false, defaultEnabled: true, platformFilter: "",
 		hasConfig: true, configPaths: 1,
-		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"lazygit"}, pkg.PlatformDebian: {"lazygit"}, pkg.PlatformMacOS: {"lazygit"}},
+		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"lazygit"}, pkg.PlatformMacOS: {"lazygit"}},
 	},
 	"lm-studio": {
 		name: "LM Studio", description: "Local LLM runner", category: CategoryApp, icon: "\U000f06a9",
 		uiGroup: UIGroupGUIApps, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
 		hasConfig: false, configPaths: 0,
-		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"lm-studio"}, pkg.PlatformMacOS: {"lm-studio"}},
+		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"lmstudio-bin"}, pkg.PlatformMacOS: {"lm-studio"}},
 	},
 	"moonlight": {
 		name: "Moonlight", description: "Open-source game streaming client", category: CategoryUtility, icon: "🌙",

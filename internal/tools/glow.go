@@ -31,9 +31,10 @@ func NewGlowTool() *GlowTool {
 			icon:        "󰈙",
 			category:    CategoryUtility,
 			packages: map[pkg.Platform][]string{
-				pkg.PlatformMacOS:  {"glow"},
-				pkg.PlatformArch:   {"glow"},
-				pkg.PlatformDebian: {"glow"},
+				pkg.PlatformMacOS: {"glow"},
+				pkg.PlatformArch:  {"glow"},
+				// glow is not in stock Debian/Ubuntu repos (requires Charm keyring);
+				// omitting Debian entry prevents a guaranteed-failing apt install.
 			},
 			configPaths: []string{},
 			// UI metadata

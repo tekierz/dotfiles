@@ -32,9 +32,10 @@ func NewLazyGitTool() *LazyGitTool {
 			icon:        "󰊢",
 			category:    CategoryGit,
 			packages: map[pkg.Platform][]string{
-				pkg.PlatformMacOS:  {"lazygit"},
-				pkg.PlatformArch:   {"lazygit"},
-				pkg.PlatformDebian: {"lazygit"},
+				pkg.PlatformMacOS: {"lazygit"},
+				pkg.PlatformArch:  {"lazygit"},
+				// lazygit is not in stock Debian/Ubuntu repos; install via Go or
+				// manually — omitting Debian entry prevents a guaranteed-failing apt.
 			},
 			configPaths: []string{
 				filepath.Join(home, ".config", "lazygit", "config.yml"),
