@@ -223,11 +223,12 @@ type App struct {
 	manageStatus       string // transient status line (save result, etc.)
 
 	// Installation state
-	installStep     int
-	installOutput   []string
-	installRunning  bool
-	installComplete bool
-	installCmd      *exec.Cmd
+	installStep         int
+	installPlannedSteps int // total step-increments the worker will emit (set before worker starts)
+	installOutput       []string
+	installRunning      bool
+	installComplete     bool
+	installCmd          *exec.Cmd
 	installEvents   chan installEventMsg // streamed progress from the install worker goroutine
 	updateStream    chan updateStreamMsg // streamed progress from the update worker goroutine
 	runner          *runner.Runner

@@ -183,12 +183,6 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		a.manageInstalledReady = false
 		return s, nil
 
-	case installLogMsg:
-		// Shared install/update streaming log line. Currently emitted by neither
-		// path, but handled here so a future per-line streamer works while this
-		// screen is active.
-		a.appendInstallLog(msg.line)
-		return s, nil
 	}
 	return s, nil
 }
@@ -215,46 +209,50 @@ func (s *progressScreen) View(width, height int) string {
 		title = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true).Render("✓ Installation Complete!")
 	}
 
-	steps := []struct {
-		name string
-	}{
-		{"Initializing backup"},
+	// Build a concise display list from the always-core phases only; selected
+	// tool installs and gated config phases (lazygit/btop/glow/claude-code) are
+	// collapsed into "Installing packages" so the list stays compact.  The list is
+	// decorative — the progress bar is the authoritative indicator. The step counter
+	// (a.installStep) maps to the FULL planned-phase count (installPlannedSteps) to
+	// drive the bar accurately rather than against this smaller display list.
+	displaySteps := []struct{ name string }{
 		{"Installing packages"},
-		{"Configuring zsh"},
+		{"Setting up utilities"},
 		{"Configuring tmux"},
 		{"Configuring ghostty"},
-		{"Configuring yazi"},
+		{"Configuring zsh"},
+		{"Configuring neovim"},
 		{"Configuring git"},
-		{"Setting up utilities"},
-		{"Setting up neovim"},
-		{"Finalizing"},
+		{"Configuring yazi"},
+		{"Configuring fzf"},
+		{"Configuring tools"},
 	}
 
-	// a.installStep is an opaque, monotonically increasing counter (one tick per
-	// installed tool plus one per config phase), so it does not line up with the
-	// fixed 10-entry display list and routinely exceeds len(steps). Map it onto a
-	// bounded "current phase" so the list never renders every step as complete
-	// while the install is still running.
-	currentPhase := a.installStep
+	// Total planned steps, set by startInstallation when the install begins.
+	// Falls back to the display list length for the rare case where the screen
+	// is rendered before startInstallation has run (no over/under-report).
+	totalSteps := a.installPlannedSteps
+	if totalSteps <= 0 {
+		totalSteps = len(displaySteps)
+	}
+
+	// Map a.installStep (cumulative step count, one per worker stepLine) onto
+	// displaySteps so the highlighted entry tracks rough progress without ever
+	// flipping the whole list to complete while the install is still running.
+	currentPhase := 0
 	if a.installComplete {
-		// Everything done: mark all steps complete.
-		currentPhase = len(steps)
-	} else if a.installRunning {
-		// In progress: keep an active step visible and never let the whole list
-		// flip to complete (clamp to the last step at most).
-		if currentPhase > len(steps)-1 {
-			currentPhase = len(steps) - 1
+		currentPhase = len(displaySteps)
+	} else if a.installRunning && a.installStep > 0 {
+		// Scale the raw step counter proportionally onto the display list.
+		scaled := int(float64(a.installStep) / float64(totalSteps) * float64(len(displaySteps)))
+		if scaled >= len(displaySteps) {
+			scaled = len(displaySteps) - 1
 		}
-		if currentPhase < 0 {
-			currentPhase = 0
-		}
-	} else {
-		// Not started yet.
-		currentPhase = 0
+		currentPhase = scaled
 	}
 
 	var stepList strings.Builder
-	for i, st := range steps {
+	for i, st := range displaySteps {
 		var status string
 		var style lipgloss.Style
 
@@ -271,8 +269,9 @@ func (s *progressScreen) View(width, height int) string {
 		stepList.WriteString(style.Render(fmt.Sprintf("  %s %s\n", status, st.name)))
 	}
 
-	// Calculate progress, clamped to [0,1] (currentPhase can equal len(steps)).
-	progressPercent := float64(currentPhase) / float64(len(steps))
+	// Progress fraction derived from the ACTUAL planned phase count, so the bar
+	// reflects real completion rather than the fixed display list length.
+	progressPercent := float64(a.installStep) / float64(totalSteps)
 	if a.installComplete {
 		progressPercent = 1.0
 	}

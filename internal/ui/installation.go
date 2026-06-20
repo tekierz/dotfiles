@@ -49,6 +49,31 @@ func (a *App) startInstallation() tea.Cmd {
 	// Collect all selected tools from deep dive config
 	selectedTools := a.collectSelectedTools()
 
+	// Compute the total number of step-increments the worker will emit so the
+	// progress fraction in the View is accurate. Always-core phases (utilities,
+	// tmux, ghostty, zsh, neovim, git, yazi, fzf) each emit one step. Selected
+	// gated phases (claude-code, lazygit, btop, glow) contribute one step each
+	// when their selection flag is set. Each selected tool package-install also
+	// emits one step.
+	plannedSteps := len(selectedTools) // one stepLine per tool install
+	// Always-core config phases: utilities + tmux + ghostty + zsh + neovim + git + yazi + fzf
+	const alwaysCoreSteps = 8
+	plannedSteps += alwaysCoreSteps
+	cfg := *a.deepDiveConfig // snapshot for planned-steps computation
+	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
+		plannedSteps++ // claude-code step
+	}
+	if cfg.CLITools["lazygit"] {
+		plannedSteps++
+	}
+	if cfg.CLITools["btop"] {
+		plannedSteps++
+	}
+	if cfg.CLITools["glow"] {
+		plannedSteps++
+	}
+	a.installPlannedSteps = plannedSteps
+
 	// Buffered channel so the worker can make progress without blocking on a
 	// slow consumer; the listen Cmd drains it one event at a time.
 	events := make(chan installEventMsg, 64)
@@ -72,11 +97,10 @@ func (a *App) startInstallation() tea.Cmd {
 		a.sudoKeepAliveStop = startSudoKeepAlive(refreshSudo)
 	}
 
-	// Snapshot the values the worker needs so it never reads App fields after
-	// this point (they may be mutated by the Update loop concurrently). The
-	// deep-dive config is copied by value; the install progress screen does not
-	// allow editing it, so the shared maps inside are effectively immutable here.
-	cfg := *a.deepDiveConfig
+	// cfg is already a snapshot of deepDiveConfig (taken above for planned-steps
+	// computation); theme is snapshotted here. Both are passed to the worker so
+	// it never reads App fields after this point (they may be mutated by the
+	// Update loop concurrently).
 	theme := a.theme
 
 	go runInstallWorker(ctx, events, selectedTools, cfg, theme)
@@ -417,55 +441,79 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 		return nil
 	}, "  ✓ FZF configured")
 
-	// Configure LazyGit
-	configPhase("\n▶ Configuring LazyGit...", func() error {
-		lazygitCfg := tools.LazyGitConfig{
-			SideBySide: cfg.LazyGitSideBySide,
-			MouseMode:  cfg.LazyGitMouseMode,
-			Theme:      cfg.LazyGitTheme,
-		}
-		if err := tools.WriteLazyGitConfig(lazygitCfg, theme); err != nil {
-			return fmt.Errorf("Failed to configure LazyGit: %w", err)
-		}
-		return nil
-	}, "  ✓ LazyGit configured")
-
-	// Configure Btop
-	configPhase("\n▶ Configuring Btop...", func() error {
-		btopCfg := tools.BtopConfig{
-			Theme:     cfg.BtopTheme,
-			UpdateMs:  cfg.BtopUpdateMs,
-			ShowTemp:  cfg.BtopShowTemp,
-			GraphType: cfg.BtopGraphType,
-		}
-		if err := tools.WriteBtopConfig(btopCfg, theme); err != nil {
-			return fmt.Errorf("Failed to configure Btop: %w", err)
-		}
-		return nil
-	}, "  ✓ Btop configured")
-
-	// Configure Glow
-	configPhase("\n▶ Configuring Glow...", func() error {
-		glowCfg := tools.GlowConfig{
-			Pager: cfg.GlowPager,
-			Style: cfg.GlowStyle,
-			Width: cfg.GlowWidth,
-		}
-		if err := tools.WriteGlowConfig(glowCfg, theme); err != nil {
-			return fmt.Errorf("Failed to configure Glow: %w", err)
-		}
-		return nil
-	}, "  ✓ Glow configured")
-
-	// Surface all failures: report the count and the first failing step so the
-	// Error screen makes clear that one or more phases failed (not just the last).
-	var finalErr error
-	if len(failures) == 1 {
-		finalErr = failures[0]
-	} else if len(failures) > 1 {
-		finalErr = fmt.Errorf("%d steps failed; first: %w", len(failures), failures[0])
+	// Configure LazyGit — only when the user selected it in the deep-dive.
+	// lazygit is in CLITools (UIGroupCLITools) and therefore has an explicit
+	// selection flag; skipping its config when deselected matches user intent.
+	if cfg.CLITools["lazygit"] {
+		configPhase("\n▶ Configuring LazyGit...", func() error {
+			lazygitCfg := tools.LazyGitConfig{
+				SideBySide: cfg.LazyGitSideBySide,
+				MouseMode:  cfg.LazyGitMouseMode,
+				Theme:      cfg.LazyGitTheme,
+			}
+			if err := tools.WriteLazyGitConfig(lazygitCfg, theme); err != nil {
+				return fmt.Errorf("Failed to configure LazyGit: %w", err)
+			}
+			return nil
+		}, "  ✓ LazyGit configured")
 	}
-	finish(finalErr)
+
+	// Configure Btop — only when the user selected it in the deep-dive.
+	// btop is in CLITools (UIGroupCLITools) and has an explicit selection flag.
+	if cfg.CLITools["btop"] {
+		configPhase("\n▶ Configuring Btop...", func() error {
+			btopCfg := tools.BtopConfig{
+				Theme:     cfg.BtopTheme,
+				UpdateMs:  cfg.BtopUpdateMs,
+				ShowTemp:  cfg.BtopShowTemp,
+				GraphType: cfg.BtopGraphType,
+			}
+			if err := tools.WriteBtopConfig(btopCfg, theme); err != nil {
+				return fmt.Errorf("Failed to configure Btop: %w", err)
+			}
+			return nil
+		}, "  ✓ Btop configured")
+	}
+
+	// Configure Glow — only when the user selected it in the deep-dive.
+	// glow is in CLITools (UIGroupCLITools) and has an explicit selection flag.
+	if cfg.CLITools["glow"] {
+		configPhase("\n▶ Configuring Glow...", func() error {
+			glowCfg := tools.GlowConfig{
+				Pager: cfg.GlowPager,
+				Style: cfg.GlowStyle,
+				Width: cfg.GlowWidth,
+			}
+			if err := tools.WriteGlowConfig(glowCfg, theme); err != nil {
+				return fmt.Errorf("Failed to configure Glow: %w", err)
+			}
+			return nil
+		}, "  ✓ Glow configured")
+	}
+
+	// Surface all failures: name each failed step so the Error screen lists
+	// exactly what went wrong, not just a count + first error.
+	finish(aggregateFailures(failures))
+}
+
+// aggregateFailures builds the final installation error from a slice of per-step
+// failures. A single failure is returned as-is. Two or more failures produce a
+// "Failed steps:" list that names every failed phase so the Error screen gives
+// the user an actionable summary rather than "N steps failed; first: ...".
+func aggregateFailures(failures []error) error {
+	switch len(failures) {
+	case 0:
+		return nil
+	case 1:
+		return failures[0]
+	default:
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d steps failed. Failed steps:\n", len(failures))
+		for i, err := range failures {
+			fmt.Fprintf(&b, "  %d. %v\n", i+1, err)
+		}
+		return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+	}
 }
 
 // installUtilities copies the dotfiles binary and shell utilities to ~/.local/bin
