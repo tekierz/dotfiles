@@ -529,8 +529,10 @@ func installUtilities(utilities map[string]bool) error {
 
 	binDir := filepath.Join(home, ".local", "bin")
 
-	// Create ~/.local/bin if it doesn't exist
-	if err := os.MkdirAll(binDir, 0755); err != nil {
+	// Create ~/.local/bin if it doesn't exist. Owner-only (0700) matches the
+	// project's per-user permission policy (config dirs 700) and avoids creating
+	// a world-readable bin directory.
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		return fmt.Errorf("cannot create %s: %w", binDir, err)
 	}
 
@@ -558,8 +560,10 @@ func installUtilities(utilities map[string]bool) error {
 		return fmt.Errorf("cannot copy binary: %w", err)
 	}
 
-	// Make it executable
-	if err := os.Chmod(destPath, 0755); err != nil {
+	// Make it executable. Owner-only (0700) matches the per-user script policy
+	// used for hk/caff/sshh and the bin directory above; this is the final
+	// authoritative mode on the binary.
+	if err := os.Chmod(destPath, 0o700); err != nil {
 		return fmt.Errorf("cannot set permissions: %w", err)
 	}
 
@@ -583,7 +587,10 @@ func installUtilities(utilities map[string]bool) error {
 	return nil
 }
 
-// copyFile copies a file from src to dst
+// copyFile copies a file from src to dst. The destination is created with
+// explicit owner-only permissions (0700) via OpenFile rather than os.Create's
+// umask-default 0666, so the file is never momentarily group- or other-readable
+// /writable before the caller applies the final authoritative mode.
 func copyFile(src, dst string) error {
 	sourceFile, err := os.Open(src)
 	if err != nil {
@@ -591,7 +598,7 @@ func copyFile(src, dst string) error {
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o700)
 	if err != nil {
 		return err
 	}

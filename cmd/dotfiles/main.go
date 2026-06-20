@@ -599,7 +599,31 @@ func listBackups() {
 // restore (missing/invalid backup, unreadable backup dir, unknown home). The
 // path mapping, traversal guard, and mode preservation are shared with the TUI
 // via the internal/backup package so the two paths cannot diverge.
+// isValidBackupName reports whether name is a safe single-component backup name.
+// A backup lives at <config>/backups/<name>; allowing "..", absolute paths, or
+// path separators would let an externally-supplied name traverse out of the
+// backups directory and read an arbitrary restore SOURCE. The name must equal
+// its own filepath.Base and contain no separator or parent reference.
+func isValidBackupName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if filepath.IsAbs(name) {
+		return false
+	}
+	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, filepath.Separator) {
+		return false
+	}
+	return name == filepath.Base(name)
+}
+
 func restoreBackup(name string) (int, error) {
+	if !isValidBackupName(name) {
+		fmt.Fprintf(os.Stderr, "Invalid backup name: %q\n", name)
+		fmt.Println("Run 'dotfiles backups' to see available backups.")
+		return 0, fmt.Errorf("invalid backup name: %q", name)
+	}
+
 	backupDir := filepath.Join(config.ConfigDir(), "backups", name)
 
 	info, err := os.Stat(backupDir)

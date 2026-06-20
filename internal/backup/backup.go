@@ -134,6 +134,45 @@ func noFollowWrite(dstPath string, data []byte, mode os.FileMode) error {
 	return os.WriteFile(dstPath, data, mode)
 }
 
+// resolvedParentWithinHome verifies that the real (symlink-resolved) parent
+// directory of dstPath still lives inside home. safeJoin's lexical check and
+// noFollowWrite's final-component check do not catch a symlinked INTERMEDIATE
+// directory (e.g. ~/.config/evil -> /outside): the leaf does not exist yet, so
+// only resolving the deepest existing ancestor reveals the escape.
+//
+// EvalSymlinks is applied to the deepest EXISTING ancestor of dstPath (the leaf
+// and freshly-created directories normally do not exist yet at restore time, so
+// resolving the literal parent would fail and wrongly reject legitimate
+// restores into new directories under the real home). The resolved ancestor
+// must equal home or sit beneath it.
+func resolvedParentWithinHome(dstPath, home string) (bool, error) {
+	realHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return false, err
+	}
+
+	// Walk up from the parent until we hit a directory that exists, then resolve
+	// its symlinks. Everything below it does not exist yet, so it cannot itself
+	// be a symlink redirecting the write.
+	ancestor := filepath.Dir(dstPath)
+	for {
+		resolved, err := filepath.EvalSymlinks(ancestor)
+		if err == nil {
+			clean := filepath.Clean(resolved)
+			return clean == realHome || strings.HasPrefix(clean, realHome+string(os.PathSeparator)), nil
+		}
+		if !os.IsNotExist(err) {
+			return false, err
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			// Reached the filesystem root without finding an existing ancestor.
+			return false, nil
+		}
+		ancestor = parent
+	}
+}
+
 // RestoreResult reports the outcome of a restore for a single backup.
 type RestoreResult struct {
 	// Restored is the relative path of each file successfully restored.
@@ -203,9 +242,30 @@ func Restore(backupDir, home string) (RestoreResult, error) {
 	for _, it := range items {
 		srcPath := filepath.Join(backupDir, it.srcName)
 
+		// IsRestorePathSafe is the exported, production guard against traversal
+		// (absolute paths and ".." components). safeJoin returns the cleaned
+		// destination once the path is known safe.
+		if !IsRestorePathSafe(home, it.relPath) {
+			result.Skipped[it.relPath] = "path traversal detected"
+			continue
+		}
 		dstPath, ok := safeJoin(home, it.relPath)
 		if !ok {
 			result.Skipped[it.relPath] = "path traversal detected"
+			continue
+		}
+
+		// Lexical safety (safeJoin) does not cover symlinked INTERMEDIATE
+		// directories. Resolve the deepest existing ancestor and confirm it is
+		// still inside home before creating directories or writing, so a
+		// symlinked parent cannot redirect the write outside home.
+		withinHome, perr := resolvedParentWithinHome(dstPath, home)
+		if perr != nil {
+			result.Skipped[it.relPath] = fmt.Sprintf("resolve parent: %v", perr)
+			continue
+		}
+		if !withinHome {
+			result.Skipped[it.relPath] = "refusing to write through symlinked parent outside home"
 			continue
 		}
 

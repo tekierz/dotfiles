@@ -45,6 +45,40 @@ func TestRestoreSecurityPathTraversal(t *testing.T) {
 	}
 }
 
+// TestIsValidBackupName verifies the CLI restore name guard: a backup name must
+// be a single path component (== filepath.Base(name)), never empty, absolute, or
+// containing ".." or path separators. This prevents path traversal of the
+// restore SOURCE directory (config/backups/<name>).
+func TestIsValidBackupName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		valid bool
+	}{
+		// Legitimate timestamp-style names.
+		{"timestamp", "2026-06-20_15-04-05", true},
+		{"plain name", "mybackup", true},
+
+		// Rejected.
+		{"empty", "", false},
+		{"dot dot", "..", false},
+		{"parent traversal", "../../etc", false},
+		{"leading traversal", "../backup", false},
+		{"absolute path", "/abs/path", false},
+		{"separator", "a/b", false},
+		{"dot", ".", false},
+		{"embedded traversal", "good/../../../etc", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isValidBackupName(tc.input); got != tc.valid {
+				t.Errorf("isValidBackupName(%q) = %v, want %v", tc.input, got, tc.valid)
+			}
+		})
+	}
+}
+
 // TestRestoreFilenameRoundTrip is the regression test for cmd-1: a path whose
 // component contains a literal underscore must round-trip back to its exact
 // original location, not be split into extra directory levels. The manifest is
