@@ -516,7 +516,8 @@ OPTIONS
                         Themes: catppuccin-mocha, catppuccin-latte,
                         catppuccin-frappe, catppuccin-macchiato, dracula,
                         gruvbox-dark, gruvbox-light, nord, tokyo-night,
-                        solarized-dark, solarized-light, monokai, rose-pine
+                        solarized-dark, solarized-light, monokai, rose-pine,
+                        everforest
     --macos-apps        Install optional macOS quality-of-life apps
     --raspi             Raspberry Pi mode (auto-detect model)
     --raspi5            Raspberry Pi 5 optimizations
@@ -3441,7 +3442,8 @@ ${YELLOW}KEYBOARD STYLES${NC}
 ${YELLOW}THEMES${NC}
     catppuccin-mocha (default), catppuccin-latte, catppuccin-frappe,
     catppuccin-macchiato, dracula, gruvbox-dark, gruvbox-light,
-    nord, tokyo-night, solarized-dark, solarized-light, monokai, rose-pine
+    nord, tokyo-night, solarized-dark, solarized-light, monokai, rose-pine,
+    everforest
 EOF
 }
 
