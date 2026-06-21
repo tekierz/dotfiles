@@ -598,7 +598,7 @@ func TestConfigGhosttyReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenConfigGhostty)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenConfigGhostty")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenConfigGhostty")
 	}
 
@@ -962,7 +962,7 @@ func TestConfigClaudeCodeReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenConfigClaudeCode)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenConfigClaudeCode")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenConfigClaudeCode")
 	}
 
@@ -988,7 +988,7 @@ func TestWelcomeReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(cmd()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenWelcome")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenWelcome")
 	}
 
@@ -1001,7 +1001,7 @@ func TestWelcomeReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenMainMenu)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenMainMenu")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenMainMenu")
 	}
 	if mv := app.screenMgr.View(); !strings.Contains(mv, "Dotfiles Management") {
@@ -1037,7 +1037,7 @@ func TestMigratedScreensReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(msg); !handled {
 		t.Fatal("manager should handle the NavigateMsg")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenError")
 	}
 
@@ -1525,7 +1525,7 @@ func TestManageScreenReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenManage)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenManage")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenManage")
 	}
 	if app.screenMgr.Current().ID() != ScreenManage {
@@ -1715,7 +1715,7 @@ func TestManagementScreensReachableViaManager(t *testing.T) {
 			if _, handled := app.screenMgr.Update(NavigateTo(tc.target)()); !handled {
 				t.Fatalf("manager should handle NavigateMsg to %v", tc.target)
 			}
-			if app.screenMgr.IsLegacyMode() {
+			if app.screenMgr.Current() == nil {
 				t.Fatalf("manager should be in managed mode after navigating to %v", tc.target)
 			}
 			if app.screenMgr.Current().ID() != tc.target {
@@ -1845,7 +1845,7 @@ func TestAnimationScreenReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenAnimation)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenAnimation")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenAnimation")
 	}
 	if app.screenMgr.Current().ID() != ScreenAnimation {
@@ -2044,7 +2044,7 @@ func TestProgressScreenReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenProgress)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenProgress")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenProgress")
 	}
 	if app.screenMgr.Current().ID() != ScreenProgress {
@@ -2233,7 +2233,7 @@ func TestUsersScreenReachableViaManager(t *testing.T) {
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenUsers)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenUsers")
 	}
-	if app.screenMgr.IsLegacyMode() {
+	if app.screenMgr.Current() == nil {
 		t.Fatal("manager should be in managed mode after navigating to ScreenUsers")
 	}
 	if app.screenMgr.Current().ID() != ScreenUsers {

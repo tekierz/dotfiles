@@ -15,11 +15,8 @@ func TestNewScreenManager(t *testing.T) {
 	if mgr.Context() != ctx {
 		t.Error("Context() should return set context")
 	}
-	if !mgr.IsLegacyMode() {
-		t.Error("should start in legacy mode")
-	}
 	if mgr.Current() != nil {
-		t.Error("Current() should be nil initially")
+		t.Error("Current() should be nil before the first Navigate")
 	}
 }
 
@@ -56,49 +53,6 @@ func TestScreenManager_IncrementUIFrame(t *testing.T) {
 	}
 }
 
-func TestScreenManager_LegacyMode(t *testing.T) {
-	ctx := NewTestScreenContext()
-	mgr := NewScreenManager(ctx, nil)
-
-	// Initially in legacy mode
-	if !mgr.IsLegacyMode() {
-		t.Error("should start in legacy mode")
-	}
-
-	// Set legacy screen
-	mgr.SetLegacyScreen(ScreenManage)
-
-	if mgr.LegacyScreen() != ScreenManage {
-		t.Errorf("LegacyScreen() = %v, want %v", mgr.LegacyScreen(), ScreenManage)
-	}
-	if !mgr.IsLegacyMode() {
-		t.Error("should still be in legacy mode")
-	}
-}
-
-func TestScreenManager_Navigate_Legacy(t *testing.T) {
-	ctx := NewTestScreenContext()
-
-	// Factory that returns nil (legacy fallback)
-	factory := func(id Screen, ctx *ScreenContext) ScreenHandler {
-		return nil
-	}
-
-	mgr := NewScreenManager(ctx, factory)
-
-	cmd := mgr.Navigate(ScreenHotkeys)
-	if cmd != nil {
-		t.Error("Navigate to legacy screen should return nil cmd")
-	}
-
-	if !mgr.IsLegacyMode() {
-		t.Error("should be in legacy mode")
-	}
-	if mgr.LegacyScreen() != ScreenHotkeys {
-		t.Errorf("LegacyScreen() = %v, want %v", mgr.LegacyScreen(), ScreenHotkeys)
-	}
-}
-
 func TestScreenManager_Navigate_Managed(t *testing.T) {
 	ctx := NewTestScreenContext()
 
@@ -117,9 +71,6 @@ func TestScreenManager_Navigate_Managed(t *testing.T) {
 	// Init may return nil
 	_ = cmd
 
-	if mgr.IsLegacyMode() {
-		t.Error("should not be in legacy mode")
-	}
 	if mgr.Current() != testScreen {
 		t.Error("Current() should be the test screen")
 	}
@@ -151,18 +102,30 @@ func TestScreenManager_Update_NavigateMsg(t *testing.T) {
 	}
 	_ = cmd // may be nil
 
-	if mgr.IsLegacyMode() {
-		t.Error("should not be in legacy mode")
+	if mgr.Current() != testScreen {
+		t.Error("Current() should be the test screen after NavigateMsg")
 	}
 }
 
-func TestScreenManager_View_LegacyMode(t *testing.T) {
+func TestScreenManager_Update_BeforeNavigate(t *testing.T) {
+	ctx := NewTestScreenContext()
+	mgr := NewScreenManager(ctx, nil)
+
+	// A non-navigation message before the first Navigate must not panic and
+	// must report "not handled" (current is still nil).
+	_, handled := mgr.Update(uiTickMsg{})
+	if handled {
+		t.Error("Update should report not-handled before the first Navigate")
+	}
+}
+
+func TestScreenManager_View_BeforeNavigate(t *testing.T) {
 	ctx := NewTestScreenContext()
 	mgr := NewScreenManager(ctx, nil)
 
 	view := mgr.View()
 	if view != "" {
-		t.Error("View() should return empty string in legacy mode")
+		t.Error("View() should return empty string before the first Navigate")
 	}
 }
 
@@ -185,4 +148,92 @@ func TestScreenManager_View_ManagedMode(t *testing.T) {
 	if !testScreen.viewCalled {
 		t.Error("View() should have been called on screen")
 	}
+}
+
+// allNavigableScreens lists every Screen constant that is reachable via
+// navigation. The retired ScreenConfigApps iota slot is intentionally omitted
+// because it has no name and is never navigated to. If a new navigable screen is
+// added it MUST appear here and in the factory; otherwise TestFactory_FailsLoud
+// catches the gap.
+var allNavigableScreens = []Screen{
+	ScreenAnimation,
+	ScreenWelcome,
+	ScreenThemePicker,
+	ScreenNavPicker,
+	ScreenFileTree,
+	ScreenProgress,
+	ScreenSummary,
+	ScreenError,
+	ScreenDeepDiveMenu,
+	ScreenConfigGhostty,
+	ScreenConfigTmux,
+	ScreenConfigZsh,
+	ScreenConfigNeovim,
+	ScreenConfigGit,
+	ScreenConfigYazi,
+	ScreenConfigFzf,
+	ScreenConfigUtilities,
+	ScreenConfigMacApps,
+	ScreenMainMenu,
+	ScreenManage,
+	ScreenUpdate,
+	ScreenHotkeys,
+	ScreenBackups,
+	ScreenUsers,
+	ScreenConfigCLITools,
+	ScreenConfigGUIApps,
+	ScreenConfigCLIUtilities,
+	ScreenConfigLazyGit,
+	ScreenConfigLazyDocker,
+	ScreenConfigBtop,
+	ScreenConfigGlow,
+	ScreenConfigClaudeCode,
+}
+
+// TestFactory_AllNavigableScreensMapped proves the factory returns a non-nil
+// handler for every navigable screen, so the fail-loud panic can never fire for
+// a real screen during normal use.
+func TestFactory_AllNavigableScreensMapped(t *testing.T) {
+	ctx := NewTestScreenContext()
+	f := NewFactory()
+
+	for _, id := range allNavigableScreens {
+		handler := f.Create(id, ctx)
+		if handler == nil {
+			t.Errorf("Factory.Create(%v) = nil; every navigable screen must map to a handler", id)
+		}
+	}
+}
+
+// TestFactory_FailsLoudOnUnmappedScreen verifies the factory panics (fail loud)
+// rather than silently returning nil when handed an unmapped Screen value.
+func TestFactory_FailsLoudOnUnmappedScreen(t *testing.T) {
+	ctx := NewTestScreenContext()
+	f := NewFactory()
+
+	// A Screen value far beyond every defined constant is guaranteed unmapped.
+	invalid := Screen(9999)
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Factory.Create with an unmapped screen should panic, but it did not")
+		}
+	}()
+
+	f.Create(invalid, ctx)
+}
+
+// TestScreenManager_Navigate_UnmappedPanics verifies Navigate fails loud (via
+// the factory panic) for an unmapped screen instead of entering an inert state.
+func TestScreenManager_Navigate_UnmappedPanics(t *testing.T) {
+	ctx := NewTestScreenContext()
+	mgr := NewScreenManager(ctx, NewFactory().CreateFactory())
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Navigate to an unmapped screen should panic, but it did not")
+		}
+	}()
+
+	mgr.Navigate(Screen(9999))
 }

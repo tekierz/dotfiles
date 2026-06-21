@@ -1,5 +1,7 @@
 package ui
 
+import "fmt"
+
 // ScreenData holds any data needed to create a screen.
 // This is used to pass context-specific information to screens during creation.
 type ScreenData struct {
@@ -26,7 +28,10 @@ func (f *Factory) SetError(err error) {
 }
 
 // Create returns a ScreenHandler for the given screen ID.
-// Returns nil if the screen is not migrated yet (falls back to legacy).
+// Every live, navigable screen is mapped below. An unmapped screen is a
+// programming error (e.g. a new screen added without a factory case), so Create
+// panics rather than silently returning nil — failing loud in dev/test instead
+// of rendering a blank screen in production.
 func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 	switch id {
 	case ScreenError:
@@ -94,8 +99,7 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 	case ScreenConfigClaudeCode:
 		return NewConfigClaudeCodeScreen(ctx)
 	default:
-		// Not migrated yet - return nil to use legacy handling
-		return nil
+		panic(fmt.Sprintf("screen factory: no handler for screen %d — every live screen must be mapped", id))
 	}
 }
 

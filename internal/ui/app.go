@@ -904,10 +904,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the UI through the ScreenManager. Every live screen is a
 // migrated ScreenHandler, so the manager always renders the current screen.
 func (a *App) View() string {
-	// Defensive: if no navigation has landed yet (manager still in its initial
-	// legacy state), enter managed mode on the start screen so the first frame
-	// is never blank. App.Init also navigates to run the handler's Init command.
-	if a.screenMgr.IsLegacyMode() {
+	// Defensive: if no navigation has landed yet (no current screen), navigate to
+	// the start screen so the first frame is never blank. NewApp already navigates
+	// at construction, so this is belt-and-suspenders.
+	if a.screenMgr.Current() == nil {
 		a.screenMgr.Navigate(a.screen)
 	}
 	return a.screenMgr.View()
