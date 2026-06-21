@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/config"
 )
 
 func TestNavigateMsg(t *testing.T) {
@@ -83,12 +84,11 @@ func TestBaseScreen(t *testing.T) {
 }
 
 func TestScreenContext(t *testing.T) {
-	deps := NewTestDependencies()
-	ctx := NewScreenContext(deps)
+	// No persisted config: NewScreenContext falls back to its built-in defaults.
+	withTempHome(t)
 
-	if ctx.Deps != deps {
-		t.Error("Deps should match")
-	}
+	ctx := NewScreenContext()
+
 	if ctx.Theme != "catppuccin-mocha" {
 		t.Errorf("Theme = %q, want default", ctx.Theme)
 	}
@@ -103,6 +103,33 @@ func TestScreenContext(t *testing.T) {
 	}
 	if ctx.Height != 24 {
 		t.Errorf("Height = %d, want 24", ctx.Height)
+	}
+}
+
+// TestScreenContextSeedsFromGlobalConfig guards that NewScreenContext still
+// seeds the theme / nav style / animation flag from the persisted global
+// config (the one real behavior the removed DI layer used to provide).
+func TestScreenContextSeedsFromGlobalConfig(t *testing.T) {
+	withTempHome(t)
+
+	if err := config.SaveGlobalConfig(&config.GlobalConfig{
+		Theme:             "neon-seapunk",
+		NavStyle:          "vim",
+		DisableAnimations: true,
+	}); err != nil {
+		t.Fatalf("SaveGlobalConfig: %v", err)
+	}
+
+	ctx := NewScreenContext()
+
+	if ctx.Theme != "neon-seapunk" {
+		t.Errorf("Theme = %q, want %q (seeded from global config)", ctx.Theme, "neon-seapunk")
+	}
+	if ctx.NavStyle != "vim" {
+		t.Errorf("NavStyle = %q, want %q (seeded from global config)", ctx.NavStyle, "vim")
+	}
+	if ctx.AnimationsEnabled {
+		t.Error("AnimationsEnabled should be false when config disables animations")
 	}
 }
 

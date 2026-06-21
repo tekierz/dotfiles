@@ -51,7 +51,6 @@ func newGoldenContext(t *testing.T) *ScreenContext {
 	app := NewApp(true)
 
 	ctx := &ScreenContext{
-		Deps:              NewTestDependencies(),
 		app:               app,
 		Theme:             "neon-seapunk",
 		NavStyle:          "emacs",

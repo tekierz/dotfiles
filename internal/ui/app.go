@@ -355,8 +355,7 @@ func (a *App) initScreenManager() {
 	if a.screenFactory == nil {
 		a.screenFactory = NewFactory()
 	}
-	deps := NewDependencies()
-	ctx := NewScreenContext(deps)
+	ctx := NewScreenContext()
 	// Connect the context to this App so handlers can reach shared App
 	// state (theme, deepDiveConfig, etc.) through ScreenContext.app.
 	ctx.app = a

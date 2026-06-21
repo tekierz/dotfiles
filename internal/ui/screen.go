@@ -42,9 +42,6 @@ func NavigateTo(id Screen) tea.Cmd {
 // ScreenContext provides shared state and dependencies to screens.
 // This replaces the tight coupling to the App struct.
 type ScreenContext struct {
-	// Dependencies (injected)
-	Deps *Dependencies
-
 	// app is the owning App instance. Screen handlers reach shared App state
 	// (e.g. deepDiveConfig, manageConfig, theme) through this. It is unexported
 	// so external packages cannot depend on it; it is wired by NewApp when it
