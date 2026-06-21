@@ -414,8 +414,23 @@ func setTheme(theme string) {
 
 // listThemes prints available themes
 func listThemes() {
-	cfg, _ := config.LoadGlobalConfig()
-	current := cfg.Theme
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		// Fall back to defaults so the theme list is still usable when
+		// no config directory exists; no '(current)' marker will appear.
+		cfg = config.DefaultGlobalConfig()
+	}
+	listThemesWithConfig(cfg)
+}
+
+// listThemesWithConfig prints available themes using the provided config.
+// Passing nil is safe: it is treated the same as an empty config (no current
+// theme is highlighted).
+func listThemesWithConfig(cfg *config.GlobalConfig) {
+	var current string
+	if cfg != nil {
+		current = cfg.Theme
+	}
 
 	fmt.Println("Available themes:")
 	for _, t := range config.AvailableThemes {

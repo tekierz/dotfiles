@@ -39,8 +39,18 @@ type configFieldNav struct {
 // ID returns the screen identifier.
 func (s *configFieldNav) ID() Screen { return s.id }
 
-// Init returns any initial commands (none on entry).
-func (s *configFieldNav) Init() tea.Cmd { return nil }
+// Init clamps configFieldIndex into [0, maxField] on every screen entry so
+// that abnormal navigation paths (e.g. jumping directly to a config screen
+// without going through back()) cannot leave a stale out-of-range index.
+func (s *configFieldNav) Init() tea.Cmd {
+	if a := s.App(); a != nil && s.maxField != nil {
+		max := s.maxField(a)
+		if a.configFieldIndex < 0 || a.configFieldIndex > max {
+			a.configFieldIndex = 0
+		}
+	}
+	return nil
+}
 
 // footer returns the pre-rendered help line for all field-nav config screens.
 // Accurate to handleMsg: up/down move, left/right/space change, enter/esc back.

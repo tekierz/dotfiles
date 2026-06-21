@@ -256,6 +256,9 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	// --- Async results (delegated here while this screen is active) ---
 	case userLoadedMsg:
 		if msg.err != nil {
+			// Reset the guard so re-entering the screen retries the load
+			// instead of permanently stranding an empty list.
+			a.usersLoaded = false
 			a.usersStatus = fmt.Sprintf("Load failed: %v", msg.err)
 		} else {
 			a.usersItems = msg.users
