@@ -78,8 +78,13 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			CursorStyle:     cfg.GhosttyCursorStyle,
 		}, theme)
 	},
+	// tmux generator is a PURE file write (~/.tmux.conf only). TPM installation
+	// (git clone + plugin install) is an INSTALL side-effect and lives ONLY in the
+	// install worker (installation.go calls tools.SetupTPM directly). Config-apply
+	// — Manage save and `dotfiles config tmux` — must never clone or hit the
+	// network, so it uses WriteTmuxConfig, not SetupTPM.
 	"tmux": func(cfg DeepDiveConfig, theme string) error {
-		return tools.SetupTPM(tools.TmuxConfig{
+		return tools.WriteTmuxConfig(tools.TmuxConfig{
 			Prefix:           cfg.TmuxPrefix,
 			SplitBinds:       cfg.TmuxSplitBinds,
 			StatusBar:        cfg.TmuxStatusBar,
@@ -103,8 +108,14 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			Autosuggestions: cfg.ZshAutosuggestions,
 		}, theme)
 	},
+	// neovim generator is a PURE user-prefs overlay (lua/custom/options.lua in an
+	// existing ~/.config/nvim). Cloning a preset repo and the destructive
+	// move/remove of ~/.config/nvim are INSTALL side-effects and live ONLY in the
+	// install worker (installation.go calls tools.WriteNeovimConfig directly).
+	// Config-apply must never clone or clobber the user's nvim config, so it uses
+	// WriteNeovimUserPrefs (a no-op when nvim isn't installed yet).
 	"neovim": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteNeovimConfig(tools.NeovimConfig{
+		return tools.WriteNeovimUserPrefs(tools.NeovimConfig{
 			ConfigPreset: cfg.NeovimConfig,
 			LSPs:         cfg.NeovimLSPs,
 			Plugins:      cfg.NeovimPlugins,

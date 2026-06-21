@@ -108,6 +108,9 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.manageStatus = fmt.Sprintf("Save failed: %v", msg.err)
 		} else {
 			a.manageStatus = "Saved ✓"
+			// Refresh the diff baseline so the next save only applies tools changed
+			// since THIS save (otherwise a second save would re-apply the same tools).
+			a.snapshotManageBaseline()
 		}
 		return s, nil
 

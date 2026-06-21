@@ -123,6 +123,19 @@ func (a *App) persistTheme() {
 	a.themeStatus = ""
 }
 
+// snapshotManageBaseline records the current Manage config + theme as the
+// baseline the next Manage save diffs against. Called after loading at startup and
+// after a successful save so each save scopes its config-file writes to only the
+// tools changed since the last persisted state.
+func (a *App) snapshotManageBaseline() {
+	if a.manageConfig != nil {
+		a.manageConfigBaseline = *a.manageConfig // value copy of a flat struct
+	} else {
+		a.manageConfigBaseline = *NewManageConfig()
+	}
+	a.manageConfigBaselineTheme = a.theme
+}
+
 // revertThemeToSaved reverts the in-session theme/preview back to the persisted
 // theme (used when the user cancels a standalone theme change with Esc).
 func (a *App) revertThemeToSaved() {
@@ -207,7 +220,13 @@ type App struct {
 
 	// Management state (detailed config)
 	manageConfig *ManageConfig
-	managePane   int // 0 = tools pane, 1 = settings pane (ScreenManage)
+	// manageConfigBaseline is a snapshot of manageConfig + theme as last loaded or
+	// last successfully saved. The Manage save diffs the live config against this
+	// to apply ONLY the tools the user actually changed, so editing one tool can
+	// never rewrite another tool's config file from manage.json defaults (P1-A2).
+	manageConfigBaseline      ManageConfig
+	manageConfigBaselineTheme string
+	managePane                int // 0 = tools pane, 1 = settings pane (ScreenManage)
 	// Cached install status for tools to avoid running package-manager checks every render.
 	manageInstalled      map[string]bool
 	manageInstalledReady bool
@@ -431,6 +450,10 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 	if cfg, err := config.LoadToolConfig("manage", NewManageConfig); err == nil && cfg != nil {
 		app.manageConfig = cfg
 	}
+
+	// Snapshot the loaded Manage config + theme as the save baseline so the Manage
+	// save can scope its config-file writes to only the tools the user changes.
+	app.snapshotManageBaseline()
 
 	// Best-effort: load hotkeys favorites config and migrate any legacy
 	// Key-string-keyed favorites to the new stable-ID format.

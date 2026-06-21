@@ -193,6 +193,35 @@ func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
 	return writeNeovimUserPrefs(cfg, theme, nvimDir)
 }
 
+// WriteNeovimUserPrefs writes ONLY the user-preferences overlay
+// (lua/custom/options.lua, plus a require appended to init.lua if present) into
+// the existing ~/.config/nvim. It is the PURE, non-destructive counterpart of
+// WriteNeovimConfig used by the config-apply path: it never clones a preset and
+// never moves/removes ~/.config/nvim, so saving Neovim settings (Manage save or
+// `dotfiles config neovim`) cannot do a network install or clobber the user's
+// config. Preset cloning stays at install time only (installation.go).
+//
+// If ~/.config/nvim does not exist yet (Neovim not installed / no preset cloned),
+// this is a deliberate no-op: there is no base config to overlay, and writing a
+// bare options.lua there would be meaningless without the preset's init.lua. The
+// preset clone at install time is what creates the directory; this writer only
+// updates an existing one.
+func WriteNeovimUserPrefs(cfg NeovimConfig, theme string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	nvimDir := filepath.Join(home, ".config", "nvim")
+
+	// No existing config dir => nothing to overlay. Do NOT create it (that is the
+	// install-time preset clone's job) and do NOT clone here.
+	if _, statErr := os.Stat(nvimDir); statErr != nil {
+		return nil
+	}
+
+	return writeNeovimUserPrefs(cfg, theme, nvimDir)
+}
+
 // writeNeovimUserPrefs writes user preferences to a separate file
 func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 	prefsPath := filepath.Join(nvimDir, "lua", "custom", "options.lua")

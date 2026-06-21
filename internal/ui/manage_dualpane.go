@@ -98,6 +98,17 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 	theme := a.theme
 	nav := a.navStyle
 	animationsEnabled := a.animationsEnabled
+
+	// Compute the set of tools to apply BEFORE the async closure runs, by diffing
+	// the live config against the baseline captured at load / last save. Scoping
+	// the apply to only the changed tools is the data-loss fix (P1-A2): a
+	// Ghostty-only edit must not rewrite ~/.tmux.conf, ~/.zshrc, ~/.gitconfig, etc.
+	// from manage.json defaults (overwriting any hand edits). A theme change is
+	// cross-cutting (all generated colors depend on it) and intentionally
+	// re-applies every tool — see changedManageTools.
+	baseline := a.manageConfigBaseline
+	changed := changedManageTools(&baseline, cfg, a.manageConfigBaselineTheme, theme)
+
 	return func() tea.Msg {
 		if err := config.SaveToolConfig("manage", cfg); err != nil {
 			return manageSavedMsg{err: err}
@@ -116,14 +127,16 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 			return manageSavedMsg{err: err}
 		}
 
-		// Apply the saved preferences to the REAL tool config files (C12). Before
-		// this, the Manage editor only persisted manage.json + global prefs and
-		// claimed "Saved ✓" while no generator ever ran, so font sizes, tmux
-		// prefix, git default branch, etc. never touched the dotfiles. Funnel
-		// through the shared apply path so this stays in sync with the standalone
-		// `dotfiles config <tool>` editor.
-		if errs := applyDeepDiveConfig(manageConfigToDeepDive(cfg), theme); len(errs) > 0 {
-			return manageSavedMsg{err: fmt.Errorf("saved preferences but failed to apply %d config file(s); first: %w", len(errs), errs[0])}
+		// Apply the saved preferences to the REAL tool config files (C12), but ONLY
+		// for the tools the user actually changed. Before C12 the Manage editor only
+		// persisted manage.json + global prefs and claimed "Saved ✓" while no
+		// generator ever ran; the first C12 pass over-corrected by re-applying ALL
+		// tools every save (clobbering unrelated configs). This scoped apply funnels
+		// through applyOneToolConfig — the same scoped writer the standalone
+		// `dotfiles config <tool>` editor uses — so the two paths cannot drift, and
+		// it is a PURE file write (no TPM/Neovim clone; that stays at install time).
+		if errs := applyChangedManageTools(changed, manageConfigToDeepDive(cfg), theme); len(errs) > 0 {
+			return manageSavedMsg{err: firstErrorSummary(errs)}
 		}
 
 		return manageSavedMsg{err: nil}
