@@ -2,54 +2,72 @@ package ui
 
 import (
 	"fmt"
+	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-// applyStandaloneConfigCmd persists the in-memory deepDiveConfig to the real
-// tool config files (via the shared apply path) and then quits. It is the exit
-// action for a `dotfiles config <tool>` session, where there is no install step
-// to apply the edits (C27). Failures are intentionally swallowed here: this runs
-// as the app is tearing down, so there is no screen left to surface an error to;
-// the generators themselves are best-effort and the apply path already isolates
-// per-tool failures.
+// applyStandaloneConfigCmd persists the edits from a `dotfiles config <tool>`
+// session to the real config files and then quits (C27). It writes ONLY the tool
+// whose config screen was opened — NOT every generator — so a single-tool config
+// session can never clobber the other tools' config files with compiled-in
+// defaults (the data-loss regression FIX 1 closes). The opened tool is derived
+// from a.startScreen via the authoritative screen<->tool mapping.
+//
+// A failed apply is surfaced on stderr (instead of being silently swallowed) so a
+// failed `config <tool>` save is observable; the app is quitting so there is no
+// screen left to render the error to.
 func (a *App) applyStandaloneConfigCmd() tea.Cmd {
-	cfg := *a.deepDiveConfig
-	theme := a.theme
 	return tea.Sequence(
 		func() tea.Msg {
-			_ = applyDeepDiveConfig(cfg, theme)
+			if errs := a.applyStandaloneConfig(); len(errs) > 0 {
+				fmt.Fprintf(os.Stderr, "dotfiles: failed to apply config: %v\n", errs[0])
+			}
 			return nil
 		},
 		tea.Quit,
 	)
 }
 
+// applyStandaloneConfig writes ONLY the config file for the tool whose screen was
+// opened standalone (a.startScreen), using the current in-memory deepDiveConfig.
+// It returns any generator error(s). Splitting this out from the Cmd keeps it
+// directly testable (no tea.Quit) and is the single scoped-write entry point for
+// the standalone path.
+func (a *App) applyStandaloneConfig() []error {
+	toolID, ok := toolIDForScreen(a.startScreen)
+	if !ok {
+		// Not a per-tool config screen; nothing scoped to write.
+		return nil
+	}
+	return applyOneToolConfig(toolID, *a.deepDiveConfig, a.theme)
+}
+
 // config_apply.go is the SINGLE place that turns the TUI's in-memory config into
-// real tool config files. Both the Manage editor's save (C12) and the standalone
-// `dotfiles config <tool>` editor (C27) funnel through applyDeepDiveConfig so the
-// generator-calling logic lives in exactly one spot and cannot drift.
+// real tool config files. The per-tool generators live once in
+// toolConfigGenerators; the Manage editor's save (C12) calls applyDeepDiveConfig
+// to write EVERY tool from manage.json, while the standalone `dotfiles config
+// <tool>` editor (C27) calls applyOneToolConfig to write ONLY the opened tool so
+// it can never clobber the others with defaults (FIX 1). Both share
+// toolConfigGenerators so the generator-calling logic cannot drift.
 //
 // The install worker (installation.go) historically inlined the same
 // DeepDiveConfig -> tools.*Config translation; the configuration phase there
 // pre-dates this helper and is left as-is to avoid disturbing the streaming
 // install path (T1), but it mirrors the same mapping.
 
-// applyDeepDiveConfig writes every tool config file derived from a DeepDiveConfig
-// using the tools.Write*Config generators. It is best-effort: each generator is
-// attempted independently and ALL failures are collected and returned, so one
-// tool failing does not silently skip the rest (consistent with the T2
-// silent-failure work). A nil/empty slice means everything succeeded.
-func applyDeepDiveConfig(cfg DeepDiveConfig, theme string) []error {
-	var errs []error
-	try := func(name string, fn func() error) {
-		if err := fn(); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-		}
-	}
-
-	try("ghostty", func() error {
+// toolConfigGenerators maps a tool ID to the function that writes that one tool's
+// config file from a DeepDiveConfig. It is the SINGLE source of the generator
+// invocations: applyDeepDiveConfig runs every entry (Manage save / install) and
+// applyOneToolConfig runs exactly one (standalone `dotfiles config <tool>`), so
+// the two paths can never drift. Keys match the tool IDs in toolConfigScreens.
+//
+// claude-code is intentionally omitted here because its generator only runs when
+// MCP servers are configured; applyDeepDiveConfig and applyOneToolConfig handle
+// that gated case explicitly.
+var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) error{
+	"ghostty": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteGhosttyConfig(tools.GhosttyConfig{
 			FontSize:        cfg.GhosttyFontSize,
 			FontFamily:      cfg.GhosttyFontFamily,
@@ -59,9 +77,8 @@ func applyDeepDiveConfig(cfg DeepDiveConfig, theme string) []error {
 			ScrollbackLines: cfg.GhosttyScrollbackLines,
 			CursorStyle:     cfg.GhosttyCursorStyle,
 		}, theme)
-	})
-
-	try("tmux", func() error {
+	},
+	"tmux": func(cfg DeepDiveConfig, theme string) error {
 		return tools.SetupTPM(tools.TmuxConfig{
 			Prefix:           cfg.TmuxPrefix,
 			SplitBinds:       cfg.TmuxSplitBinds,
@@ -74,9 +91,8 @@ func applyDeepDiveConfig(cfg DeepDiveConfig, theme string) []error {
 			PluginYank:       cfg.TmuxPluginYank,
 			ContinuumSaveMin: cfg.TmuxContinuumSaveMin,
 		}, theme)
-	})
-
-	try("zsh", func() error {
+	},
+	"zsh": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteZshConfig(tools.ZshConfig{
 			PromptStyle:     cfg.ZshPromptStyle,
 			Plugins:         cfg.ZshPlugins,
@@ -86,9 +102,8 @@ func applyDeepDiveConfig(cfg DeepDiveConfig, theme string) []error {
 			SyntaxHighlight: cfg.ZshSyntaxHighlight,
 			Autosuggestions: cfg.ZshAutosuggestions,
 		}, theme)
-	})
-
-	try("neovim", func() error {
+	},
+	"neovim": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteNeovimConfig(tools.NeovimConfig{
 			ConfigPreset: cfg.NeovimConfig,
 			LSPs:         cfg.NeovimLSPs,
@@ -98,9 +113,8 @@ func applyDeepDiveConfig(cfg DeepDiveConfig, theme string) []error {
 			CursorLine:   cfg.NeovimCursorLine,
 			Clipboard:    cfg.NeovimClipboard,
 		}, theme)
-	})
-
-	try("git", func() error {
+	},
+	"git": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteGitConfig(tools.GitConfig{
 			DeltaSideBySide:  cfg.GitDeltaSideBySide,
 			DefaultBranch:    cfg.GitDefaultBranch,
@@ -109,57 +123,106 @@ func applyDeepDiveConfig(cfg DeepDiveConfig, theme string) []error {
 			SignCommits:      cfg.GitSignCommits,
 			CredentialHelper: cfg.GitCredentialHelper,
 		}, theme)
-	})
-
-	try("yazi", func() error {
+	},
+	"yazi": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteYaziConfig(tools.YaziConfig{
 			Keymap:      cfg.YaziKeymap,
 			ShowHidden:  cfg.YaziShowHidden,
 			PreviewMode: cfg.YaziPreviewMode,
 		}, theme)
-	})
-
-	try("fzf", func() error {
+	},
+	"fzf": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteFzfConfig(tools.FzfConfig{
 			Preview: cfg.FzfPreview,
 			Height:  cfg.FzfHeight,
 			Layout:  cfg.FzfLayout,
 		}, theme)
-	})
-
-	try("lazygit", func() error {
+	},
+	"lazygit": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteLazyGitConfig(tools.LazyGitConfig{
 			SideBySide: cfg.LazyGitSideBySide,
 			MouseMode:  cfg.LazyGitMouseMode,
 			Theme:      cfg.LazyGitTheme,
 		}, theme)
-	})
-
-	try("btop", func() error {
+	},
+	"btop": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteBtopConfig(tools.BtopConfig{
 			Theme:     cfg.BtopTheme,
 			UpdateMs:  cfg.BtopUpdateMs,
 			ShowTemp:  cfg.BtopShowTemp,
 			GraphType: cfg.BtopGraphType,
 		}, theme)
-	})
-
-	try("glow", func() error {
+	},
+	"glow": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteGlowConfig(tools.GlowConfig{
 			Pager: cfg.GlowPager,
 			Style: cfg.GlowStyle,
 			Width: cfg.GlowWidth,
 		}, theme)
-	})
+	},
+}
 
-	// Claude Code MCP servers (only when any are configured).
-	if len(cfg.ClaudeCodeMCPs) > 0 {
-		try("claude-code", func() error {
-			return tools.NewClaudeCodeTool().ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs)
-		})
+// applyClaudeCodeConfig applies the Claude Code MCP server config, but only when
+// at least one server is configured (mirrors the gating both apply paths use).
+func applyClaudeCodeConfig(cfg DeepDiveConfig) error {
+	if len(cfg.ClaudeCodeMCPs) == 0 {
+		return nil
+	}
+	return tools.NewClaudeCodeTool().ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs)
+}
+
+// applyDeepDiveConfig writes every tool config file derived from a DeepDiveConfig
+// using the tools.Write*Config generators. It is best-effort: each generator is
+// attempted independently and ALL failures are collected and returned, so one
+// tool failing does not silently skip the rest (consistent with the T2
+// silent-failure work). A nil/empty slice means everything succeeded.
+//
+// This is the ALL-TOOLS path used by the install worker and the Manage save (the
+// latter legitimately re-applies every tool from manage.json). The standalone
+// `dotfiles config <tool>` path uses applyOneToolConfig so it cannot clobber the
+// other tools (FIX 1).
+func applyDeepDiveConfig(cfg DeepDiveConfig, theme string) []error {
+	var errs []error
+	try := func(name string, fn func() error) {
+		if err := fn(); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		}
 	}
 
+	// Apply in a stable order so collected errors are deterministic.
+	for _, name := range []string{
+		"ghostty", "tmux", "zsh", "neovim", "git", "yazi", "fzf", "lazygit", "btop", "glow",
+	} {
+		gen := toolConfigGenerators[name]
+		try(name, func() error { return gen(cfg, theme) })
+	}
+
+	// Claude Code MCP servers (only when any are configured).
+	try("claude-code", func() error { return applyClaudeCodeConfig(cfg) })
+
 	return errs
+}
+
+// applyOneToolConfig writes ONLY the named tool's config file from a
+// DeepDiveConfig. It is the scoped counterpart of applyDeepDiveConfig used by the
+// standalone `dotfiles config <tool>` exit, so editing one tool's settings can
+// never overwrite another tool's config file with defaults (FIX 1). An unknown
+// toolID (no generator) is a no-op returning nil.
+func applyOneToolConfig(toolID string, cfg DeepDiveConfig, theme string) []error {
+	if toolID == "claude-code" {
+		if err := applyClaudeCodeConfig(cfg); err != nil {
+			return []error{fmt.Errorf("claude-code: %w", err)}
+		}
+		return nil
+	}
+	gen, ok := toolConfigGenerators[toolID]
+	if !ok {
+		return nil
+	}
+	if err := gen(cfg, theme); err != nil {
+		return []error{fmt.Errorf("%s: %w", toolID, err)}
+	}
+	return nil
 }
 
 // tmuxPrefixToGenerator converts the Manage UI's prefix vocabulary ("C-a",

@@ -940,6 +940,18 @@ func (a *App) SetStartScreen(screen Screen) {
 	// (which only exists in the install wizard) and discarding them (C27).
 	a.configStandalone = screenIsToolConfig(screen)
 
+	// Seed the in-memory deep-dive config from the persisted manage.json so a
+	// standalone `dotfiles config <tool>` edits (and on exit re-writes) the user's
+	// SAVED preferences rather than the compiled-in defaults. Without this the
+	// opened tool's other fields would silently reset to defaults on save, and the
+	// scoped write would persist defaults over prior Manage customizations (FIX 1;
+	// also closes the deferred T3 cross-launch-persistence gap). Uses the SAME
+	// translation the Manage save path uses so the two stay in sync.
+	if a.configStandalone {
+		dd := manageConfigToDeepDive(a.manageConfig)
+		a.deepDiveConfig = &dd
+	}
+
 	// CLI `dotfiles theme` routes directly to ScreenThemePicker. Set
 	// themeStandalone=true so Enter persists+quits (the whole TUI was started
 	// just for the picker) instead of advancing into the install wizard (C7).

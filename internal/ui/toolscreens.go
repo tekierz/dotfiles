@@ -45,6 +45,19 @@ func screenIsToolConfig(screen Screen) bool {
 	return false
 }
 
+// toolIDForScreen returns the tool ID whose dedicated config screen is the given
+// screen, and true, or "" and false when the screen is not a per-tool config
+// screen. It is the inverse of toolConfigScreens, used by the standalone
+// `dotfiles config <tool>` exit to scope the write to exactly the opened tool.
+func toolIDForScreen(screen Screen) (string, bool) {
+	for id, s := range toolConfigScreens {
+		if s == screen {
+			return id, true
+		}
+	}
+	return "", false
+}
+
 // verifyToolConfigScreens asserts that the authoritative toolConfigScreens map
 // agrees with the raw ConfigScreen() ints declared in the tools registry. It
 // panics on any disagreement so an iota reorder or a stale tool definition is
