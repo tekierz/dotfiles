@@ -53,8 +53,13 @@ func TestApplyManageConfigWritesGeneratedFiles(t *testing.T) {
 	mc.TmuxPrefix = "C-b" // Manage vocabulary; generator expects ctrl-b -> "C-b"
 
 	dd := manageConfigToDeepDive(mc)
-	if errs := applyDeepDiveConfig(dd, "catppuccin-mocha"); len(errs) > 0 {
-		t.Fatalf("applyDeepDiveConfig returned errors: %v", errs)
+	// Write each tool via the scoped config-apply path (the same path the Manage
+	// save and standalone `dotfiles config <tool>` use). This proves a Manage value
+	// reaches the generated file on disk.
+	for _, id := range []string{"ghostty", "git", "tmux"} {
+		if errs := applyOneToolConfig(id, dd, "catppuccin-mocha"); len(errs) > 0 {
+			t.Fatalf("applyOneToolConfig(%s) returned errors: %v", id, errs)
+		}
 	}
 
 	// Ghostty

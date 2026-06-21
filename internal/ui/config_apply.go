@@ -45,160 +45,215 @@ func (a *App) applyStandaloneConfig() []error {
 }
 
 // config_apply.go is the SINGLE place that turns the TUI's in-memory config into
-// real tool config files. The per-tool generators live once in
-// toolConfigGenerators; the Manage editor's save (C12) calls applyDeepDiveConfig
-// to write EVERY tool from manage.json, while the standalone `dotfiles config
-// <tool>` editor (C27) calls applyOneToolConfig to write ONLY the opened tool so
-// it can never clobber the others with defaults (FIX 1). Both share
-// toolConfigGenerators so the generator-calling logic cannot drift.
+// real tool config files. The DeepDiveConfig -> tools.*Config translation lives
+// once per tool in the *ConfigFrom builders below; every path that needs a tool's
+// config struct (the config-apply generators here AND the install worker in
+// installation.go) calls the same builder, so the mapping cannot drift.
 //
-// The install worker (installation.go) historically inlined the same
-// DeepDiveConfig -> tools.*Config translation; the configuration phase there
-// pre-dates this helper and is left as-is to avoid disturbing the streaming
-// install path (T1), but it mirrors the same mapping.
+// The per-tool generators live once in toolConfigGenerators; the standalone
+// `dotfiles config <tool>` editor (C27) and the Manage editor's save (C12) both
+// call applyOneToolConfig — Manage via applyChangedManageTools over the changed
+// tools — to write ONLY the relevant tool(s) so a save can never clobber the
+// others with defaults (FIX 1). The install worker uses the builders directly
+// with its install-only writers (SetupTPM / WriteNeovimConfig do the clones), so
+// only the WRITE action differs between install and config-apply; the
+// TRANSLATION is shared.
+
+// ghosttyConfigFrom is the single mapping of DeepDiveConfig to tools.GhosttyConfig,
+// shared by the config-apply generator and the install worker.
+func ghosttyConfigFrom(cfg DeepDiveConfig) tools.GhosttyConfig {
+	return tools.GhosttyConfig{
+		FontSize:          cfg.GhosttyFontSize,
+		FontFamily:        cfg.GhosttyFontFamily,
+		Opacity:           cfg.GhosttyOpacity,
+		BlurRadius:        cfg.GhosttyBlurRadius,
+		TabBindings:       cfg.GhosttyTabBindings,
+		ScrollbackLines:   cfg.GhosttyScrollbackLines,
+		CursorStyle:       cfg.GhosttyCursorStyle,
+		WindowDecorations: cfg.GhosttyWindowDecorations,
+		ConfirmClose:      cfg.GhosttyConfirmClose,
+	}
+}
+
+// tmuxConfigFrom is the single mapping of DeepDiveConfig to tools.TmuxConfig. Both
+// the pure config-apply write (WriteTmuxConfig) and the install worker's TPM setup
+// (SetupTPM) consume the same struct; only the write action differs.
+func tmuxConfigFrom(cfg DeepDiveConfig) tools.TmuxConfig {
+	return tools.TmuxConfig{
+		Prefix:           cfg.TmuxPrefix,
+		SplitBinds:       cfg.TmuxSplitBinds,
+		StatusBar:        cfg.TmuxStatusBar,
+		MouseMode:        cfg.TmuxMouseMode,
+		BaseIndex:        cfg.TmuxBaseIndex,
+		PaneBorderStyle:  cfg.TmuxPaneBorderStyle,
+		HistoryLimit:     cfg.TmuxHistoryLimit,
+		EscapeTime:       cfg.TmuxEscapeTime,
+		AggressiveResize: cfg.TmuxAggressiveResize,
+		TPMEnabled:       cfg.TmuxTPMEnabled,
+		PluginSensible:   cfg.TmuxPluginSensible,
+		PluginResurrect:  cfg.TmuxPluginResurrect,
+		PluginContinuum:  cfg.TmuxPluginContinuum,
+		PluginYank:       cfg.TmuxPluginYank,
+		ContinuumSaveMin: cfg.TmuxContinuumSaveMin,
+		ContinuumRestore: cfg.TmuxContinuumRestore,
+	}
+}
+
+// zshConfigFrom is the single mapping of DeepDiveConfig to tools.ZshConfig.
+func zshConfigFrom(cfg DeepDiveConfig) tools.ZshConfig {
+	return tools.ZshConfig{
+		PromptStyle:       cfg.ZshPromptStyle,
+		Plugins:           cfg.ZshPlugins,
+		Aliases:           cfg.ZshAliases,
+		HistorySize:       cfg.ZshHistorySize,
+		AutoCD:            cfg.ZshAutoCD,
+		SyntaxHighlight:   cfg.ZshSyntaxHighlight,
+		Autosuggestions:   cfg.ZshAutosuggestions,
+		HistoryIgnoreDups: cfg.ZshHistoryIgnoreDups,
+		Correction:        cfg.ZshCorrection,
+		CompletionMenu:    cfg.ZshCompletionMenu,
+	}
+}
+
+// neovimConfigFrom is the single mapping of DeepDiveConfig to tools.NeovimConfig.
+// The pure config-apply overlay (WriteNeovimUserPrefs) and the install worker's
+// preset clone (WriteNeovimConfig) consume the same struct; only the write action
+// differs.
+func neovimConfigFrom(cfg DeepDiveConfig) tools.NeovimConfig {
+	return tools.NeovimConfig{
+		ConfigPreset: cfg.NeovimConfig,
+		LSPs:         cfg.NeovimLSPs,
+		Plugins:      cfg.NeovimPlugins,
+		TabWidth:     cfg.NeovimTabWidth,
+		Wrap:         cfg.NeovimWrap,
+		CursorLine:   cfg.NeovimCursorLine,
+		Clipboard:    cfg.NeovimClipboard,
+		LineNumbers:  cfg.NeovimLineNumbers,
+		RelativeNum:  cfg.NeovimRelativeNum,
+		ExpandTab:    cfg.NeovimExpandTab,
+		UndoFile:     cfg.NeovimUndoFile,
+	}
+}
+
+// gitConfigFrom is the single mapping of DeepDiveConfig to tools.GitConfig.
+func gitConfigFrom(cfg DeepDiveConfig) tools.GitConfig {
+	return tools.GitConfig{
+		DeltaSideBySide:  cfg.GitDeltaSideBySide,
+		DefaultBranch:    cfg.GitDefaultBranch,
+		Aliases:          cfg.GitAliases,
+		PullRebase:       cfg.GitPullRebase,
+		SignCommits:      cfg.GitSignCommits,
+		CredentialHelper: cfg.GitCredentialHelper,
+		AutoSetupRemote:  cfg.GitAutoSetupRemote,
+		MergeTool:        cfg.GitMergeTool,
+		DiffTool:         cfg.GitDiffTool,
+	}
+}
+
+// yaziConfigFrom is the single mapping of DeepDiveConfig to tools.YaziConfig.
+func yaziConfigFrom(cfg DeepDiveConfig) tools.YaziConfig {
+	return tools.YaziConfig{
+		Keymap:      cfg.YaziKeymap,
+		ShowHidden:  cfg.YaziShowHidden,
+		PreviewMode: cfg.YaziPreviewMode,
+		SortBy:      cfg.YaziSortBy,
+		SortReverse: cfg.YaziSortReverse,
+		LineMode:    cfg.YaziLineMode,
+		ScrollOff:   cfg.YaziScrollOff,
+	}
+}
+
+// fzfConfigFrom is the single mapping of DeepDiveConfig to tools.FzfConfig.
+func fzfConfigFrom(cfg DeepDiveConfig) tools.FzfConfig {
+	return tools.FzfConfig{
+		Preview:       cfg.FzfPreview,
+		Height:        cfg.FzfHeight,
+		Layout:        cfg.FzfLayout,
+		DefaultOpts:   cfg.FzfDefaultOpts,
+		BorderStyle:   cfg.FzfBorderStyle,
+		PreviewWindow: cfg.FzfPreviewWindow,
+	}
+}
+
+// lazygitConfigFrom is the single mapping of DeepDiveConfig to tools.LazyGitConfig.
+func lazygitConfigFrom(cfg DeepDiveConfig) tools.LazyGitConfig {
+	return tools.LazyGitConfig{
+		SideBySide: cfg.LazyGitSideBySide,
+		MouseMode:  cfg.LazyGitMouseMode,
+		Theme:      cfg.LazyGitTheme,
+		Paging:     cfg.LazyGitPaging,
+	}
+}
+
+// btopConfigFrom is the single mapping of DeepDiveConfig to tools.BtopConfig.
+func btopConfigFrom(cfg DeepDiveConfig) tools.BtopConfig {
+	return tools.BtopConfig{
+		Theme:      cfg.BtopTheme,
+		UpdateMs:   cfg.BtopUpdateMs,
+		ShowTemp:   cfg.BtopShowTemp,
+		GraphType:  cfg.BtopGraphType,
+		TempScale:  cfg.BtopTempScale,
+		ShownBoxes: cfg.BtopShownBoxes,
+	}
+}
+
+// glowConfigFrom is the single mapping of DeepDiveConfig to tools.GlowConfig.
+func glowConfigFrom(cfg DeepDiveConfig) tools.GlowConfig {
+	return tools.GlowConfig{
+		Pager: cfg.GlowPager,
+		Style: cfg.GlowStyle,
+		Width: cfg.GlowWidth,
+		Mouse: cfg.GlowMouse,
+	}
+}
 
 // toolConfigGenerators maps a tool ID to the function that writes that one tool's
-// config file from a DeepDiveConfig. It is the SINGLE source of the generator
-// invocations: applyDeepDiveConfig runs every entry (Manage save / install) and
-// applyOneToolConfig runs exactly one (standalone `dotfiles config <tool>`), so
-// the two paths can never drift. Keys match the tool IDs in toolConfigScreens.
+// config file from a DeepDiveConfig, using the shared *ConfigFrom builder for the
+// translation. It is the SINGLE source of the generator invocations:
+// applyOneToolConfig runs exactly one entry (standalone `dotfiles config <tool>`,
+// and Manage save via applyChangedManageTools), so those paths can never drift.
+// Keys match the tool IDs in toolConfigScreens.
 //
 // claude-code is intentionally omitted here because its generator only runs when
-// MCP servers are configured; applyDeepDiveConfig and applyOneToolConfig handle
-// that gated case explicitly.
+// MCP servers are configured; applyOneToolConfig handles that gated case
+// explicitly.
+//
+// tmux and neovim generators are PURE writes: WriteTmuxConfig writes only
+// ~/.tmux.conf (TPM clone is an install-only side-effect, installation.go calls
+// SetupTPM), and WriteNeovimUserPrefs overlays only lua/custom/options.lua (preset
+// clone + the destructive nvim move are install-only, installation.go calls
+// WriteNeovimConfig). Config-apply — Manage save and `dotfiles config <tool>` —
+// must never clone or hit the network.
 var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) error{
 	"ghostty": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteGhosttyConfig(tools.GhosttyConfig{
-			FontSize:          cfg.GhosttyFontSize,
-			FontFamily:        cfg.GhosttyFontFamily,
-			Opacity:           cfg.GhosttyOpacity,
-			BlurRadius:        cfg.GhosttyBlurRadius,
-			TabBindings:       cfg.GhosttyTabBindings,
-			ScrollbackLines:   cfg.GhosttyScrollbackLines,
-			CursorStyle:       cfg.GhosttyCursorStyle,
-			WindowDecorations: cfg.GhosttyWindowDecorations,
-			ConfirmClose:      cfg.GhosttyConfirmClose,
-		}, theme)
+		return tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme)
 	},
-	// tmux generator is a PURE file write (~/.tmux.conf only). TPM installation
-	// (git clone + plugin install) is an INSTALL side-effect and lives ONLY in the
-	// install worker (installation.go calls tools.SetupTPM directly). Config-apply
-	// — Manage save and `dotfiles config tmux` — must never clone or hit the
-	// network, so it uses WriteTmuxConfig, not SetupTPM.
 	"tmux": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteTmuxConfig(tools.TmuxConfig{
-			Prefix:           cfg.TmuxPrefix,
-			SplitBinds:       cfg.TmuxSplitBinds,
-			StatusBar:        cfg.TmuxStatusBar,
-			MouseMode:        cfg.TmuxMouseMode,
-			BaseIndex:        cfg.TmuxBaseIndex,
-			PaneBorderStyle:  cfg.TmuxPaneBorderStyle,
-			HistoryLimit:     cfg.TmuxHistoryLimit,
-			EscapeTime:       cfg.TmuxEscapeTime,
-			AggressiveResize: cfg.TmuxAggressiveResize,
-			TPMEnabled:       cfg.TmuxTPMEnabled,
-			PluginSensible:   cfg.TmuxPluginSensible,
-			PluginResurrect:  cfg.TmuxPluginResurrect,
-			PluginContinuum:  cfg.TmuxPluginContinuum,
-			PluginYank:       cfg.TmuxPluginYank,
-			ContinuumSaveMin: cfg.TmuxContinuumSaveMin,
-			ContinuumRestore: cfg.TmuxContinuumRestore,
-		}, theme)
+		return tools.WriteTmuxConfig(tmuxConfigFrom(cfg), theme)
 	},
 	"zsh": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteZshConfig(tools.ZshConfig{
-			PromptStyle:       cfg.ZshPromptStyle,
-			Plugins:           cfg.ZshPlugins,
-			Aliases:           cfg.ZshAliases,
-			HistorySize:       cfg.ZshHistorySize,
-			AutoCD:            cfg.ZshAutoCD,
-			SyntaxHighlight:   cfg.ZshSyntaxHighlight,
-			Autosuggestions:   cfg.ZshAutosuggestions,
-			HistoryIgnoreDups: cfg.ZshHistoryIgnoreDups,
-			Correction:        cfg.ZshCorrection,
-			CompletionMenu:    cfg.ZshCompletionMenu,
-		}, theme)
+		return tools.WriteZshConfig(zshConfigFrom(cfg), theme)
 	},
-	// neovim generator is a PURE user-prefs overlay (lua/custom/options.lua in an
-	// existing ~/.config/nvim). Cloning a preset repo and the destructive
-	// move/remove of ~/.config/nvim are INSTALL side-effects and live ONLY in the
-	// install worker (installation.go calls tools.WriteNeovimConfig directly).
-	// Config-apply must never clone or clobber the user's nvim config, so it uses
-	// WriteNeovimUserPrefs (a no-op when nvim isn't installed yet).
 	"neovim": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteNeovimUserPrefs(tools.NeovimConfig{
-			ConfigPreset: cfg.NeovimConfig,
-			LSPs:         cfg.NeovimLSPs,
-			Plugins:      cfg.NeovimPlugins,
-			TabWidth:     cfg.NeovimTabWidth,
-			Wrap:         cfg.NeovimWrap,
-			CursorLine:   cfg.NeovimCursorLine,
-			Clipboard:    cfg.NeovimClipboard,
-			LineNumbers:  cfg.NeovimLineNumbers,
-			RelativeNum:  cfg.NeovimRelativeNum,
-			ExpandTab:    cfg.NeovimExpandTab,
-			UndoFile:     cfg.NeovimUndoFile,
-		}, theme)
+		return tools.WriteNeovimUserPrefs(neovimConfigFrom(cfg), theme)
 	},
 	"git": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteGitConfig(tools.GitConfig{
-			DeltaSideBySide:  cfg.GitDeltaSideBySide,
-			DefaultBranch:    cfg.GitDefaultBranch,
-			Aliases:          cfg.GitAliases,
-			PullRebase:       cfg.GitPullRebase,
-			SignCommits:      cfg.GitSignCommits,
-			CredentialHelper: cfg.GitCredentialHelper,
-			AutoSetupRemote:  cfg.GitAutoSetupRemote,
-			MergeTool:        cfg.GitMergeTool,
-			DiffTool:         cfg.GitDiffTool,
-		}, theme)
+		return tools.WriteGitConfig(gitConfigFrom(cfg), theme)
 	},
 	"yazi": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteYaziConfig(tools.YaziConfig{
-			Keymap:      cfg.YaziKeymap,
-			ShowHidden:  cfg.YaziShowHidden,
-			PreviewMode: cfg.YaziPreviewMode,
-			SortBy:      cfg.YaziSortBy,
-			SortReverse: cfg.YaziSortReverse,
-			LineMode:    cfg.YaziLineMode,
-			ScrollOff:   cfg.YaziScrollOff,
-		}, theme)
+		return tools.WriteYaziConfig(yaziConfigFrom(cfg), theme)
 	},
 	"fzf": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteFzfConfig(tools.FzfConfig{
-			Preview:       cfg.FzfPreview,
-			Height:        cfg.FzfHeight,
-			Layout:        cfg.FzfLayout,
-			DefaultOpts:   cfg.FzfDefaultOpts,
-			BorderStyle:   cfg.FzfBorderStyle,
-			PreviewWindow: cfg.FzfPreviewWindow,
-		}, theme)
+		return tools.WriteFzfConfig(fzfConfigFrom(cfg), theme)
 	},
 	"lazygit": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteLazyGitConfig(tools.LazyGitConfig{
-			SideBySide: cfg.LazyGitSideBySide,
-			MouseMode:  cfg.LazyGitMouseMode,
-			Theme:      cfg.LazyGitTheme,
-			Paging:     cfg.LazyGitPaging,
-		}, theme)
+		return tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), theme)
 	},
 	"btop": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteBtopConfig(tools.BtopConfig{
-			Theme:      cfg.BtopTheme,
-			UpdateMs:   cfg.BtopUpdateMs,
-			ShowTemp:   cfg.BtopShowTemp,
-			GraphType:  cfg.BtopGraphType,
-			TempScale:  cfg.BtopTempScale,
-			ShownBoxes: cfg.BtopShownBoxes,
-		}, theme)
+		return tools.WriteBtopConfig(btopConfigFrom(cfg), theme)
 	},
 	"glow": func(cfg DeepDiveConfig, theme string) error {
-		return tools.WriteGlowConfig(tools.GlowConfig{
-			Pager: cfg.GlowPager,
-			Style: cfg.GlowStyle,
-			Width: cfg.GlowWidth,
-			Mouse: cfg.GlowMouse,
-		}, theme)
+		return tools.WriteGlowConfig(glowConfigFrom(cfg), theme)
 	},
 }
 
@@ -211,41 +266,10 @@ func applyClaudeCodeConfig(cfg DeepDiveConfig) error {
 	return tools.NewClaudeCodeTool().ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs)
 }
 
-// applyDeepDiveConfig writes every tool config file derived from a DeepDiveConfig
-// using the tools.Write*Config generators. It is best-effort: each generator is
-// attempted independently and ALL failures are collected and returned, so one
-// tool failing does not silently skip the rest (consistent with the T2
-// silent-failure work). A nil/empty slice means everything succeeded.
-//
-// This is the ALL-TOOLS path used by the install worker and the Manage save (the
-// latter legitimately re-applies every tool from manage.json). The standalone
-// `dotfiles config <tool>` path uses applyOneToolConfig so it cannot clobber the
-// other tools (FIX 1).
-func applyDeepDiveConfig(cfg DeepDiveConfig, theme string) []error {
-	var errs []error
-	try := func(name string, fn func() error) {
-		if err := fn(); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-		}
-	}
-
-	// Apply in a stable order so collected errors are deterministic.
-	for _, name := range []string{
-		"ghostty", "tmux", "zsh", "neovim", "git", "yazi", "fzf", "lazygit", "btop", "glow",
-	} {
-		gen := toolConfigGenerators[name]
-		try(name, func() error { return gen(cfg, theme) })
-	}
-
-	// Claude Code MCP servers (only when any are configured).
-	try("claude-code", func() error { return applyClaudeCodeConfig(cfg) })
-
-	return errs
-}
-
 // applyOneToolConfig writes ONLY the named tool's config file from a
-// DeepDiveConfig. It is the scoped counterpart of applyDeepDiveConfig used by the
-// standalone `dotfiles config <tool>` exit, so editing one tool's settings can
+// DeepDiveConfig. It is the single scoped writer used by the standalone
+// `dotfiles config <tool>` exit and, one tool at a time via
+// applyChangedManageTools, by the Manage save — so editing one tool's settings can
 // never overwrite another tool's config file with defaults (FIX 1). An unknown
 // toolID (no generator) is a no-op returning nil.
 func applyOneToolConfig(toolID string, cfg DeepDiveConfig, theme string) []error {
@@ -301,7 +325,7 @@ func glowPagerToGenerator(pager string) string {
 }
 
 // manageConfigToDeepDive translates the persisted ManageConfig into a
-// DeepDiveConfig suitable for applyDeepDiveConfig. It starts from
+// DeepDiveConfig suitable for the config-apply generators. It starts from
 // NewDeepDiveConfig() so fields the Manage UI does not expose keep their sane
 // defaults (e.g. install-flag maps, zsh plugins, neovim LSPs), then overlays
 // every ManageConfig field that has a generator equivalent.

@@ -301,25 +301,10 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 		return nil
 	}, "  ✓ Utilities installed to ~/.local/bin")
 
-	// Configure tmux with TPM plugins
-	tmuxCfg := tools.TmuxConfig{
-		Prefix:           cfg.TmuxPrefix,
-		SplitBinds:       cfg.TmuxSplitBinds,
-		StatusBar:        cfg.TmuxStatusBar,
-		MouseMode:        cfg.TmuxMouseMode,
-		BaseIndex:        cfg.TmuxBaseIndex,
-		PaneBorderStyle:  cfg.TmuxPaneBorderStyle,
-		HistoryLimit:     cfg.TmuxHistoryLimit,
-		EscapeTime:       cfg.TmuxEscapeTime,
-		AggressiveResize: cfg.TmuxAggressiveResize,
-		TPMEnabled:       cfg.TmuxTPMEnabled,
-		PluginSensible:   cfg.TmuxPluginSensible,
-		PluginResurrect:  cfg.TmuxPluginResurrect,
-		PluginContinuum:  cfg.TmuxPluginContinuum,
-		PluginYank:       cfg.TmuxPluginYank,
-		ContinuumSaveMin: cfg.TmuxContinuumSaveMin,
-		ContinuumRestore: cfg.TmuxContinuumRestore,
-	}
+	// Configure tmux with TPM plugins. The DeepDiveConfig -> TmuxConfig translation
+	// is shared with config-apply via tmuxConfigFrom; install additionally clones
+	// TPM (SetupTPM), which is an install-only side-effect.
+	tmuxCfg := tmuxConfigFrom(cfg)
 	stepLine("\n▶ Configuring tmux...")
 	if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
 		emitLine(fmt.Sprintf("  ⚠ Failed to configure tmux: %v", err))
@@ -357,18 +342,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 
 	// Configure Ghostty
 	configPhase("\n▶ Configuring Ghostty...", func() error {
-		ghosttyCfg := tools.GhosttyConfig{
-			FontSize:          cfg.GhosttyFontSize,
-			FontFamily:        cfg.GhosttyFontFamily,
-			Opacity:           cfg.GhosttyOpacity,
-			BlurRadius:        cfg.GhosttyBlurRadius,
-			TabBindings:       cfg.GhosttyTabBindings,
-			ScrollbackLines:   cfg.GhosttyScrollbackLines,
-			CursorStyle:       cfg.GhosttyCursorStyle,
-			WindowDecorations: cfg.GhosttyWindowDecorations,
-			ConfirmClose:      cfg.GhosttyConfirmClose,
-		}
-		if err := tools.WriteGhosttyConfig(ghosttyCfg, theme); err != nil {
+		if err := tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure Ghostty: %w", err)
 		}
 		return nil
@@ -376,38 +350,17 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 
 	// Configure Zsh
 	configPhase("\n▶ Configuring Zsh...", func() error {
-		zshCfg := tools.ZshConfig{
-			PromptStyle:       cfg.ZshPromptStyle,
-			Plugins:           cfg.ZshPlugins,
-			Aliases:           cfg.ZshAliases,
-			HistorySize:       cfg.ZshHistorySize,
-			AutoCD:            cfg.ZshAutoCD,
-			SyntaxHighlight:   cfg.ZshSyntaxHighlight,
-			Autosuggestions:   cfg.ZshAutosuggestions,
-			HistoryIgnoreDups: cfg.ZshHistoryIgnoreDups,
-			Correction:        cfg.ZshCorrection,
-			CompletionMenu:    cfg.ZshCompletionMenu,
-		}
-		if err := tools.WriteZshConfig(zshCfg, theme); err != nil {
+		if err := tools.WriteZshConfig(zshConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure Zsh: %w", err)
 		}
 		return nil
 	}, "  ✓ Zsh configured with ~/.zshrc")
 
-	// Configure Neovim
-	neovimCfg := tools.NeovimConfig{
-		ConfigPreset: cfg.NeovimConfig,
-		LSPs:         cfg.NeovimLSPs,
-		Plugins:      cfg.NeovimPlugins,
-		TabWidth:     cfg.NeovimTabWidth,
-		Wrap:         cfg.NeovimWrap,
-		CursorLine:   cfg.NeovimCursorLine,
-		Clipboard:    cfg.NeovimClipboard,
-		LineNumbers:  cfg.NeovimLineNumbers,
-		RelativeNum:  cfg.NeovimRelativeNum,
-		ExpandTab:    cfg.NeovimExpandTab,
-		UndoFile:     cfg.NeovimUndoFile,
-	}
+	// Configure Neovim. The DeepDiveConfig -> NeovimConfig translation is shared
+	// with config-apply via neovimConfigFrom; install uses WriteNeovimConfig, which
+	// clones the preset repo (an install-only side-effect), whereas config-apply
+	// only overlays user prefs.
+	neovimCfg := neovimConfigFrom(cfg)
 	neovimSuccessMsg := fmt.Sprintf("  ✓ Neovim configured (%s)", neovimCfg.ConfigPreset)
 	if neovimCfg.ConfigPreset == "custom" {
 		neovimSuccessMsg = "  ✓ Neovim: using existing config (unchanged)"
@@ -421,18 +374,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 
 	// Configure Git
 	configPhase("\n▶ Configuring Git...", func() error {
-		gitCfg := tools.GitConfig{
-			DeltaSideBySide:  cfg.GitDeltaSideBySide,
-			DefaultBranch:    cfg.GitDefaultBranch,
-			Aliases:          cfg.GitAliases,
-			PullRebase:       cfg.GitPullRebase,
-			SignCommits:      cfg.GitSignCommits,
-			CredentialHelper: cfg.GitCredentialHelper,
-			AutoSetupRemote:  cfg.GitAutoSetupRemote,
-			MergeTool:        cfg.GitMergeTool,
-			DiffTool:         cfg.GitDiffTool,
-		}
-		if err := tools.WriteGitConfig(gitCfg, theme); err != nil {
+		if err := tools.WriteGitConfig(gitConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure Git: %w", err)
 		}
 		return nil
@@ -440,16 +382,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 
 	// Configure Yazi
 	configPhase("\n▶ Configuring Yazi...", func() error {
-		yaziCfg := tools.YaziConfig{
-			Keymap:      cfg.YaziKeymap,
-			ShowHidden:  cfg.YaziShowHidden,
-			PreviewMode: cfg.YaziPreviewMode,
-			SortBy:      cfg.YaziSortBy,
-			SortReverse: cfg.YaziSortReverse,
-			LineMode:    cfg.YaziLineMode,
-			ScrollOff:   cfg.YaziScrollOff,
-		}
-		if err := tools.WriteYaziConfig(yaziCfg, theme); err != nil {
+		if err := tools.WriteYaziConfig(yaziConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure Yazi: %w", err)
 		}
 		return nil
@@ -457,15 +390,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 
 	// Configure FZF
 	configPhase("\n▶ Configuring FZF...", func() error {
-		fzfCfg := tools.FzfConfig{
-			Preview:       cfg.FzfPreview,
-			Height:        cfg.FzfHeight,
-			Layout:        cfg.FzfLayout,
-			DefaultOpts:   cfg.FzfDefaultOpts,
-			BorderStyle:   cfg.FzfBorderStyle,
-			PreviewWindow: cfg.FzfPreviewWindow,
-		}
-		if err := tools.WriteFzfConfig(fzfCfg, theme); err != nil {
+		if err := tools.WriteFzfConfig(fzfConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure FZF: %w", err)
 		}
 		return nil
@@ -476,13 +401,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// selection flag; skipping its config when deselected matches user intent.
 	if cfg.CLITools["lazygit"] {
 		configPhase("\n▶ Configuring LazyGit...", func() error {
-			lazygitCfg := tools.LazyGitConfig{
-				SideBySide: cfg.LazyGitSideBySide,
-				MouseMode:  cfg.LazyGitMouseMode,
-				Theme:      cfg.LazyGitTheme,
-				Paging:     cfg.LazyGitPaging,
-			}
-			if err := tools.WriteLazyGitConfig(lazygitCfg, theme); err != nil {
+			if err := tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), theme); err != nil {
 				return fmt.Errorf("Failed to configure LazyGit: %w", err)
 			}
 			return nil
@@ -493,15 +412,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// btop is in CLITools (UIGroupCLITools) and has an explicit selection flag.
 	if cfg.CLITools["btop"] {
 		configPhase("\n▶ Configuring Btop...", func() error {
-			btopCfg := tools.BtopConfig{
-				Theme:      cfg.BtopTheme,
-				UpdateMs:   cfg.BtopUpdateMs,
-				ShowTemp:   cfg.BtopShowTemp,
-				GraphType:  cfg.BtopGraphType,
-				TempScale:  cfg.BtopTempScale,
-				ShownBoxes: cfg.BtopShownBoxes,
-			}
-			if err := tools.WriteBtopConfig(btopCfg, theme); err != nil {
+			if err := tools.WriteBtopConfig(btopConfigFrom(cfg), theme); err != nil {
 				return fmt.Errorf("Failed to configure Btop: %w", err)
 			}
 			return nil
@@ -512,13 +423,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// glow is in CLITools (UIGroupCLITools) and has an explicit selection flag.
 	if cfg.CLITools["glow"] {
 		configPhase("\n▶ Configuring Glow...", func() error {
-			glowCfg := tools.GlowConfig{
-				Pager: cfg.GlowPager,
-				Style: cfg.GlowStyle,
-				Width: cfg.GlowWidth,
-				Mouse: cfg.GlowMouse,
-			}
-			if err := tools.WriteGlowConfig(glowCfg, theme); err != nil {
+			if err := tools.WriteGlowConfig(glowConfigFrom(cfg), theme); err != nil {
 				return fmt.Errorf("Failed to configure Glow: %w", err)
 			}
 			return nil

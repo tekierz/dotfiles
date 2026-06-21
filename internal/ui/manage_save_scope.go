@@ -4,9 +4,9 @@ import "fmt"
 
 // manageGeneratorToolOrder is the stable set of tool IDs whose config files the
 // Manage save can write, in the deterministic order used for applying changes and
-// reporting errors. It mirrors the all-tools order in applyDeepDiveConfig (minus
+// reporting errors. It mirrors the install worker's all-tools order (minus
 // claude-code, which is gated and handled separately) so the scoped Manage save
-// and the all-tools path agree on which tools exist.
+// and the install path agree on which tools exist.
 var manageGeneratorToolOrder = []string{
 	"ghostty", "tmux", "zsh", "neovim", "git", "yazi", "fzf", "lazygit", "btop", "glow",
 }
@@ -148,7 +148,7 @@ func changedManageTools(baseline, current *ManageConfig, baselineTheme, currentT
 // reusing the scoped applyOneToolConfig writer so the Manage save shares the exact
 // generator-calling logic as the standalone `dotfiles config <tool>` path. It is
 // best-effort: every tool is attempted and ALL errors are collected (consistent
-// with applyDeepDiveConfig / the T2 silent-failure work).
+// with the T2 silent-failure work).
 func applyChangedManageTools(toolIDs []string, cfg DeepDiveConfig, theme string) []error {
 	var errs []error
 	for _, id := range toolIDs {
