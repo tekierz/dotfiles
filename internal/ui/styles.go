@@ -328,10 +328,6 @@ func updateStyles() {
 		Bold(true).
 		Padding(0, 1)
 
-	LogoStyle = lipgloss.NewStyle().
-		Foreground(ColorNeonPink).
-		Bold(true)
-
 	ButtonStyle = lipgloss.NewStyle().
 		Padding(0, 2).
 		Border(lipgloss.RoundedBorder()).
@@ -344,30 +340,9 @@ func updateStyles() {
 		Foreground(ColorCyan).
 		Bold(true)
 
-	ButtonGlowStyle = lipgloss.NewStyle().
-		Padding(0, 2).
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(ColorNeonPink).
-		Foreground(ColorNeonPink).
-		Bold(true)
-
-	StatusReadyStyle = lipgloss.NewStyle().
-		Foreground(ColorGreen)
-
-	StatusPendingStyle = lipgloss.NewStyle().
-		Foreground(ColorYellow)
-
-	StatusErrorStyle = lipgloss.NewStyle().
-		Foreground(ColorRed)
-
 	HelpStyle = lipgloss.NewStyle().
 		Foreground(ColorTextMuted).
 		Padding(1, 0)
-
-	AccentBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(ColorNeonPurple).
-		Padding(0, 1)
 }
 
 // Legacy color variables (updated by SetTheme via updateDynamicColors)
@@ -380,19 +355,8 @@ var (
 	ColorNeonPurple = lipgloss.Color("#9B5DE5") // electric purple
 	ColorGreen      = lipgloss.Color("#00F5A0") // mint success
 	ColorYellow     = lipgloss.Color("#FEE440") // neon sand
-	ColorOrange     = lipgloss.Color("#FF9F1C")
 	ColorRed        = lipgloss.Color("#FF4D6D")
 
-	// Gradient colors for smooth transitions
-	GradientCyan = []lipgloss.Color{
-		"#00F5D4", "#00E5FF", "#00BBF9", "#4EA8DE", "#5B7CFA",
-	}
-	GradientPink = []lipgloss.Color{
-		"#F15BB5", "#FF5DA2", "#C77DFF", "#9B5DE5", "#5B7CFA",
-	}
-	GradientRainbow = []lipgloss.Color{
-		"#ff0000", "#ff7f00", "#ffff00", "#00ff00", "#00ffff", "#0000ff", "#8b00ff",
-	}
 	// Primary UI gradient used across borders, dividers, and logo accents.
 	GradientCyber = []lipgloss.Color{
 		"#00F5D4", "#00E5FF", "#00BBF9", "#4EA8DE", "#5B7CFA", "#9B5DE5", "#F15BB5",
@@ -414,8 +378,6 @@ var (
 // Spinner frames for animation
 var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 var SpinnerDotsFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
-var SpinnerBlockFrames = []string{"▖", "▘", "▝", "▗"}
-var SpinnerPulseFrames = []string{"█", "▓", "▒", "░", "▒", "▓"}
 
 // Styles - no explicit backgrounds to respect terminal transparency
 var (
@@ -431,10 +393,6 @@ var (
 			Bold(true).
 			Padding(0, 1)
 
-	LogoStyle = lipgloss.NewStyle().
-			Foreground(ColorNeonPink).
-			Bold(true)
-
 	// Button styles
 	ButtonStyle = lipgloss.NewStyle().
 			Padding(0, 2).
@@ -448,34 +406,10 @@ var (
 				Foreground(ColorCyan).
 				Bold(true)
 
-	// Glowing button style
-	ButtonGlowStyle = lipgloss.NewStyle().
-			Padding(0, 2).
-			Border(lipgloss.DoubleBorder()).
-			BorderForeground(ColorNeonPink).
-			Foreground(ColorNeonPink).
-			Bold(true)
-
-	// Status indicator styles
-	StatusReadyStyle = lipgloss.NewStyle().
-				Foreground(ColorGreen)
-
-	StatusPendingStyle = lipgloss.NewStyle().
-				Foreground(ColorYellow)
-
-	StatusErrorStyle = lipgloss.NewStyle().
-				Foreground(ColorRed)
-
 	// Help text style
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorTextMuted).
 			Padding(1, 0)
-
-	// Accent box style
-	AccentBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.DoubleBorder()).
-			BorderForeground(ColorNeonPurple).
-			Padding(0, 1)
 )
 
 // RenderBadge renders a compact pill badge.
@@ -506,19 +440,6 @@ func GradientText(text string, colors []lipgloss.Color) string {
 	return result.String()
 }
 
-// GlitchText adds a glitch effect to text with gradient
-func GlitchText(text string) string {
-	prefix := GradientText("░▒▓█", GradientCyber)
-	suffix := GradientText("█▓▒░", []lipgloss.Color{
-		"#bf00ff", "#0044ff", "#006eff", "#0099ff", "#00c3ff", "#00e1ff", "#00ffff",
-	})
-	middle := lipgloss.NewStyle().
-		Foreground(ColorTextBright).
-		Bold(true).
-		Render(" " + text + " ")
-	return prefix + middle + suffix
-}
-
 // CyberBorder creates a cyberpunk-style border decoration
 func CyberBorder(width int) string {
 	if width < 4 {
@@ -541,66 +462,13 @@ func CyberBorder(width int) string {
 	return left + middle + right
 }
 
-// PulsingText returns text that appears to pulse based on frame
-func PulsingText(text string, frame int) string {
-	colors := []lipgloss.Color{ColorCyan, ColorNeonBlue, ColorMagenta, ColorNeonPink, ColorMagenta, ColorNeonBlue}
-	colorIdx := frame % len(colors)
-	return lipgloss.NewStyle().Foreground(colors[colorIdx]).Bold(true).Render(text)
-}
-
-// AnimatedSpinner returns the current spinner frame
-func AnimatedSpinner(frame int) string {
-	idx := frame % len(SpinnerFrames)
-	return lipgloss.NewStyle().Foreground(ColorCyan).Render(SpinnerFrames[idx])
-}
-
 // AnimatedSpinnerDots returns the current dots spinner frame
 func AnimatedSpinnerDots(frame int) string {
 	idx := frame % len(SpinnerDotsFrames)
 	return lipgloss.NewStyle().Foreground(ColorMagenta).Render(SpinnerDotsFrames[idx])
 }
 
-// ScanlineEffect returns a scanline decoration
-func ScanlineEffect(width int) string {
-	var line strings.Builder
-	for i := 0; i < width; i++ {
-		colorIdx := (i * len(GradientCyber)) / width
-		if colorIdx >= len(GradientCyber) {
-			colorIdx = len(GradientCyber) - 1
-		}
-		style := lipgloss.NewStyle().Foreground(GradientCyber[colorIdx])
-		if i%2 == 0 {
-			line.WriteString(style.Render("▀"))
-		} else {
-			line.WriteString(style.Render("▄"))
-		}
-	}
-	return line.String()
-}
-
-// ScanlineEffectAnimated returns a scanline decoration with a subtle animated
-// gradient shift. Useful for headers and separators.
-func ScanlineEffectAnimated(width int, frame int) string {
-	if width <= 0 {
-		return ""
-	}
-
-	var line strings.Builder
-	for i := 0; i < width; i++ {
-		colorIdx := ((i + frame) * len(GradientCyber)) / width
-		colorIdx = colorIdx % len(GradientCyber)
-		style := lipgloss.NewStyle().Foreground(GradientCyber[colorIdx])
-		if (i+frame)%2 == 0 {
-			line.WriteString(style.Render("▀"))
-		} else {
-			line.WriteString(style.Render("▄"))
-		}
-	}
-	return line.String()
-}
-
 // ShimmerDivider renders a subtle divider with a moving highlight segment.
-// This is intentionally less "glitchy" than ScanlineEffectAnimated.
 func ShimmerDivider(width int, frame int, enabled bool) string {
 	if width <= 0 {
 		return ""
@@ -679,15 +547,6 @@ func ProgressBarAnimated(percent float64, width int, frame int) string {
 	bar.WriteString(emptyStyle.Render(strings.Repeat("░", empty)))
 
 	return bar.String()
-}
-
-// NeonBox creates a neon-style box with glowing border
-func NeonBox(content string, color lipgloss.Color) string {
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(color).
-		Padding(1, 2).
-		Render(content)
 }
 
 // ASCIILogo returns an ASCII art logo with gradient

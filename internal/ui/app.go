@@ -54,7 +54,9 @@ const (
 	ScreenHotkeys
 	ScreenBackups
 	ScreenUsers
-	ScreenConfigApps
+	_ // retired: ScreenConfigApps (vestigial screen). Slot reserved so the
+	// remaining iota values stay stable for the raw ConfigScreen() ints declared
+	// in the tools package (see toolscreens.go / verifyToolConfigScreens).
 	// Additional config screens
 	ScreenConfigCLITools
 	ScreenConfigGUIApps
@@ -470,8 +472,8 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{}
 	// Drive the start screen through the ScreenManager so the screen's Init()
-	// runs. The intro animation (animationScreen.Init) issues
-	// tickAnimation()+checkDurdraw(); the Update screen (updateScreen.Init) kicks
+	// runs. The intro animation (animationScreen.Init) issues tickAnimation();
+	// the Update screen (updateScreen.Init) kicks
 	// the update check; the Progress screen (progressScreen.Init) triggers the
 	// install. App.Init therefore must NOT duplicate those, or they would
 	// double-fire.
@@ -865,7 +867,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// message it does not claim (e.g. before the first navigation lands) is a
 	// no-op here.
 	//
-	// Note: the intro animation (tickMsg / durdrawAvailableMsg / animationDoneMsg),
+	// Note: the intro animation (tickMsg / animationDoneMsg),
 	// the install flow (installStartMsg / sudoRequiredMsg / sudoCachedMsg /
 	// installOutputMsg / installEventMsg / installDoneMsg / installLogMsg) and the
 	// Users async results (userLoadedMsg / userSavedMsg / userDeletedMsg /

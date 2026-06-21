@@ -29,31 +29,13 @@ type ScreenHandler interface {
 
 // NavigateMsg signals that the screen wants to navigate to a different screen
 type NavigateMsg struct {
-	To       Screen
-	PushBack bool // If true, current screen is saved for back navigation
+	To Screen
 }
 
 // NavigateTo creates a NavigateMsg to go to a screen
 func NavigateTo(id Screen) tea.Cmd {
 	return func() tea.Msg {
-		return NavigateMsg{To: id, PushBack: false}
-	}
-}
-
-// NavigatePush creates a NavigateMsg that saves current screen for back navigation
-func NavigatePush(id Screen) tea.Cmd {
-	return func() tea.Msg {
-		return NavigateMsg{To: id, PushBack: true}
-	}
-}
-
-// NavigateBackMsg signals to go back to the previous screen
-type NavigateBackMsg struct{}
-
-// NavigateBack returns a command to go back to the previous screen
-func NavigateBack() tea.Cmd {
-	return func() tea.Msg {
-		return NavigateBackMsg{}
+		return NavigateMsg{To: id}
 	}
 }
 

@@ -14,9 +14,6 @@ type tickMsg time.Time
 // uiTickMsg is a global tick for small UI animations (spinners/widgets).
 type uiTickMsg time.Time
 
-// durdrawAvailableMsg indicates if durdraw is available
-type durdrawAvailableMsg bool
-
 // animationDoneMsg indicates the animation has finished
 type animationDoneMsg struct{}
 
@@ -160,12 +157,4 @@ func tickUI() tea.Cmd {
 	return tea.Tick(uiTick, func(t time.Time) tea.Msg {
 		return uiTickMsg(t)
 	})
-}
-
-// checkDurdraw returns a command that checks if durdraw is available
-func checkDurdraw() tea.Cmd {
-	return func() tea.Msg {
-		available := DetectDurdraw()
-		return durdrawAvailableMsg(available)
-	}
 }

@@ -16,18 +16,17 @@ import (
 // animationDone flag are read/written through s.App() so the rest of the legacy
 // wizard and the post-intro transition keep seeing the same values.
 //
-// On-enter work: Init() returns tickAnimation() + checkDurdraw(), the two
-// commands that previously lived in App.Init's `if a.screen == ScreenAnimation`
-// branch. Driving them from the handler's Init keeps them from double-firing
-// (App.Init no longer issues them).
+// On-enter work: Init() returns tickAnimation(), the command that previously
+// lived in App.Init's `if a.screen == ScreenAnimation` branch. Driving it from
+// the handler's Init keeps it from double-firing (App.Init no longer issues it).
 //
 // Async-in-handler: because the ScreenManager delegates every non-navigation
 // message to this handler while it is active, the intro tick advance is handled
 // here (not in App.Update's tickMsg case): each tickMsg advances animFrame and,
 // at introAnimationFrames, transitions via a.postIntroTransition() (which routes
-// through NavigateTo). durdrawAvailableMsg and animationDoneMsg are handled here
-// too. The "no window size yet, don't advance" guard is preserved so the intro
-// does not fast-forward on terminals that deliver WindowSizeMsg late.
+// through NavigateTo). animationDoneMsg is handled here too. The "no window size
+// yet, don't advance" guard is preserved so the intro does not fast-forward on
+// terminals that deliver WindowSizeMsg late.
 type animationScreen struct {
 	BaseScreen
 }
@@ -42,15 +41,14 @@ func NewAnimationScreen(ctx *ScreenContext) *animationScreen {
 // ID returns the screen identifier.
 func (s *animationScreen) ID() Screen { return ScreenAnimation }
 
-// Init kicks the intro frame tick and the durdraw availability probe on entry.
-// These were previously issued from App.Init; moving them here keeps them from
-// double-firing.
+// Init kicks the intro frame tick on entry. This was previously issued from
+// App.Init; moving it here keeps it from double-firing.
 func (s *animationScreen) Init() tea.Cmd {
-	return tea.Batch(tickAnimation(), checkDurdraw())
+	return tickAnimation()
 }
 
-// Update handles the intro tick advance, the durdraw probe result, the
-// animation-done signal, and any key (which skips the intro).
+// Update handles the intro tick advance, the animation-done signal, and any key
+// (which skips the intro).
 func (s *animationScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	a := s.App()
 	switch msg := msg.(type) {
@@ -76,11 +74,6 @@ func (s *animationScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			return s, a.postIntroTransition()
 		}
 		return s, tickAnimation()
-
-	case durdrawAvailableMsg:
-		// Store durdraw availability if needed (currently unused, but probed so the
-		// behavior matches the legacy App.Update case).
-		return s, nil
 
 	case animationDoneMsg:
 		return s, a.postIntroTransition()

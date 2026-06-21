@@ -34,7 +34,7 @@ func CheckAllUpdates() ([]Package, error) {
 	// the paru/pacman double-listing artifact without erasing a package's source
 	// manager: two records with the same name but different InstalledBy (e.g. a
 	// "pacman" vs an "aur" entry) are legitimately distinct and must both survive
-	// so UpdatePackages() routes each via the manager that can actually upgrade it.
+	// so each can be routed via the manager that can actually upgrade it.
 	seen := make(map[string]bool)
 	var deduped []Package
 	for _, p := range allPackages {

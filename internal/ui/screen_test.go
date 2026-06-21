@@ -21,36 +21,6 @@ func TestNavigateMsg(t *testing.T) {
 	if navMsg.To != ScreenMainMenu {
 		t.Errorf("To = %v, want %v", navMsg.To, ScreenMainMenu)
 	}
-	if navMsg.PushBack {
-		t.Error("PushBack should be false")
-	}
-
-	// Test NavigatePush
-	cmd = NavigatePush(ScreenManage)
-	msg = cmd()
-	navMsg, ok = msg.(NavigateMsg)
-	if !ok {
-		t.Fatalf("expected NavigateMsg, got %T", msg)
-	}
-	if navMsg.To != ScreenManage {
-		t.Errorf("To = %v, want %v", navMsg.To, ScreenManage)
-	}
-	if !navMsg.PushBack {
-		t.Error("PushBack should be true")
-	}
-}
-
-func TestNavigateBackMsg(t *testing.T) {
-	cmd := NavigateBack()
-	if cmd == nil {
-		t.Fatal("NavigateBack should return a command")
-	}
-
-	msg := cmd()
-	_, ok := msg.(NavigateBackMsg)
-	if !ok {
-		t.Fatalf("expected NavigateBackMsg, got %T", msg)
-	}
 }
 
 func TestBaseScreen(t *testing.T) {

@@ -77,8 +77,6 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewConfigUtilitiesScreen(ctx)
 	case ScreenConfigMacApps:
 		return NewConfigMacAppsScreen(ctx)
-	case ScreenConfigApps:
-		return NewConfigAppsScreen(ctx)
 	case ScreenConfigCLITools:
 		return NewConfigCLIToolsScreen(ctx)
 	case ScreenConfigGUIApps:

@@ -1815,12 +1815,12 @@ func TestAnimationScreenTickNoSizeHolds(t *testing.T) {
 	}
 }
 
-// TestAnimationScreenInit verifies Init() issues the intro tick + durdraw probe.
+// TestAnimationScreenInit verifies Init() issues the intro tick.
 func TestAnimationScreenInit(t *testing.T) {
 	ctx := newGoldenContext(t)
 	screen := NewAnimationScreen(ctx)
 	if cmd := screen.Init(); cmd == nil {
-		t.Fatal("animationScreen.Init() should return a batch (tickAnimation + checkDurdraw)")
+		t.Fatal("animationScreen.Init() should return the intro tick command")
 	}
 }
 

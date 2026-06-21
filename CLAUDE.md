@@ -23,7 +23,6 @@ internal/
   pkg/                   # Package manager abstraction (brew/pacman/apt)
   runner/                # Bash script execution
   scripts/               # Embedded utility scripts (hk, caff, sshh)
-  testutil/              # Shared test helpers (testutil.go)
   tools/                 # Tool registry (30 tools)
   ui/                    # Bubble Tea TUI (~14,600 lines)
 bin/

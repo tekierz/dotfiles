@@ -21,9 +21,6 @@ func TestNewScreenManager(t *testing.T) {
 	if mgr.Current() != nil {
 		t.Error("Current() should be nil initially")
 	}
-	if mgr.HistoryDepth() != 0 {
-		t.Errorf("HistoryDepth() = %d, want 0", mgr.HistoryDepth())
-	}
 }
 
 func TestScreenManager_SetSize(t *testing.T) {
@@ -131,122 +128,6 @@ func TestScreenManager_Navigate_Managed(t *testing.T) {
 	}
 }
 
-func TestScreenManager_NavigateWithPush(t *testing.T) {
-	ctx := NewTestScreenContext()
-
-	screen1 := &mockScreenHandler{screenID: ScreenError}
-	screen2 := &mockScreenHandler{screenID: ScreenSummary}
-
-	factory := func(id Screen, ctx *ScreenContext) ScreenHandler {
-		switch id {
-		case ScreenError:
-			return screen1
-		case ScreenSummary:
-			return screen2
-		}
-		return nil
-	}
-
-	mgr := NewScreenManager(ctx, factory)
-
-	// Navigate to first screen
-	mgr.Navigate(ScreenError)
-	if mgr.HistoryDepth() != 0 {
-		t.Errorf("HistoryDepth() = %d, want 0", mgr.HistoryDepth())
-	}
-
-	// Navigate with push
-	mgr.NavigateWithPush(ScreenSummary)
-	if mgr.HistoryDepth() != 1 {
-		t.Errorf("HistoryDepth() = %d, want 1", mgr.HistoryDepth())
-	}
-	if mgr.Current() != screen2 {
-		t.Error("Current() should be screen2")
-	}
-}
-
-func TestScreenManager_NavigateBack(t *testing.T) {
-	ctx := NewTestScreenContext()
-
-	screen1 := &mockScreenHandler{screenID: ScreenError}
-	screen2 := &mockScreenHandler{screenID: ScreenSummary}
-
-	factory := func(id Screen, ctx *ScreenContext) ScreenHandler {
-		switch id {
-		case ScreenError:
-			return screen1
-		case ScreenSummary:
-			return screen2
-		}
-		return nil
-	}
-
-	mgr := NewScreenManager(ctx, factory)
-
-	// Set up history
-	mgr.Navigate(ScreenError)
-	mgr.NavigateWithPush(ScreenSummary)
-
-	// Go back
-	mgr.NavigateBack()
-
-	if mgr.Current() != screen1 {
-		t.Error("Current() should be screen1 after back")
-	}
-	if mgr.HistoryDepth() != 0 {
-		t.Errorf("HistoryDepth() = %d, want 0", mgr.HistoryDepth())
-	}
-}
-
-func TestScreenManager_NavigateBack_NoHistory(t *testing.T) {
-	ctx := NewTestScreenContext()
-	mgr := NewScreenManager(ctx, nil)
-
-	// Navigate back with no history
-	mgr.NavigateBack()
-
-	if !mgr.IsLegacyMode() {
-		t.Error("should be in legacy mode")
-	}
-	if mgr.LegacyScreen() != ScreenMainMenu {
-		t.Errorf("LegacyScreen() = %v, want %v", mgr.LegacyScreen(), ScreenMainMenu)
-	}
-}
-
-func TestScreenManager_ClearHistory(t *testing.T) {
-	ctx := NewTestScreenContext()
-
-	screen1 := &mockScreenHandler{screenID: ScreenError}
-	screen2 := &mockScreenHandler{screenID: ScreenSummary}
-
-	factory := func(id Screen, ctx *ScreenContext) ScreenHandler {
-		switch id {
-		case ScreenError:
-			return screen1
-		case ScreenSummary:
-			return screen2
-		}
-		return nil
-	}
-
-	mgr := NewScreenManager(ctx, factory)
-
-	// Build up history
-	mgr.Navigate(ScreenError)
-	mgr.NavigateWithPush(ScreenSummary)
-
-	if mgr.HistoryDepth() != 1 {
-		t.Errorf("HistoryDepth() = %d, want 1", mgr.HistoryDepth())
-	}
-
-	// Clear
-	mgr.ClearHistory()
-
-	if mgr.HistoryDepth() != 0 {
-		t.Errorf("HistoryDepth() = %d, want 0 after clear", mgr.HistoryDepth())
-	}
-}
-
 func TestScreenManager_Update_NavigateMsg(t *testing.T) {
 	ctx := NewTestScreenContext()
 
@@ -262,7 +143,7 @@ func TestScreenManager_Update_NavigateMsg(t *testing.T) {
 	mgr := NewScreenManager(ctx, factory)
 
 	// Send NavigateMsg
-	msg := NavigateMsg{To: ScreenError, PushBack: false}
+	msg := NavigateMsg{To: ScreenError}
 	cmd, handled := mgr.Update(msg)
 
 	if !handled {
@@ -273,19 +154,6 @@ func TestScreenManager_Update_NavigateMsg(t *testing.T) {
 	if mgr.IsLegacyMode() {
 		t.Error("should not be in legacy mode")
 	}
-}
-
-func TestScreenManager_Update_NavigateBackMsg(t *testing.T) {
-	ctx := NewTestScreenContext()
-	mgr := NewScreenManager(ctx, nil)
-
-	msg := NavigateBackMsg{}
-	cmd, handled := mgr.Update(msg)
-
-	if !handled {
-		t.Error("NavigateBackMsg should be handled")
-	}
-	_ = cmd // may be nil
 }
 
 func TestScreenManager_View_LegacyMode(t *testing.T) {
