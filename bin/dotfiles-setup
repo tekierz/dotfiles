@@ -885,12 +885,20 @@ restore_backup() {
             if [[ "$type" == "directory" ]]; then
                 if [[ -d "$backup" ]]; then
                     rm -rf "$original" 2>/dev/null
-                    cp -rp "$backup" "$original" && ((restored++)) || ((errors++))
+                    if cp -rp "$backup" "$original"; then
+                        restored=$((restored + 1))
+                    else
+                        errors=$((errors + 1))
+                    fi
                 fi
             else
                 if [[ -f "$backup" ]]; then
                     mkdir -p "$(dirname "$original")"
-                    cp -p "$backup" "$original" && ((restored++)) || ((errors++))
+                    if cp -p "$backup" "$original"; then
+                        restored=$((restored + 1))
+                    else
+                        errors=$((errors + 1))
+                    fi
                 fi
             fi
         else
@@ -3377,12 +3385,20 @@ restore_backup() {
             if [[ "$type" == "directory" ]]; then
                 if [[ -d "$backup" ]]; then
                     rm -rf "$original" 2>/dev/null
-                    cp -rp "$backup" "$original" && ((restored++)) || ((errors++))
+                    if cp -rp "$backup" "$original"; then
+                        restored=$((restored + 1))
+                    else
+                        errors=$((errors + 1))
+                    fi
                 fi
             else
                 if [[ -f "$backup" ]]; then
                     mkdir -p "$(dirname "$original")"
-                    cp -p "$backup" "$original" && ((restored++)) || ((errors++))
+                    if cp -p "$backup" "$original"; then
+                        restored=$((restored + 1))
+                    else
+                        errors=$((errors + 1))
+                    fi
                 fi
             fi
         else

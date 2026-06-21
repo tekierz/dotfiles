@@ -130,3 +130,70 @@ func TestEmbeddedCLIRestoreActuallyRestores(t *testing.T) {
 			restoredContent, string(got), output)
 	}
 }
+
+// TestEmbeddedCLIRestoreReportsCorrectCounts guards against the `((restored++))`
+// post-increment off-by-one: `cp && ((restored++)) || ((errors++))` evaluates the
+// OLD value of restored, so on the FIRST success (restored=0) the increment
+// returns exit status 1 and the `|| ((errors++))` branch ALSO fires, inflating
+// the error count. With an all-success multi-file manifest the correct report is
+// "N files restored, 0 errors"; the buggy idiom reports a spurious error.
+func TestEmbeddedCLIRestoreReportsCorrectCounts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("embedded bash CLI not applicable on Windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	body := extractEmbeddedCLI(t)
+
+	home := t.TempDir()
+	cliPath := filepath.Join(home, "dotfiles")
+	if err := os.WriteFile(cliPath, []byte(body), 0o755); err != nil {
+		t.Fatalf("write CLI: %v", err)
+	}
+
+	sessionDir := filepath.Join(home, ".config", "dotfiles", "backups", "20240101-000000")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session: %v", err)
+	}
+
+	// Lay down several backup files all under $HOME so the restore guard accepts
+	// them and every copy succeeds. The first success is the one that triggers
+	// the off-by-one, so a multi-file all-success manifest is the key fixture.
+	var manifest strings.Builder
+	const fileCount = 3
+	for i := 0; i < fileCount; i++ {
+		name := []string{"zshrc", "tmux.conf", "gitconfig"}[i]
+		backupFile := filepath.Join(sessionDir, name+".backup")
+		content := "ORIGINAL " + name + " CONTENTS\n"
+		if err := os.WriteFile(backupFile, []byte(content), 0o644); err != nil {
+			t.Fatalf("write backup file %s: %v", name, err)
+		}
+		destFile := filepath.Join(home, "."+name)
+		manifest.WriteString(destFile + "|" + backupFile + "|yes|file\n")
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "manifest.txt"), []byte(manifest.String()), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	cmd := exec.Command("bash", cliPath, "restore", "20240101-000000")
+	cmd.Env = append(os.Environ(),
+		"HOME="+home,
+		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
+	)
+	cmd.Stdin = strings.NewReader("y\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("restore failed: %v\noutput:\n%s", err, out)
+	}
+	output := string(out)
+
+	// All files were valid and under $HOME, so there must be zero errors.
+	if !strings.Contains(output, "3 files restored") {
+		t.Fatalf("expected '3 files restored' in output (off-by-one or miscount):\n%s", output)
+	}
+	if strings.Contains(output, "errors occurred") {
+		t.Fatalf("restore reported spurious errors on all-success restore (((restored++)) off-by-one):\n%s", output)
+	}
+}
