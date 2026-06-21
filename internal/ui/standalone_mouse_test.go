@@ -484,7 +484,13 @@ func TestBackupsClickRow(t *testing.T) {
 		}
 	})
 
-	t.Run("click left of box selects nothing", func(t *testing.T) {
+	// X-bounds guard (FIX 4): the list box is LEFT-aligned at X=0 (the full-width
+	// tab bar pins the block to X=0), so a click at X=0 on a real backup row MUST
+	// select it, and a click at X >= boxOuterW (in the empty strip to the right)
+	// must NOT. The legacy handler assumed a centered box, so it dropped the X=0
+	// click and wrongly accepted the far-right click; this subtest would catch
+	// that regression.
+	t.Run("X-bounds left-aligned at zero", func(t *testing.T) {
 		ctx := newGoldenContext(t)
 		ctx.app.width, ctx.app.height = w, h
 		ctx.Width, ctx.Height = w, h
@@ -494,14 +500,27 @@ func TestBackupsClickRow(t *testing.T) {
 
 		screen := NewBackupsScreen(ctx)
 		out := screen.View(w, h)
+		// Target the SECOND backup row so a successful select is distinguishable
+		// from the default index (0).
 		y := labelLineY(t, out, backups[1].Name)
 		if y < 0 {
 			t.Fatal("backup row not found")
 		}
+
+		// Click at the absolute left edge (X=0): must select the row under it.
+		ctx.app.backupIndex = 999
+		screen.Update(clickAt(0, y))
+		if ctx.app.backupIndex != 1 {
+			t.Errorf("click at X=0 on row 1 (Y=%d): backupIndex = %d, want 1 (box is left-aligned)", y, ctx.app.backupIndex)
+		}
+
+		// Click far to the right, outside the box (X >= boxOuterW): must NOT change
+		// the selection. boxOuterW = min(92, max(44, width-8)) = 72 at width=80.
+		boxOuterW := min(92, maxInt(44, w-8))
 		ctx.app.backupIndex = 0
-		screen.Update(clickAt(0, y)) // far left, outside centered box
+		screen.Update(clickAt(boxOuterW+2, y))
 		if ctx.app.backupIndex != 0 {
-			t.Errorf("click left of box changed backupIndex to %d, want unchanged (0)", ctx.app.backupIndex)
+			t.Errorf("click at X=%d (right of box) changed backupIndex to %d, want unchanged (0)", boxOuterW+2, ctx.app.backupIndex)
 		}
 	})
 }

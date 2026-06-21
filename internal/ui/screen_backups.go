@@ -267,15 +267,15 @@ func (s *backupsScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		listStartY = 9
 	}
 
-	// X-bounds: the list box is centered horizontally with width boxOuterW.
-	// Mirror the View's width math and ignore clicks outside the box so a click
-	// anywhere on the row (even off the centered box) no longer selects.
+	// X-bounds: the list box is LEFT-aligned at absolute X=0, not centered. The
+	// View composes a full-width RenderTabBar first in JoinVertical(Left, ...),
+	// which pins the whole content block to the full terminal width, so the
+	// lipgloss.Place(Center, ...) adds zero left pad and the box lands at X=0. The
+	// previous centered boxLeft := (width-boxOuterW)/2 dropped clicks on the left
+	// columns (cursor/name) and wrongly accepted clicks in the empty strip to the
+	// right (FIX 4). Accept [0, boxOuterW).
 	boxOuterW := min(92, maxInt(44, a.width-8))
-	boxLeft := (a.width - boxOuterW) / 2
-	if boxLeft < 0 {
-		boxLeft = 0
-	}
-	if m.X < boxLeft || m.X >= boxLeft+boxOuterW {
+	if m.X < 0 || m.X >= boxOuterW {
 		return nil
 	}
 
