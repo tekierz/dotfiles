@@ -69,13 +69,15 @@ func (a *App) applyStandaloneConfig() []error {
 var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) error{
 	"ghostty": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteGhosttyConfig(tools.GhosttyConfig{
-			FontSize:        cfg.GhosttyFontSize,
-			FontFamily:      cfg.GhosttyFontFamily,
-			Opacity:         cfg.GhosttyOpacity,
-			BlurRadius:      cfg.GhosttyBlurRadius,
-			TabBindings:     cfg.GhosttyTabBindings,
-			ScrollbackLines: cfg.GhosttyScrollbackLines,
-			CursorStyle:     cfg.GhosttyCursorStyle,
+			FontSize:          cfg.GhosttyFontSize,
+			FontFamily:        cfg.GhosttyFontFamily,
+			Opacity:           cfg.GhosttyOpacity,
+			BlurRadius:        cfg.GhosttyBlurRadius,
+			TabBindings:       cfg.GhosttyTabBindings,
+			ScrollbackLines:   cfg.GhosttyScrollbackLines,
+			CursorStyle:       cfg.GhosttyCursorStyle,
+			WindowDecorations: cfg.GhosttyWindowDecorations,
+			ConfirmClose:      cfg.GhosttyConfirmClose,
 		}, theme)
 	},
 	// tmux generator is a PURE file write (~/.tmux.conf only). TPM installation
@@ -89,23 +91,32 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			SplitBinds:       cfg.TmuxSplitBinds,
 			StatusBar:        cfg.TmuxStatusBar,
 			MouseMode:        cfg.TmuxMouseMode,
+			BaseIndex:        cfg.TmuxBaseIndex,
+			PaneBorderStyle:  cfg.TmuxPaneBorderStyle,
+			HistoryLimit:     cfg.TmuxHistoryLimit,
+			EscapeTime:       cfg.TmuxEscapeTime,
+			AggressiveResize: cfg.TmuxAggressiveResize,
 			TPMEnabled:       cfg.TmuxTPMEnabled,
 			PluginSensible:   cfg.TmuxPluginSensible,
 			PluginResurrect:  cfg.TmuxPluginResurrect,
 			PluginContinuum:  cfg.TmuxPluginContinuum,
 			PluginYank:       cfg.TmuxPluginYank,
 			ContinuumSaveMin: cfg.TmuxContinuumSaveMin,
+			ContinuumRestore: cfg.TmuxContinuumRestore,
 		}, theme)
 	},
 	"zsh": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteZshConfig(tools.ZshConfig{
-			PromptStyle:     cfg.ZshPromptStyle,
-			Plugins:         cfg.ZshPlugins,
-			Aliases:         cfg.ZshAliases,
-			HistorySize:     cfg.ZshHistorySize,
-			AutoCD:          cfg.ZshAutoCD,
-			SyntaxHighlight: cfg.ZshSyntaxHighlight,
-			Autosuggestions: cfg.ZshAutosuggestions,
+			PromptStyle:       cfg.ZshPromptStyle,
+			Plugins:           cfg.ZshPlugins,
+			Aliases:           cfg.ZshAliases,
+			HistorySize:       cfg.ZshHistorySize,
+			AutoCD:            cfg.ZshAutoCD,
+			SyntaxHighlight:   cfg.ZshSyntaxHighlight,
+			Autosuggestions:   cfg.ZshAutosuggestions,
+			HistoryIgnoreDups: cfg.ZshHistoryIgnoreDups,
+			Correction:        cfg.ZshCorrection,
+			CompletionMenu:    cfg.ZshCompletionMenu,
 		}, theme)
 	},
 	// neovim generator is a PURE user-prefs overlay (lua/custom/options.lua in an
@@ -123,6 +134,10 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			Wrap:         cfg.NeovimWrap,
 			CursorLine:   cfg.NeovimCursorLine,
 			Clipboard:    cfg.NeovimClipboard,
+			LineNumbers:  cfg.NeovimLineNumbers,
+			RelativeNum:  cfg.NeovimRelativeNum,
+			ExpandTab:    cfg.NeovimExpandTab,
+			UndoFile:     cfg.NeovimUndoFile,
 		}, theme)
 	},
 	"git": func(cfg DeepDiveConfig, theme string) error {
@@ -133,6 +148,8 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			PullRebase:       cfg.GitPullRebase,
 			SignCommits:      cfg.GitSignCommits,
 			CredentialHelper: cfg.GitCredentialHelper,
+			AutoSetupRemote:  cfg.GitAutoSetupRemote,
+			MergeTool:        cfg.GitMergeTool,
 		}, theme)
 	},
 	"yazi": func(cfg DeepDiveConfig, theme string) error {
@@ -140,13 +157,20 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			Keymap:      cfg.YaziKeymap,
 			ShowHidden:  cfg.YaziShowHidden,
 			PreviewMode: cfg.YaziPreviewMode,
+			SortBy:      cfg.YaziSortBy,
+			SortReverse: cfg.YaziSortReverse,
+			LineMode:    cfg.YaziLineMode,
+			ScrollOff:   cfg.YaziScrollOff,
 		}, theme)
 	},
 	"fzf": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteFzfConfig(tools.FzfConfig{
-			Preview: cfg.FzfPreview,
-			Height:  cfg.FzfHeight,
-			Layout:  cfg.FzfLayout,
+			Preview:       cfg.FzfPreview,
+			Height:        cfg.FzfHeight,
+			Layout:        cfg.FzfLayout,
+			DefaultOpts:   cfg.FzfDefaultOpts,
+			BorderStyle:   cfg.FzfBorderStyle,
+			PreviewWindow: cfg.FzfPreviewWindow,
 		}, theme)
 	},
 	"lazygit": func(cfg DeepDiveConfig, theme string) error {
@@ -154,14 +178,17 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			SideBySide: cfg.LazyGitSideBySide,
 			MouseMode:  cfg.LazyGitMouseMode,
 			Theme:      cfg.LazyGitTheme,
+			Paging:     cfg.LazyGitPaging,
 		}, theme)
 	},
 	"btop": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteBtopConfig(tools.BtopConfig{
-			Theme:     cfg.BtopTheme,
-			UpdateMs:  cfg.BtopUpdateMs,
-			ShowTemp:  cfg.BtopShowTemp,
-			GraphType: cfg.BtopGraphType,
+			Theme:      cfg.BtopTheme,
+			UpdateMs:   cfg.BtopUpdateMs,
+			ShowTemp:   cfg.BtopShowTemp,
+			GraphType:  cfg.BtopGraphType,
+			TempScale:  cfg.BtopTempScale,
+			ShownBoxes: cfg.BtopShownBoxes,
 		}, theme)
 	},
 	"glow": func(cfg DeepDiveConfig, theme string) error {
@@ -169,6 +196,7 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			Pager: cfg.GlowPager,
 			Style: cfg.GlowStyle,
 			Width: cfg.GlowWidth,
+			Mouse: cfg.GlowMouse,
 		}, theme)
 	},
 }
@@ -277,21 +305,20 @@ func glowPagerToGenerator(pager string) string {
 // defaults (e.g. install-flag maps, zsh plugins, neovim LSPs), then overlays
 // every ManageConfig field that has a generator equivalent.
 //
-// Fields present in ManageConfig but with NO generator equivalent are
-// intentionally NOT mapped here (documented inline); persisting them in
-// manage.json is harmless, but they do not affect generated files:
-//   - Ghostty: WindowDecorations, ConfirmClose
-//   - Tmux: BaseIndex, StatusPosition, PaneBorderStyle, HistoryLimit, EscapeTime,
-//     AggressiveResize, ContinuumRestore
-//   - Zsh: HistoryIgnoreDups, Correction, CompletionMenu
-//   - Neovim: LineNumbers, RelativeNum, ExpandTab, UndoFile
-//   - Git: AutoSetupRemote, MergeTool (DiffTool only influences the generator's
-//     boolean DeltaSideBySide, set below; difftastic/vimdiff are not modeled)
-//   - Yazi: SortBy, SortReverse, LineMode, ScrollOff (no generator fields)
-//   - FZF: DefaultOpts, BorderStyle, PreviewWindow
-//   - LazyGit: Paging; LazyDocker: all (no generator at all)
-//   - Btop: TempScale, ShownBoxes
-//   - Glow: Mouse
+// P1-B closed the "editable but does nothing" gap: every Manage field is now
+// EITHER overlaid here and wired through a generator (the round-trip is proven by
+// manage_field_apply_test.go's table) OR explicitly listed as not-applied in
+// manageNotAppliedFields so the UI never claims success for a no-op.
+//
+// The ONLY fields intentionally NOT mapped here are LazyDocker's (MouseMode,
+// LogsTail): no generator or config-file writer exists for lazydocker at all, so
+// they are not-applied (manageNotAppliedFields). GitDiffTool is mapped indirectly —
+// it only drives the generator's boolean DeltaSideBySide (delta vs not);
+// difftastic/vimdiff are not separately modeled in the .gitconfig template.
+//
+// CRITICAL (Task 19 coupling): any field overlaid here must ALSO be listed in
+// toolDeepDiveFields (manage_save_scope.go) or the scoped Manage save will not
+// detect a change to it and will silently under-apply.
 func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd := *NewDeepDiveConfig()
 	if mc == nil {
@@ -305,6 +332,8 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.GhosttyBlurRadius = mc.GhosttyBlurRadius
 	dd.GhosttyCursorStyle = mc.GhosstyCursorStyle
 	dd.GhosttyScrollbackLines = mc.GhosttyScrollbackLines
+	dd.GhosttyWindowDecorations = mc.GhosttyWindowDecorations
+	dd.GhosttyConfirmClose = mc.GhosttyConfirmClose
 
 	// Tmux (prefix vocabulary reconciled for the generator).
 	dd.TmuxPrefix = tmuxPrefixToGenerator(mc.TmuxPrefix)
@@ -313,24 +342,34 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.TmuxHistoryLimit = mc.TmuxHistoryLimit
 	dd.TmuxEscapeTime = mc.TmuxEscapeTime
 	dd.TmuxBaseIndex = mc.TmuxBaseIndex
+	dd.TmuxPaneBorderStyle = mc.TmuxPaneBorderStyle
+	dd.TmuxAggressiveResize = mc.TmuxAggressiveResize
 	dd.TmuxTPMEnabled = mc.TmuxTPMEnabled
 	dd.TmuxPluginSensible = mc.TmuxPluginSensible
 	dd.TmuxPluginResurrect = mc.TmuxPluginResurrect
 	dd.TmuxPluginContinuum = mc.TmuxPluginContinuum
 	dd.TmuxPluginYank = mc.TmuxPluginYank
 	dd.TmuxContinuumSaveMin = mc.TmuxContinuumSaveMin
+	dd.TmuxContinuumRestore = mc.TmuxContinuumRestore
 
 	// Zsh
 	dd.ZshHistorySize = mc.ZshHistorySize
 	dd.ZshAutoCD = mc.ZshAutoCD
 	dd.ZshSyntaxHighlight = mc.ZshSyntaxHighlight
 	dd.ZshAutosuggestions = mc.ZshAutosuggestions
+	dd.ZshHistoryIgnoreDups = mc.ZshHistoryIgnoreDups
+	dd.ZshCorrection = mc.ZshCorrection
+	dd.ZshCompletionMenu = mc.ZshCompletionMenu
 
 	// Neovim
 	dd.NeovimTabWidth = mc.NeovimTabWidth
 	dd.NeovimWrap = mc.NeovimWrap
 	dd.NeovimCursorLine = mc.NeovimCursorLine
 	dd.NeovimClipboard = mc.NeovimClipboard
+	dd.NeovimLineNumbers = mc.NeovimLineNumbers
+	dd.NeovimRelativeNum = mc.NeovimRelativeNum
+	dd.NeovimExpandTab = mc.NeovimExpandTab
+	dd.NeovimUndoFile = mc.NeovimUndoFile
 
 	// Git
 	dd.GitDefaultBranch = mc.GitDefaultBranch
@@ -338,33 +377,48 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.GitSignCommits = mc.GitSignCommits
 	dd.GitCredentialHelper = mc.GitCredentialHelper
 	dd.GitDeltaSideBySide = mc.GitDiffTool == "delta"
+	dd.GitAutoSetupRemote = mc.GitAutoSetupRemote
+	dd.GitMergeTool = mc.GitMergeTool
 
-	// Yazi (only ShowHidden has a generator equivalent here).
+	// Yazi
 	dd.YaziShowHidden = mc.YaziShowHidden
+	dd.YaziSortBy = mc.YaziSortBy
+	dd.YaziSortReverse = mc.YaziSortReverse
+	dd.YaziLineMode = mc.YaziLineMode
+	dd.YaziScrollOff = mc.YaziScrollOff
 
 	// FZF
 	dd.FzfHeight = mc.FzfHeight
 	dd.FzfLayout = mc.FzfLayout
 	dd.FzfPreview = mc.FzfPreview
+	dd.FzfDefaultOpts = mc.FzfDefaultOpts
+	dd.FzfBorderStyle = mc.FzfBorderStyle
+	dd.FzfPreviewWindow = mc.FzfPreviewWindow
 
 	// LazyGit
 	dd.LazyGitSideBySide = mc.LazyGitSideBySide
 	dd.LazyGitMouseMode = mc.LazyGitMouseMode
 	dd.LazyGitTheme = mc.LazyGitGuiTheme
+	dd.LazyGitPaging = mc.LazyGitPaging
 
-	// LazyDocker (DeepDiveConfig field exists; no generator consumes it yet).
-	dd.LazyDockerMouseMode = mc.LazyDockerMouseMode
+	// LazyDocker: NO generator/config file exists for lazydocker (see
+	// manageNotAppliedFields). Its Manage fields are intentionally not applied; the
+	// preference is remembered in manage.json but no config file is written, so
+	// nothing is overlaid here.
 
 	// Btop (graph symbol vocabulary matches the generator's GraphType).
 	dd.BtopTheme = mc.BtopTheme
 	dd.BtopUpdateMs = mc.BtopUpdateMs
 	dd.BtopShowTemp = mc.BtopShowTemp
 	dd.BtopGraphType = mc.BtopGraphSymbol
+	dd.BtopTempScale = mc.BtopTempScale
+	dd.BtopShownBoxes = mc.BtopShownBoxes
 
 	// Glow (pager vocabulary reconciled for the generator).
 	dd.GlowStyle = mc.GlowStyle
 	dd.GlowPager = glowPagerToGenerator(mc.GlowPager)
 	dd.GlowWidth = mc.GlowWidth
+	dd.GlowMouse = mc.GlowMouse
 
 	// Claude Code MCP servers: translate the flat bools into the map the
 	// generator consumes (keys must match config.AllMCPServers()).

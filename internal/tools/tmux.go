@@ -23,6 +23,12 @@ type TmuxConfig struct {
 	StatusBar  string
 	MouseMode  bool
 
+	BaseIndex        int    // Starting index for windows/panes
+	PaneBorderStyle  string // "single", "double", "heavy", "simple"
+	HistoryLimit     int    // Scrollback buffer size
+	EscapeTime       int    // Escape key delay in ms
+	AggressiveResize bool   // Aggressively resize panes on window changes
+
 	// TPM settings
 	TPMEnabled       bool
 	PluginSensible   bool
@@ -30,6 +36,7 @@ type TmuxConfig struct {
 	PluginContinuum  bool
 	PluginYank       bool
 	ContinuumSaveMin int
+	ContinuumRestore bool // Restore sessions on tmux start
 }
 
 // NewTmuxTool creates a new Tmux tool
@@ -147,9 +154,15 @@ func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
 
 	// Window settings
 	sb.WriteString("# Window settings\n")
-	sb.WriteString("set -g base-index 1\n")
-	sb.WriteString("setw -g pane-base-index 1\n")
-	sb.WriteString("set -g renumber-windows on\n\n")
+	sb.WriteString(fmt.Sprintf("set -g base-index %d\n", cfg.BaseIndex))
+	sb.WriteString(fmt.Sprintf("setw -g pane-base-index %d\n", cfg.BaseIndex))
+	sb.WriteString("set -g renumber-windows on\n")
+	if cfg.AggressiveResize {
+		sb.WriteString("setw -g aggressive-resize on\n")
+	} else {
+		sb.WriteString("setw -g aggressive-resize off\n")
+	}
+	sb.WriteString(fmt.Sprintf("set -g pane-border-lines %s\n\n", paneBorderToTmuxFormat(cfg.PaneBorderStyle)))
 
 	// Status bar
 	sb.WriteString("# Status bar\n")
@@ -159,8 +172,8 @@ func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
 
 	// Performance
 	sb.WriteString("# Performance\n")
-	sb.WriteString("set -sg escape-time 0\n")
-	sb.WriteString("set -g history-limit 50000\n\n")
+	sb.WriteString(fmt.Sprintf("set -sg escape-time %d\n", cfg.EscapeTime))
+	sb.WriteString(fmt.Sprintf("set -g history-limit %d\n\n", cfg.HistoryLimit))
 
 	// Reload binding
 	sb.WriteString("# Reload config\n")
@@ -204,7 +217,11 @@ func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
 		if cfg.PluginContinuum {
 			sb.WriteString("# Continuum settings\n")
 			sb.WriteString(fmt.Sprintf("set -g @continuum-save-interval '%d'\n", cfg.ContinuumSaveMin))
-			sb.WriteString("set -g @continuum-restore 'on'\n\n")
+			restore := "off"
+			if cfg.ContinuumRestore {
+				restore = "on"
+			}
+			sb.WriteString(fmt.Sprintf("set -g @continuum-restore '%s'\n\n", restore))
 		}
 
 		if cfg.PluginResurrect {
@@ -232,6 +249,19 @@ func prefixToTmuxFormat(prefix string) string {
 		return "C-Space"
 	default:
 		return "C-a"
+	}
+}
+
+// paneBorderToTmuxFormat maps the Manage UI's pane-border vocabulary onto the
+// values tmux's pane-border-lines option accepts. tmux supports
+// single/double/heavy/simple/number; the UI offers the first four, so anything
+// unrecognized falls back to "single".
+func paneBorderToTmuxFormat(style string) string {
+	switch style {
+	case "single", "double", "heavy", "simple":
+		return style
+	default:
+		return "single"
 	}
 }
 

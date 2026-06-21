@@ -26,22 +26,26 @@ func buildToolGroupDefaults(group tools.UIGroup) map[string]bool {
 // DeepDiveConfig holds all deep dive configuration options
 type DeepDiveConfig struct {
 	// Ghostty settings
-	GhosttyFontSize        int
-	GhosttyOpacity         int // 0-100
-	GhosttyTabBindings     string
-	GhosttyFontFamily      string // Font family name
-	GhosttyBlurRadius      int    // 0-100 (blur behind window)
-	GhosttyScrollbackLines int    // Number of scrollback lines
-	GhosttyCursorStyle     string // block, bar, underline
+	GhosttyFontSize          int
+	GhosttyOpacity           int // 0-100
+	GhosttyTabBindings       string
+	GhosttyFontFamily        string // Font family name
+	GhosttyBlurRadius        int    // 0-100 (blur behind window)
+	GhosttyScrollbackLines   int    // Number of scrollback lines
+	GhosttyCursorStyle       string // block, bar, underline
+	GhosttyWindowDecorations bool   // Native window decorations
+	GhosttyConfirmClose      bool   // Confirm before closing a surface
 
 	// Tmux settings
-	TmuxPrefix       string
-	TmuxSplitBinds   string
-	TmuxStatusBar    string
-	TmuxMouseMode    bool
-	TmuxHistoryLimit int // Scrollback buffer size
-	TmuxEscapeTime   int // Escape key delay in ms
-	TmuxBaseIndex    int // Starting index for windows/panes
+	TmuxPrefix           string
+	TmuxSplitBinds       string
+	TmuxStatusBar        string
+	TmuxMouseMode        bool
+	TmuxHistoryLimit     int    // Scrollback buffer size
+	TmuxEscapeTime       int    // Escape key delay in ms
+	TmuxBaseIndex        int    // Starting index for windows/panes
+	TmuxPaneBorderStyle  string // single/double/heavy/simple
+	TmuxAggressiveResize bool   // aggressive-resize
 
 	// Tmux TPM (Plugin Manager) settings
 	TmuxTPMEnabled       bool
@@ -49,25 +53,33 @@ type DeepDiveConfig struct {
 	TmuxPluginResurrect  bool
 	TmuxPluginContinuum  bool
 	TmuxPluginYank       bool
-	TmuxContinuumSaveMin int // 5-60 minutes
+	TmuxContinuumSaveMin int  // 5-60 minutes
+	TmuxContinuumRestore bool // restore sessions on start
 
 	// Zsh settings
-	ZshPromptStyle     string
-	ZshPlugins         []string
-	ZshAliases         map[string]bool
-	ZshHistorySize     int  // History file size
-	ZshAutoCD          bool // Auto cd into directories
-	ZshSyntaxHighlight bool // Enable syntax highlighting
-	ZshAutosuggestions bool // Enable autosuggestions
+	ZshPromptStyle       string
+	ZshPlugins           []string
+	ZshAliases           map[string]bool
+	ZshHistorySize       int  // History file size
+	ZshAutoCD            bool // Auto cd into directories
+	ZshSyntaxHighlight   bool // Enable syntax highlighting
+	ZshAutosuggestions   bool // Enable autosuggestions
+	ZshHistoryIgnoreDups bool // HIST_IGNORE_DUPS
+	ZshCorrection        bool // CORRECT
+	ZshCompletionMenu    bool // menu select
 
 	// Neovim settings
-	NeovimConfig     string
-	NeovimLSPs       []string
-	NeovimPlugins    []string
-	NeovimTabWidth   int    // Tab width (2, 4, 8)
-	NeovimWrap       bool   // Line wrapping
-	NeovimCursorLine bool   // Highlight current line
-	NeovimClipboard  string // Clipboard integration (unnamedplus, unnamed, none)
+	NeovimConfig      string
+	NeovimLSPs        []string
+	NeovimPlugins     []string
+	NeovimTabWidth    int    // Tab width (2, 4, 8)
+	NeovimWrap        bool   // Line wrapping
+	NeovimCursorLine  bool   // Highlight current line
+	NeovimClipboard   string // Clipboard integration (unnamedplus, unnamed, none)
+	NeovimLineNumbers string // absolute/relative/none
+	NeovimRelativeNum bool   // relative line numbers
+	NeovimExpandTab   bool   // spaces instead of tabs
+	NeovimUndoFile    bool   // persistent undo
 
 	// Git settings
 	GitDeltaSideBySide  bool
@@ -76,16 +88,25 @@ type DeepDiveConfig struct {
 	GitPullRebase       bool   // Rebase on pull
 	GitSignCommits      bool   // GPG sign commits
 	GitCredentialHelper string // Credential helper (cache, store, osxkeychain)
+	GitAutoSetupRemote  bool   // push.autoSetupRemote
+	GitMergeTool        string // merge tool
 
 	// Yazi settings
 	YaziKeymap      string
 	YaziShowHidden  bool
 	YaziPreviewMode string
+	YaziSortBy      string // alphabetical/modified/size/natural
+	YaziSortReverse bool   // reverse sort
+	YaziLineMode    string // size/permissions/mtime/none
+	YaziScrollOff   int    // scroll offset
 
 	// FZF settings
-	FzfPreview bool
-	FzfHeight  int
-	FzfLayout  string
+	FzfPreview       bool
+	FzfHeight        int
+	FzfLayout        string
+	FzfDefaultOpts   string // extra opts
+	FzfBorderStyle   string // border style
+	FzfPreviewWindow string // preview placement
 
 	// macOS Apps
 	MacApps map[string]bool
@@ -106,20 +127,24 @@ type DeepDiveConfig struct {
 	LazyGitSideBySide bool
 	LazyGitMouseMode  bool
 	LazyGitTheme      string
+	LazyGitPaging     string // delta/diff-so-fancy/never
 
 	// LazyDocker settings
 	LazyDockerMouseMode bool
 
 	// Btop settings
-	BtopTheme     string
-	BtopUpdateMs  int
-	BtopShowTemp  bool
-	BtopGraphType string
+	BtopTheme      string
+	BtopUpdateMs   int
+	BtopShowTemp   bool
+	BtopGraphType  string
+	BtopTempScale  string // celsius/fahrenheit
+	BtopShownBoxes string // shown boxes
 
 	// Glow settings
 	GlowPager string
 	GlowStyle string
 	GlowWidth int
+	GlowMouse bool // mouse support
 
 	// Claude Code MCP settings
 	ClaudeCodeMCPs map[string]bool // MCP servers to enable
@@ -129,22 +154,26 @@ type DeepDiveConfig struct {
 func NewDeepDiveConfig() *DeepDiveConfig {
 	return &DeepDiveConfig{
 		// Ghostty defaults
-		GhosttyFontSize:        14,
-		GhosttyOpacity:         100,
-		GhosttyTabBindings:     "super",
-		GhosttyFontFamily:      "JetBrains Mono",
-		GhosttyBlurRadius:      0,
-		GhosttyScrollbackLines: 10000,
-		GhosttyCursorStyle:     "block",
+		GhosttyFontSize:          14,
+		GhosttyOpacity:           100,
+		GhosttyTabBindings:       "super",
+		GhosttyFontFamily:        "JetBrains Mono",
+		GhosttyBlurRadius:        0,
+		GhosttyScrollbackLines:   10000,
+		GhosttyCursorStyle:       "block",
+		GhosttyWindowDecorations: true,
+		GhosttyConfirmClose:      true,
 
 		// Tmux defaults
-		TmuxPrefix:       "ctrl-a",
-		TmuxSplitBinds:   "pipes", // | and -
-		TmuxStatusBar:    "bottom",
-		TmuxMouseMode:    true,
-		TmuxHistoryLimit: 50000,
-		TmuxEscapeTime:   10,
-		TmuxBaseIndex:    1,
+		TmuxPrefix:           "ctrl-a",
+		TmuxSplitBinds:       "pipes", // | and -
+		TmuxStatusBar:        "bottom",
+		TmuxMouseMode:        true,
+		TmuxHistoryLimit:     50000,
+		TmuxEscapeTime:       10,
+		TmuxBaseIndex:        1,
+		TmuxPaneBorderStyle:  "single",
+		TmuxAggressiveResize: true,
 
 		// Tmux TPM defaults
 		TmuxTPMEnabled:       true,
@@ -153,6 +182,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		TmuxPluginContinuum:  false, // Opt-in for auto-save
 		TmuxPluginYank:       true,
 		TmuxContinuumSaveMin: 15,
+		TmuxContinuumRestore: true,
 
 		// Zsh defaults
 		ZshPromptStyle: "p10k",
@@ -169,10 +199,13 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"gc":     true,
 			"docker": true,
 		},
-		ZshHistorySize:     10000,
-		ZshAutoCD:          true,
-		ZshSyntaxHighlight: true,
-		ZshAutosuggestions: true,
+		ZshHistorySize:       10000,
+		ZshAutoCD:            true,
+		ZshSyntaxHighlight:   true,
+		ZshAutosuggestions:   true,
+		ZshHistoryIgnoreDups: true,
+		ZshCorrection:        true,
+		ZshCompletionMenu:    true,
 
 		// Neovim defaults
 		NeovimConfig: "kickstart",
@@ -188,10 +221,14 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"lsp",
 			"cmp",
 		},
-		NeovimTabWidth:   4,
-		NeovimWrap:       false,
-		NeovimCursorLine: true,
-		NeovimClipboard:  "unnamedplus",
+		NeovimTabWidth:    4,
+		NeovimWrap:        false,
+		NeovimCursorLine:  true,
+		NeovimClipboard:   "unnamedplus",
+		NeovimLineNumbers: "absolute",
+		NeovimRelativeNum: true,
+		NeovimExpandTab:   true,
+		NeovimUndoFile:    true,
 
 		// Git defaults
 		GitDeltaSideBySide: true,
@@ -202,16 +239,25 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GitPullRebase:       true,
 		GitSignCommits:      false,
 		GitCredentialHelper: "cache",
+		GitAutoSetupRemote:  true,
+		GitMergeTool:        "vimdiff",
 
 		// Yazi defaults
 		YaziKeymap:      "vim",
 		YaziShowHidden:  false,
 		YaziPreviewMode: "auto",
+		YaziSortBy:      "alphabetical",
+		YaziSortReverse: false,
+		YaziLineMode:    "size",
+		YaziScrollOff:   5,
 
 		// FZF defaults
-		FzfPreview: true,
-		FzfHeight:  40,
-		FzfLayout:  "reverse",
+		FzfPreview:       true,
+		FzfHeight:        40,
+		FzfLayout:        "reverse",
+		FzfDefaultOpts:   "",
+		FzfBorderStyle:   "rounded",
+		FzfPreviewWindow: "right:50%",
 
 		// macOS Apps defaults (from registry)
 		MacApps: buildToolGroupDefaults(tools.UIGroupMacApps),
@@ -236,20 +282,24 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		LazyGitSideBySide: true,
 		LazyGitMouseMode:  true,
 		LazyGitTheme:      "auto",
+		LazyGitPaging:     "delta",
 
 		// LazyDocker defaults
 		LazyDockerMouseMode: true,
 
 		// Btop defaults
-		BtopTheme:     "auto",
-		BtopUpdateMs:  2000,
-		BtopShowTemp:  true,
-		BtopGraphType: "braille",
+		BtopTheme:      "auto",
+		BtopUpdateMs:   2000,
+		BtopShowTemp:   true,
+		BtopGraphType:  "braille",
+		BtopTempScale:  "celsius",
+		BtopShownBoxes: "cpu mem net proc",
 
 		// Glow defaults
 		GlowPager: "auto",
 		GlowStyle: "auto",
 		GlowWidth: 80,
+		GlowMouse: true,
 
 		// Claude Code MCP defaults
 		ClaudeCodeMCPs: map[string]bool{

@@ -18,6 +18,10 @@ type ZshConfig struct {
 	AutoCD          bool
 	SyntaxHighlight bool
 	Autosuggestions bool
+
+	HistoryIgnoreDups bool // setopt HIST_IGNORE_DUPS
+	Correction        bool // setopt CORRECT
+	CompletionMenu    bool // zstyle menu select
 }
 
 // ZshTool represents the Zsh shell
@@ -66,7 +70,9 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("HISTSIZE=%d\n", cfg.HistorySize))
 	sb.WriteString(fmt.Sprintf("SAVEHIST=%d\n", cfg.HistorySize))
 	sb.WriteString("HISTFILE=~/.zsh_history\n")
-	sb.WriteString("setopt HIST_IGNORE_DUPS\n")
+	if cfg.HistoryIgnoreDups {
+		sb.WriteString("setopt HIST_IGNORE_DUPS\n")
+	}
 	sb.WriteString("setopt HIST_IGNORE_SPACE\n")
 	sb.WriteString("setopt SHARE_HISTORY\n\n")
 
@@ -76,10 +82,18 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 		sb.WriteString("setopt AUTO_CD\n\n")
 	}
 
+	// Auto correction
+	if cfg.Correction {
+		sb.WriteString("# Correction\n")
+		sb.WriteString("setopt CORRECT\n\n")
+	}
+
 	// Completion
 	sb.WriteString("# Completion\n")
 	sb.WriteString("autoload -Uz compinit && compinit\n")
-	sb.WriteString("zstyle ':completion:*' menu select\n")
+	if cfg.CompletionMenu {
+		sb.WriteString("zstyle ':completion:*' menu select\n")
+	}
 	sb.WriteString("zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'\n\n")
 
 	// PATH additions

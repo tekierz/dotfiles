@@ -14,6 +14,11 @@ type YaziConfig struct {
 	Keymap      string // "vim", "emacs"
 	ShowHidden  bool
 	PreviewMode string // "auto", "always", "never"
+
+	SortBy      string // "alphabetical", "modified", "size", "natural"
+	SortReverse bool   // reverse sort direction
+	LineMode    string // "size", "permissions", "mtime", "none"
+	ScrollOff   int    // items kept visible above/below cursor
 }
 
 // YaziTool represents the Yazi file manager
@@ -60,11 +65,12 @@ func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 	// Manager settings
 	sb.WriteString("[manager]\n")
 	sb.WriteString("ratio = [1, 4, 3]\n")
-	sb.WriteString("sort_by = \"natural\"\n")
+	sb.WriteString(fmt.Sprintf("sort_by = \"%s\"\n", yaziSortBy(cfg.SortBy)))
 	sb.WriteString("sort_sensitive = false\n")
-	sb.WriteString("sort_reverse = false\n")
+	sb.WriteString(fmt.Sprintf("sort_reverse = %t\n", cfg.SortReverse))
 	sb.WriteString("sort_dir_first = true\n")
-	sb.WriteString("linemode = \"size\"\n")
+	sb.WriteString(fmt.Sprintf("linemode = \"%s\"\n", cfg.LineMode))
+	sb.WriteString(fmt.Sprintf("scrolloff = %d\n", cfg.ScrollOff))
 	sb.WriteString(fmt.Sprintf("show_hidden = %t\n", cfg.ShowHidden))
 	sb.WriteString("show_symlink = true\n\n")
 
@@ -95,6 +101,21 @@ func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 	sb.WriteString("enabled = false\n")
 
 	return sb.String()
+}
+
+// yaziSortBy maps the Manage UI's sort vocabulary onto the values yazi's
+// [manager] sort_by accepts. yazi understands alphabetical/natural/size/mtime
+// (among others); the UI's "modified" is yazi's "mtime". Unrecognized values fall
+// back to "natural" so the written file is always a value yazi accepts.
+func yaziSortBy(sortBy string) string {
+	switch sortBy {
+	case "modified":
+		return "mtime"
+	case "alphabetical", "natural", "size":
+		return sortBy
+	default:
+		return "natural"
+	}
 }
 
 // GenerateYaziKeymap builds the keymap.toml content

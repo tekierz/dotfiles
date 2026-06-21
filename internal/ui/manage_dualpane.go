@@ -877,7 +877,8 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 		for i := a.manageFieldsScroll; i < len(fields) && len(fieldLines) < fieldCapacity; i++ {
 			f := fields[i]
 			focused := (a.managePane == managePaneSettings) && (i == a.configFieldIndex)
-			fieldLines = append(fieldLines, truncateVisible(renderManageFieldLine(f, focused), innerW))
+			applied := manageFieldIsApplied(item.id, f.key)
+			fieldLines = append(fieldLines, truncateVisible(renderManageFieldLine(f, focused, applied), innerW))
 		}
 	}
 	for len(fieldLines) < fieldCapacity {
@@ -922,7 +923,19 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	return panel.Render(content)
 }
 
-func renderManageFieldLine(f manageField, focused bool) string {
+// renderManageFieldLine renders one settings row. applied=false means the field is
+// editable but is NOT wired to any generator (manageNotAppliedFields); a clear
+// "(not applied)" marker is appended so the user is never misled into thinking the
+// save wrote it — the P1-B honesty requirement.
+func renderManageFieldLine(f manageField, focused, applied bool) string {
+	line := renderManageFieldLineBase(f, focused)
+	if !applied {
+		line += " " + lipgloss.NewStyle().Foreground(ColorYellow).Render("(not applied)")
+	}
+	return line
+}
+
+func renderManageFieldLineBase(f manageField, focused bool) string {
 	// Left label column.
 	labelStyle := lipgloss.NewStyle().Foreground(ColorText).Width(18)
 	valueStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)

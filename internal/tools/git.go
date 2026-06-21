@@ -17,6 +17,9 @@ type GitConfig struct {
 	PullRebase       bool
 	SignCommits      bool
 	CredentialHelper string // "cache", "store", "osxkeychain"
+
+	AutoSetupRemote bool   // push.autoSetupRemote
+	MergeTool       string // "vimdiff", "nvimdiff", "meld"
 }
 
 // GitTool represents Git version control
@@ -71,6 +74,10 @@ func GenerateGitConfig(cfg GitConfig, theme string) string {
 	}
 	sb.WriteString("\n")
 
+	// Push behavior
+	sb.WriteString("[push]\n")
+	sb.WriteString(fmt.Sprintf("\tautoSetupRemote = %t\n\n", cfg.AutoSetupRemote))
+
 	// Credential helper
 	if cfg.CredentialHelper != "" && cfg.CredentialHelper != "none" {
 		sb.WriteString("[credential]\n")
@@ -100,7 +107,11 @@ func GenerateGitConfig(cfg GitConfig, theme string) string {
 	sb.WriteString("\tsyntax-theme = Dracula\n\n")
 
 	sb.WriteString("[merge]\n")
-	sb.WriteString("\tconflictstyle = diff3\n\n")
+	sb.WriteString("\tconflictstyle = diff3\n")
+	if cfg.MergeTool != "" {
+		sb.WriteString(fmt.Sprintf("\ttool = %s\n", cfg.MergeTool))
+	}
+	sb.WriteString("\n")
 
 	sb.WriteString("[diff]\n")
 	sb.WriteString("\tcolorMoved = default\n\n")

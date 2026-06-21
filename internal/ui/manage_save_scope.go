@@ -25,39 +25,58 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 		return []any{
 			cfg.GhosttyFontSize, cfg.GhosttyFontFamily, cfg.GhosttyOpacity,
 			cfg.GhosttyBlurRadius, cfg.GhosttyTabBindings, cfg.GhosttyScrollbackLines,
-			cfg.GhosttyCursorStyle,
+			cfg.GhosttyCursorStyle, cfg.GhosttyWindowDecorations, cfg.GhosttyConfirmClose,
 		}
 	case "tmux":
 		return []any{
 			cfg.TmuxPrefix, cfg.TmuxSplitBinds, cfg.TmuxStatusBar, cfg.TmuxMouseMode,
+			cfg.TmuxBaseIndex, cfg.TmuxPaneBorderStyle, cfg.TmuxHistoryLimit,
+			cfg.TmuxEscapeTime, cfg.TmuxAggressiveResize,
 			cfg.TmuxTPMEnabled, cfg.TmuxPluginSensible, cfg.TmuxPluginResurrect,
 			cfg.TmuxPluginContinuum, cfg.TmuxPluginYank, cfg.TmuxContinuumSaveMin,
+			cfg.TmuxContinuumRestore,
 		}
 	case "zsh":
 		return []any{
 			cfg.ZshPromptStyle, cfg.ZshHistorySize, cfg.ZshAutoCD,
 			cfg.ZshSyntaxHighlight, cfg.ZshAutosuggestions,
+			cfg.ZshHistoryIgnoreDups, cfg.ZshCorrection, cfg.ZshCompletionMenu,
 		}
 	case "neovim":
 		return []any{
 			cfg.NeovimConfig, cfg.NeovimTabWidth, cfg.NeovimWrap,
 			cfg.NeovimCursorLine, cfg.NeovimClipboard,
+			cfg.NeovimLineNumbers, cfg.NeovimRelativeNum, cfg.NeovimExpandTab,
+			cfg.NeovimUndoFile,
 		}
 	case "git":
 		return []any{
 			cfg.GitDeltaSideBySide, cfg.GitDefaultBranch, cfg.GitPullRebase,
 			cfg.GitSignCommits, cfg.GitCredentialHelper,
+			cfg.GitAutoSetupRemote, cfg.GitMergeTool,
 		}
 	case "yazi":
-		return []any{cfg.YaziShowHidden}
+		return []any{
+			cfg.YaziShowHidden, cfg.YaziSortBy, cfg.YaziSortReverse,
+			cfg.YaziLineMode, cfg.YaziScrollOff,
+		}
 	case "fzf":
-		return []any{cfg.FzfPreview, cfg.FzfHeight, cfg.FzfLayout}
+		return []any{
+			cfg.FzfPreview, cfg.FzfHeight, cfg.FzfLayout,
+			cfg.FzfDefaultOpts, cfg.FzfBorderStyle, cfg.FzfPreviewWindow,
+		}
 	case "lazygit":
-		return []any{cfg.LazyGitSideBySide, cfg.LazyGitMouseMode, cfg.LazyGitTheme}
+		return []any{
+			cfg.LazyGitSideBySide, cfg.LazyGitMouseMode, cfg.LazyGitTheme,
+			cfg.LazyGitPaging,
+		}
 	case "btop":
-		return []any{cfg.BtopTheme, cfg.BtopUpdateMs, cfg.BtopShowTemp, cfg.BtopGraphType}
+		return []any{
+			cfg.BtopTheme, cfg.BtopUpdateMs, cfg.BtopShowTemp, cfg.BtopGraphType,
+			cfg.BtopTempScale, cfg.BtopShownBoxes,
+		}
 	case "glow":
-		return []any{cfg.GlowPager, cfg.GlowStyle, cfg.GlowWidth}
+		return []any{cfg.GlowPager, cfg.GlowStyle, cfg.GlowWidth, cfg.GlowMouse}
 	}
 	return nil
 }

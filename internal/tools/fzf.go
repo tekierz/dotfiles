@@ -14,6 +14,10 @@ type FzfConfig struct {
 	Preview bool
 	Height  int    // Percentage (e.g., 40 for 40%)
 	Layout  string // "reverse", "default", "reverse-list"
+
+	DefaultOpts   string // extra CLI options appended verbatim
+	BorderStyle   string // "rounded", "sharp", "bold", "none"
+	PreviewWindow string // "right:50%", "up:50%", "down:50%"
 }
 
 // FzfTool represents the fzf fuzzy finder
@@ -68,13 +72,26 @@ func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 	// Preview
 	if cfg.Preview {
 		opts = append(opts, "--preview 'bat --style=numbers --color=always --line-range :500 {} 2>/dev/null || cat {}'")
-		opts = append(opts, "--preview-window=right:50%:wrap")
+		previewWindow := cfg.PreviewWindow
+		if previewWindow == "" {
+			previewWindow = "right:50%"
+		}
+		opts = append(opts, fmt.Sprintf("--preview-window=%s:wrap", previewWindow))
 	}
 
 	// Common styling
-	opts = append(opts, "--border=rounded")
+	border := cfg.BorderStyle
+	if border == "" {
+		border = "rounded"
+	}
+	opts = append(opts, fmt.Sprintf("--border=%s", border))
 	opts = append(opts, "--margin=1")
 	opts = append(opts, "--padding=1")
+
+	// Extra user-supplied options, appended verbatim.
+	if strings.TrimSpace(cfg.DefaultOpts) != "" {
+		opts = append(opts, strings.TrimSpace(cfg.DefaultOpts))
+	}
 
 	// Write export
 	if len(opts) > 0 {

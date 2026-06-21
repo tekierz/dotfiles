@@ -14,6 +14,7 @@ type GlowConfig struct {
 	Pager string // "auto", "less", "never"
 	Style string // "auto", "dark", "light", "dracula", etc.
 	Width int    // Max width for rendering (0 = terminal width)
+	Mouse bool   // Enable mouse support
 }
 
 // GlowTool represents glow markdown viewer
@@ -79,7 +80,7 @@ func GenerateGlowConfig(cfg GlowConfig, theme string) string {
 	sb.WriteString("local: true\n")
 
 	// Mouse support
-	sb.WriteString("mouse: true\n")
+	sb.WriteString(fmt.Sprintf("mouse: %t\n", cfg.Mouse))
 
 	return sb.String()
 }

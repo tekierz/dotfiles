@@ -15,6 +15,9 @@ type BtopConfig struct {
 	UpdateMs  int    // Update interval in milliseconds
 	ShowTemp  bool   // Show temperature sensors
 	GraphType string // "braille", "block", "tty"
+
+	TempScale  string // "celsius", "fahrenheit"
+	ShownBoxes string // e.g. "cpu mem net proc"
 }
 
 // BtopTool represents btop system monitor
@@ -86,12 +89,20 @@ func GenerateBtopConfig(cfg BtopConfig, theme string) string {
 	sb.WriteString("graph_symbol_mem = \"default\"\n")
 	sb.WriteString("graph_symbol_net = \"default\"\n")
 	sb.WriteString("graph_symbol_proc = \"default\"\n")
-	sb.WriteString("shown_boxes = \"cpu mem net proc\"\n\n")
+	shownBoxes := cfg.ShownBoxes
+	if shownBoxes == "" {
+		shownBoxes = "cpu mem net proc"
+	}
+	sb.WriteString(fmt.Sprintf("shown_boxes = \"%s\"\n\n", shownBoxes))
 
 	// Temperature
 	sb.WriteString("#* Temperature\n")
 	sb.WriteString(fmt.Sprintf("show_coretemp = %t\n", cfg.ShowTemp))
-	sb.WriteString("temp_scale = \"celsius\"\n\n")
+	tempScale := cfg.TempScale
+	if tempScale == "" {
+		tempScale = "celsius"
+	}
+	sb.WriteString(fmt.Sprintf("temp_scale = \"%s\"\n\n", tempScale))
 
 	// Memory
 	sb.WriteString("#* Memory\n")

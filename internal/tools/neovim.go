@@ -19,6 +19,11 @@ type NeovimConfig struct {
 	Wrap         bool
 	CursorLine   bool
 	Clipboard    string // "unnamedplus", "unnamed", "none"
+
+	LineNumbers string // "absolute", "relative", "none"
+	RelativeNum bool   // show relative line numbers
+	ExpandTab   bool   // use spaces instead of tabs
+	UndoFile    bool   // persistent undo on disk
 }
 
 // NeovimTool represents the Neovim editor
@@ -89,13 +94,15 @@ func GenerateNeovimConfig(cfg NeovimConfig, theme string) string {
 
 	// Basic settings
 	sb.WriteString("-- Basic settings\n")
-	sb.WriteString("vim.opt.number = true\n")
-	sb.WriteString("vim.opt.relativenumber = true\n")
+	// "absolute"/"relative" both show the number column; "none" hides it.
+	sb.WriteString(fmt.Sprintf("vim.opt.number = %t\n", cfg.LineNumbers != "none"))
+	sb.WriteString(fmt.Sprintf("vim.opt.relativenumber = %t\n", cfg.RelativeNum))
 	sb.WriteString(fmt.Sprintf("vim.opt.tabstop = %d\n", cfg.TabWidth))
 	sb.WriteString(fmt.Sprintf("vim.opt.shiftwidth = %d\n", cfg.TabWidth))
-	sb.WriteString("vim.opt.expandtab = true\n")
+	sb.WriteString(fmt.Sprintf("vim.opt.expandtab = %t\n", cfg.ExpandTab))
 	sb.WriteString(fmt.Sprintf("vim.opt.wrap = %t\n", cfg.Wrap))
 	sb.WriteString(fmt.Sprintf("vim.opt.cursorline = %t\n", cfg.CursorLine))
+	sb.WriteString(fmt.Sprintf("vim.opt.undofile = %t\n", cfg.UndoFile))
 	sb.WriteString("\n")
 
 	// Clipboard

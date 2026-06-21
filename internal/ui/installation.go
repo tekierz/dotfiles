@@ -307,12 +307,18 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 		SplitBinds:       cfg.TmuxSplitBinds,
 		StatusBar:        cfg.TmuxStatusBar,
 		MouseMode:        cfg.TmuxMouseMode,
+		BaseIndex:        cfg.TmuxBaseIndex,
+		PaneBorderStyle:  cfg.TmuxPaneBorderStyle,
+		HistoryLimit:     cfg.TmuxHistoryLimit,
+		EscapeTime:       cfg.TmuxEscapeTime,
+		AggressiveResize: cfg.TmuxAggressiveResize,
 		TPMEnabled:       cfg.TmuxTPMEnabled,
 		PluginSensible:   cfg.TmuxPluginSensible,
 		PluginResurrect:  cfg.TmuxPluginResurrect,
 		PluginContinuum:  cfg.TmuxPluginContinuum,
 		PluginYank:       cfg.TmuxPluginYank,
 		ContinuumSaveMin: cfg.TmuxContinuumSaveMin,
+		ContinuumRestore: cfg.TmuxContinuumRestore,
 	}
 	stepLine("\n▶ Configuring tmux...")
 	if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
@@ -352,13 +358,15 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure Ghostty
 	configPhase("\n▶ Configuring Ghostty...", func() error {
 		ghosttyCfg := tools.GhosttyConfig{
-			FontSize:        cfg.GhosttyFontSize,
-			FontFamily:      cfg.GhosttyFontFamily,
-			Opacity:         cfg.GhosttyOpacity,
-			BlurRadius:      cfg.GhosttyBlurRadius,
-			TabBindings:     cfg.GhosttyTabBindings,
-			ScrollbackLines: cfg.GhosttyScrollbackLines,
-			CursorStyle:     cfg.GhosttyCursorStyle,
+			FontSize:          cfg.GhosttyFontSize,
+			FontFamily:        cfg.GhosttyFontFamily,
+			Opacity:           cfg.GhosttyOpacity,
+			BlurRadius:        cfg.GhosttyBlurRadius,
+			TabBindings:       cfg.GhosttyTabBindings,
+			ScrollbackLines:   cfg.GhosttyScrollbackLines,
+			CursorStyle:       cfg.GhosttyCursorStyle,
+			WindowDecorations: cfg.GhosttyWindowDecorations,
+			ConfirmClose:      cfg.GhosttyConfirmClose,
 		}
 		if err := tools.WriteGhosttyConfig(ghosttyCfg, theme); err != nil {
 			return fmt.Errorf("Failed to configure Ghostty: %w", err)
@@ -369,13 +377,16 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure Zsh
 	configPhase("\n▶ Configuring Zsh...", func() error {
 		zshCfg := tools.ZshConfig{
-			PromptStyle:     cfg.ZshPromptStyle,
-			Plugins:         cfg.ZshPlugins,
-			Aliases:         cfg.ZshAliases,
-			HistorySize:     cfg.ZshHistorySize,
-			AutoCD:          cfg.ZshAutoCD,
-			SyntaxHighlight: cfg.ZshSyntaxHighlight,
-			Autosuggestions: cfg.ZshAutosuggestions,
+			PromptStyle:       cfg.ZshPromptStyle,
+			Plugins:           cfg.ZshPlugins,
+			Aliases:           cfg.ZshAliases,
+			HistorySize:       cfg.ZshHistorySize,
+			AutoCD:            cfg.ZshAutoCD,
+			SyntaxHighlight:   cfg.ZshSyntaxHighlight,
+			Autosuggestions:   cfg.ZshAutosuggestions,
+			HistoryIgnoreDups: cfg.ZshHistoryIgnoreDups,
+			Correction:        cfg.ZshCorrection,
+			CompletionMenu:    cfg.ZshCompletionMenu,
 		}
 		if err := tools.WriteZshConfig(zshCfg, theme); err != nil {
 			return fmt.Errorf("Failed to configure Zsh: %w", err)
@@ -392,6 +403,10 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 		Wrap:         cfg.NeovimWrap,
 		CursorLine:   cfg.NeovimCursorLine,
 		Clipboard:    cfg.NeovimClipboard,
+		LineNumbers:  cfg.NeovimLineNumbers,
+		RelativeNum:  cfg.NeovimRelativeNum,
+		ExpandTab:    cfg.NeovimExpandTab,
+		UndoFile:     cfg.NeovimUndoFile,
 	}
 	neovimSuccessMsg := fmt.Sprintf("  ✓ Neovim configured (%s)", neovimCfg.ConfigPreset)
 	if neovimCfg.ConfigPreset == "custom" {
@@ -413,6 +428,8 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 			PullRebase:       cfg.GitPullRebase,
 			SignCommits:      cfg.GitSignCommits,
 			CredentialHelper: cfg.GitCredentialHelper,
+			AutoSetupRemote:  cfg.GitAutoSetupRemote,
+			MergeTool:        cfg.GitMergeTool,
 		}
 		if err := tools.WriteGitConfig(gitCfg, theme); err != nil {
 			return fmt.Errorf("Failed to configure Git: %w", err)
@@ -426,6 +443,10 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 			Keymap:      cfg.YaziKeymap,
 			ShowHidden:  cfg.YaziShowHidden,
 			PreviewMode: cfg.YaziPreviewMode,
+			SortBy:      cfg.YaziSortBy,
+			SortReverse: cfg.YaziSortReverse,
+			LineMode:    cfg.YaziLineMode,
+			ScrollOff:   cfg.YaziScrollOff,
 		}
 		if err := tools.WriteYaziConfig(yaziCfg, theme); err != nil {
 			return fmt.Errorf("Failed to configure Yazi: %w", err)
@@ -436,9 +457,12 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure FZF
 	configPhase("\n▶ Configuring FZF...", func() error {
 		fzfCfg := tools.FzfConfig{
-			Preview: cfg.FzfPreview,
-			Height:  cfg.FzfHeight,
-			Layout:  cfg.FzfLayout,
+			Preview:       cfg.FzfPreview,
+			Height:        cfg.FzfHeight,
+			Layout:        cfg.FzfLayout,
+			DefaultOpts:   cfg.FzfDefaultOpts,
+			BorderStyle:   cfg.FzfBorderStyle,
+			PreviewWindow: cfg.FzfPreviewWindow,
 		}
 		if err := tools.WriteFzfConfig(fzfCfg, theme); err != nil {
 			return fmt.Errorf("Failed to configure FZF: %w", err)
@@ -455,6 +479,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 				SideBySide: cfg.LazyGitSideBySide,
 				MouseMode:  cfg.LazyGitMouseMode,
 				Theme:      cfg.LazyGitTheme,
+				Paging:     cfg.LazyGitPaging,
 			}
 			if err := tools.WriteLazyGitConfig(lazygitCfg, theme); err != nil {
 				return fmt.Errorf("Failed to configure LazyGit: %w", err)
@@ -468,10 +493,12 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	if cfg.CLITools["btop"] {
 		configPhase("\n▶ Configuring Btop...", func() error {
 			btopCfg := tools.BtopConfig{
-				Theme:     cfg.BtopTheme,
-				UpdateMs:  cfg.BtopUpdateMs,
-				ShowTemp:  cfg.BtopShowTemp,
-				GraphType: cfg.BtopGraphType,
+				Theme:      cfg.BtopTheme,
+				UpdateMs:   cfg.BtopUpdateMs,
+				ShowTemp:   cfg.BtopShowTemp,
+				GraphType:  cfg.BtopGraphType,
+				TempScale:  cfg.BtopTempScale,
+				ShownBoxes: cfg.BtopShownBoxes,
 			}
 			if err := tools.WriteBtopConfig(btopCfg, theme); err != nil {
 				return fmt.Errorf("Failed to configure Btop: %w", err)
@@ -488,6 +515,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 				Pager: cfg.GlowPager,
 				Style: cfg.GlowStyle,
 				Width: cfg.GlowWidth,
+				Mouse: cfg.GlowMouse,
 			}
 			if err := tools.WriteGlowConfig(glowCfg, theme); err != nil {
 				return fmt.Errorf("Failed to configure Glow: %w", err)

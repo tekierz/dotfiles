@@ -14,6 +14,7 @@ type LazyGitConfig struct {
 	SideBySide bool
 	MouseMode  bool
 	Theme      string // "auto", "dark", "light"
+	Paging     string // "delta", "diff-so-fancy", "never"
 }
 
 // LazyGitTool represents LazyGit TUI for Git
@@ -76,7 +77,7 @@ func GenerateLazyGitConfig(cfg LazyGitConfig, theme string) string {
 	sb.WriteString("git:\n")
 	sb.WriteString("  paging:\n")
 	sb.WriteString("    colorArg: always\n")
-	sb.WriteString("    pager: delta --dark --paging=never\n")
+	sb.WriteString(fmt.Sprintf("    pager: %s\n", lazygitPager(cfg.Paging)))
 	sb.WriteString("  commit:\n")
 	sb.WriteString("    signOff: false\n")
 	sb.WriteString("  merging:\n")
@@ -109,6 +110,20 @@ func GenerateLazyGitConfig(cfg LazyGitConfig, theme string) string {
 	sb.WriteString("    scrollRight: <right>\n")
 
 	return sb.String()
+}
+
+// lazygitPager maps the Manage UI's paging vocabulary onto the pager command
+// lazygit's git.paging.pager expects. "never" disables the external pager by
+// routing through cat; anything unrecognized falls back to delta.
+func lazygitPager(paging string) string {
+	switch paging {
+	case "diff-so-fancy":
+		return "diff-so-fancy"
+	case "never":
+		return "cat"
+	default:
+		return "delta --dark --paging=never"
+	}
 }
 
 // WriteLazyGitConfig writes the lazygit config to disk

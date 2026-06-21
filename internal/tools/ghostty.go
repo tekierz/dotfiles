@@ -18,6 +18,9 @@ type GhosttyConfig struct {
 	TabBindings     string // "super", "ctrl", "ctrl-shift"
 	ScrollbackLines int
 	CursorStyle     string // "block", "bar", "underline"
+
+	WindowDecorations bool // Show native window decorations
+	ConfirmClose      bool // Prompt before closing a surface
 }
 
 // GhosttyTool represents the Ghostty terminal emulator
@@ -74,6 +77,8 @@ func GenerateGhosttyConfig(cfg GhosttyConfig, theme string) string {
 	if cfg.BlurRadius > 0 {
 		sb.WriteString(fmt.Sprintf("background-blur-radius = %d\n", cfg.BlurRadius))
 	}
+	sb.WriteString(fmt.Sprintf("window-decoration = %t\n", cfg.WindowDecorations))
+	sb.WriteString(fmt.Sprintf("confirm-close-surface = %t\n", cfg.ConfirmClose))
 	sb.WriteString("\n")
 
 	// Cursor
