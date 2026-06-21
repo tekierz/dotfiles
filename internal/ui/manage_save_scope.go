@@ -53,7 +53,7 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 		return []any{
 			cfg.GitDeltaSideBySide, cfg.GitDefaultBranch, cfg.GitPullRebase,
 			cfg.GitSignCommits, cfg.GitCredentialHelper,
-			cfg.GitAutoSetupRemote, cfg.GitMergeTool,
+			cfg.GitAutoSetupRemote, cfg.GitMergeTool, cfg.GitDiffTool,
 		}
 	case "yazi":
 		return []any{

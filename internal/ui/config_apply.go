@@ -150,6 +150,7 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 			CredentialHelper: cfg.GitCredentialHelper,
 			AutoSetupRemote:  cfg.GitAutoSetupRemote,
 			MergeTool:        cfg.GitMergeTool,
+			DiffTool:         cfg.GitDiffTool,
 		}, theme)
 	},
 	"yazi": func(cfg DeepDiveConfig, theme string) error {
@@ -312,9 +313,9 @@ func glowPagerToGenerator(pager string) string {
 //
 // The ONLY fields intentionally NOT mapped here are LazyDocker's (MouseMode,
 // LogsTail): no generator or config-file writer exists for lazydocker at all, so
-// they are not-applied (manageNotAppliedFields). GitDiffTool is mapped indirectly —
-// it only drives the generator's boolean DeltaSideBySide (delta vs not);
-// difftastic/vimdiff are not separately modeled in the .gitconfig template.
+// they are not-applied (manageNotAppliedFields). GitDiffTool is now mapped to the
+// real GitConfig.DiffTool field, so delta/difftastic/vimdiff each produce a
+// distinct .gitconfig (delta pager vs difftastic external diff vs vim difftool).
 //
 // CRITICAL (Task 19 coupling): any field overlaid here must ALSO be listed in
 // toolDeepDiveFields (manage_save_scope.go) or the scoped Manage save will not
@@ -371,12 +372,15 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.NeovimExpandTab = mc.NeovimExpandTab
 	dd.NeovimUndoFile = mc.NeovimUndoFile
 
-	// Git
+	// Git. GitDiffTool now drives the real DiffTool field (delta/difftastic/
+	// vimdiff); it is no longer collapsed into the DeltaSideBySide boolean.
+	// DeltaSideBySide keeps its NewDeepDiveConfig default (true) because the Manage
+	// UI exposes no side-by-side toggle — only the wizard's Git screen does.
 	dd.GitDefaultBranch = mc.GitDefaultBranch
 	dd.GitPullRebase = mc.GitPullRebase
 	dd.GitSignCommits = mc.GitSignCommits
 	dd.GitCredentialHelper = mc.GitCredentialHelper
-	dd.GitDeltaSideBySide = mc.GitDiffTool == "delta"
+	dd.GitDiffTool = mc.GitDiffTool
 	dd.GitAutoSetupRemote = mc.GitAutoSetupRemote
 	dd.GitMergeTool = mc.GitMergeTool
 

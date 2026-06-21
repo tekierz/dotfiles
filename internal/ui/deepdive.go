@@ -90,6 +90,7 @@ type DeepDiveConfig struct {
 	GitCredentialHelper string // Credential helper (cache, store, osxkeychain)
 	GitAutoSetupRemote  bool   // push.autoSetupRemote
 	GitMergeTool        string // merge tool
+	GitDiffTool         string // diff tool: "delta" (default), "difftastic", "vimdiff"/"nvimdiff"
 
 	// Yazi settings
 	YaziKeymap      string
@@ -241,6 +242,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GitCredentialHelper: "cache",
 		GitAutoSetupRemote:  true,
 		GitMergeTool:        "vimdiff",
+		GitDiffTool:         "delta",
 
 		// Yazi defaults
 		YaziKeymap:      "vim",

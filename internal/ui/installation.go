@@ -430,6 +430,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 			CredentialHelper: cfg.GitCredentialHelper,
 			AutoSetupRemote:  cfg.GitAutoSetupRemote,
 			MergeTool:        cfg.GitMergeTool,
+			DiffTool:         cfg.GitDiffTool,
 		}
 		if err := tools.WriteGitConfig(gitCfg, theme); err != nil {
 			return fmt.Errorf("Failed to configure Git: %w", err)

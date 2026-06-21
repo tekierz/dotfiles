@@ -20,6 +20,7 @@ type GitConfig struct {
 
 	AutoSetupRemote bool   // push.autoSetupRemote
 	MergeTool       string // "vimdiff", "nvimdiff", "meld"
+	DiffTool        string // "delta" (default), "difftastic", "vimdiff"/"nvimdiff"
 }
 
 // GitTool represents Git version control
@@ -50,6 +51,20 @@ func NewGitTool() *GitTool {
 			configScreen:   13, // ScreenConfigGit
 			defaultEnabled: true,
 		},
+	}
+}
+
+// normalizeDiffTool maps the Manage/wizard diff-tool vocabulary onto the values
+// GenerateGitConfig branches on. An empty value (older configs that predate the
+// DiffTool field) defaults to delta so the generated config is unchanged for them.
+func normalizeDiffTool(diffTool string) string {
+	switch diffTool {
+	case "difftastic":
+		return "difftastic"
+	case "vimdiff", "nvimdiff":
+		return diffTool
+	default:
+		return "delta"
 	}
 }
 
@@ -90,31 +105,66 @@ func GenerateGitConfig(cfg GitConfig, theme string) string {
 		sb.WriteString("\tgpgsign = true\n\n")
 	}
 
-	// Delta pager (if delta is available)
-	sb.WriteString("[core]\n")
-	sb.WriteString("\tpager = delta\n")
-	sb.WriteString("\teditor = nvim\n\n")
+	// Diff tool. The choice drives which (if any) external diff pager is wired
+	// in: delta routes git's pager + interactive diffFilter through delta and
+	// emits a [delta] block; difftastic and vimdiff/nvimdiff must NOT force the
+	// delta pager (that was the bug — the diff-tool selection was ignored).
+	switch normalizeDiffTool(cfg.DiffTool) {
+	case "difftastic":
+		// difftastic's documented git integration: register it as the external
+		// diff driver. Leave core.pager unset so git uses its own pager.
+		sb.WriteString("[core]\n")
+		sb.WriteString("\teditor = nvim\n\n")
+		sb.WriteString("[diff]\n")
+		sb.WriteString("\texternal = difft\n")
+		sb.WriteString("\tcolorMoved = default\n\n")
+		sb.WriteString("[merge]\n")
+		sb.WriteString("\tconflictstyle = diff3\n")
+		if cfg.MergeTool != "" {
+			sb.WriteString(fmt.Sprintf("\ttool = %s\n", cfg.MergeTool))
+		}
+		sb.WriteString("\n")
 
-	sb.WriteString("[interactive]\n")
-	sb.WriteString("\tdiffFilter = delta --color-only\n\n")
+	case "vimdiff", "nvimdiff":
+		// Use (n)vim as the interactive difftool; do not force the delta pager.
+		sb.WriteString("[core]\n")
+		sb.WriteString("\teditor = nvim\n\n")
+		sb.WriteString("[diff]\n")
+		sb.WriteString(fmt.Sprintf("\ttool = %s\n", cfg.DiffTool))
+		sb.WriteString("\tcolorMoved = default\n\n")
+		sb.WriteString("[merge]\n")
+		sb.WriteString("\tconflictstyle = diff3\n")
+		if cfg.MergeTool != "" {
+			sb.WriteString(fmt.Sprintf("\ttool = %s\n", cfg.MergeTool))
+		}
+		sb.WriteString("\n")
 
-	sb.WriteString("[delta]\n")
-	sb.WriteString("\tnavigate = true\n")
-	if cfg.DeltaSideBySide {
-		sb.WriteString("\tside-by-side = true\n")
+	default: // "delta"
+		sb.WriteString("[core]\n")
+		sb.WriteString("\tpager = delta\n")
+		sb.WriteString("\teditor = nvim\n\n")
+
+		sb.WriteString("[interactive]\n")
+		sb.WriteString("\tdiffFilter = delta --color-only\n\n")
+
+		sb.WriteString("[delta]\n")
+		sb.WriteString("\tnavigate = true\n")
+		if cfg.DeltaSideBySide {
+			sb.WriteString("\tside-by-side = true\n")
+		}
+		sb.WriteString("\tline-numbers = true\n")
+		sb.WriteString("\tsyntax-theme = Dracula\n\n")
+
+		sb.WriteString("[merge]\n")
+		sb.WriteString("\tconflictstyle = diff3\n")
+		if cfg.MergeTool != "" {
+			sb.WriteString(fmt.Sprintf("\ttool = %s\n", cfg.MergeTool))
+		}
+		sb.WriteString("\n")
+
+		sb.WriteString("[diff]\n")
+		sb.WriteString("\tcolorMoved = default\n\n")
 	}
-	sb.WriteString("\tline-numbers = true\n")
-	sb.WriteString("\tsyntax-theme = Dracula\n\n")
-
-	sb.WriteString("[merge]\n")
-	sb.WriteString("\tconflictstyle = diff3\n")
-	if cfg.MergeTool != "" {
-		sb.WriteString(fmt.Sprintf("\ttool = %s\n", cfg.MergeTool))
-	}
-	sb.WriteString("\n")
-
-	sb.WriteString("[diff]\n")
-	sb.WriteString("\tcolorMoved = default\n\n")
 
 	// Aliases
 	sb.WriteString("[alias]\n")

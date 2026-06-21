@@ -71,7 +71,9 @@ func GenerateLazyGitConfig(cfg LazyGitConfig, theme string) string {
 	sb.WriteString("  showRandomTip: false\n")
 	sb.WriteString("  showCommandLog: true\n")
 	sb.WriteString("  showBottomLine: true\n")
-	sb.WriteString("  nerdFontsVersion: \"3\"\n\n")
+	sb.WriteString("  nerdFontsVersion: \"3\"\n")
+	sb.WriteString(lazygitThemeBlock(cfg.Theme))
+	sb.WriteString("\n")
 
 	// Git settings
 	sb.WriteString("git:\n")
@@ -109,6 +111,36 @@ func GenerateLazyGitConfig(cfg LazyGitConfig, theme string) string {
 	sb.WriteString("    scrollLeft: <left>\n")
 	sb.WriteString("    scrollRight: <right>\n")
 
+	return sb.String()
+}
+
+// lazygitThemeBlock emits lazygit's gui.theme color block tuned for the chosen
+// GUI theme. lazygit has no single "theme name" key (theming is per-color: see
+// gui.theme.activeBorderColor / selectedLineBgColor / defaultFgColor in the
+// lazygit Config docs), so the auto/dark/light selection maps onto concrete color
+// choices:
+//   - dark / auto: lazygit's standard palette (blue selected-line background).
+//   - light: the lazygit-documented light-terminal palette — selectedLineBgColor
+//     [reverse] (the blue background washes out on light terminals; reverse is the
+//     recommended high-contrast alternative) and a dark default foreground.
+//
+// Each branch produces a DISTINCT, valid config block, so the GUI Theme control is
+// a real applied setting rather than a silent no-op.
+func lazygitThemeBlock(theme string) string {
+	var sb strings.Builder
+	sb.WriteString("  theme:\n")
+	switch theme {
+	case "light":
+		sb.WriteString("    activeBorderColor:\n      - blue\n      - bold\n")
+		sb.WriteString("    inactiveBorderColor:\n      - default\n")
+		sb.WriteString("    selectedLineBgColor:\n      - reverse\n")
+		sb.WriteString("    defaultFgColor:\n      - black\n")
+	default: // "dark" and "auto" share lazygit's standard dark-friendly palette
+		sb.WriteString("    activeBorderColor:\n      - green\n      - bold\n")
+		sb.WriteString("    inactiveBorderColor:\n      - default\n")
+		sb.WriteString("    selectedLineBgColor:\n      - blue\n")
+		sb.WriteString("    defaultFgColor:\n      - default\n")
+	}
 	return sb.String()
 }
 
