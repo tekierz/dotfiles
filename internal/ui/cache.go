@@ -214,8 +214,3 @@ func (a *App) startInstallCacheLoad() tea.Cmd {
 	a.installCacheLoading = true
 	return loadInstallCacheCmd()
 }
-
-// isInstallCacheReady returns true if the cache is ready, false if loading or not started
-func (a *App) isInstallCacheReady() bool {
-	return a.manageInstalledReady
-}

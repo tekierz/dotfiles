@@ -219,15 +219,15 @@ func TestFailureAggregation_MultipleFailuresNamedList(t *testing.T) {
 // This ensures the progress fraction does not over/under-report.
 //
 // Planned config-only phases (no selected tools, no claude-code):
-//   1. installUtilities
-//   2. tmux
-//   3. ghostty
-//   4. zsh
-//   5. neovim
-//   6. git
-//   7. yazi
-//   8. fzf
-//   9. lazygit (if selected)
+//  1. installUtilities
+//  2. tmux
+//  3. ghostty
+//  4. zsh
+//  5. neovim
+//  6. git
+//  7. yazi
+//  8. fzf
+//  9. lazygit (if selected)
 //  10. btop    (if selected)
 //  11. glow    (if selected)
 //

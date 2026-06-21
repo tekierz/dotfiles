@@ -269,19 +269,6 @@ func renderCheckbox(label string, checked, focused bool) string {
 	return fmt.Sprintf("%s%s %s", cursor, boxStyle.Render(box), labelStyle.Render(label))
 }
 
-func renderCheckboxInline(checked, focused bool) string {
-	box := "☐"
-	boxStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-	if checked {
-		box = "☑"
-		boxStyle = lipgloss.NewStyle().Foreground(ColorGreen)
-	}
-	if focused {
-		boxStyle = lipgloss.NewStyle().Foreground(ColorCyan)
-	}
-	return boxStyle.Render(box)
-}
-
 // renderCheckboxInlineWithInstallState renders a checkbox with install status awareness
 // - installed: shows yellow checkbox (already installed, can update), item is not selectable
 // - not installed: normal checkbox behavior (green when checked)

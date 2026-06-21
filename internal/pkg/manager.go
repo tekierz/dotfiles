@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -186,11 +185,6 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
-}
-
-func commandExists(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
 }
 
 // isRaspberryPi detects if running on a Raspberry Pi by checking device tree model

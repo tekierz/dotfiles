@@ -130,23 +130,6 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 	}
 }
 
-func (a *App) installToolCmd(toolID string) tea.Cmd {
-	return func() tea.Msg {
-		reg := tools.GetRegistry()
-		t, ok := reg.Get(toolID)
-		if !ok {
-			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("unknown tool: %s", toolID)}
-		}
-
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
-		}
-
-		return manageInstallDoneMsg{toolID: toolID, err: t.Install(mgr)}
-	}
-}
-
 // checkSudoAndInstallCmd checks if sudo is needed and either prompts or starts install
 func (a *App) checkSudoAndInstallCmd(toolID string) tea.Cmd {
 	return func() tea.Msg {

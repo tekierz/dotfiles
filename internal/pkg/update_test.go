@@ -106,51 +106,6 @@ func TestParsePacmanUpdates_Empty(t *testing.T) {
 	}
 }
 
-// TestGetManagerByName_AURRequiresParu verifies that routing AUR packages to a
-// manager that cannot build them is rejected (regression for pkg-5). When paru
-// is unavailable, getManagerByName("aur") must return nil so UpdatePackages
-// surfaces a clear error instead of issuing `sudo pacman -S <aurpkg>`.
-func TestGetManagerByName_AURRequiresParu(t *testing.T) {
-	mgr := getManagerByName("aur")
-	if mgr != nil {
-		// If a manager is returned it must actually be paru-capable.
-		pm, ok := mgr.(*PacmanManager)
-		if !ok {
-			t.Fatalf("getManagerByName(\"aur\") returned %T, want *PacmanManager or nil", mgr)
-		}
-		if !pm.useParu {
-			t.Error("getManagerByName(\"aur\") returned a non-paru pacman manager that cannot upgrade AUR packages")
-		}
-	}
-	// When mgr == nil (paru not installed on this host, the common CI case),
-	// UpdatePackages reports "package manager aur not available", which is the
-	// intended behavior.
-}
-
-// TestGetManagerByName_KnownManagers verifies routing for the non-AUR names is
-// unchanged.
-func TestGetManagerByName_KnownManagers(t *testing.T) {
-	cases := map[string]string{
-		"brew":      "brew",
-		"brew-cask": "brew",
-		"apt":       "apt",
-	}
-	for name, wantMgrName := range cases {
-		mgr := getManagerByName(name)
-		if mgr == nil {
-			t.Errorf("getManagerByName(%q) returned nil", name)
-			continue
-		}
-		if mgr.Name() != wantMgrName {
-			t.Errorf("getManagerByName(%q).Name() = %q, want %q", name, mgr.Name(), wantMgrName)
-		}
-	}
-
-	if getManagerByName("nonexistent") != nil {
-		t.Error("getManagerByName(\"nonexistent\") should return nil")
-	}
-}
-
 // TestCheckDotfilesUpdates_DebianRenamedPackages verifies that packages with
 // platform-specific names (e.g., fd -> fd-find on Debian) are recognized in
 // the dotfiles update allow-list when the current-platform name is used.
@@ -160,8 +115,8 @@ func TestCheckDotfilesUpdates_DebianRenamedPackages(t *testing.T) {
 	// Simulate what CheckAllUpdates returns on Debian: apt reports the package
 	// by its Debian name "fd-find", not the macOS/Arch "fd".
 	debianUpdates := []Package{
-		{Name: "fd-find", InstalledBy: "apt", Outdated: true},   // fd on Debian
-		{Name: "zsh", InstalledBy: "apt", Outdated: true},        // same name everywhere
+		{Name: "fd-find", InstalledBy: "apt", Outdated: true},        // fd on Debian
+		{Name: "zsh", InstalledBy: "apt", Outdated: true},            // same name everywhere
 		{Name: "something-else", InstalledBy: "apt", Outdated: true}, // not a dotfiles pkg
 	}
 

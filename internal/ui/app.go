@@ -153,7 +153,6 @@ type App struct {
 
 	// Animation state
 	animFrame        int
-	animTicker       *time.Ticker
 	postIntroScreen  Screen // where to land after the intro animation
 	uiFrame          int    // global animation frame counter (manager widgets, spinners, etc.)
 	manageInstalling bool
@@ -228,10 +227,9 @@ type App struct {
 	installOutput       []string
 	installRunning      bool
 	installComplete     bool
-	installCmd          *exec.Cmd
-	installEvents   chan installEventMsg // streamed progress from the install worker goroutine
-	updateStream    chan updateStreamMsg // streamed progress from the update worker goroutine
-	runner          *runner.Runner
+	installEvents       chan installEventMsg // streamed progress from the install worker goroutine
+	updateStream        chan updateStreamMsg // streamed progress from the update worker goroutine
+	runner              *runner.Runner
 	// streamCancel cancels the context driving the currently-running install or
 	// update worker (and the underlying StreamingCmd). It is retained on the App
 	// so navigate-away / Ctrl+C can tear the subprocess + worker goroutines down
@@ -488,22 +486,6 @@ func (a *App) Init() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
-}
-
-// runUpdateCmd updates specific packages
-func runUpdateCmd(packages []pkg.Package) tea.Cmd {
-	return func() tea.Msg {
-		results := pkg.UpdatePackages(packages)
-		return updateRunDoneMsg{results: results}
-	}
-}
-
-// runUpdateAllCmd updates all outdated packages
-func runUpdateAllCmd() tea.Cmd {
-	return func() tea.Msg {
-		err := pkg.UpdateAllPackages()
-		return updateRunDoneMsg{err: err}
-	}
 }
 
 // checkSudoAndUpdateCmd checks if sudo is needed and either prompts or starts update

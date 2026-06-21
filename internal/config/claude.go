@@ -21,17 +21,6 @@ type MCPServer struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
-// DefaultMCPServers returns the default MCP server configurations
-func DefaultMCPServers() map[string]MCPServer {
-	return map[string]MCPServer{
-		"context7": {
-			Type:    "stdio",
-			Command: "npx",
-			Args:    []string{"-y", "@upstash/context7-mcp"},
-		},
-	}
-}
-
 // AllMCPServers returns all available MCP server configurations
 func AllMCPServers() map[string]MCPServer {
 	return map[string]MCPServer{

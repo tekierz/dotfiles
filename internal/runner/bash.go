@@ -55,16 +55,6 @@ func CheckSudoCached() bool {
 	return cmd.Run() == nil
 }
 
-// CacheSudoCredentials prompts for sudo password and caches credentials
-// This should be called with stdin/stdout connected to the terminal
-func CacheSudoCredentials() error {
-	cmd := exec.Command("sudo", "-v")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
 // RefreshSudo extends the cached sudo timestamp WITHOUT prompting. It runs
 // `sudo -n -v`, which refreshes the credential cache when it is still valid and
 // fails (rather than prompting) once it has expired. It is used by the install

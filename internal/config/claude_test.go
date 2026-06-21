@@ -45,7 +45,7 @@ func TestSaveClaudeConfigPreservesUnrelatedKeys(t *testing.T) {
 	if _, ok := cfg.MCPServers["preexisting"]; !ok {
 		t.Errorf("expected preexisting MCP server to be loaded, got %v", cfg.MCPServers)
 	}
-	cfg.MCPServers = DefaultMCPServers()
+	cfg.MCPServers = AllMCPServers()
 	if err := SaveClaudeConfig(cfg); err != nil {
 		t.Fatalf("SaveClaudeConfig failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestSaveClaudeConfigWritesToClaudeJSON(t *testing.T) {
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	claudeJSON := filepath.Join(home, ".claude.json")
 
-	cfg := &ClaudeConfig{MCPServers: DefaultMCPServers()}
+	cfg := &ClaudeConfig{MCPServers: AllMCPServers()}
 	if err := SaveClaudeConfig(cfg); err != nil {
 		t.Fatalf("SaveClaudeConfig failed: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestSaveClaudeConfigBacksUpExisting(t *testing.T) {
 		t.Fatalf("seed write failed: %v", err)
 	}
 
-	cfg := &ClaudeConfig{MCPServers: DefaultMCPServers()}
+	cfg := &ClaudeConfig{MCPServers: AllMCPServers()}
 	if err := SaveClaudeConfig(cfg); err != nil {
 		t.Fatalf("SaveClaudeConfig failed: %v", err)
 	}
@@ -186,10 +186,10 @@ func TestMCPPackageNames(t *testing.T) {
 	}
 
 	// context7 is the default-enabled MCP; verify it uses the correct package.
-	def := DefaultMCPServers()
-	c7, ok := def["context7"]
+	all := AllMCPServers()
+	c7, ok := all["context7"]
 	if !ok {
-		t.Fatal("context7 missing from DefaultMCPServers")
+		t.Fatal("context7 missing from AllMCPServers")
 	}
 	if !strings.Contains(strings.Join(c7.Args, " "), "@upstash/context7-mcp") {
 		t.Errorf("default context7 args = %v, want @upstash/context7-mcp", c7.Args)
