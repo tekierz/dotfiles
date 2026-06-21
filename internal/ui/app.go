@@ -250,7 +250,6 @@ type App struct {
 	installComplete     bool
 	installEvents       chan installEventMsg // streamed progress from the install worker goroutine
 	updateStream        chan updateStreamMsg // streamed progress from the update worker goroutine
-	runner              *runner.Runner
 	// streamCancel cancels the context driving the currently-running install or
 	// update worker (and the underlying StreamingCmd). It is retained on the App
 	// so navigate-away / Ctrl+C can tear the subprocess + worker goroutines down
@@ -415,7 +414,6 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		theme:                "catppuccin-mocha",
 		navStyle:             "emacs",
 		animationsEnabled:    true,
-		runner:               runner.NewRunner(),
 		installOutput:        make([]string, 0, 100),
 		deepDiveConfig:       NewDeepDiveConfig(),
 		manageConfig:         NewManageConfig(),
