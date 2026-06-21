@@ -41,6 +41,13 @@ func keyMsg(name string) tea.KeyMsg {
 func newGoldenContext(t *testing.T) *ScreenContext {
 	t.Helper()
 
+	// Hermetic by construction: point HOME at a temp dir BEFORE NewApp so the
+	// app's startup config load (and any persistTheme / SaveToolConfig a handler
+	// under test triggers) reads and writes the temp dir, never the developer's
+	// real ~/.config/dotfiles. This makes every golden/handler test that goes
+	// through newGoldenContext safe to run with no writable real HOME (P1-C).
+	withTempHome(t)
+
 	app := NewApp(true)
 
 	ctx := &ScreenContext{
