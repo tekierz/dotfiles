@@ -236,13 +236,18 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 				continue
 			}
 
-			// Get packages for this platform
-			pkgs := t.Packages()[platform]
+			// Resolve packages via the single source of truth (which applies the
+			// Raspberry Pi -> Debian fallback). Using the raw map lookup here was a
+			// silent no-op on Pi, where standard tools define only MacOS/Arch/Debian
+			// keys: the loop printed a warning and continued with NO noteFailure, so
+			// selecting standard tools on a Pi installed nothing and never surfaced an
+			// Error screen (FIX 2 — the RC-C silent-failure class re-introduced).
+			pkgs := tools.PackagesForPlatform(t.Packages(), platform)
 			if len(pkgs) == 0 {
-				pkgs = t.Packages()["all"]
-			}
-			if len(pkgs) == 0 {
+				// A genuinely-unsupported selected tool must surface as a failure
+				// (Error screen), not be silently skipped.
 				emitLine(fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
+				noteFailure(fmt.Errorf("%s: no packages for this platform", toolID))
 				continue
 			}
 
@@ -683,8 +688,13 @@ func (a *App) collectSelectedTools() []string {
 	return selected
 }
 
-// streamingInstallToolCmd returns a command that installs a tool with output collection
-func (a *App) streamingInstallToolCmd(toolID string) tea.Cmd {
+// streamingInstallToolCmd returns a command that installs a tool with output
+// collection. The cancelable ctx is created and its cancel handle (a.streamCancel)
+// registered by the caller (handleManageStartInstallMsg) on the main loop so
+// teardownStream can stop this (often sudo) subprocess on Ctrl+C / q instead of
+// orphaning it (FIX 3). This closure must not touch App state (it runs on a
+// bubbletea worker goroutine), so it relies on the context for cancellation.
+func (a *App) streamingInstallToolCmd(ctx context.Context, toolID string) tea.Cmd {
 	return func() tea.Msg {
 		reg := tools.GetRegistry()
 		t, ok := reg.Get(toolID)
@@ -697,18 +707,24 @@ func (a *App) streamingInstallToolCmd(toolID string) tea.Cmd {
 			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
 		}
 
-		// Get packages for this platform
+		// Resolve packages via the single source of truth (Pi -> Debian fallback),
+		// consistent with the wizard loop and IsInstalled/cache (FIX 2). The empty
+		// case is already surfaced (manageInstallWithLogsMsg carries the error), so
+		// this path is not silent — but routing through PackagesForPlatform keeps the
+		// Pi behavior correct here too.
 		platform := pkg.DetectPlatform()
-		pkgs := t.Packages()[platform]
-		if len(pkgs) == 0 {
-			pkgs = t.Packages()["all"]
-		}
+		pkgs := tools.PackagesForPlatform(t.Packages(), platform)
 		if len(pkgs) == 0 {
 			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no packages defined for %s", toolID)}
 		}
 
-		// Start streaming install
-		ctx := context.Background()
+		// Start streaming install on the caller-provided cancelable context so
+		// teardownStream stops the subprocess on quit (FIX 3). The cancel handle was
+		// already registered on the main loop (handleManageStartInstallMsg); we do
+		// NOT write a.streamCmd from this worker-goroutine closure, since that would
+		// race teardownStream's main-loop read. Cancelling the context is sufficient:
+		// InstallStreaming runs via exec.CommandContext, so a.streamCancel() kills the
+		// subprocess.
 		cmd, err := mgr.InstallStreaming(ctx, pkgs...)
 		if err != nil {
 			return manageInstallWithLogsMsg{toolID: toolID, err: err}

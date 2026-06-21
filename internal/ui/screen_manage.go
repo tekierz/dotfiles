@@ -37,7 +37,8 @@ import (
 // so the finalize + cache-refresh chain survives navigation away from this
 // screen (the install worker + package-manager subprocess outlive the screen):
 //   - manageSudoRequiredMsg -> tea.Exec(sudo prompt) -> manageStartInstallMsg
-//   - manageStartInstallMsg -> a.streamingInstallToolCmd(toolID)
+//   - manageStartInstallMsg -> register cancelable ctx/streamCancel, then
+//     a.streamingInstallToolCmd(ctx, toolID) (FIX 3: so teardownStream cancels it)
 //   - manageInstallWithLogsMsg success -> InvalidateCache + manageInstalledReady
 //     =false + re-issue a.startInstallCacheLoad() so the install-status cache
 //     refreshes (Phase B + C10 fix).

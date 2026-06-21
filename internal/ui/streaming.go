@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -144,11 +146,30 @@ func (a *App) handleManageSudoRequiredMsg(msg manageSudoRequiredMsg) tea.Cmd {
 }
 
 // handleManageStartInstallMsg starts the streaming install (sudo already cached).
+//
+// The cancelable context and its cancel handle are created HERE, on the main
+// loop, before spawning the install command (FIX 3). This is the only place
+// that's safe to set a.streamCancel without a data race: the worker goroutine
+// the Cmd spawns must not touch App fields. Registering a.streamCancel lets
+// teardownStream() cancel the context on Ctrl+C / q, which (via
+// exec.CommandContext) kills the orphaned `sudo apt/pacman install ...`
+// subprocess instead of leaking it to init. The Linux sudo keep-alive is started
+// here too, mirroring the wizard/update paths, and torn down on completion.
 func (a *App) handleManageStartInstallMsg(msg manageStartInstallMsg) tea.Cmd {
 	a.clearInstallLogs()
 	a.manageInstalling = true
 	a.manageInstallID = msg.toolID
-	return a.streamingInstallToolCmd(msg.toolID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	a.streamCancel = cancel
+	// Keep the (often-expiring) sudo timestamp fresh during a long install, the
+	// same as the wizard/update paths. No-op on macOS / when sudo isn't cached;
+	// stopped by teardownStream on completion or cancel (C16).
+	if runner.NeedsSudo() && runner.CheckSudoCached() {
+		a.sudoKeepAliveStop = startSudoKeepAlive(refreshSudo)
+	}
+
+	return a.streamingInstallToolCmd(ctx, msg.toolID)
 }
 
 // handleManageInstallWithLogsMsg finalizes a manage install that carried its
