@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -278,8 +279,16 @@ var ThemePalettes = map[string]ColorPalette{
 // CurrentPalette holds the active theme's colors
 var CurrentPalette = ThemePalettes["neon-seapunk"]
 
+// themeMu serializes the SetTheme write sequence. In production there is a
+// single App driven by Bubble Tea on one goroutine, so this never contends;
+// it exists so the parallel-test construction storm (each NewApp -> SetTheme)
+// cannot race write-write on the package-global palette/color/style vars.
+var themeMu sync.Mutex
+
 // SetTheme updates the current palette based on theme name
 func SetTheme(theme string) {
+	themeMu.Lock()
+	defer themeMu.Unlock()
 	if p, ok := ThemePalettes[theme]; ok {
 		CurrentPalette = p
 		updateDynamicColors()
