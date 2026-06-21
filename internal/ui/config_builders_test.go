@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -151,6 +152,9 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 		t.Errorf("tmuxConfigFrom mismatch:\n got %+v\nwant %+v", got, want)
 	}
 
+	// neovim/git/zsh carry slice/map fields (LSPs, Plugins, Aliases); compare the
+	// whole struct with reflect.DeepEqual so a mapping to a different but
+	// equal-length slice/map can't slip past a len()-only check.
 	if got, want := neovimConfigFrom(cfg), (tools.NeovimConfig{
 		ConfigPreset: cfg.NeovimConfig,
 		LSPs:         cfg.NeovimLSPs,
@@ -163,12 +167,7 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 		RelativeNum:  cfg.NeovimRelativeNum,
 		ExpandTab:    cfg.NeovimExpandTab,
 		UndoFile:     cfg.NeovimUndoFile,
-	}); got.ConfigPreset != want.ConfigPreset || got.TabWidth != want.TabWidth ||
-		got.Wrap != want.Wrap || got.CursorLine != want.CursorLine ||
-		got.Clipboard != want.Clipboard || got.LineNumbers != want.LineNumbers ||
-		got.RelativeNum != want.RelativeNum || got.ExpandTab != want.ExpandTab ||
-		got.UndoFile != want.UndoFile || len(got.LSPs) != len(want.LSPs) ||
-		len(got.Plugins) != len(want.Plugins) {
+	}); !reflect.DeepEqual(got, want) {
 		t.Errorf("neovimConfigFrom mismatch:\n got %+v\nwant %+v", got, want)
 	}
 
@@ -182,11 +181,7 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 		AutoSetupRemote:  cfg.GitAutoSetupRemote,
 		MergeTool:        cfg.GitMergeTool,
 		DiffTool:         cfg.GitDiffTool,
-	}); got.DeltaSideBySide != want.DeltaSideBySide || got.DefaultBranch != want.DefaultBranch ||
-		got.PullRebase != want.PullRebase || got.SignCommits != want.SignCommits ||
-		got.CredentialHelper != want.CredentialHelper || got.AutoSetupRemote != want.AutoSetupRemote ||
-		got.MergeTool != want.MergeTool || got.DiffTool != want.DiffTool ||
-		len(got.Aliases) != len(want.Aliases) {
+	}); !reflect.DeepEqual(got, want) {
 		t.Errorf("gitConfigFrom mismatch:\n got %+v\nwant %+v", got, want)
 	}
 
@@ -201,11 +196,7 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 		HistoryIgnoreDups: cfg.ZshHistoryIgnoreDups,
 		Correction:        cfg.ZshCorrection,
 		CompletionMenu:    cfg.ZshCompletionMenu,
-	}); got.PromptStyle != want.PromptStyle || got.HistorySize != want.HistorySize ||
-		got.AutoCD != want.AutoCD || got.SyntaxHighlight != want.SyntaxHighlight ||
-		got.Autosuggestions != want.Autosuggestions || got.HistoryIgnoreDups != want.HistoryIgnoreDups ||
-		got.Correction != want.Correction || got.CompletionMenu != want.CompletionMenu ||
-		len(got.Plugins) != len(want.Plugins) || len(got.Aliases) != len(want.Aliases) {
+	}); !reflect.DeepEqual(got, want) {
 		t.Errorf("zshConfigFrom mismatch:\n got %+v\nwant %+v", got, want)
 	}
 
@@ -262,12 +253,17 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 	}
 }
 
-// TestInstallAndConfigApplyProduceSameFiles is the single-source / anti-drift
-// guarantee: for the pure tools, the config file written by the config-apply
-// path (applyOneToolConfig — Manage save / standalone) is byte-identical to the
-// file written by the install translation (WriteXConfig(xConfigFrom(cfg))). Both
-// go through the same shared builder, so this stays GREEN; if the two paths ever
-// build different structs it goes RED.
+// TestInstallAndConfigApplyProduceSameFiles is a CALL-SITE routing guard, NOT a
+// field-mapping lock. For the pure tools it asserts the config file written by the
+// config-apply path (applyOneToolConfig — Manage save / standalone) is
+// byte-identical to the file written by the install translation
+// (WriteXConfig(xConfigFrom(cfg))). Both intentionally route through the SAME
+// shared builder, so mutating a builder changes both sides identically and this
+// test stays GREEN — it does NOT catch a wrong field mapping (that is locked by
+// TestConfigBuildersMatchInstallStructs, which is mutation-proven). What it DOES
+// catch is call-site drift: install reverting to an inline struct, or a generator
+// no longer calling the builder / calling a different writer — anything that makes
+// the two paths produce different files for the same cfg goes RED.
 func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 	cfg := sampleDeepDiveConfig()
 	const theme = "catppuccin-mocha"
