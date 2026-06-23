@@ -131,74 +131,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// Inline string editor captures keys first so typing doesn't trigger global
 	// bindings.
 	if a.manageEditing {
-		switch key {
-		case keyEsc:
-			a.manageCancelEditing()
-			return nil
-
-		case keyEnter:
-			a.manageCommitEditing()
-			a.manageStatus = "Updated ✓"
-			return nil
-
-		case keyLeft, "h":
-			if a.manageEditCursor > 0 {
-				a.manageEditCursor--
-			}
-			return nil
-
-		case keyRight, "l":
-			if a.manageEditCursor < utf8.RuneCountInString(a.manageEditValue) {
-				a.manageEditCursor++
-			}
-			return nil
-
-		case "home":
-			a.manageEditCursor = 0
-			return nil
-
-		case "end":
-			a.manageEditCursor = utf8.RuneCountInString(a.manageEditValue)
-			return nil
-
-		case keyBackspace:
-			r := []rune(a.manageEditValue)
-			cur := clampInt(a.manageEditCursor, 0, len(r))
-			if cur > 0 {
-				r = append(r[:cur-1], r[cur:]...)
-				a.manageEditCursor = cur - 1
-				a.manageEditValue = string(r)
-			}
-			return nil
-
-		case keyDelete:
-			r := []rune(a.manageEditValue)
-			cur := clampInt(a.manageEditCursor, 0, len(r))
-			if cur < len(r) {
-				r = append(r[:cur], r[cur+1:]...)
-				a.manageEditValue = string(r)
-			}
-			return nil
-
-		default:
-			// Insert typed runes (ignore non-rune keys and alt-modified keys).
-			// Note: Bubble Tea represents Ctrl combinations as KeyType values (not
-			// KeyRunes).
-			if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 && !msg.Alt {
-				r := []rune(a.manageEditValue)
-				cur := clampInt(a.manageEditCursor, 0, len(r))
-				insert := msg.Runes
-
-				out := make([]rune, 0, len(r)+len(insert))
-				out = append(out, r[:cur]...)
-				out = append(out, insert...)
-				out = append(out, r[cur:]...)
-
-				a.manageEditValue = string(out)
-				a.manageEditCursor = cur + len(insert)
-			}
-			return nil
-		}
+		return s.manageHandleEditKey(msg, key)
 	}
 
 	// Non-editing manage UI.
@@ -215,59 +148,6 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	a.manageEnsureToolsVisible(layout, len(items))
 	fields := a.manageFieldsFor(items[a.manageIndex].id)
 	a.manageEnsureFieldsVisible(layout, len(fields))
-
-	// Helpers.
-	currentField := func() (manageField, bool) {
-		if len(fields) == 0 {
-			return manageField{}, false
-		}
-		idx := clampInt(a.configFieldIndex, 0, len(fields)-1)
-		return fields[idx], true
-	}
-
-	adjustField := func(dir int) {
-		f, ok := currentField()
-		if !ok {
-			return
-		}
-		switch f.kind {
-		case manageFieldOption:
-			if f.str != nil && len(f.options) > 0 {
-				*f.str = cycleStringOption(f.options, *f.str, dir > 0)
-				if f.key == manageFieldTheme {
-					a.syncThemeIndex()
-				}
-			}
-		case manageFieldNumber:
-			if f.n != nil {
-				step := f.step
-				if step == 0 {
-					step = 1
-				}
-				*f.n = clampInt(*f.n+(dir*step), f.min, f.max)
-			}
-		case manageFieldText, manageFieldToggle:
-			// Text/toggle fields are not adjusted by left/right cycling.
-		}
-	}
-
-	toggleField := func() {
-		f, ok := currentField()
-		if !ok {
-			return
-		}
-		if f.kind == manageFieldToggle && f.b != nil {
-			*f.b = !*f.b
-		}
-	}
-
-	startEditingField := func() {
-		f, ok := currentField()
-		if !ok {
-			return
-		}
-		a.manageStartEditing(f)
-	}
 
 	// Block navigating away while a tool install is streaming: the terminal
 	// manageInstallWithLogsMsg is only handled by this active screen, so leaving
