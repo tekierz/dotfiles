@@ -27,12 +27,12 @@ type ScreenHandler interface {
 	View(width, height int) string
 }
 
-// NavigateMsg signals that the screen wants to navigate to a different screen
+// NavigateMsg signals that the screen wants to navigate to a different screen.
 type NavigateMsg struct {
 	To Screen
 }
 
-// NavigateTo creates a NavigateMsg to go to a screen
+// NavigateTo creates a NavigateMsg to go to a screen.
 func NavigateTo(id Screen) tea.Cmd {
 	return func() tea.Msg {
 		return NavigateMsg{To: id}
@@ -67,7 +67,7 @@ type BaseScreen struct {
 	ctx *ScreenContext
 }
 
-// Context returns the screen context
+// Context returns the screen context.
 func (s *BaseScreen) Context() *ScreenContext {
 	return s.ctx
 }
@@ -82,12 +82,12 @@ func (s *BaseScreen) App() *App {
 	return s.ctx.app
 }
 
-// SetContext sets the screen context (called by ScreenManager)
+// SetContext sets the screen context (called by ScreenManager).
 func (s *BaseScreen) SetContext(ctx *ScreenContext) {
 	s.ctx = ctx
 }
 
-// Width returns the screen width from context
+// Width returns the screen width from context.
 func (s *BaseScreen) Width() int {
 	if s.ctx == nil {
 		return 80
@@ -95,7 +95,7 @@ func (s *BaseScreen) Width() int {
 	return s.ctx.Width
 }
 
-// Height returns the screen height from context
+// Height returns the screen height from context.
 func (s *BaseScreen) Height() int {
 	if s.ctx == nil {
 		return 24
@@ -103,7 +103,7 @@ func (s *BaseScreen) Height() int {
 	return s.ctx.Height
 }
 
-// Theme returns the current theme from context
+// Theme returns the current theme from context.
 func (s *BaseScreen) Theme() string {
 	if s.ctx == nil {
 		return "catppuccin-mocha"
@@ -111,7 +111,7 @@ func (s *BaseScreen) Theme() string {
 	return s.ctx.Theme
 }
 
-// NavStyle returns the current nav style from context
+// NavStyle returns the current nav style from context.
 func (s *BaseScreen) NavStyle() string {
 	if s.ctx == nil {
 		return "emacs"
@@ -119,7 +119,7 @@ func (s *BaseScreen) NavStyle() string {
 	return s.ctx.NavStyle
 }
 
-// AnimationsEnabled returns whether animations are enabled
+// AnimationsEnabled returns whether animations are enabled.
 func (s *BaseScreen) AnimationsEnabled() bool {
 	if s.ctx == nil {
 		return true
@@ -127,7 +127,7 @@ func (s *BaseScreen) AnimationsEnabled() bool {
 	return s.ctx.AnimationsEnabled
 }
 
-// UIFrame returns the current UI animation frame
+// UIFrame returns the current UI animation frame.
 func (s *BaseScreen) UIFrame() int {
 	if s.ctx == nil {
 		return 0
@@ -139,7 +139,7 @@ func (s *BaseScreen) UIFrame() int {
 // This allows the ScreenManager to create screens lazily.
 type ScreenFactory func(id Screen, ctx *ScreenContext) ScreenHandler
 
-// ContextSetter is implemented by screens that need context injection
+// ContextSetter is implemented by screens that need context injection.
 type ContextSetter interface {
 	SetContext(ctx *ScreenContext)
 }

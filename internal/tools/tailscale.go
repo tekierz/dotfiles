@@ -6,12 +6,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// TailscaleTool represents the Tailscale mesh VPN
+// TailscaleTool represents the Tailscale mesh VPN.
 type TailscaleTool struct {
 	BaseTool
 }
 
-// NewTailscaleTool creates a new Tailscale tool
+// NewTailscaleTool creates a new Tailscale tool.
 func NewTailscaleTool() *TailscaleTool {
 	return &TailscaleTool{
 		BaseTool: BaseTool{

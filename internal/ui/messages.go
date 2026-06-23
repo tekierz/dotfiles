@@ -8,82 +8,82 @@ import (
 	"github.com/tekierz/dotfiles/internal/runner"
 )
 
-// tickMsg is sent on each animation frame
+// tickMsg is sent on each animation frame.
 type tickMsg time.Time
 
 // uiTickMsg is a global tick for small UI animations (spinners/widgets).
 type uiTickMsg time.Time
 
-// animationDoneMsg indicates the animation has finished
+// animationDoneMsg indicates the animation has finished.
 type animationDoneMsg struct{}
 
-// installOutputMsg carries output from the installation
+// installOutputMsg carries output from the installation.
 type installOutputMsg struct {
 	line runner.OutputLine
 }
 
-// installDoneMsg indicates installation completed
+// installDoneMsg indicates installation completed.
 type installDoneMsg struct {
 	err     error
 	context string // last few lines of output for error context
 }
 
-// installStartMsg triggers installation start
+// installStartMsg triggers installation start.
 type installStartMsg struct{}
 
-// sudoRequiredMsg indicates sudo is needed
+// sudoRequiredMsg indicates sudo is needed.
 type sudoRequiredMsg struct{}
 
-// sudoCachedMsg indicates sudo credentials are ready
+// sudoCachedMsg indicates sudo credentials are ready.
 type sudoCachedMsg struct {
 	err error
 }
 
-// updateCheckDoneMsg indicates the async update check completed
+// updateCheckDoneMsg indicates the async update check completed.
 type updateCheckDoneMsg struct {
 	updates []pkg.Package
 	err     error
 }
 
-// installCacheDoneMsg indicates the async install cache loading completed
+// installCacheDoneMsg indicates the async install cache loading completed.
 type installCacheDoneMsg struct {
 	installed map[string]bool
 }
 
-// updateRunDoneMsg indicates an update operation completed
+// updateRunDoneMsg indicates an update operation completed.
 type updateRunDoneMsg struct {
 	results []pkg.UpdateResult
 	err     error
 }
 
-// installLogMsg carries a single log line from streaming install/update
+// installLogMsg carries a single log line from streaming install/update.
 type installLogMsg struct {
 	line string
 }
 
-// manageSudoRequiredMsg indicates sudo is needed before manage install
+// manageSudoRequiredMsg indicates sudo is needed before manage install.
 type manageSudoRequiredMsg struct {
 	toolID string
 }
 
-// updateSudoRequiredMsg indicates sudo is needed before update
+// updateSudoRequiredMsg indicates sudo is needed before update.
 type updateSudoRequiredMsg struct {
 	packages []pkg.Package
 	all      bool
 }
 
-// manageStartInstallMsg triggers streaming install after sudo is cached
+// manageStartInstallMsg triggers streaming install after sudo is cached.
 type manageStartInstallMsg struct {
 	toolID string
 }
 
-// updateStartMsg triggers streaming update after sudo is cached
+// updateStartMsg triggers streaming update after sudo is cached.
 type updateStartMsg struct {
 	packages []pkg.Package
 	all      bool
 }
 
-// BackupEntry represents a backup in the list
+// BackupEntry represents a backup in the list.
 type BackupEntry struct {
 	Name      string
 	Timestamp time.Time
@@ -92,13 +92,13 @@ type BackupEntry struct {
 	Path      string
 }
 
-// backupsLoadedMsg indicates the async backup list loading completed
+// backupsLoadedMsg indicates the async backup list loading completed.
 type backupsLoadedMsg struct {
 	backups []BackupEntry
 	err     error
 }
 
-// backupRestoreDoneMsg indicates a restore operation completed
+// backupRestoreDoneMsg indicates a restore operation completed.
 type backupRestoreDoneMsg struct {
 	name    string
 	count   int // files successfully restored
@@ -106,26 +106,26 @@ type backupRestoreDoneMsg struct {
 	err     error
 }
 
-// backupDeleteDoneMsg indicates a delete operation completed
+// backupDeleteDoneMsg indicates a delete operation completed.
 type backupDeleteDoneMsg struct {
 	name string
 	err  error
 }
 
-// backupCreateDoneMsg indicates a new backup was created
+// backupCreateDoneMsg indicates a new backup was created.
 type backupCreateDoneMsg struct {
 	name string
 	err  error
 }
 
-// manageInstallWithLogsMsg carries install result with collected logs
+// manageInstallWithLogsMsg carries install result with collected logs.
 type manageInstallWithLogsMsg struct {
 	toolID string
 	logs   []string
 	err    error
 }
 
-// updateWithLogsMsg carries update result with collected logs
+// updateWithLogsMsg carries update result with collected logs.
 type updateWithLogsMsg struct {
 	logs    []string
 	results []pkg.UpdateResult
@@ -145,14 +145,14 @@ type updateStreamMsg struct {
 	err     error              // final error (only meaningful when done)
 }
 
-// tickAnimation returns a command that sends tickMsg on each animation frame
+// tickAnimation returns a command that sends tickMsg on each animation frame.
 func tickAnimation() tea.Cmd {
 	return tea.Tick(introAnimationTick, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
-// tickUI returns a command that sends uiTickMsg for UI animations
+// tickUI returns a command that sends uiTickMsg for UI animations.
 func tickUI() tea.Cmd {
 	return tea.Tick(uiTick, func(t time.Time) tea.Msg {
 		return uiTickMsg(t)

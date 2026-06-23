@@ -8,19 +8,19 @@ import (
 	"github.com/tekierz/dotfiles/internal/hotkeys"
 )
 
-// HotkeysConfig stores per-user hotkey customizations
+// HotkeysConfig stores per-user hotkey customizations.
 type HotkeysConfig struct {
 	// Keyed by user name from global config's ActiveUser
 	Users map[string]*UserHotkeys `json:"users"`
 }
 
-// UserHotkeys stores a user's hotkey customizations
+// UserHotkeys stores a user's hotkey customizations.
 type UserHotkeys struct {
 	Favorites map[string][]string `json:"favorites"` // category_id -> []item_keys
 	Aliases   map[string]string   `json:"aliases"`   // alias -> actual_command
 }
 
-// LoadHotkeysConfig loads hotkeys config from ~/.config/dotfiles/hotkeys.json
+// LoadHotkeysConfig loads hotkeys config from ~/.config/dotfiles/hotkeys.json.
 func LoadHotkeysConfig() (*HotkeysConfig, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -46,7 +46,7 @@ func LoadHotkeysConfig() (*HotkeysConfig, error) {
 	return &cfg, nil
 }
 
-// SaveHotkeysConfig saves hotkeys config
+// SaveHotkeysConfig saves hotkeys config.
 func SaveHotkeysConfig(cfg *HotkeysConfig) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -82,7 +82,7 @@ func (c *HotkeysConfig) GetUserHotkeys(username string) *UserHotkeys {
 	return h
 }
 
-// SetUserHotkeys updates the hotkeys for a specific user
+// SetUserHotkeys updates the hotkeys for a specific user.
 func (c *HotkeysConfig) SetUserHotkeys(username string, h *UserHotkeys) {
 	if c.Users == nil {
 		c.Users = make(map[string]*UserHotkeys)
@@ -90,7 +90,7 @@ func (c *HotkeysConfig) SetUserHotkeys(username string, h *UserHotkeys) {
 	c.Users[username] = h
 }
 
-// IsFavorite checks if a hotkey item is a favorite for the user
+// IsFavorite checks if a hotkey item is a favorite for the user.
 func (u *UserHotkeys) IsFavorite(categoryID, itemKey string) bool {
 	if u == nil || u.Favorites == nil {
 		return false
@@ -107,7 +107,7 @@ func (u *UserHotkeys) IsFavorite(categoryID, itemKey string) bool {
 	return false
 }
 
-// ToggleFavorite toggles favorite status for a hotkey item
+// ToggleFavorite toggles favorite status for a hotkey item.
 func (u *UserHotkeys) ToggleFavorite(categoryID, itemKey string) {
 	if u.Favorites == nil {
 		u.Favorites = make(map[string][]string)
@@ -125,7 +125,7 @@ func (u *UserHotkeys) ToggleFavorite(categoryID, itemKey string) {
 	u.Favorites[categoryID] = append(items, itemKey)
 }
 
-// GetFavoriteCount returns the total number of favorites for the user
+// GetFavoriteCount returns the total number of favorites for the user.
 func (u *UserHotkeys) GetFavoriteCount() int {
 	if u == nil {
 		return 0

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -268,13 +269,13 @@ func TestConfigDirEmptyGuard(t *testing.T) {
 		t.Skip("ConfigDir resolved despite unset HOME; guard not exercised on this platform")
 	}
 
-	if err := EnsureDirs(); err != ErrNoConfigDir {
+	if err := EnsureDirs(); !errors.Is(err, ErrNoConfigDir) {
 		t.Errorf("EnsureDirs() err = %v, want ErrNoConfigDir", err)
 	}
-	if _, err := LoadGlobalConfig(); err != ErrNoConfigDir {
+	if _, err := LoadGlobalConfig(); !errors.Is(err, ErrNoConfigDir) {
 		t.Errorf("LoadGlobalConfig() err = %v, want ErrNoConfigDir", err)
 	}
-	if _, err := LoadToolConfig("x", DefaultTestToolConfig); err != ErrNoConfigDir {
+	if _, err := LoadToolConfig("x", DefaultTestToolConfig); !errors.Is(err, ErrNoConfigDir) {
 		t.Errorf("LoadToolConfig() err = %v, want ErrNoConfigDir", err)
 	}
 }

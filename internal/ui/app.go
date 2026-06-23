@@ -24,7 +24,7 @@ const (
 	uiTick               = 80 * time.Millisecond
 )
 
-// Screen represents different screens in the wizard
+// Screen represents different screens in the wizard.
 type Screen int
 
 const (
@@ -36,7 +36,7 @@ const (
 	ScreenProgress
 	ScreenSummary
 	ScreenError
-	// Deep dive screens
+	// Deep dive screens.
 	ScreenDeepDiveMenu
 	ScreenConfigGhostty
 	ScreenConfigTmux
@@ -47,7 +47,7 @@ const (
 	ScreenConfigFzf
 	ScreenConfigUtilities
 	ScreenConfigMacApps
-	// Management platform screens (new)
+	// Management platform screens (new).
 	ScreenMainMenu
 	ScreenManage
 	ScreenUpdate
@@ -57,11 +57,11 @@ const (
 	_ // retired: ScreenConfigApps (vestigial screen). Slot reserved so the
 	// remaining iota values stay stable for the raw ConfigScreen() ints declared
 	// in the tools package (see toolscreens.go / verifyToolConfigScreens).
-	// Additional config screens
+	// Additional config screens.
 	ScreenConfigCLITools
 	ScreenConfigGUIApps
 	ScreenConfigCLIUtilities // bat, eza, zoxide, ripgrep, fd, delta, fswatch
-	// Individual CLI tool config screens (installer)
+	// Individual CLI tool config screens (installer).
 	ScreenConfigLazyGit
 	_ // retired: ScreenConfigLazyDocker. LazyDocker has no config generator, so
 	// it is installable but not configurable (no `dotfiles config lazydocker`).
@@ -73,7 +73,7 @@ const (
 	ScreenConfigClaudeCode
 )
 
-// Available themes
+// Available themes.
 var themes = []struct {
 	name  string
 	desc  string
@@ -154,7 +154,7 @@ func (a *App) revertThemeToSaved() {
 	}
 }
 
-// App is the main application model
+// App is the main application model.
 type App struct {
 	screen        Screen
 	startScreen   Screen // Initial screen to show (for CLI routing)
@@ -347,7 +347,7 @@ type App struct {
 	lastError error
 }
 
-// AppOption configures optional App parameters
+// AppOption configures optional App parameters.
 type AppOption func(*App)
 
 // initScreenManager wires the App's Factory and ScreenManager. Every live
@@ -407,7 +407,7 @@ func (a *App) postIntroTransition() tea.Cmd {
 	return nav
 }
 
-// NewApp creates a new application instance
+// NewApp creates a new application instance.
 func NewApp(skipIntro bool, opts ...AppOption) *App {
 	// Fail fast if the tool->screen mapping has drifted from the tools registry
 	// (e.g. a Screen iota reorder), so misroutes are caught at startup.
@@ -499,7 +499,7 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 	return app
 }
 
-// Init initializes the application
+// Init initializes the application.
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{}
 	// Drive the start screen through the ScreenManager so the screen's Init()
@@ -521,7 +521,7 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// checkSudoAndUpdateCmd checks if sudo is needed and either prompts or starts update
+// checkSudoAndUpdateCmd checks if sudo is needed and either prompts or starts update.
 func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
 	return func() tea.Msg {
 		mgr := pkg.DetectManager()
@@ -539,7 +539,7 @@ func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
 	}
 }
 
-// loadBackupsCmd loads the list of available backups asynchronously
+// loadBackupsCmd loads the list of available backups asynchronously.
 func loadBackupsCmd() tea.Cmd {
 	return func() tea.Msg {
 		backupDir := filepath.Join(config.ConfigDir(), "backups")
@@ -614,7 +614,7 @@ func makeUniqueBackupDir(backupsDir, baseName string) string {
 	}
 }
 
-// calcDirSize calculates the total size of files in a directory
+// calcDirSize calculates the total size of files in a directory.
 func calcDirSize(path string) int64 {
 	var size int64
 	_ = filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
@@ -626,7 +626,7 @@ func calcDirSize(path string) int64 {
 	return size
 }
 
-// formatBytes formats a byte count into a human-readable string
+// formatBytes formats a byte count into a human-readable string.
 func formatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
@@ -668,7 +668,7 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 	}
 }
 
-// deleteBackupCmd deletes a backup directory
+// deleteBackupCmd deletes a backup directory.
 func deleteBackupCmd(b BackupEntry) tea.Cmd {
 	return func() tea.Msg {
 		err := os.RemoveAll(b.Path)
@@ -676,7 +676,7 @@ func deleteBackupCmd(b BackupEntry) tea.Cmd {
 	}
 }
 
-// createBackupCmd creates a new backup of current dotfiles
+// createBackupCmd creates a new backup of current dotfiles.
 func createBackupCmd() tea.Cmd {
 	return func() tea.Msg {
 		home, err := os.UserHomeDir()
@@ -718,7 +718,7 @@ var defaultBackupFiles = []string{
 	".gitconfig",
 }
 
-// cleanupBackups removes old backups based on global config settings
+// cleanupBackups removes old backups based on global config settings.
 func cleanupBackups() {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
@@ -831,7 +831,7 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 	return autoBackupResult{enabled: true, count: count}, nil
 }
 
-// Update handles messages
+// Update handles messages.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle window resize for screen manager
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
@@ -921,16 +921,16 @@ func (a *App) View() string {
 	return a.screenMgr.View()
 }
 
-// execCommand wraps exec.Cmd to implement tea.ExecCommand
+// execCommand wraps exec.Cmd to implement tea.ExecCommand.
 type execCommand struct {
 	*exec.Cmd
 }
 
-func (e execCommand) SetStdin(r io.Reader)  { e.Cmd.Stdin = r }
-func (e execCommand) SetStdout(w io.Writer) { e.Cmd.Stdout = w }
-func (e execCommand) SetStderr(w io.Writer) { e.Cmd.Stderr = w }
+func (e execCommand) SetStdin(r io.Reader)  { e.Stdin = r }
+func (e execCommand) SetStdout(w io.Writer) { e.Stdout = w }
+func (e execCommand) SetStderr(w io.Writer) { e.Stderr = w }
 
-// sudoPromptCmd returns a command that prompts for sudo credentials
+// sudoPromptCmd returns a command that prompts for sudo credentials.
 func sudoPromptCmd() tea.ExecCommand {
 	// Use a script that shows a nice message then prompts for sudo
 	cmd := exec.Command("bash", "-c", `
@@ -959,7 +959,7 @@ func sudoPromptCmd() tea.ExecCommand {
 	return execCommand{cmd}
 }
 
-// SetStartScreen sets the initial screen to display (for CLI routing)
+// SetStartScreen sets the initial screen to display (for CLI routing).
 func (a *App) SetStartScreen(screen Screen) {
 	a.startScreen = screen
 	// Always land on the requested screen after the intro.
@@ -1024,7 +1024,7 @@ func (a *App) SetStartScreen(screen Screen) {
 	a.animationDone = false
 }
 
-// SetHotkeyFilter sets the tool filter for hotkeys screen
+// SetHotkeyFilter sets the tool filter for hotkeys screen.
 func (a *App) SetHotkeyFilter(tool string) {
 	a.hotkeyFilter = tool
 }
@@ -1054,7 +1054,7 @@ func ConfigurableToolIDs() []string {
 	return ids
 }
 
-// MainMenuItem represents an item in the main menu
+// MainMenuItem represents an item in the main menu.
 type MainMenuItem struct {
 	Name        string
 	Description string
@@ -1062,7 +1062,7 @@ type MainMenuItem struct {
 	Screen      Screen
 }
 
-// GetMainMenuItems returns the main menu items for the management platform
+// GetMainMenuItems returns the main menu items for the management platform.
 func GetMainMenuItems() []MainMenuItem {
 	return []MainMenuItem{
 		{
@@ -1141,5 +1141,5 @@ func buildScreenToolIDs() map[Screen][]string {
 }
 
 // ScreenToolIDs maps deep dive screens to their corresponding tool IDs
-// Generated from tool registry - single source of truth
+// Generated from tool registry - single source of truth.
 var ScreenToolIDs = buildScreenToolIDs()

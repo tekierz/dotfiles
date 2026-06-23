@@ -5,14 +5,14 @@ import (
 	"sort"
 )
 
-// UpdateResult represents the result of an update operation
+// UpdateResult represents the result of an update operation.
 type UpdateResult struct {
 	Package Package
 	Success bool
 	Error   error
 }
 
-// CheckAllUpdates checks for updates across all available package managers
+// CheckAllUpdates checks for updates across all available package managers.
 func CheckAllUpdates() ([]Package, error) {
 	var allPackages []Package
 
@@ -138,7 +138,7 @@ func CheckDotfilesUpdates() ([]Package, error) {
 	}
 
 	// Pick the allow-list appropriate for the current platform so that
-	// Debian-renamed packages (fd-find etc.) are recognised correctly.
+	// Debian-renamed packages (fd-find etc.) are recognized correctly.
 	var allowList []string
 	switch DetectPlatform() {
 	case PlatformDebian, PlatformPi:

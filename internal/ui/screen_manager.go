@@ -31,18 +31,18 @@ func (sm *ScreenManager) Current() ScreenHandler {
 	return sm.current
 }
 
-// Context returns the shared screen context
+// Context returns the shared screen context.
 func (sm *ScreenManager) Context() *ScreenContext {
 	return sm.ctx
 }
 
-// SetSize updates the context dimensions
+// SetSize updates the context dimensions.
 func (sm *ScreenManager) SetSize(width, height int) {
 	sm.ctx.Width = width
 	sm.ctx.Height = height
 }
 
-// IncrementUIFrame increments the UI animation frame counter
+// IncrementUIFrame increments the UI animation frame counter.
 func (sm *ScreenManager) IncrementUIFrame() {
 	sm.ctx.UIFrame++
 }
@@ -61,7 +61,7 @@ func (sm *ScreenManager) Navigate(screenID Screen) tea.Cmd {
 	return sm.navigateToHandler(handler)
 }
 
-// navigateToHandler switches to a managed screen handler
+// navigateToHandler switches to a managed screen handler.
 func (sm *ScreenManager) navigateToHandler(handler ScreenHandler) tea.Cmd {
 	// Inject context if the screen supports it
 	if setter, ok := handler.(ContextSetter); ok {

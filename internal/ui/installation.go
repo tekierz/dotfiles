@@ -132,7 +132,7 @@ func (a *App) listenInstallEventsCmd() tea.Cmd {
 func runInstallWorker(ctx context.Context, events chan<- installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string) {
 	defer close(events)
 
-	// Sends select on ctx.Done() so a cancelled install (Ctrl+C / teardown)
+	// Sends select on ctx.Done() so a canceled install (Ctrl+C / teardown)
 	// unblocks the worker instead of parking forever on the bounded channel once
 	// the consumer (the listen Cmd) stops draining it.
 	emit := func(line string) {
@@ -216,7 +216,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 
 		successCount := 0
 		for _, toolID := range selectedTools {
-			// Stop promptly if the install was cancelled (Ctrl+C / teardown).
+			// Stop promptly if the install was canceled (Ctrl+C / teardown).
 			if ctx.Err() != nil {
 				finish(ctx.Err())
 				return
@@ -455,7 +455,7 @@ func aggregateFailures(failures []error) error {
 	}
 }
 
-// installUtilities copies the dotfiles binary and shell utilities to ~/.local/bin
+// installUtilities copies the dotfiles binary and shell utilities to ~/.local/bin.
 func installUtilities(utilities map[string]bool) error {
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -579,7 +579,7 @@ func cleanupOldInstallations() (removed []string) {
 	return removed
 }
 
-// collectSelectedTools gathers all tool IDs selected in deep dive config
+// collectSelectedTools gathers all tool IDs selected in deep dive config.
 func (a *App) collectSelectedTools() []string {
 	// Ensure we have install status cached
 	a.ensureInstallCache()
@@ -656,7 +656,7 @@ func (a *App) streamingInstallToolCmd(ctx context.Context, toolID string) tea.Cm
 		// teardownStream stops the subprocess on quit (FIX 3). The cancel handle was
 		// already registered on the main loop (handleManageStartInstallMsg); we do
 		// NOT write a.streamCmd from this worker-goroutine closure, since that would
-		// race teardownStream's main-loop read. Cancelling the context is sufficient:
+		// race teardownStream's main-loop read. Canceling the context is sufficient:
 		// InstallStreaming runs via exec.CommandContext, so a.streamCancel() kills the
 		// subprocess.
 		cmd, err := mgr.InstallStreaming(ctx, pkgs...)
@@ -809,7 +809,7 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 	return a.listenUpdateStreamCmd()
 }
 
-// saveInstallerConfig saves theme and nav style during installer flow
+// saveInstallerConfig saves theme and nav style during installer flow.
 func (a *App) saveInstallerConfig() {
 	g, err := config.LoadGlobalConfig()
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// GitConfig holds Git configuration settings
+// GitConfig holds Git configuration settings.
 type GitConfig struct {
 	DeltaSideBySide  bool
 	DefaultBranch    string
@@ -23,12 +23,12 @@ type GitConfig struct {
 	DiffTool        string // "delta" (default), "difftastic", "vimdiff"/"nvimdiff"
 }
 
-// GitTool represents Git version control
+// GitTool represents Git version control.
 type GitTool struct {
 	BaseTool
 }
 
-// NewGitTool creates a new Git tool
+// NewGitTool creates a new Git tool.
 func NewGitTool() *GitTool {
 	home, _ := os.UserHomeDir()
 	return &GitTool{
@@ -68,7 +68,7 @@ func normalizeDiffTool(diffTool string) string {
 	}
 }
 
-// GenerateGitConfig builds the .gitconfig content
+// GenerateGitConfig builds the .gitconfig content.
 func GenerateGitConfig(cfg GitConfig, theme string) string {
 	var sb strings.Builder
 
@@ -186,7 +186,7 @@ func GenerateGitConfig(cfg GitConfig, theme string) string {
 	return sb.String()
 }
 
-// WriteGitConfig writes the .gitconfig file to disk
+// WriteGitConfig writes the .gitconfig file to disk.
 func WriteGitConfig(cfg GitConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

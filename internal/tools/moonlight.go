@@ -6,12 +6,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// MoonlightTool represents the Moonlight game streaming client
+// MoonlightTool represents the Moonlight game streaming client.
 type MoonlightTool struct {
 	BaseTool
 }
 
-// NewMoonlightTool creates a new Moonlight tool
+// NewMoonlightTool creates a new Moonlight tool.
 func NewMoonlightTool() *MoonlightTool {
 	return &MoonlightTool{
 		BaseTool: BaseTool{

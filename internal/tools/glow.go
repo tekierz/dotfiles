@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// GlowConfig holds Glow configuration settings
+// GlowConfig holds Glow configuration settings.
 type GlowConfig struct {
 	Pager string // "auto", "less", "never"
 	Style string // "auto", "dark", "light", "dracula", etc.
@@ -17,12 +17,12 @@ type GlowConfig struct {
 	Mouse bool   // Enable mouse support
 }
 
-// GlowTool represents glow markdown viewer
+// GlowTool represents glow markdown viewer.
 type GlowTool struct {
 	BaseTool
 }
 
-// NewGlowTool creates a new glow tool
+// NewGlowTool creates a new glow tool.
 func NewGlowTool() *GlowTool {
 	return &GlowTool{
 		BaseTool: BaseTool{
@@ -46,7 +46,7 @@ func NewGlowTool() *GlowTool {
 	}
 }
 
-// GenerateGlowConfig builds the glow.yml content
+// GenerateGlowConfig builds the glow.yml content.
 func GenerateGlowConfig(cfg GlowConfig, theme string) string {
 	var sb strings.Builder
 
@@ -62,11 +62,12 @@ func GenerateGlowConfig(cfg GlowConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("style: \"%s\"\n", glowStyle))
 
 	// Pager
-	if cfg.Pager == "never" {
+	switch cfg.Pager {
+	case "never":
 		sb.WriteString("pager: false\n")
-	} else if cfg.Pager == "less" {
+	case "less":
 		sb.WriteString("pager: true\n")
-	} else {
+	default:
 		sb.WriteString("pager: true\n")
 	}
 
@@ -85,7 +86,7 @@ func GenerateGlowConfig(cfg GlowConfig, theme string) string {
 	return sb.String()
 }
 
-// WriteGlowConfig writes the glow config to disk
+// WriteGlowConfig writes the glow config to disk.
 func WriteGlowConfig(cfg GlowConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

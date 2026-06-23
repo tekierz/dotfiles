@@ -1,6 +1,6 @@
 package ui
 
-// ManageConfig holds detailed management configuration for all tools
+// ManageConfig holds detailed management configuration for all tools.
 type ManageConfig struct {
 	// Ghostty detailed settings
 	GhosttyFontFamily        string
@@ -107,7 +107,7 @@ type ManageConfig struct {
 	ClaudeCodeMCPSequentialThinking bool
 }
 
-// NewManageConfig creates a new management config with defaults
+// NewManageConfig creates a new management config with defaults.
 func NewManageConfig() *ManageConfig {
 	return &ManageConfig{
 		// Ghostty

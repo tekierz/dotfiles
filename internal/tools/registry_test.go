@@ -411,7 +411,7 @@ func TestRegistry_Register(t *testing.T) {
 	}
 }
 
-// mockTool is a simple Tool implementation for testing
+// mockTool is a simple Tool implementation for testing.
 type mockTool struct {
 	id          string
 	name        string

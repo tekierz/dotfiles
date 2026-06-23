@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// LazyGitConfig holds LazyGit configuration settings
+// LazyGitConfig holds LazyGit configuration settings.
 type LazyGitConfig struct {
 	SideBySide bool
 	MouseMode  bool
@@ -17,12 +17,12 @@ type LazyGitConfig struct {
 	Paging     string // "delta", "diff-so-fancy", "never"
 }
 
-// LazyGitTool represents LazyGit TUI for Git
+// LazyGitTool represents LazyGit TUI for Git.
 type LazyGitTool struct {
 	BaseTool
 }
 
-// NewLazyGitTool creates a new LazyGit tool
+// NewLazyGitTool creates a new LazyGit tool.
 func NewLazyGitTool() *LazyGitTool {
 	home, _ := os.UserHomeDir()
 	return &LazyGitTool{
@@ -49,7 +49,7 @@ func NewLazyGitTool() *LazyGitTool {
 	}
 }
 
-// GenerateLazyGitConfig builds the lazygit config.yml content
+// GenerateLazyGitConfig builds the lazygit config.yml content.
 func GenerateLazyGitConfig(cfg LazyGitConfig, theme string) string {
 	var sb strings.Builder
 
@@ -158,7 +158,7 @@ func lazygitPager(paging string) string {
 	}
 }
 
-// WriteLazyGitConfig writes the lazygit config to disk
+// WriteLazyGitConfig writes the lazygit config to disk.
 func WriteLazyGitConfig(cfg LazyGitConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

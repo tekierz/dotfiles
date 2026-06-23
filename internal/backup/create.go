@@ -19,7 +19,7 @@ import (
 //   - if the manifest write fails it returns that error.
 //
 // Per-file stat/read/write errors are skipped (the file may simply not exist),
-// matching the previous behaviour, but the aggregate result is now honest.
+// matching the previous behavior, but the aggregate result is now honest.
 func Create(home, backupDir string, files []string) (int, error) {
 	if err := os.MkdirAll(backupDir, 0o700); err != nil {
 		return 0, err

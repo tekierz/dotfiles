@@ -739,7 +739,7 @@ func (a *App) toggleHotkeyFavorite(categoryID, itemKey string) {
 	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
 }
 
-// hotkeysAliasCurrentFieldLen returns the rune count of the current alias field
+// hotkeysAliasCurrentFieldLen returns the rune count of the current alias field.
 func (a *App) hotkeysAliasCurrentFieldLen() int {
 	if a.hotkeysAliasField == 0 {
 		return utf8.RuneCountInString(a.hotkeysAliasName)
@@ -747,7 +747,7 @@ func (a *App) hotkeysAliasCurrentFieldLen() int {
 	return utf8.RuneCountInString(a.hotkeysAliasCommand)
 }
 
-// hotkeysAliasBackspace deletes the character before the cursor
+// hotkeysAliasBackspace deletes the character before the cursor.
 func (a *App) hotkeysAliasBackspace() {
 	if a.hotkeysAliasField == 0 {
 		r := []rune(a.hotkeysAliasName)
@@ -768,7 +768,7 @@ func (a *App) hotkeysAliasBackspace() {
 	}
 }
 
-// hotkeysAliasDelete deletes the character at the cursor
+// hotkeysAliasDelete deletes the character at the cursor.
 func (a *App) hotkeysAliasDelete() {
 	if a.hotkeysAliasField == 0 {
 		r := []rune(a.hotkeysAliasName)
@@ -787,7 +787,7 @@ func (a *App) hotkeysAliasDelete() {
 	}
 }
 
-// hotkeysAliasInsertRunes inserts runes at the cursor position
+// hotkeysAliasInsertRunes inserts runes at the cursor position.
 func (a *App) hotkeysAliasInsertRunes(runes []rune) {
 	if a.hotkeysAliasField == 0 {
 		r := []rune(a.hotkeysAliasName)
@@ -810,7 +810,7 @@ func (a *App) hotkeysAliasInsertRunes(runes []rune) {
 	}
 }
 
-// hotkeysSaveAlias saves the alias to the user's config
+// hotkeysSaveAlias saves the alias to the user's config.
 func (a *App) hotkeysSaveAlias() {
 	userHotkeys := a.getCurrentUserHotkeys()
 	if userHotkeys.Aliases == nil {
@@ -822,7 +822,7 @@ func (a *App) hotkeysSaveAlias() {
 	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
 }
 
-// hotkeysCancelAlias cancels alias editing and resets state
+// hotkeysCancelAlias cancels alias editing and resets state.
 func (a *App) hotkeysCancelAlias() {
 	a.hotkeysAddingAlias = false
 	a.hotkeysAliasName = ""
@@ -1063,7 +1063,7 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 	return panel.Render(content)
 }
 
-// renderHotkeysAliasDialog renders the alias input dialog
+// renderHotkeysAliasDialog renders the alias input dialog.
 func (a *App) renderHotkeysAliasDialog(width int) string {
 	if width <= 0 {
 		return ""

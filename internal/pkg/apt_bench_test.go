@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Mock dpkg output for benchmarking without requiring actual dpkg
+// Mock dpkg output for benchmarking without requiring actual dpkg.
 const mockDpkgOutput = `accountsservice	install
 acl	install
 adduser	install
@@ -19,7 +19,7 @@ tmux	install
 vim	install
 zsh	install`
 
-// BenchmarkParseDpkgOutput benchmarks parsing dpkg --get-selections output
+// BenchmarkParseDpkgOutput benchmarks parsing dpkg --get-selections output.
 func BenchmarkParseDpkgOutput(b *testing.B) {
 	output := mockDpkgOutput
 
@@ -40,7 +40,7 @@ func BenchmarkParseDpkgOutput(b *testing.B) {
 	}
 }
 
-// BenchmarkListInstalledMock benchmarks parsing with 1000 packages
+// BenchmarkListInstalledMock benchmarks parsing with 1000 packages.
 func BenchmarkListInstalledMock(b *testing.B) {
 	// Create mock output with 1000 packages
 	var builder strings.Builder
@@ -68,7 +68,7 @@ func BenchmarkListInstalledMock(b *testing.B) {
 	}
 }
 
-// BenchmarkParseUpgradableOutput benchmarks parsing apt list --upgradable output
+// BenchmarkParseUpgradableOutput benchmarks parsing apt list --upgradable output.
 func BenchmarkParseUpgradableOutput(b *testing.B) {
 	var builder strings.Builder
 	builder.WriteString("Listing... Up to date\n")
@@ -112,7 +112,7 @@ func BenchmarkParseUpgradableOutput(b *testing.B) {
 	}
 }
 
-// BenchmarkPackageAllocation benchmarks Package struct allocation
+// BenchmarkPackageAllocation benchmarks Package struct allocation.
 func BenchmarkPackageAllocation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -131,7 +131,7 @@ func BenchmarkPackageAllocation(b *testing.B) {
 	}
 }
 
-// TestAptManager_Name tests the Name method
+// TestAptManager_Name tests the Name method.
 func TestAptManager_Name(t *testing.T) {
 	mgr := &AptManager{}
 	if mgr.Name() != "apt" {
@@ -139,7 +139,7 @@ func TestAptManager_Name(t *testing.T) {
 	}
 }
 
-// TestAptManager_NeedsSudo tests sudo requirement
+// TestAptManager_NeedsSudo tests sudo requirement.
 func TestAptManager_NeedsSudo(t *testing.T) {
 	mgr := &AptManager{}
 	if !mgr.NeedsSudo() {

@@ -3,6 +3,7 @@ package pkg
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -10,13 +11,13 @@ import (
 	"github.com/tekierz/dotfiles/internal/runner"
 )
 
-// PacmanManager implements PackageManager for Arch Linux (pacman/paru)
+// PacmanManager implements PackageManager for Arch Linux (pacman/paru).
 type PacmanManager struct {
 	pacmanPath string
 	useParu    bool // Use paru for AUR support
 }
 
-// NewPacmanManager creates a new pacman manager
+// NewPacmanManager creates a new pacman manager.
 func NewPacmanManager(preferParu bool) *PacmanManager {
 	pm := &PacmanManager{}
 
@@ -140,7 +141,8 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 		// failure (e.g. a stale temp DB) that should be surfaced.
 		err := cmd.Run()
 		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+			exitErr := &exec.ExitError{}
+			if errors.As(err, &exitErr) {
 				return "", nil
 			}
 			return "", fmt.Errorf("checkupdates failed: %w", err)
@@ -314,14 +316,14 @@ func (p *PacmanManager) ListInstalled() ([]Package, error) {
 	return packages, nil
 }
 
-// NeedsSudo returns true for both pacman and paru since they need sudo for package installation
+// NeedsSudo returns true for both pacman and paru since they need sudo for package installation.
 func (p *PacmanManager) NeedsSudo() bool {
 	// Both pacman and paru need sudo to be cached. paru handles calling sudo internally,
 	// but still requires credentials to be cached or a terminal for prompting.
 	return true
 }
 
-// InstallStreaming installs packages with real-time output streaming
+// InstallStreaming installs packages with real-time output streaming.
 func (p *PacmanManager) InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
@@ -341,7 +343,7 @@ func (p *PacmanManager) InstallStreaming(ctx context.Context, packages ...string
 	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
 }
 
-// UpdateStreaming updates packages with real-time output streaming
+// UpdateStreaming updates packages with real-time output streaming.
 func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
@@ -360,7 +362,7 @@ func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string)
 	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
 }
 
-// UpdateAllStreaming updates all packages with real-time output streaming
+// UpdateAllStreaming updates all packages with real-time output streaming.
 func (p *PacmanManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally

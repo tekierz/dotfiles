@@ -33,7 +33,7 @@ const (
 	usersHeaderRows = 2
 )
 
-// userItem represents a user in the left pane
+// userItem represents a user in the left pane.
 type userItem struct {
 	name     string
 	theme    string
@@ -42,7 +42,7 @@ type userItem struct {
 	isActive bool
 }
 
-// userFieldKind describes field types for editing
+// userFieldKind describes field types for editing.
 type userFieldKind int
 
 const (
@@ -50,7 +50,7 @@ const (
 	userFieldText
 )
 
-// userField represents an editable field in the right pane
+// userField represents an editable field in the right pane.
 type userField struct {
 	key         string
 	label       string
@@ -60,32 +60,32 @@ type userField struct {
 	options     []string
 }
 
-// userLoadedMsg is sent when user list is loaded
+// userLoadedMsg is sent when user list is loaded.
 type userLoadedMsg struct {
 	users      []userItem
 	activeUser string
 	err        error
 }
 
-// userSavedMsg is sent after saving a user profile
+// userSavedMsg is sent after saving a user profile.
 type userSavedMsg struct {
 	name string
 	err  error
 }
 
-// userDeletedMsg is sent after deleting a user profile
+// userDeletedMsg is sent after deleting a user profile.
 type userDeletedMsg struct {
 	name string
 	err  error
 }
 
-// userSwitchedMsg is sent after switching to a user
+// userSwitchedMsg is sent after switching to a user.
 type userSwitchedMsg struct {
 	name string
 	err  error
 }
 
-// loadUsersCmd loads all user profiles
+// loadUsersCmd loads all user profiles.
 func loadUsersCmd() tea.Cmd {
 	return func() tea.Msg {
 		names, err := config.ListUserProfiles()
@@ -118,7 +118,7 @@ func loadUsersCmd() tea.Cmd {
 	}
 }
 
-// saveUserCmd saves a user profile
+// saveUserCmd saves a user profile.
 func saveUserCmd(name, theme, nav, keyboard string) tea.Cmd {
 	return func() tea.Msg {
 		profile := &config.UserProfile{
@@ -141,7 +141,7 @@ func saveUserCmd(name, theme, nav, keyboard string) tea.Cmd {
 	}
 }
 
-// deleteUserCmd deletes a user profile
+// deleteUserCmd deletes a user profile.
 func deleteUserCmd(name string) tea.Cmd {
 	return func() tea.Msg {
 		if err := config.DeleteUserProfile(name); err != nil {
@@ -162,7 +162,7 @@ func deleteUserCmd(name string) tea.Cmd {
 	}
 }
 
-// switchUserCmd switches to a user profile
+// switchUserCmd switches to a user profile.
 func switchUserCmd(name string) tea.Cmd {
 	return func() tea.Msg {
 		profile, err := config.LoadUserProfile(name)
@@ -487,7 +487,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// getUserFields returns the editable fields for the current user
+// getUserFields returns the editable fields for the current user.
 func (a *App) getUserFields() []userField {
 	if len(a.usersItems) == 0 || a.usersIndex >= len(a.usersItems) {
 		return nil
@@ -522,7 +522,7 @@ func (a *App) getUserFields() []userField {
 	}
 }
 
-// cycleUserFieldOption cycles through options for a field
+// cycleUserFieldOption cycles through options for a field.
 func (a *App) cycleUserFieldOption(f userField, delta int) {
 	if len(a.usersItems) == 0 || a.usersIndex >= len(a.usersItems) {
 		return
@@ -699,7 +699,7 @@ func (s *usersScreen) View(width, height int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, tabBar, content, statusBar)
 }
 
-// renderUsersListPane renders the left pane with user list
+// renderUsersListPane renders the left pane with user list.
 func (a *App) renderUsersListPane(width, height int) string {
 	var b strings.Builder
 
@@ -783,7 +783,7 @@ func (a *App) renderUsersListPane(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Render(b.String())
 }
 
-// renderUsersSettingsPane renders the right pane with user settings
+// renderUsersSettingsPane renders the right pane with user settings.
 func (a *App) renderUsersSettingsPane(width, height int) string {
 	var b strings.Builder
 
@@ -875,7 +875,7 @@ func (a *App) renderUsersSettingsPane(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Render(b.String())
 }
 
-// renderUsersStatusBar renders the status bar at the bottom
+// renderUsersStatusBar renders the status bar at the bottom.
 func (a *App) renderUsersStatusBar() string {
 	statusStyle := lipgloss.NewStyle().
 		Width(a.width).

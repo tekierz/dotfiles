@@ -23,7 +23,7 @@ func buildToolGroupDefaults(group tools.UIGroup) map[string]bool {
 	return result
 }
 
-// DeepDiveConfig holds all deep dive configuration options
+// DeepDiveConfig holds all deep dive configuration options.
 type DeepDiveConfig struct {
 	// Ghostty settings
 	GhosttyFontSize          int
@@ -150,7 +150,7 @@ type DeepDiveConfig struct {
 	ClaudeCodeMCPs map[string]bool // MCP servers to enable
 }
 
-// NewDeepDiveConfig creates a new config with defaults
+// NewDeepDiveConfig creates a new config with defaults.
 func NewDeepDiveConfig() *DeepDiveConfig {
 	return &DeepDiveConfig{
 		// Ghostty defaults
@@ -316,7 +316,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 	}
 }
 
-// DeepDiveMenuItem represents an item in the deep dive menu
+// DeepDiveMenuItem represents an item in the deep dive menu.
 type DeepDiveMenuItem struct {
 	Name        string
 	Description string
@@ -327,7 +327,7 @@ type DeepDiveMenuItem struct {
 }
 
 // GetDeepDiveMenuItems returns the menu items for deep dive configuration
-// Items are organized into logical categories for clarity
+// Items are organized into logical categories for clarity.
 func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 	return []DeepDiveMenuItem{
 		// Terminal & Shell - the foundation

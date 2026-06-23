@@ -32,11 +32,11 @@ func TestManageInstallRegistersCancel(t *testing.T) {
 	}
 
 	// Prove teardownStream actually invokes the registered cancel and clears it.
-	cancelled := false
-	a.streamCancel = func() { cancelled = true }
+	canceled := false
+	a.streamCancel = func() { canceled = true }
 	a.teardownStream()
 
-	if !cancelled {
+	if !canceled {
 		t.Error("teardownStream did not invoke the registered streamCancel (FIX 3)")
 	}
 	if a.streamCancel != nil || a.streamCmd != nil {
@@ -51,15 +51,15 @@ func TestManageInstallCompletionClearsHandles(t *testing.T) {
 	a := ctx.app
 
 	// Simulate an in-flight install with a registered cancel handle.
-	cancelled := false
+	canceled := false
 	a.manageInstalling = true
 	a.manageInstallID = "tmux"
-	a.streamCancel = func() { cancelled = true }
+	a.streamCancel = func() { canceled = true }
 
 	// Completion (success path) must tear down the stream.
 	_ = a.handleManageInstallWithLogsMsg(manageInstallWithLogsMsg{toolID: "tmux"})
 
-	if !cancelled {
+	if !canceled {
 		t.Error("completion did not invoke teardownStream's cancel")
 	}
 	if a.streamCancel != nil || a.streamCmd != nil {

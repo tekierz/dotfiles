@@ -8,7 +8,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// Category represents a tool category
+// Category represents a tool category.
 type Category string
 
 const (
@@ -22,7 +22,7 @@ const (
 	CategoryApp       Category = "app"
 )
 
-// UIGroup represents which installer section a tool belongs to
+// UIGroup represents which installer section a tool belongs to.
 type UIGroup string
 
 const (
@@ -34,7 +34,7 @@ const (
 	UIGroupUtilities    UIGroup = "utilities" // Shell scripts (hk, caff, sshh)
 )
 
-// Tool defines the interface for all managed tools
+// Tool defines the interface for all managed tools.
 type Tool interface {
 	// Identity
 	ID() string          // Unique identifier (e.g., "ghostty", "lazygit")
@@ -62,7 +62,7 @@ type Tool interface {
 	PlatformFilter() pkg.Platform // Empty for all platforms, or specific platform
 }
 
-// BaseTool provides common functionality for tools
+// BaseTool provides common functionality for tools.
 type BaseTool struct {
 	id          string
 	name        string

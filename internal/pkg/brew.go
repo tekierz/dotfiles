@@ -11,12 +11,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/runner"
 )
 
-// BrewManager implements PackageManager for Homebrew
+// BrewManager implements PackageManager for Homebrew.
 type BrewManager struct {
 	brewPath string
 }
 
-// NewBrewManager creates a new Homebrew manager
+// NewBrewManager creates a new Homebrew manager.
 func NewBrewManager() *BrewManager {
 	path, _ := exec.LookPath("brew")
 	return &BrewManager{brewPath: path}
@@ -269,12 +269,12 @@ func (b *BrewManager) ListInstalledCasks() ([]string, error) {
 	return casks, nil
 }
 
-// NeedsSudo returns false for Homebrew (doesn't require sudo)
+// NeedsSudo returns false for Homebrew (doesn't require sudo).
 func (b *BrewManager) NeedsSudo() bool {
 	return false
 }
 
-// InstallStreaming installs packages with real-time output streaming
+// InstallStreaming installs packages with real-time output streaming.
 func (b *BrewManager) InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
@@ -284,7 +284,7 @@ func (b *BrewManager) InstallStreaming(ctx context.Context, packages ...string) 
 	return runner.RunStreaming(ctx, b.brewPath, args...)
 }
 
-// UpdateStreaming updates packages with real-time output streaming
+// UpdateStreaming updates packages with real-time output streaming.
 func (b *BrewManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
@@ -294,7 +294,7 @@ func (b *BrewManager) UpdateStreaming(ctx context.Context, packages ...string) (
 	return runner.RunStreaming(ctx, b.brewPath, args...)
 }
 
-// UpdateAllStreaming updates all packages with real-time output streaming
+// UpdateAllStreaming updates all packages with real-time output streaming.
 func (b *BrewManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
 	return runner.RunStreaming(ctx, b.brewPath, "upgrade")
 }

@@ -10,12 +10,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// ClaudeCodeTool represents Claude Code CLI
+// ClaudeCodeTool represents Claude Code CLI.
 type ClaudeCodeTool struct {
 	BaseTool
 }
 
-// NewClaudeCodeTool creates a new Claude Code tool
+// NewClaudeCodeTool creates a new Claude Code tool.
 func NewClaudeCodeTool() *ClaudeCodeTool {
 	home, _ := os.UserHomeDir()
 	return &ClaudeCodeTool{
@@ -44,7 +44,7 @@ func NewClaudeCodeTool() *ClaudeCodeTool {
 	}
 }
 
-// IsInstalled checks if claude command is available (npm global install)
+// IsInstalled checks if claude command is available (npm global install).
 func (t *ClaudeCodeTool) IsInstalled() bool {
 	_, err := exec.LookPath("claude")
 	return err == nil
@@ -72,7 +72,7 @@ func (t *ClaudeCodeTool) Install(mgr pkg.PackageManager) error {
 	return nil
 }
 
-// ApplyConfigWithMCPs applies MCP server configuration with specific MCP selections
+// ApplyConfigWithMCPs applies MCP server configuration with specific MCP selections.
 func (t *ClaudeCodeTool) ApplyConfigWithMCPs(enabledMCPs map[string]bool) error {
 	cfg, err := config.LoadClaudeConfig()
 	if err != nil {

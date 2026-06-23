@@ -10,12 +10,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// TmuxTool represents tmux terminal multiplexer
+// TmuxTool represents tmux terminal multiplexer.
 type TmuxTool struct {
 	BaseTool
 }
 
-// TmuxConfig holds tmux configuration settings
+// TmuxConfig holds tmux configuration settings.
 type TmuxConfig struct {
 	// Basic settings
 	Prefix     string
@@ -39,7 +39,7 @@ type TmuxConfig struct {
 	ContinuumRestore bool // Restore sessions on tmux start
 }
 
-// NewTmuxTool creates a new Tmux tool
+// NewTmuxTool creates a new Tmux tool.
 func NewTmuxTool() *TmuxTool {
 	home, _ := os.UserHomeDir()
 	return &TmuxTool{
@@ -65,19 +65,19 @@ func NewTmuxTool() *TmuxTool {
 	}
 }
 
-// TPMPath returns the TPM installation directory
+// TPMPath returns the TPM installation directory.
 func TPMPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".tmux", "plugins", "tpm")
 }
 
-// IsTPMInstalled checks if TPM is installed
+// IsTPMInstalled checks if TPM is installed.
 func IsTPMInstalled() bool {
 	_, err := os.Stat(TPMPath())
 	return err == nil
 }
 
-// InstallTPM clones TPM repository
+// InstallTPM clones TPM repository.
 func InstallTPM() error {
 	tpmPath := TPMPath()
 
@@ -99,7 +99,7 @@ func InstallTPM() error {
 	return nil
 }
 
-// RunTPMInstall triggers TPM to install plugins
+// RunTPMInstall triggers TPM to install plugins.
 func RunTPMInstall() error {
 	installScript := filepath.Join(TPMPath(), "scripts", "install_plugins.sh")
 
@@ -111,7 +111,7 @@ func RunTPMInstall() error {
 	return cmd.Run()
 }
 
-// GenerateTmuxConfig builds the tmux.conf content
+// GenerateTmuxConfig builds the tmux.conf content.
 func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
 	var sb strings.Builder
 
@@ -238,7 +238,7 @@ func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
 	return sb.String()
 }
 
-// prefixToTmuxFormat converts config format to tmux format
+// prefixToTmuxFormat converts config format to tmux format.
 func prefixToTmuxFormat(prefix string) string {
 	switch prefix {
 	case "ctrl-a":
@@ -265,7 +265,7 @@ func paneBorderToTmuxFormat(style string) string {
 	}
 }
 
-// WriteTmuxConfig writes the tmux.conf file
+// WriteTmuxConfig writes the tmux.conf file.
 func WriteTmuxConfig(cfg TmuxConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -277,7 +277,7 @@ func WriteTmuxConfig(cfg TmuxConfig, theme string) error {
 	return writeToolConfig(configPath, []byte(content))
 }
 
-// SetupTPM handles TPM installation and plugin setup
+// SetupTPM handles TPM installation and plugin setup.
 func SetupTPM(cfg TmuxConfig, theme string) error {
 	// Write config first
 	if err := WriteTmuxConfig(cfg, theme); err != nil {

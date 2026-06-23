@@ -76,7 +76,7 @@ func makeItem(catID, keys, description string) Item {
 //
 // This is the single source of truth used by:
 // - the Hotkeys TUI screen
-// - contextual hotkey/docs in the manager
+// - contextual hotkey/docs in the manager.
 func Categories(navStyle string) []Category {
 	nav := normalizeNavStyle(navStyle)
 

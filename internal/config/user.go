@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// UserProfile represents a user configuration profile
+// UserProfile represents a user configuration profile.
 type UserProfile struct {
 	Name          string `json:"name"`
 	Theme         string `json:"theme"`
@@ -22,21 +22,21 @@ type UserProfile struct {
 }
 
 // usernameRegex validates username format
-// Must start with letter, followed by 0-31 alphanumeric/underscore/hyphen chars
+// Must start with letter, followed by 0-31 alphanumeric/underscore/hyphen chars.
 var usernameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,31}$`)
 
-// ValidNavStyles are the allowed navigation styles
+// ValidNavStyles are the allowed navigation styles.
 var ValidNavStyles = []string{"emacs", "vim"}
 
-// ValidKeyboardStyles are the allowed keyboard styles
+// ValidKeyboardStyles are the allowed keyboard styles.
 var ValidKeyboardStyles = []string{"macos", "linux"}
 
-// UsersDir returns the users directory path
+// UsersDir returns the users directory path.
 func UsersDir() string {
 	return filepath.Join(ConfigDir(), "users")
 }
 
-// ValidateUsername checks if a username is valid
+// ValidateUsername checks if a username is valid.
 func ValidateUsername(name string) error {
 	if name == "" {
 		return fmt.Errorf("username cannot be empty")
@@ -47,7 +47,7 @@ func ValidateUsername(name string) error {
 	return nil
 }
 
-// IsValidNavStyle checks if a navigation style is valid
+// IsValidNavStyle checks if a navigation style is valid.
 func IsValidNavStyle(style string) bool {
 	for _, s := range ValidNavStyles {
 		if s == style {
@@ -57,7 +57,7 @@ func IsValidNavStyle(style string) bool {
 	return false
 }
 
-// IsValidKeyboardStyle checks if a keyboard style is valid
+// IsValidKeyboardStyle checks if a keyboard style is valid.
 func IsValidKeyboardStyle(style string) bool {
 	for _, s := range ValidKeyboardStyles {
 		if s == style {
@@ -67,14 +67,14 @@ func IsValidKeyboardStyle(style string) bool {
 	return false
 }
 
-// UserExists checks if a user profile exists
+// UserExists checks if a user profile exists.
 func UserExists(name string) bool {
 	path := filepath.Join(UsersDir(), name+".json")
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-// LoadUserProfile loads a user profile from disk
+// LoadUserProfile loads a user profile from disk.
 func LoadUserProfile(name string) (*UserProfile, error) {
 	if err := ValidateUsername(name); err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func LoadUserProfile(name string) (*UserProfile, error) {
 	return &profile, nil
 }
 
-// SaveUserProfile saves a user profile to disk
+// SaveUserProfile saves a user profile to disk.
 func SaveUserProfile(profile *UserProfile) error {
 	if err := ValidateUsername(profile.Name); err != nil {
 		return err
@@ -126,7 +126,7 @@ func SaveUserProfile(profile *UserProfile) error {
 	return nil
 }
 
-// DeleteUserProfile removes a user profile from disk
+// DeleteUserProfile removes a user profile from disk.
 func DeleteUserProfile(name string) error {
 	if err := ValidateUsername(name); err != nil {
 		return err
@@ -144,7 +144,7 @@ func DeleteUserProfile(name string) error {
 	return nil
 }
 
-// ListUserProfiles returns all user profile names, sorted alphabetically
+// ListUserProfiles returns all user profile names, sorted alphabetically.
 func ListUserProfiles() ([]string, error) {
 	if err := EnsureDirs(); err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func ListUserProfiles() ([]string, error) {
 	return users, nil
 }
 
-// DefaultUserProfile returns a new profile with default settings
+// DefaultUserProfile returns a new profile with default settings.
 func DefaultUserProfile(name string) *UserProfile {
 	return &UserProfile{
 		Name:          name,
@@ -180,7 +180,7 @@ func DefaultUserProfile(name string) *UserProfile {
 	}
 }
 
-// ApplyUserProfile applies a user profile's settings to the global config
+// ApplyUserProfile applies a user profile's settings to the global config.
 func ApplyUserProfile(profile *UserProfile) error {
 	cfg, err := LoadGlobalConfig()
 	if err != nil {
@@ -194,7 +194,7 @@ func ApplyUserProfile(profile *UserProfile) error {
 	return SaveGlobalConfig(cfg)
 }
 
-// GetActiveUser returns the currently active user profile, if any
+// GetActiveUser returns the currently active user profile, if any.
 func GetActiveUser() (*UserProfile, error) {
 	cfg, err := LoadGlobalConfig()
 	if err != nil {
@@ -212,7 +212,7 @@ func GetActiveUser() (*UserProfile, error) {
 	return LoadUserProfile(cfg.ActiveUser)
 }
 
-// ClearActiveUser clears the active user setting
+// ClearActiveUser clears the active user setting.
 func ClearActiveUser() error {
 	cfg, err := LoadGlobalConfig()
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// Focused field styles
+// Focused field styles.
 var (
 	focusedStyle = lipgloss.NewStyle().
 			Foreground(ColorCyan).
@@ -37,7 +37,7 @@ var (
 				Padding(0, 1)
 )
 
-// GetFilteredDeepDiveMenuItems returns deep dive menu items filtered for the current platform
+// GetFilteredDeepDiveMenuItems returns deep dive menu items filtered for the current platform.
 func GetFilteredDeepDiveMenuItems() []DeepDiveMenuItem {
 	platform := pkg.DetectPlatform()
 	allItems := GetDeepDiveMenuItems()
@@ -271,7 +271,7 @@ func renderCheckbox(label string, checked, focused bool) string {
 
 // renderCheckboxInlineWithInstallState renders a checkbox with install status awareness
 // - installed: shows yellow checkbox (already installed, can update), item is not selectable
-// - not installed: normal checkbox behavior (green when checked)
+// - not installed: normal checkbox behavior (green when checked).
 func renderCheckboxInlineWithInstallState(checked, focused, installed bool) string {
 	if installed {
 		// Already installed - show yellow filled checkbox, not selectable

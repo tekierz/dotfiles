@@ -15,7 +15,7 @@ var (
 	globalRegistryOnce sync.Once
 )
 
-// Registry holds all registered tools
+// Registry holds all registered tools.
 type Registry struct {
 	tools map[string]Tool
 
@@ -87,18 +87,18 @@ func NewRegistry() *Registry {
 	return r
 }
 
-// Register adds a tool to the registry
+// Register adds a tool to the registry.
 func (r *Registry) Register(t Tool) {
 	r.tools[t.ID()] = t
 }
 
-// Get returns a tool by ID
+// Get returns a tool by ID.
 func (r *Registry) Get(id string) (Tool, bool) {
 	t, ok := r.tools[id]
 	return t, ok
 }
 
-// All returns all registered tools sorted by name
+// All returns all registered tools sorted by name.
 func (r *Registry) All() []Tool {
 	var tools []Tool
 	for _, t := range r.tools {
@@ -110,7 +110,7 @@ func (r *Registry) All() []Tool {
 	return tools
 }
 
-// ByCategory returns tools in a specific category
+// ByCategory returns tools in a specific category.
 func (r *Registry) ByCategory(cat Category) []Tool {
 	var tools []Tool
 	for _, t := range r.tools {
@@ -124,7 +124,7 @@ func (r *Registry) ByCategory(cat Category) []Tool {
 	return tools
 }
 
-// ensureCache populates the installed cache if not already done
+// ensureCache populates the installed cache if not already done.
 func (r *Registry) ensureCache() {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
@@ -139,14 +139,14 @@ func (r *Registry) ensureCache() {
 	r.cachePopulated = true
 }
 
-// isInstalledCached returns cached installation status for a tool
+// isInstalledCached returns cached installation status for a tool.
 func (r *Registry) isInstalledCached(id string) bool {
 	r.cacheMu.RLock()
 	defer r.cacheMu.RUnlock()
 	return r.installedCache[id]
 }
 
-// RefreshCache invalidates and repopulates the installed cache
+// RefreshCache invalidates and repopulates the installed cache.
 func (r *Registry) RefreshCache() {
 	r.cacheMu.Lock()
 	r.cachePopulated = false
@@ -156,7 +156,7 @@ func (r *Registry) RefreshCache() {
 	r.ensureCache()
 }
 
-// InvalidateCache clears the cache without repopulating
+// InvalidateCache clears the cache without repopulating.
 func (r *Registry) InvalidateCache() {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
@@ -164,7 +164,7 @@ func (r *Registry) InvalidateCache() {
 	r.installedCache = make(map[string]bool)
 }
 
-// Installed returns all installed tools (uses cache)
+// Installed returns all installed tools (uses cache).
 func (r *Registry) Installed() []Tool {
 	r.ensureCache()
 
@@ -180,7 +180,7 @@ func (r *Registry) Installed() []Tool {
 	return tools
 }
 
-// NotInstalled returns tools that are not installed (uses cache)
+// NotInstalled returns tools that are not installed (uses cache).
 func (r *Registry) NotInstalled() []Tool {
 	r.ensureCache()
 
@@ -196,7 +196,7 @@ func (r *Registry) NotInstalled() []Tool {
 	return tools
 }
 
-// NotInstalledForPlatform returns tools that are not installed and available for current platform (uses cache)
+// NotInstalledForPlatform returns tools that are not installed and available for current platform (uses cache).
 func (r *Registry) NotInstalledForPlatform() []Tool {
 	r.ensureCache()
 
@@ -219,7 +219,7 @@ func (r *Registry) NotInstalledForPlatform() []Tool {
 	return tools
 }
 
-// CountForPlatform returns the number of tools available for the current platform
+// CountForPlatform returns the number of tools available for the current platform.
 func (r *Registry) CountForPlatform() int {
 	platform := pkg.DetectPlatform()
 	count := 0
@@ -283,7 +283,7 @@ func (r *Registry) NotInstalledForSystem() []Tool {
 	return tools
 }
 
-// HeavyTools returns all tools marked as resource-heavy
+// HeavyTools returns all tools marked as resource-heavy.
 func (r *Registry) HeavyTools() []Tool {
 	var tools []Tool
 	for _, t := range r.tools {
@@ -297,7 +297,7 @@ func (r *Registry) HeavyTools() []Tool {
 	return tools
 }
 
-// InstallAll installs all tools using the provided package manager
+// InstallAll installs all tools using the provided package manager.
 func (r *Registry) InstallAll(mgr pkg.PackageManager) error {
 	for _, t := range r.tools {
 		if err := t.Install(mgr); err != nil {
@@ -309,7 +309,7 @@ func (r *Registry) InstallAll(mgr pkg.PackageManager) error {
 	return nil
 }
 
-// InstallByCategory installs all tools in a category
+// InstallByCategory installs all tools in a category.
 func (r *Registry) InstallByCategory(mgr pkg.PackageManager, cat Category) error {
 	for _, t := range r.ByCategory(cat) {
 		if err := t.Install(mgr); err != nil {
@@ -321,7 +321,7 @@ func (r *Registry) InstallByCategory(mgr pkg.PackageManager, cat Category) error
 	return nil
 }
 
-// Categories returns all unique categories
+// Categories returns all unique categories.
 func (r *Registry) Categories() []Category {
 	seen := make(map[Category]bool)
 	var cats []Category
@@ -334,12 +334,12 @@ func (r *Registry) Categories() []Category {
 	return cats
 }
 
-// Count returns the total number of registered tools
+// Count returns the total number of registered tools.
 func (r *Registry) Count() int {
 	return len(r.tools)
 }
 
-// InstalledCount returns the number of installed tools (uses cache)
+// InstalledCount returns the number of installed tools (uses cache).
 func (r *Registry) InstalledCount() int {
 	r.ensureCache()
 
