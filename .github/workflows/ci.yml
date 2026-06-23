@@ -32,23 +32,20 @@ jobs:
         run: go vet ./...
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
-        # Advisory: pinned to v2.5.0 (golangci-lint supports Go 1.25 since
-        # v2.4.0). Flip to blocking once it has run clean against the project's
-        # Go version for a few cycles. internal/ui is excluded from gocyclo/dupl
-        # in .golangci.yml (large switch-based View/Update funcs) — revisit.
-        continue-on-error: true
+        # v7 of the action is required for golangci-lint v2.x (v4 targets v1.x).
+        uses: golangci/golangci-lint-action@v7
+        # Blocking. Config is v2 schema (.golangci.yml). The whole project,
+        # including internal/ui, is enforced for gocognit/gocyclo/dupl — the
+        # former internal/ui exclusion was removed and those functions refactored.
         with:
           version: v2.5.0
           args: --timeout=5m
 
       - name: Run staticcheck
         uses: dominikh/staticcheck-action@v1
-        # Advisory: kept at `latest` — no tagged staticcheck release is built
-        # with / confirmed against Go 1.25 yet (2025.1.x is built with Go 1.24
-        # and has known Go 1.25 compatibility issues, dominikh/go-tools#1674).
-        # Pin to an exact tag and flip to blocking once a Go 1.25 release ships.
-        continue-on-error: true
+        # Blocking. `latest` now ships a release built against the Go toolchain
+        # in go.mod; the tree is staticcheck-clean. (golangci-lint also runs
+        # staticcheck, but the standalone action surfaces ST/SA checks directly.)
         with:
           version: latest
           install-go: false
@@ -65,10 +62,9 @@ jobs:
           cache: true
 
       - name: Run govulncheck
-        # Advisory: pinned to v1.1.4 (latest tagged x/vuln release; compiles
-        # against the Go 1.25 toolchain installed by setup-go). Flip to blocking
-        # once it has run clean against the project's Go version for a few cycles.
-        continue-on-error: true
+        # Blocking. Pinned to v1.1.4 (latest tagged x/vuln release; compiles
+        # against the Go toolchain in go.mod). The project calls no known
+        # vulnerable symbols.
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
