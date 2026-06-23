@@ -69,8 +69,15 @@ func (s *configCLIToolsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 func (s *configCLIToolsScreen) View(width, height int) string {
 	a := s.App()
 
-	// Ensure install status is cached.
-	a.ensureInstallCache()
+	// Install status is loaded asynchronously (kicked in Init); render a
+	// loading placeholder instead of blocking the render goroutine on the
+	// package-manager subprocess probes ensureInstallCache would run.
+	if a.installCacheLoading {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render(
+				fmt.Sprintf("%s Loading installation status...", spinner)))
+	}
 
 	title := renderConfigTitle("", "CLI Tools", "Terminal-based productivity tools")
 

@@ -58,9 +58,6 @@ func (s *configMacAppsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 func (s *configMacAppsScreen) View(width, height int) string {
 	a := s.App()
 
-	// Ensure install status is cached.
-	a.ensureInstallCache()
-
 	title := renderConfigTitle("", "macOS Apps", "Optional productivity applications")
 
 	items := make([]installListItem, len(macAppItems))

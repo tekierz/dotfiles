@@ -187,22 +187,41 @@ func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
 		return writeNeovimUserPrefs(cfg, theme, nvimDir)
 	}
 
-	// Backup existing config if present
-	if _, err := os.Stat(nvimDir); err == nil {
+	// Clone into a temp sibling dir first so a partial/failed clone never lands
+	// on ~/.config/nvim. Only after a successful clone do we move any existing
+	// config aside and swap the freshly-cloned tree into place. This avoids the
+	// data-loss window where the user's real config was already renamed to
+	// .backup but the new clone failed, leaving a half-cloned, broken nvim dir.
+	parent := filepath.Dir(nvimDir)
+	_ = os.MkdirAll(parent, 0o755)
+	tmpDir, err := os.MkdirTemp(parent, "nvim-clone-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir for %s clone: %w", cfg.ConfigPreset, err)
+	}
+	cloneTarget := filepath.Join(tmpDir, "nvim")
+
+	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, cloneTarget)
+	if err := cmd.Run(); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return fmt.Errorf("failed to clone %s config: %w", cfg.ConfigPreset, err)
+	}
+
+	// Remove .git directory to make it user-owned (in temp, before the swap).
+	_ = os.RemoveAll(filepath.Join(cloneTarget, ".git"))
+
+	// Backup existing config if present, then move the verified-good clone in.
+	// MkdirTemp keeps cloneTarget on the same filesystem as nvimDir, so the
+	// final Rename is atomic.
+	if _, statErr := os.Stat(nvimDir); statErr == nil {
 		backupDir := nvimDir + ".backup"
 		_ = os.RemoveAll(backupDir)
 		_ = os.Rename(nvimDir, backupDir)
 	}
-
-	// Clone the preset
-	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, nvimDir)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to clone %s config: %w", cfg.ConfigPreset, err)
+	if err := os.Rename(cloneTarget, nvimDir); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return fmt.Errorf("failed to install cloned %s config: %w", cfg.ConfigPreset, err)
 	}
-
-	// Remove .git directory to make it user-owned
-	gitDir := filepath.Join(nvimDir, ".git")
-	_ = os.RemoveAll(gitDir)
+	_ = os.RemoveAll(tmpDir)
 
 	// Write user preferences
 	return writeNeovimUserPrefs(cfg, theme, nvimDir)

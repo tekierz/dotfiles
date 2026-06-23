@@ -51,9 +51,6 @@ func (s *configUtilitiesScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 func (s *configUtilitiesScreen) View(width, height int) string {
 	a := s.App()
 
-	// Ensure install status is cached.
-	a.ensureInstallCache()
-
 	title := renderConfigTitle("", "Utilities", "Helper tools from tekierz/homebrew-tap")
 
 	items := make([]installListItem, len(utilityItems))

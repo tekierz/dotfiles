@@ -41,7 +41,14 @@ func NewFileTreeScreen(ctx *ScreenContext) *fileTreeScreen {
 func (s *fileTreeScreen) ID() Screen { return ScreenFileTree }
 
 // Init returns any initial commands (none on entry).
-func (s *fileTreeScreen) Init() tea.Cmd { return nil }
+func (s *fileTreeScreen) Init() tea.Cmd {
+	// Kick the async install-status load so View can render a placeholder while
+	// it loads instead of blocking the render goroutine on subprocess probes.
+	if a := s.App(); a != nil {
+		return a.startInstallCacheLoad()
+	}
+	return nil
+}
 
 // Update handles keyboard input for the file tree screen. (Mouse is a no-op,
 // matching the legacy handleSummaryMouse for ScreenFileTree.)
@@ -81,8 +88,15 @@ func (s *fileTreeScreen) View(width, height int) string {
 
 	var lines []string
 
-	// Ensure install cache is populated
-	a.ensureInstallCache()
+	// Install status is loaded asynchronously (kicked in Init); render a
+	// loading placeholder instead of blocking the render goroutine on the
+	// package-manager subprocess probes ensureInstallCache would run.
+	if a.installCacheLoading {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render(
+				fmt.Sprintf("%s Loading installation status...", spinner)))
+	}
 
 	// Collect selected and already installed tools
 	toInstall, alreadyInstalled := s.filetreeCollectTools(cfg)

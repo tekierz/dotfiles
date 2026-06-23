@@ -458,8 +458,16 @@ type configListNav struct {
 // ID returns the screen identifier.
 func (s *configListNav) ID() Screen { return s.id }
 
-// Init returns any initial commands (none on entry).
-func (s *configListNav) Init() tea.Cmd { return nil }
+// Init kicks the async install-status cache load. These list screens display
+// per-tool install state; loading it asynchronously (instead of synchronously
+// in View) keeps the render goroutine off the package-manager subprocess
+// probes. startInstallCacheLoad is idempotent (nil if already ready/loading).
+func (s *configListNav) Init() tea.Cmd {
+	if a := s.App(); a != nil {
+		return a.startInstallCacheLoad()
+	}
+	return nil
+}
 
 // footer returns the pre-rendered help line for list-nav screens.
 // Accurate to handleMsg: up/down move, space toggles, enter/esc back.
@@ -575,6 +583,18 @@ type installListItem struct {
 // enabled reports whether the item id is toggled on in the screen's config map;
 // installed reports whether the id is already installed; help is the footer.
 func renderInstallStateList(a *App, width, height, boxOuterW, nameWidth int, title string, items []installListItem, focusedIndex int, enabled, installed func(id string) bool, help string) string {
+	// Install status is loaded asynchronously (kicked in configListNav.Init);
+	// render a loading placeholder instead of blocking the render goroutine on
+	// the package-manager subprocess probes ensureInstallCache would run. Once
+	// installCacheDoneMsg lands (handled globally in App.Update), this re-renders
+	// with real per-tool state.
+	if a.installCacheLoading {
+		spinner := AnimatedSpinnerDots(a.uiFrame)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render(
+				fmt.Sprintf("%s Loading installation status...", spinner)))
+	}
+
 	rec := newFieldLayoutRecorder(boxOuterW)
 
 	for i, item := range items {

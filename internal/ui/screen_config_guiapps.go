@@ -54,9 +54,6 @@ func (s *configGUIAppsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 func (s *configGUIAppsScreen) View(width, height int) string {
 	a := s.App()
 
-	// Ensure install status is cached.
-	a.ensureInstallCache()
-
 	title := renderConfigTitle("", "GUI Apps", "Desktop applications (cross-platform)")
 
 	items := make([]installListItem, len(guiAppItems))

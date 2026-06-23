@@ -55,9 +55,6 @@ func (s *configCLIUtilitiesScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) 
 func (s *configCLIUtilitiesScreen) View(width, height int) string {
 	a := s.App()
 
-	// Ensure install status is cached.
-	a.ensureInstallCache()
-
 	title := renderConfigTitle("󰘳", "CLI Utilities", "Essential command-line replacements")
 
 	items := make([]installListItem, len(cliUtilityItems))

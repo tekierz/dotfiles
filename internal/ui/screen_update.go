@@ -156,6 +156,12 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
 			a.clearInstallLogs()
 			a.updateStatus = "Updating all packages..."
+			// Set the run guard synchronously at dispatch: checkSudoAndUpdateCmd is
+			// async (updateRunning is otherwise set only later, in
+			// handleUpdateStartMsg), so a second Enter/'a' would pass the gate and
+			// start a CONCURRENT update, orphaning the first stream/cancel handles.
+			// Every terminal outcome resets updateRunning via finishUpdate.
+			a.updateRunning = true
 			return checkSudoAndUpdateCmd(nil, true)
 		}
 	case "r": // Refresh updates
@@ -223,6 +229,10 @@ func (s *updateScreen) updateHandleEnter() tea.Cmd {
 		if len(packagesToUpdate) > 0 {
 			a.clearInstallLogs()
 			a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
+			// Set the run guard synchronously at dispatch (see the 'a' case): the
+			// dispatch via checkSudoAndUpdateCmd is async, so without this a second
+			// Enter would start a concurrent update and orphan the first stream.
+			a.updateRunning = true
 			return checkSudoAndUpdateCmd(packagesToUpdate, false)
 		}
 	}

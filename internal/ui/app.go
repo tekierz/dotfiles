@@ -874,6 +874,48 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	// On-enter LOAD results for the management tabs (Update check, Backups list,
+	// Users list) are applied GLOBALLY here, before delegating, exactly like
+	// installCacheDoneMsg above. Each is kicked on entry behind an in-flight
+	// guard flag (updateChecking / backupsLoading / usersLoaded) that navigation
+	// never resets, and tabbing/Esc away from a still-loading screen is NOT
+	// blocked (only the *Running flags block nav). So if the result arrives after
+	// the user navigated away, handling it only in the owning screen's Update
+	// would drop it, strand the guard flag set, and wedge the screen on
+	// "Checking/Loading..." forever (re-entry sees the guard set and never
+	// re-kicks). These transitions are byte-identical to the owning screens'
+	// cases, which become unreachable for these messages.
+	switch m := msg.(type) {
+	case updateCheckDoneMsg:
+		a.updateChecking = false
+		a.updateCheckDone = true
+		a.updateResults = m.updates
+		a.updateError = m.err
+		return a, nil
+	case backupsLoadedMsg:
+		a.backupsLoading = false
+		a.backupsLoaded = true
+		if m.err != nil {
+			a.backupError = m.err
+			a.backups = []BackupEntry{}
+		} else {
+			a.backups = m.backups
+			a.backupError = nil
+		}
+		return a, nil
+	case userLoadedMsg:
+		if m.err != nil {
+			// Reset the guard so re-entering the Users screen retries the load
+			// instead of permanently stranding an empty list.
+			a.usersLoaded = false
+			a.usersStatus = fmt.Sprintf("Load failed: %v", m.err)
+		} else {
+			a.usersItems = m.users
+			a.usersStatus = ""
+		}
+		return a, nil
+	}
+
 	// Streaming/terminal async messages for the package-update and tool-install
 	// flows are handled GLOBALLY here, before delegating, exactly like
 	// installCacheDoneMsg above. Their re-arm/finalize/cache-refresh chain

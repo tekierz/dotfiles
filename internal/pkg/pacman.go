@@ -141,10 +141,13 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 		// failure (e.g. a stale temp DB) that should be surfaced.
 		err := cmd.Run()
 		if err != nil {
-			exitErr := &exec.ExitError{}
-			if errors.As(err, &exitErr) {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+				// Exit 2 specifically means "no updates available" — not an error.
 				return "", nil
 			}
+			// Any other failure (stale/locked DB, network/mirror error) must be
+			// surfaced, not silently reported as "up to date".
 			return "", fmt.Errorf("checkupdates failed: %w", err)
 		}
 		return out.String(), nil
