@@ -823,15 +823,29 @@ is_safe_restore_path() {
         *..*) return 1 ;;
     esac
 
-    # The manifest stores destinations as literal "$HOME/..." paths, but $HOME may
-    # itself be a symlink, so also accept the canonicalized home. The target may
-    # not exist yet during a restore, so compare lexically rather than resolving it.
+    # Canonicalize $HOME so a symlinked home does not cause false rejections.
+    # $HOME itself must resolve; if it cannot, refuse rather than guess.
     local canon_home
-    canon_home=$(cd "$HOME" 2>/dev/null && pwd -P) || canon_home="$HOME"
+    canon_home=$(cd "$HOME" 2>/dev/null && pwd -P) || return 1
 
-    # The path must be $HOME (literal or canonical) itself or live beneath it.
-    [[ "$target" == "$HOME" || "$target" == "$HOME"/* ]] && return 0
-    [[ "$target" == "$canon_home" || "$target" == "$canon_home"/* ]]
+    # The target file may not exist yet during a restore, and any component of
+    # its path could be a symlink that escapes $HOME. A lexical HasPrefix is not
+    # enough, so resolve the realpath of the deepest EXISTING ancestor (using a
+    # portable cd+pwd -P; macOS lacks `readlink -f`) and require that resolved
+    # ancestor to stay within the canonicalized home. Components that do not yet
+    # exist cannot be symlinks, so they are safe to leave unresolved.
+    local probe="$target" resolved=""
+    while [[ -n "$probe" && "$probe" != "/" ]]; do
+        if [[ -d "$probe" ]]; then
+            resolved=$(cd "$probe" 2>/dev/null && pwd -P) || return 1
+            break
+        fi
+        probe=$(dirname "$probe")
+    done
+    [[ -z "$resolved" ]] && return 1
+
+    # The resolved ancestor must be the canonical home itself or live beneath it.
+    [[ "$resolved" == "$canon_home" || "$resolved" == "$canon_home"/* ]]
 }
 
 # Restore from a backup session
@@ -847,6 +861,13 @@ restore_backup() {
             return 1
         fi
         echo -e "Using most recent backup: ${CYAN}$session${NC}"
+    fi
+
+    # Reject traversing or multi-component session names so a crafted name cannot
+    # escape the backups directory to read an attacker-controlled manifest.
+    if [[ "$session" == */* || "$session" == *..* ]]; then
+        print_error "Invalid backup session name: $session"
+        return 1
     fi
 
     local backup_dir="$DOTFILES_BACKUP_DIR/$session"
@@ -876,6 +897,15 @@ restore_backup() {
         # Refuse to rm/cp paths that escape $HOME (corrupted/tampered manifest).
         if ! is_safe_restore_path "$original"; then
             print_warning "Skipping unsafe restore path: $original"
+            ((errors++))
+            continue
+        fi
+
+        # The backup SOURCE must live inside this session's backup dir; a tampered
+        # manifest must not be able to copy arbitrary files into an otherwise-safe
+        # destination under $HOME.
+        if [[ "$existed" == "yes" && ( "$backup" != "$backup_dir"/* || "$backup" == *..* ) ]]; then
+            print_warning "Skipping manifest entry with out-of-tree source: $backup"
             ((errors++))
             continue
         fi
@@ -2288,7 +2318,12 @@ HK_EMACS_EOF
     cat > ~/.local/bin/caff << 'CAFF_EOF'
 #!/usr/bin/env bash
 
-PIDFILE="/tmp/caffeine-$USER.pid"
+# Store the PID file in a private, per-user directory (mode 700), not
+# world-writable /tmp, so another local user cannot pre-plant a symlink or a
+# file containing an arbitrary PID that this script would later kill.
+RUNDIR="${XDG_RUNTIME_DIR:-$HOME/.local/state/caff}"
+mkdir -p "$RUNDIR" 2>/dev/null && chmod 700 "$RUNDIR" 2>/dev/null
+PIDFILE="$RUNDIR/caffeine.pid"
 
 status() {
     if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -2894,6 +2929,13 @@ delete_user() {
         return 1
     fi
 
+    # Reject path-traversal / non-single-component names before any rm, mirroring
+    # the guard add_user and switch_to_user already apply. Without this, a name
+    # like ../../some/path could delete a .settings file outside the users dir.
+    if ! validate_username "$username"; then
+        return 1
+    fi
+
     if ! user_exists "$username"; then
         echo -e "${RED}Error: User '$username' does not exist${NC}"
         return 1
@@ -3327,15 +3369,29 @@ is_safe_restore_path() {
         *..*) return 1 ;;
     esac
 
-    # The manifest stores destinations as literal "$HOME/..." paths, but $HOME may
-    # itself be a symlink, so also accept the canonicalized home. The target may
-    # not exist yet during a restore, so compare lexically rather than resolving it.
+    # Canonicalize $HOME so a symlinked home does not cause false rejections.
+    # $HOME itself must resolve; if it cannot, refuse rather than guess.
     local canon_home
-    canon_home=$(cd "$HOME" 2>/dev/null && pwd -P) || canon_home="$HOME"
+    canon_home=$(cd "$HOME" 2>/dev/null && pwd -P) || return 1
 
-    # The path must be $HOME (literal or canonical) itself or live beneath it.
-    [[ "$target" == "$HOME" || "$target" == "$HOME"/* ]] && return 0
-    [[ "$target" == "$canon_home" || "$target" == "$canon_home"/* ]]
+    # The target file may not exist yet during a restore, and any component of
+    # its path could be a symlink that escapes $HOME. A lexical HasPrefix is not
+    # enough, so resolve the realpath of the deepest EXISTING ancestor (using a
+    # portable cd+pwd -P; macOS lacks `readlink -f`) and require that resolved
+    # ancestor to stay within the canonicalized home. Components that do not yet
+    # exist cannot be symlinks, so they are safe to leave unresolved.
+    local probe="$target" resolved=""
+    while [[ -n "$probe" && "$probe" != "/" ]]; do
+        if [[ -d "$probe" ]]; then
+            resolved=$(cd "$probe" 2>/dev/null && pwd -P) || return 1
+            break
+        fi
+        probe=$(dirname "$probe")
+    done
+    [[ -z "$resolved" ]] && return 1
+
+    # The resolved ancestor must be the canonical home itself or live beneath it.
+    [[ "$resolved" == "$canon_home" || "$resolved" == "$canon_home"/* ]]
 }
 
 # Restore from a backup session
@@ -3349,6 +3405,13 @@ restore_backup() {
             return 1
         fi
         echo -e "Using most recent backup: ${CYAN}$session${NC}"
+    fi
+
+    # Reject traversing or multi-component session names so a crafted name cannot
+    # escape the backups directory to read an attacker-controlled manifest.
+    if [[ "$session" == */* || "$session" == *..* ]]; then
+        echo -e "${RED}Error: Invalid backup session name: $session${NC}"
+        return 1
     fi
 
     local backup_dir="$DOTFILES_BACKUP_DIR/$session"
@@ -3377,6 +3440,15 @@ restore_backup() {
         # Refuse to rm/cp paths that escape $HOME (corrupted/tampered manifest).
         if ! is_safe_restore_path "$original"; then
             echo -e "${YELLOW}⚠${NC} Skipping unsafe restore path: $original"
+            ((errors++))
+            continue
+        fi
+
+        # The backup SOURCE must live inside this session's backup dir; a tampered
+        # manifest must not be able to copy arbitrary files into an otherwise-safe
+        # destination under $HOME.
+        if [[ "$existed" == "yes" && ( "$backup" != "$backup_dir"/* || "$backup" == *..* ) ]]; then
+            echo -e "${YELLOW}⚠${NC} Skipping manifest entry with out-of-tree source: $backup"
             ((errors++))
             continue
         fi
