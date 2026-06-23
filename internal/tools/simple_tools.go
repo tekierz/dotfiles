@@ -144,9 +144,9 @@ var simpleTools = []simpleToolSpec{
 			// lazydocker is not in stock Debian/Ubuntu repos; install via Go or
 			// manually — omitting the Debian entry prevents a guaranteed-failing apt.
 		},
-		configPath:     []string{".config", "lazydocker", "config.yml"},
-		heavy:          true, // Skip on low-memory systems (Pi Zero 2)
-		uiGroup:        UIGroupCLITools,
+		configPath: []string{".config", "lazydocker", "config.yml"},
+		heavy:      true, // Skip on low-memory systems (Pi Zero 2)
+		uiGroup:    UIGroupCLITools,
 		// configScreen: 0 — lazydocker has NO config generator (no
 		// tools.WriteLazyDockerConfig), so it is installable but not "configurable".
 		// `dotfiles config lazydocker` is intentionally not offered; its

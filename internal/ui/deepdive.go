@@ -221,10 +221,10 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 			"lsp",
 			"cmp",
 		},
-		NeovimTabWidth:    4,
-		NeovimWrap:        false,
-		NeovimCursorLine:  true,
-		NeovimClipboard:   "unnamedplus",
+		NeovimTabWidth:   4,
+		NeovimWrap:       false,
+		NeovimCursorLine: true,
+		NeovimClipboard:  "unnamedplus",
 		// "relative" preserves the prior default (number=true, relativenumber=true)
 		// now that LineNumbers is the single source for both opts.
 		NeovimLineNumbers: "relative",
