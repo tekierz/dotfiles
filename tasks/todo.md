@@ -58,12 +58,32 @@ Source: comprehensive audit (71 confirmed findings) + user direction (maximal sc
 - [x] dependency currency assessed: core deps already latest stable; blanket -u reverted
       (uncoordinated charmbracelet render-stack skew, no CVE benefit)
 
+## Phase G — Post-review P1 remediation — DONE
+Three independent deep reviews of the branch found 6 P1 blockers + secondary
+findings; all fixed, regression-tested, and adversarially verified (merge-ready):
+- [x] CI: bump go.mod 1.25.6->1.25.8 (clears reachable GO-2026-4602 now that
+      govulncheck is blocking); pin staticcheck to 2026.1 (was floating `latest`)
+- [x] pkg/pacman: restore checkupdates exit-code-2 guard (errorlint refactor had
+      dropped it, swallowing all nonzero exits as "no updates")
+- [x] ui/app: apply updateCheck/backupsLoaded/userLoaded results globally so a
+      result arriving after tab-away is not dropped (screen stuck loading)
+- [x] ui/update: set updateRunning synchronously at dispatch (no concurrent runs)
+- [x] bash is_safe_restore_path: realpath the deepest existing ancestor (symlink
+      escape); restore_backup: reject traversing session names + out-of-tree sources
+- [x] neovim clone-to-temp-then-swap; caff PID in mode-700 dir; delete_user validation;
+      async install-status render in config screens
+
 ## Review
 30 logical commits on worktree-audit-remediation. 120 files changed (+13.7k/-8.8k).
 All 71 confirmed audit findings addressed (fixed, or resolved by removal/migration).
 Deferred (recommended follow-ups, not blocking):
 - Interactive install cancellation (Esc during install) — larger UX change
-- backup.go: harden symlink-escape with EvalSymlinks on parent dir (edge case)
-- CI: make golangci-lint/staticcheck/govulncheck blocking (currently continue-on-error)
-- Stop tracking the built bin/dotfiles binary
 - Coordinated bubbletea/lipgloss v2 migration for full dep currency (separate initiative)
+- Stop tracking the built bin/dotfiles binary
+- updateRunDoneMsg/updateWithLogsMsg are screen-local (correct: nav is blocked while
+  updateRunning). Consider elevating to App.Update global dispatch for defense-in-depth
+  if the nav-block invariant is ever relaxed.
+- restore_backup manifest-SOURCE containment is lexical ($backup_dir/* + no ..); a
+  symlink planted inside the user's own backup dir could still read outside it
+  (low: needs prior write to ~/.config/dotfiles/backups; destination stays HOME-contained)
+- caff: chmod 700 also runs when $XDG_RUNTIME_DIR is pre-existing (harmless no-op)
