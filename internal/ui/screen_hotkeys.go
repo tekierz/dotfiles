@@ -122,28 +122,6 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.hotkeyCursor = clampInt(a.hotkeyCursor, 0, len(displayItems)-1)
 	}
 
-	ensureCatVisible := func() {
-		maxScroll := layout.maxCatScroll(len(cats))
-		a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll, 0, maxScroll)
-		if a.hotkeyCategory < a.hotkeyCatScroll {
-			a.hotkeyCatScroll = a.hotkeyCategory
-		} else if a.hotkeyCategory >= a.hotkeyCatScroll+layout.leftListH {
-			a.hotkeyCatScroll = a.hotkeyCategory - layout.leftListH + 1
-		}
-		a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll, 0, maxScroll)
-	}
-
-	ensureItemVisible := func() {
-		maxScroll := layout.maxItemScroll(len(displayItems))
-		a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxScroll)
-		if a.hotkeyCursor < a.hotkeyItemScroll {
-			a.hotkeyItemScroll = a.hotkeyCursor
-		} else if a.hotkeyCursor >= a.hotkeyItemScroll+layout.rightListH {
-			a.hotkeyItemScroll = a.hotkeyCursor - layout.rightListH + 1
-		}
-		a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxScroll)
-	}
-
 	// Handle tab navigation first (1-4 keys). A number key for the already-active
 	// tab is a no-op.
 	if target, ok := tabNavigationTarget(key); ok {
@@ -168,98 +146,140 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Categories pane navigation.
 	if a.hotkeysPane == hotkeysPaneCategories {
-		switch key {
-		case "up", "k":
-			if a.hotkeyCategory > 0 {
-				a.hotkeyCategory--
-				a.hotkeyCursor = 0
-				a.hotkeyItemScroll = 0
-			}
-			ensureCatVisible()
-			return nil
-		case keyDown, "j":
-			if a.hotkeyCategory < len(cats)-1 {
-				a.hotkeyCategory++
-				a.hotkeyCursor = 0
-				a.hotkeyItemScroll = 0
-			}
-			ensureCatVisible()
-			return nil
-		case keyRight, "l", keyEnter:
-			a.hotkeysPane = hotkeysPaneItems
-			return nil
-		case "F":
-			// Allow toggling favorites filter from categories pane too
-			a.hotkeysFavoritesOnly = !a.hotkeysFavoritesOnly
-			a.hotkeyCursor = 0
-			a.hotkeyItemScroll = 0
-			return nil
-		}
+		s.hotkeysHandleCategoriesPaneKey(key, layout, cats)
 		return nil
 	}
 
 	// Items pane navigation.
+	s.hotkeysHandleItemsPaneKey(key, layout, cat, allItems, displayItems)
+	return nil
+}
+
+// hotkeysEnsureCatVisible clamps and scrolls the categories list so the active
+// category stays visible.
+func (a *App) hotkeysEnsureCatVisible(layout hotkeysLayout, numCats int) {
+	maxScroll := layout.maxCatScroll(numCats)
+	a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll, 0, maxScroll)
+	if a.hotkeyCategory < a.hotkeyCatScroll {
+		a.hotkeyCatScroll = a.hotkeyCategory
+	} else if a.hotkeyCategory >= a.hotkeyCatScroll+layout.leftListH {
+		a.hotkeyCatScroll = a.hotkeyCategory - layout.leftListH + 1
+	}
+	a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll, 0, maxScroll)
+}
+
+// hotkeysEnsureItemVisible clamps and scrolls the items list so the cursor stays
+// visible.
+func (a *App) hotkeysEnsureItemVisible(layout hotkeysLayout, numItems int) {
+	maxScroll := layout.maxItemScroll(numItems)
+	a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxScroll)
+	if a.hotkeyCursor < a.hotkeyItemScroll {
+		a.hotkeyItemScroll = a.hotkeyCursor
+	} else if a.hotkeyCursor >= a.hotkeyItemScroll+layout.rightListH {
+		a.hotkeyItemScroll = a.hotkeyCursor - layout.rightListH + 1
+	}
+	a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll, 0, maxScroll)
+}
+
+// hotkeysHandleCategoriesPaneKey handles a key event while the categories pane
+// is focused.
+func (s *hotkeysScreen) hotkeysHandleCategoriesPaneKey(key string, layout hotkeysLayout, cats []hotkeys.Category) {
+	a := s.App()
+	switch key {
+	case "up", "k":
+		if a.hotkeyCategory > 0 {
+			a.hotkeyCategory--
+			a.hotkeyCursor = 0
+			a.hotkeyItemScroll = 0
+		}
+		a.hotkeysEnsureCatVisible(layout, len(cats))
+	case keyDown, "j":
+		if a.hotkeyCategory < len(cats)-1 {
+			a.hotkeyCategory++
+			a.hotkeyCursor = 0
+			a.hotkeyItemScroll = 0
+		}
+		a.hotkeysEnsureCatVisible(layout, len(cats))
+	case keyRight, "l", keyEnter:
+		a.hotkeysPane = hotkeysPaneItems
+	case "F":
+		// Allow toggling favorites filter from categories pane too
+		a.hotkeysFavoritesOnly = !a.hotkeysFavoritesOnly
+		a.hotkeyCursor = 0
+		a.hotkeyItemScroll = 0
+	}
+}
+
+// hotkeysHandleItemsPaneKey handles a key event while the items pane is focused.
+func (s *hotkeysScreen) hotkeysHandleItemsPaneKey(key string, layout hotkeysLayout, cat hotkeys.Category, allItems, displayItems []hotkeys.Item) {
+	a := s.App()
 	switch key {
 	case "up", "k":
 		if a.hotkeyCursor > 0 {
 			a.hotkeyCursor--
 		}
-		ensureItemVisible()
-		return nil
+		a.hotkeysEnsureItemVisible(layout, len(displayItems))
 	case keyDown, "j":
 		if a.hotkeyCursor < len(displayItems)-1 {
 			a.hotkeyCursor++
 		}
-		ensureItemVisible()
-		return nil
+		a.hotkeysEnsureItemVisible(layout, len(displayItems))
 	case keyLeft, "h":
 		a.hotkeysPane = hotkeysPaneCategories
-		return nil
 	case "f":
-		// Toggle favorite for current item
-		if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
-			item := displayItems[a.hotkeyCursor]
-			a.toggleHotkeyFavorite(cat.ID, item.ID)
-			// If in favorites-only mode and we just unfavorited, adjust cursor
-			if a.hotkeysFavoritesOnly {
-				// Recalculate filtered list
-				var newFiltered []hotkeys.Item
-				for _, it := range allItems {
-					if a.isHotkeyFavorite(cat.ID, it.ID) {
-						newFiltered = append(newFiltered, it)
-					}
-				}
-				if len(newFiltered) == 0 {
-					a.hotkeyCursor = 0
-				} else if a.hotkeyCursor >= len(newFiltered) {
-					a.hotkeyCursor = len(newFiltered) - 1
-				}
-			}
-		}
-		return nil
+		s.hotkeysToggleCurrentFavorite(cat, allItems, displayItems)
 	case "F":
 		// Toggle favorites-only filter mode
 		a.hotkeysFavoritesOnly = !a.hotkeysFavoritesOnly
 		// Reset cursor when toggling filter
 		a.hotkeyCursor = 0
 		a.hotkeyItemScroll = 0
-		return nil
 	case "a":
-		// Start adding alias - pre-fill command with current item if one is selected
-		a.hotkeysAddingAlias = true
-		a.hotkeysAliasField = 0 // Start with name field
-		a.hotkeysAliasCursor = 0
-		a.hotkeysAliasName = ""
-		if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
-			item := displayItems[a.hotkeyCursor]
-			a.hotkeysAliasCommand = item.Keys // Pre-fill command from selected hotkey
-		} else {
-			a.hotkeysAliasCommand = ""
-		}
-		return nil
+		s.hotkeysStartAddingAlias(displayItems)
 	}
+}
 
-	return nil
+// hotkeysToggleCurrentFavorite toggles the favorite status of the item under the
+// cursor and, in favorites-only mode, adjusts the cursor to the recomputed list.
+func (s *hotkeysScreen) hotkeysToggleCurrentFavorite(cat hotkeys.Category, allItems, displayItems []hotkeys.Item) {
+	a := s.App()
+	// Toggle favorite for current item
+	if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
+		item := displayItems[a.hotkeyCursor]
+		a.toggleHotkeyFavorite(cat.ID, item.ID)
+		// If in favorites-only mode and we just unfavorited, adjust cursor
+		if a.hotkeysFavoritesOnly {
+			// Recalculate filtered list
+			var newFiltered []hotkeys.Item
+			for _, it := range allItems {
+				if a.isHotkeyFavorite(cat.ID, it.ID) {
+					newFiltered = append(newFiltered, it)
+				}
+			}
+			if len(newFiltered) == 0 {
+				a.hotkeyCursor = 0
+			} else if a.hotkeyCursor >= len(newFiltered) {
+				a.hotkeyCursor = len(newFiltered) - 1
+			}
+		}
+	}
+}
+
+// hotkeysStartAddingAlias enters alias-add mode, pre-filling the command field
+// from the selected hotkey when one is under the cursor.
+func (s *hotkeysScreen) hotkeysStartAddingAlias(displayItems []hotkeys.Item) {
+	a := s.App()
+	// Start adding alias - pre-fill command with current item if one is selected
+	a.hotkeysAddingAlias = true
+	a.hotkeysAliasField = 0 // Start with name field
+	a.hotkeysAliasCursor = 0
+	a.hotkeysAliasName = ""
+	if len(displayItems) > 0 && a.hotkeyCursor >= 0 && a.hotkeyCursor < len(displayItems) {
+		item := displayItems[a.hotkeyCursor]
+		a.hotkeysAliasCommand = item.Keys // Pre-fill command from selected hotkey
+	} else {
+		a.hotkeysAliasCommand = ""
+	}
 }
 
 // exit leaves the hotkeys screen, clearing the filter/favorites state and
@@ -368,37 +388,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 	// Wheel scroll.
 	if m.IsWheel() {
-		delta := 0
-		switch m.Button {
-		case tea.MouseButtonWheelUp:
-			delta = -1
-		case tea.MouseButtonWheelDown:
-			delta = 1
-		case tea.MouseButtonNone, tea.MouseButtonLeft, tea.MouseButtonMiddle,
-			tea.MouseButtonRight, tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight,
-			tea.MouseButtonBackward, tea.MouseButtonForward, tea.MouseButton10, tea.MouseButton11:
-			return nil
-		}
-
-		if m.X < layout.rightX {
-			a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll+delta, 0, layout.maxCatScroll(len(cats)))
-		} else {
-			cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
-			allItems := cat.Items
-
-			// Get display items (filtered if favorites-only mode)
-			displayItems := allItems
-			if a.hotkeysFavoritesOnly {
-				var filtered []hotkeys.Item
-				for _, it := range allItems {
-					if a.isHotkeyFavorite(cat.ID, it.ID) {
-						filtered = append(filtered, it)
-					}
-				}
-				displayItems = filtered
-			}
-			a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll+delta, 0, layout.maxItemScroll(len(displayItems)))
-		}
+		s.hotkeysHandleWheel(m, layout, cats)
 		return nil
 	}
 
@@ -422,19 +412,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Click items.
 	if layout.inRightList(m.X, m.Y) {
 		cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
-		allItems := cat.Items
-
-		// Get display items (filtered if favorites-only mode)
-		displayItems := allItems
-		if a.hotkeysFavoritesOnly {
-			var filtered []hotkeys.Item
-			for _, it := range allItems {
-				if a.isHotkeyFavorite(cat.ID, it.ID) {
-					filtered = append(filtered, it)
-				}
-			}
-			displayItems = filtered
-		}
+		displayItems := a.hotkeysDisplayItems(cat)
 
 		rel := m.Y - layout.rightListY
 		idx := a.hotkeyItemScroll + rel
@@ -446,6 +424,49 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 
 	return nil
+}
+
+// hotkeysDisplayItems returns the items shown for a category, filtered to
+// favorites when favorites-only mode is active.
+func (a *App) hotkeysDisplayItems(cat hotkeys.Category) []hotkeys.Item {
+	allItems := cat.Items
+	// Get display items (filtered if favorites-only mode)
+	displayItems := allItems
+	if a.hotkeysFavoritesOnly {
+		var filtered []hotkeys.Item
+		for _, it := range allItems {
+			if a.isHotkeyFavorite(cat.ID, it.ID) {
+				filtered = append(filtered, it)
+			}
+		}
+		displayItems = filtered
+	}
+	return displayItems
+}
+
+// hotkeysHandleWheel applies a wheel-scroll event to whichever pane the pointer
+// is over.
+func (s *hotkeysScreen) hotkeysHandleWheel(m tea.MouseEvent, layout hotkeysLayout, cats []hotkeys.Category) {
+	a := s.App()
+	delta := 0
+	switch m.Button {
+	case tea.MouseButtonWheelUp:
+		delta = -1
+	case tea.MouseButtonWheelDown:
+		delta = 1
+	case tea.MouseButtonNone, tea.MouseButtonLeft, tea.MouseButtonMiddle,
+		tea.MouseButtonRight, tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight,
+		tea.MouseButtonBackward, tea.MouseButtonForward, tea.MouseButton10, tea.MouseButton11:
+		return
+	}
+
+	if m.X < layout.rightX {
+		a.hotkeyCatScroll = clampInt(a.hotkeyCatScroll+delta, 0, layout.maxCatScroll(len(cats)))
+	} else {
+		cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
+		displayItems := a.hotkeysDisplayItems(cat)
+		a.hotkeyItemScroll = clampInt(a.hotkeyItemScroll+delta, 0, layout.maxItemScroll(len(displayItems)))
+	}
 }
 
 // View renders the dual-pane hotkeys viewer.

@@ -82,27 +82,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	a := s.App()
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case keyCtrlC:
-			// Cancel the running install worker + (sudo) package-manager subprocess
-			// before quitting so they are not orphaned when the TUI exits (C15).
-			a.teardownStream()
-			return s, tea.Quit
-		case keyEnter:
-			// Only advance once the installation is complete.
-			if !a.installRunning {
-				return s, a.showSummary()
-			}
-			return s, nil
-		case keyEsc:
-			// Allow backing out only before the run starts (mirrors the legacy
-			// "[ESC] Back" hint, which is only shown when not running/complete).
-			if !a.installRunning && !a.installComplete {
-				return s, NavigateTo(ScreenFileTree)
-			}
-			return s, nil
-		}
-		return s, nil
+		return s.progressHandleKey(msg)
 
 	// --- Install start / sudo flow (in case still emitted into the stream) ---
 	case installStartMsg:
@@ -154,35 +134,70 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		return s, a.listenInstallEventsCmd()
 
 	case installDoneMsg:
-		a.installRunning = false
-		a.installComplete = true
-		// The install worker has finished; drop the retained cancel handle so a
-		// later teardown (Ctrl+C on the summary) is a harmless no-op.
-		a.streamCancel = nil
-		a.streamCmd = nil
-		// Stop the sudo keep-alive goroutine on normal completion (C16). The stop
-		// func blocks until the goroutine exits, so no `sudo -v` keeps running after
-		// the install finishes. nil/no-op when none was started (e.g. macOS).
-		if a.sudoKeepAliveStop != nil {
-			a.sudoKeepAliveStop()
-			a.sudoKeepAliveStop = nil
+		return s.progressHandleDone(msg)
+	}
+	return s, nil
+}
+
+// progressHandleKey handles the keys for continuing (enter, when complete),
+// quitting (ctrl+c), and going back (esc, before the run starts).
+func (s *progressScreen) progressHandleKey(msg tea.KeyMsg) (ScreenHandler, tea.Cmd) {
+	a := s.App()
+	switch msg.String() {
+	case keyCtrlC:
+		// Cancel the running install worker + (sudo) package-manager subprocess
+		// before quitting so they are not orphaned when the TUI exits (C15).
+		a.teardownStream()
+		return s, tea.Quit
+	case keyEnter:
+		// Only advance once the installation is complete.
+		if !a.installRunning {
+			return s, a.showSummary()
 		}
-		if msg.err != nil {
-			if msg.context != "" {
-				a.lastError = fmt.Errorf("%w\n\nOutput:\n%s", msg.err, msg.context)
-			} else {
-				a.lastError = msg.err
-			}
-			return s, a.showError(a.lastError)
+		return s, nil
+	case keyEsc:
+		// Allow backing out only before the run starts (mirrors the legacy
+		// "[ESC] Back" hint, which is only shown when not running/complete).
+		if !a.installRunning && !a.installComplete {
+			return s, NavigateTo(ScreenFileTree)
 		}
-		// Successful install: the Manage / Deep-Dive install-status caches now
-		// show stale "not installed" for the just-installed tools. Invalidate both
-		// the registry's IsInstalled() cache and the App's manageInstalled cache so
-		// the next navigation triggers a fresh load (C10).
-		tools.GetRegistry().InvalidateCache()
-		a.manageInstalledReady = false
 		return s, nil
 	}
+	return s, nil
+}
+
+// progressHandleDone finalizes the install: mark complete, stop the sudo
+// keep-alive, then navigate to the Error screen on failure or invalidate the
+// install-status caches on success.
+func (s *progressScreen) progressHandleDone(msg installDoneMsg) (ScreenHandler, tea.Cmd) {
+	a := s.App()
+	a.installRunning = false
+	a.installComplete = true
+	// The install worker has finished; drop the retained cancel handle so a
+	// later teardown (Ctrl+C on the summary) is a harmless no-op.
+	a.streamCancel = nil
+	a.streamCmd = nil
+	// Stop the sudo keep-alive goroutine on normal completion (C16). The stop
+	// func blocks until the goroutine exits, so no `sudo -v` keeps running after
+	// the install finishes. nil/no-op when none was started (e.g. macOS).
+	if a.sudoKeepAliveStop != nil {
+		a.sudoKeepAliveStop()
+		a.sudoKeepAliveStop = nil
+	}
+	if msg.err != nil {
+		if msg.context != "" {
+			a.lastError = fmt.Errorf("%w\n\nOutput:\n%s", msg.err, msg.context)
+		} else {
+			a.lastError = msg.err
+		}
+		return s, a.showError(a.lastError)
+	}
+	// Successful install: the Manage / Deep-Dive install-status caches now
+	// show stale "not installed" for the just-installed tools. Invalidate both
+	// the registry's IsInstalled() cache and the App's manageInstalled cache so
+	// the next navigation triggers a fresh load (C10).
+	tools.GetRegistry().InvalidateCache()
+	a.manageInstalledReady = false
 	return s, nil
 }
 

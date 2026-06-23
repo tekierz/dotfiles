@@ -44,43 +44,6 @@ func RenderMiniGlobe(width, height int, frame int) string {
 
 	rimStyle := lipgloss.NewStyle().Foreground(ColorBorder).Faint(true)
 
-	wrapDeltaDeg := func(d float64) float64 {
-		// Normalize to [-180, 180).
-		d = math.Mod(d+180.0, 360.0)
-		if d < 0 {
-			d += 360.0
-		}
-		return d - 180.0
-	}
-
-	// Simple landmass model using a few elliptical blobs in lon/lat degrees.
-	isLand := func(lonDeg, latDeg float64) bool {
-		type blob struct{ lon, lat, rx, ry float64 }
-		blobs := []blob{
-			// Rough continents (hand-tuned; good enough to read as "Earth").
-			{lon: -100, lat: 40, rx: 35, ry: 20}, // North America
-			{lon: -75, lat: 10, rx: 18, ry: 18},  // Central America
-			{lon: -60, lat: -20, rx: 20, ry: 28}, // South America
-			{lon: -40, lat: 70, rx: 16, ry: 10},  // Greenland
-			{lon: 60, lat: 45, rx: 75, ry: 25},   // Eurasia
-			{lon: 20, lat: 5, rx: 30, ry: 35},    // Africa
-			{lon: 95, lat: 20, rx: 22, ry: 18},   // India / SE Asia
-			{lon: 135, lat: -25, rx: 22, ry: 12}, // Australia
-			{lon: 0, lat: -78, rx: 180, ry: 10},  // Antarctica belt
-			{lon: 140, lat: 35, rx: 18, ry: 12},  // Japan-ish bump
-			{lon: -10, lat: 55, rx: 14, ry: 10},  // Europe-ish bump
-		}
-
-		for _, b := range blobs {
-			dx := wrapDeltaDeg(lonDeg-b.lon) / b.rx
-			dy := (latDeg - b.lat) / b.ry
-			if dx*dx+dy*dy <= 1.0 {
-				return true
-			}
-		}
-		return false
-	}
-
 	lines := make([]string, 0, height)
 	for y := 0; y < height; y++ {
 		ny := 2*float64(y)/float64(height-1) - 1
@@ -128,44 +91,12 @@ func RenderMiniGlobe(width, height int, frame int) string {
 			lonDeg := lon * 180 / math.Pi
 			latDeg := lat * 180 / math.Pi
 
-			land := isLand(lonDeg, latDeg)
-
-			if land {
-				idx := int(intensity * float64(len(landRamp)-1))
-				if idx < 0 {
-					idx = 0
-				}
-				if idx >= len(landRamp) {
-					idx = len(landRamp) - 1
-				}
-				ch := string(landRamp[idx])
-
-				switch {
-				case intensity > 0.65:
-					sb.WriteString(brightLand.Render(ch))
-				case intensity > 0.35:
-					sb.WriteString(midLand.Render(ch))
-				default:
-					sb.WriteString(dimLand.Render(ch))
-				}
+			if globeIsLand(lonDeg, latDeg) {
+				ch := globeRampChar(landRamp, intensity)
+				sb.WriteString(globeShade(ch, intensity, brightLand, midLand, dimLand))
 			} else {
-				idx := int(intensity * float64(len(waterRamp)-1))
-				if idx < 0 {
-					idx = 0
-				}
-				if idx >= len(waterRamp) {
-					idx = len(waterRamp) - 1
-				}
-				ch := string(waterRamp[idx])
-
-				switch {
-				case intensity > 0.65:
-					sb.WriteString(brightWater.Render(ch))
-				case intensity > 0.35:
-					sb.WriteString(midWater.Render(ch))
-				default:
-					sb.WriteString(dimWater.Render(ch))
-				}
+				ch := globeRampChar(waterRamp, intensity)
+				sb.WriteString(globeShade(ch, intensity, brightWater, midWater, dimWater))
 			}
 		}
 
@@ -173,4 +104,67 @@ func RenderMiniGlobe(width, height int, frame int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// globeWrapDeltaDeg normalizes a longitude delta to [-180, 180).
+func globeWrapDeltaDeg(d float64) float64 {
+	d = math.Mod(d+180.0, 360.0)
+	if d < 0 {
+		d += 360.0
+	}
+	return d - 180.0
+}
+
+// globeIsLand reports whether a lon/lat (degrees) falls inside the simple
+// landmass model (a few elliptical blobs roughly tracing Earth's continents).
+func globeIsLand(lonDeg, latDeg float64) bool {
+	type blob struct{ lon, lat, rx, ry float64 }
+	blobs := []blob{
+		// Rough continents (hand-tuned; good enough to read as "Earth").
+		{lon: -100, lat: 40, rx: 35, ry: 20}, // North America
+		{lon: -75, lat: 10, rx: 18, ry: 18},  // Central America
+		{lon: -60, lat: -20, rx: 20, ry: 28}, // South America
+		{lon: -40, lat: 70, rx: 16, ry: 10},  // Greenland
+		{lon: 60, lat: 45, rx: 75, ry: 25},   // Eurasia
+		{lon: 20, lat: 5, rx: 30, ry: 35},    // Africa
+		{lon: 95, lat: 20, rx: 22, ry: 18},   // India / SE Asia
+		{lon: 135, lat: -25, rx: 22, ry: 12}, // Australia
+		{lon: 0, lat: -78, rx: 180, ry: 10},  // Antarctica belt
+		{lon: 140, lat: 35, rx: 18, ry: 12},  // Japan-ish bump
+		{lon: -10, lat: 55, rx: 14, ry: 10},  // Europe-ish bump
+	}
+
+	for _, b := range blobs {
+		dx := globeWrapDeltaDeg(lonDeg-b.lon) / b.rx
+		dy := (latDeg - b.lat) / b.ry
+		if dx*dx+dy*dy <= 1.0 {
+			return true
+		}
+	}
+	return false
+}
+
+// globeRampChar picks the shading-ramp glyph for a given intensity, clamping the
+// index into the ramp's valid range.
+func globeRampChar(ramp []rune, intensity float64) string {
+	idx := int(intensity * float64(len(ramp)-1))
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(ramp) {
+		idx = len(ramp) - 1
+	}
+	return string(ramp[idx])
+}
+
+// globeShade renders ch with the bright/mid/dim style selected by intensity.
+func globeShade(ch string, intensity float64, bright, mid, dim lipgloss.Style) string {
+	switch {
+	case intensity > 0.65:
+		return bright.Render(ch)
+	case intensity > 0.35:
+		return mid.Render(ch)
+	default:
+		return dim.Render(ch)
+	}
 }

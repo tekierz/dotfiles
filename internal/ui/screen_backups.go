@@ -151,24 +151,7 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Handle confirmation mode.
 	if a.backupConfirmMode {
-		switch key {
-		case "y", "Y":
-			if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
-				a.backupRunning = true
-				backup := a.backups[a.backupIndex]
-				switch a.backupConfirmType {
-				case "restore":
-					return restoreBackupCmd(backup)
-				case keyDelete:
-					return deleteBackupCmd(backup)
-				}
-			}
-			a.backupConfirmMode = false
-		case "n", "N", keyEsc:
-			a.backupConfirmMode = false
-			a.backupStatus = ""
-		}
-		return nil
+		return s.backupsHandleConfirmKey(key)
 	}
 
 	// Handle tab navigation first. A number key for the already-active tab is a
@@ -190,17 +173,9 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.backupIndex++
 		}
 	case keyEnter: // Restore selected backup
-		if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
-			a.backupConfirmMode = true
-			a.backupConfirmType = "restore"
-			a.backupStatus = fmt.Sprintf("Restore backup '%s'? (y/n)", a.backups[a.backupIndex].Name)
-		}
+		s.backupsEnterConfirm("restore", "Restore backup '%s'? (y/n)")
 	case "d", "D": // Delete selected backup
-		if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
-			a.backupConfirmMode = true
-			a.backupConfirmType = keyDelete
-			a.backupStatus = fmt.Sprintf("Delete backup '%s'? (y/n)", a.backups[a.backupIndex].Name)
-		}
+		s.backupsEnterConfirm(keyDelete, "Delete backup '%s'? (y/n)")
 	case "n", "N": // Create new backup
 		a.backupRunning = true
 		a.backupStatus = "Creating backup..."
@@ -216,6 +191,41 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return NavigateTo(ScreenMainMenu)
 	}
 	return nil
+}
+
+// backupsHandleConfirmKey handles a key event while a restore/delete
+// confirmation prompt is active.
+func (s *backupsScreen) backupsHandleConfirmKey(key string) tea.Cmd {
+	a := s.App()
+	switch key {
+	case "y", "Y":
+		if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
+			a.backupRunning = true
+			backup := a.backups[a.backupIndex]
+			switch a.backupConfirmType {
+			case "restore":
+				return restoreBackupCmd(backup)
+			case keyDelete:
+				return deleteBackupCmd(backup)
+			}
+		}
+		a.backupConfirmMode = false
+	case "n", "N", keyEsc:
+		a.backupConfirmMode = false
+		a.backupStatus = ""
+	}
+	return nil
+}
+
+// backupsEnterConfirm arms a confirmation prompt of the given type for the
+// selected backup, formatting statusFmt with the backup name.
+func (s *backupsScreen) backupsEnterConfirm(confirmType, statusFmt string) {
+	a := s.App()
+	if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
+		a.backupConfirmMode = true
+		a.backupConfirmType = confirmType
+		a.backupStatus = fmt.Sprintf(statusFmt, a.backups[a.backupIndex].Name)
+	}
 }
 
 // handleMouse handles mouse clicks on the backups screen.
@@ -326,23 +336,7 @@ func (s *backupsScreen) View(width, height int) string {
 	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(subtitleText)
 
 	// Show status message if any
-	var statusLine string
-	if a.backupStatus != "" {
-		statusStyle := lipgloss.NewStyle().Foreground(ColorYellow)
-		switch {
-		case strings.Contains(a.backupStatus, "skipped"):
-			// Partial/failed restore: keep the warning (yellow) style even though
-			// the message contains "Restored" (C3).
-			statusStyle = lipgloss.NewStyle().Foreground(ColorYellow)
-		case strings.Contains(a.backupStatus, "Restored") || strings.Contains(a.backupStatus, "Created"):
-			statusStyle = lipgloss.NewStyle().Foreground(ColorGreen)
-		case strings.Contains(a.backupStatus, "failed") || strings.Contains(a.backupStatus, "Error"):
-			statusStyle = lipgloss.NewStyle().Foreground(ColorRed)
-		case a.backupConfirmMode:
-			statusStyle = lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
-		}
-		statusLine = statusStyle.Render(a.backupStatus)
-	}
+	statusLine := a.backupsRenderStatusLine()
 
 	// Check if no backups
 	if len(a.backups) == 0 {
@@ -376,6 +370,57 @@ func (s *backupsScreen) View(width, height int) string {
 	boxOuterW := min(92, maxInt(44, width-8))
 	innerTextW := maxInt(20, boxOuterW-4) // border(2) + paddingX(2)
 
+	listBox := a.backupsRenderListBox(boxOuterW, innerTextW)
+
+	// Details panel for selected backup
+	detailsBox := a.backupsRenderDetailsBox(boxOuterW)
+
+	// Help text
+	help := HelpStyle.Render(a.backupsHelpText())
+
+	// Build content with optional status line
+	var contentParts []string
+	contentParts = append(contentParts, tabBar, "", title, subtitle)
+	if statusLine != "" {
+		contentParts = append(contentParts, statusLine)
+	}
+	contentParts = append(contentParts, "", listBox)
+	if detailsBox != "" {
+		contentParts = append(contentParts, "", detailsBox)
+	}
+	contentParts = append(contentParts, "", help)
+	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
+
+	return lipgloss.Place(width, height,
+		lipgloss.Center, lipgloss.Top,
+		content)
+}
+
+// backupsRenderStatusLine renders the styled status message, or "" when none is
+// set.
+func (a *App) backupsRenderStatusLine() string {
+	if a.backupStatus == "" {
+		return ""
+	}
+	statusStyle := lipgloss.NewStyle().Foreground(ColorYellow)
+	switch {
+	case strings.Contains(a.backupStatus, "skipped"):
+		// Partial/failed restore: keep the warning (yellow) style even though
+		// the message contains "Restored" (C3).
+		statusStyle = lipgloss.NewStyle().Foreground(ColorYellow)
+	case strings.Contains(a.backupStatus, "Restored") || strings.Contains(a.backupStatus, "Created"):
+		statusStyle = lipgloss.NewStyle().Foreground(ColorGreen)
+	case strings.Contains(a.backupStatus, "failed") || strings.Contains(a.backupStatus, "Error"):
+		statusStyle = lipgloss.NewStyle().Foreground(ColorRed)
+	case a.backupConfirmMode:
+		statusStyle = lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
+	}
+	return statusStyle.Render(a.backupStatus)
+}
+
+// backupsRenderListBox renders the bordered backup list (header + one row per
+// backup).
+func (a *App) backupsRenderListBox(boxOuterW, innerTextW int) string {
 	// Backup list header
 	backupLines := make([]string, 0, len(a.backups)+2)
 	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
@@ -425,61 +470,47 @@ func (s *backupsScreen) View(width, height int) string {
 		borderColor = ColorMagenta
 	}
 
-	listBox := lipgloss.NewStyle().
+	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1).
 		Width(maxInt(1, boxOuterW-2)). // border adds 2
 		Render(backupList)
+}
 
-	// Details panel for selected backup
-	var detailsBox string
-	if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
-		selected := a.backups[a.backupIndex]
-		detailLines := []string{
-			lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true).Render("DETAILS"),
-			"",
-			fmt.Sprintf("%s %s", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Name:"), lipgloss.NewStyle().Foreground(ColorText).Render(selected.Name)),
-			fmt.Sprintf("%s %s", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Date:"), lipgloss.NewStyle().Foreground(ColorText).Render(selected.Timestamp.Format("2006-01-02 15:04:05"))),
-			fmt.Sprintf("%s %d", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Files:"), selected.FileCount),
-			fmt.Sprintf("%s %s", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Size:"), formatBytes(selected.Size)),
-			fmt.Sprintf("%s %s", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Path:"), lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(selected.Path, 40))),
-		}
-		detailsContent := strings.Join(detailLines, "\n")
-		detailsBox = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBorder).
-			Padding(0, 1).
-			Width(maxInt(1, boxOuterW-2)).
-			Render(detailsContent)
+// backupsRenderDetailsBox renders the details panel for the selected backup, or
+// "" when there is no valid selection.
+func (a *App) backupsRenderDetailsBox(boxOuterW int) string {
+	if len(a.backups) == 0 || a.backupIndex >= len(a.backups) {
+		return ""
 	}
+	selected := a.backups[a.backupIndex]
+	detailLines := []string{
+		lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true).Render("DETAILS"),
+		"",
+		fmt.Sprintf("%s %s", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Name:"), lipgloss.NewStyle().Foreground(ColorText).Render(selected.Name)),
+		fmt.Sprintf("%s %s", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Date:"), lipgloss.NewStyle().Foreground(ColorText).Render(selected.Timestamp.Format("2006-01-02 15:04:05"))),
+		fmt.Sprintf("%s %d", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Files:"), selected.FileCount),
+		fmt.Sprintf("%s %s", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Size:"), formatBytes(selected.Size)),
+		fmt.Sprintf("%s %s", lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Path:"), lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(selected.Path, 40))),
+	}
+	detailsContent := strings.Join(detailLines, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder).
+		Padding(0, 1).
+		Width(maxInt(1, boxOuterW-2)).
+		Render(detailsContent)
+}
 
-	// Help text
-	var helpText string
+// backupsHelpText returns the footer help text for the loaded-list state.
+func (a *App) backupsHelpText() string {
 	switch {
 	case a.backupRunning:
-		helpText = "please wait..."
+		return "please wait..."
 	case a.backupConfirmMode:
-		helpText = "y confirm • n cancel"
+		return "y confirm • n cancel"
 	default:
-		helpText = "up/down navigate • enter restore • d delete • n new backup • r refresh • esc menu"
+		return "up/down navigate • enter restore • d delete • n new backup • r refresh • esc menu"
 	}
-	help := HelpStyle.Render(helpText)
-
-	// Build content with optional status line
-	var contentParts []string
-	contentParts = append(contentParts, tabBar, "", title, subtitle)
-	if statusLine != "" {
-		contentParts = append(contentParts, statusLine)
-	}
-	contentParts = append(contentParts, "", listBox)
-	if detailsBox != "" {
-		contentParts = append(contentParts, "", detailsBox)
-	}
-	contentParts = append(contentParts, "", help)
-	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
-
-	return lipgloss.Place(width, height,
-		lipgloss.Center, lipgloss.Top,
-		content)
 }

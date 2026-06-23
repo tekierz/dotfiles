@@ -130,84 +130,8 @@ func (s *animationScreen) View(width, height int) string {
 	lines := make([]string, 0, contentH)
 
 	// Rain (matrix-style), but explicitly vertical and readable (not "glitch noise").
-	chars := []rune("01ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*")
-	headStyle := lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
-	midStyle := lipgloss.NewStyle().Foreground(ColorGreen)
-	tailStyle := lipgloss.NewStyle().Foreground(ColorGreen).Faint(true)
-	sparkStyle := lipgloss.NewStyle().Foreground(ColorNeonBlue).Bold(true)
-
-	hash32 := func(v uint32) uint32 {
-		// Tiny deterministic mixer (no RNG state, stable across frames).
-		v ^= v >> 16
-		v *= 0x7feb352d
-		v ^= v >> 15
-		v *= 0x846ca68b
-		v ^= v >> 16
-		return v
-	}
-
-	// Precompute per-column drop parameters.
-	type drop struct {
-		head   int
-		length int
-		color  int // 0 = green, 1 = cyan spark
-	}
-	drops := make([]drop, contentW)
-	for x := 0; x < contentW; x++ {
-		//nolint:gosec // G115: terminal-bounded small positive int, no overflow
-		h := hash32(uint32(x*1337 + 42))
-		speed := 1 + int(h%3) // 1..3
-		length := 6 + int((h>>8)%10)
-		gap := 8 + int((h>>16)%10)
-		cycle := rainH + length + gap
-		//nolint:gosec // G115: terminal-bounded small positive int, no overflow
-		head := (a.animFrame*speed + int(h%uint32(cycle))) % cycle
-		head -= length // allow entering from above
-
-		color := 0
-		if (h>>24)%11 == 0 {
-			color = 1
-		}
-
-		drops[x] = drop{head: head, length: length, color: color}
-	}
-
-	for y := 0; y < rainH; y++ {
-		var line strings.Builder
-		for x := 0; x < contentW; x++ {
-			d := drops[x]
-			if y > d.head || d.head < 0 {
-				line.WriteByte(' ')
-				continue
-			}
-
-			dist := d.head - y // 0 at head, increases upward
-			if dist < 0 || dist >= d.length {
-				line.WriteByte(' ')
-				continue
-			}
-
-			// Pick a stable-ish character for this cell.
-			//nolint:gosec // G115: terminal-bounded small positive int, no overflow
-			sv := hash32(uint32(x*31 + y*97 + ((a.animFrame - dist) * 7)))
-			ch := chars[int(sv)%len(chars)]
-
-			// Choose style by distance down the trail.
-			style := tailStyle
-			if dist == 0 {
-				if d.color == 1 {
-					style = sparkStyle
-				} else {
-					style = headStyle
-				}
-			} else if dist < d.length/3 {
-				style = midStyle
-			}
-
-			line.WriteString(style.Render(string(ch)))
-		}
-		lines = append(lines, line.String())
-	}
+	drops := animationComputeDrops(contentW, rainH, a.animFrame)
+	lines = append(lines, animationRenderRain(drops, contentW, rainH, a.animFrame)...)
 
 	// Blank spacer line (kept always to avoid layout jitter).
 	lines = append(lines, "")
@@ -275,4 +199,95 @@ func (s *animationScreen) View(width, height int) string {
 		Render(content)
 
 	return PlaceWithBackground(a.width, a.height, card)
+}
+
+// animationHash32 is a tiny deterministic mixer (no RNG state, stable across
+// frames) used to derive per-column/per-cell pseudo-random values.
+func animationHash32(v uint32) uint32 {
+	v ^= v >> 16
+	v *= 0x7feb352d
+	v ^= v >> 15
+	v *= 0x846ca68b
+	v ^= v >> 16
+	return v
+}
+
+// animationDrop holds the precomputed parameters for one matrix-rain column.
+type animationDrop struct {
+	head   int
+	length int
+	color  int // 0 = green, 1 = cyan spark
+}
+
+// animationComputeDrops precomputes the per-column drop parameters for the
+// matrix rain at the given frame.
+func animationComputeDrops(contentW, rainH, animFrame int) []animationDrop {
+	drops := make([]animationDrop, contentW)
+	for x := 0; x < contentW; x++ {
+		//nolint:gosec // G115: terminal-bounded small positive int, no overflow
+		h := animationHash32(uint32(x*1337 + 42))
+		speed := 1 + int(h%3) // 1..3
+		length := 6 + int((h>>8)%10)
+		gap := 8 + int((h>>16)%10)
+		cycle := rainH + length + gap
+		//nolint:gosec // G115: terminal-bounded small positive int, no overflow
+		head := (animFrame*speed + int(h%uint32(cycle))) % cycle
+		head -= length // allow entering from above
+
+		color := 0
+		if (h>>24)%11 == 0 {
+			color = 1
+		}
+
+		drops[x] = animationDrop{head: head, length: length, color: color}
+	}
+	return drops
+}
+
+// animationRenderRain renders the matrix-rain lines for the given drops/frame.
+func animationRenderRain(drops []animationDrop, contentW, rainH, animFrame int) []string {
+	chars := []rune("01ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*")
+	headStyle := lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
+	midStyle := lipgloss.NewStyle().Foreground(ColorGreen)
+	tailStyle := lipgloss.NewStyle().Foreground(ColorGreen).Faint(true)
+	sparkStyle := lipgloss.NewStyle().Foreground(ColorNeonBlue).Bold(true)
+
+	rows := make([]string, 0, rainH)
+	for y := 0; y < rainH; y++ {
+		var line strings.Builder
+		for x := 0; x < contentW; x++ {
+			d := drops[x]
+			if y > d.head || d.head < 0 {
+				line.WriteByte(' ')
+				continue
+			}
+
+			dist := d.head - y // 0 at head, increases upward
+			if dist < 0 || dist >= d.length {
+				line.WriteByte(' ')
+				continue
+			}
+
+			// Pick a stable-ish character for this cell.
+			//nolint:gosec // G115: terminal-bounded small positive int, no overflow
+			sv := animationHash32(uint32(x*31 + y*97 + ((animFrame - dist) * 7)))
+			ch := chars[int(sv)%len(chars)]
+
+			// Choose style by distance down the trail.
+			style := tailStyle
+			if dist == 0 {
+				if d.color == 1 {
+					style = sparkStyle
+				} else {
+					style = headStyle
+				}
+			} else if dist < d.length/3 {
+				style = midStyle
+			}
+
+			line.WriteString(style.Render(string(ch)))
+		}
+		rows = append(rows, line.String())
+	}
+	return rows
 }

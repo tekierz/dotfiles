@@ -198,89 +198,119 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Package installation is skipped when no NEW packages are selected (e.g. a
 	// fully-installed machine), but the configuration phases below ALWAYS run.
 	// runInstallWorker is the only path that writes deep-dive configs, so a
-	// re-run with nothing to install must still re-apply config (C14).
+	// re-run with nothing to install must still re-apply config (C14). When the
+	// install phase aborts (no package manager / canceled) it has already called
+	// finish(), so we return immediately without applying configs.
+	if installSelectedTools(ctx, selectedTools, emitLine, stepLine, noteFailure, finish) {
+		return
+	}
+
+	applyToolConfigs(cfg, theme, emitLine, stepLine, noteFailure)
+
+	// Surface all failures: name each failed step so the Error screen lists
+	// exactly what went wrong, not just a count + first error.
+	finish(aggregateFailures(failures))
+}
+
+// installSelectedTools runs the package-install phase. It returns true only when
+// it has already called finish() and the caller must return immediately (no
+// package manager detected, or the install was canceled). A nil/empty selection
+// is not an abort: configuration must still be applied afterwards (C14).
+func installSelectedTools(ctx context.Context, selectedTools []string, emitLine, stepLine func(string), noteFailure func(error), finish func(error)) bool {
 	if len(selectedTools) == 0 {
 		emitLine("No new tools to install; applying configuration...")
-	} else {
-		// Detect package manager (only needed for the package-install loop).
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			finish(fmt.Errorf("no package manager detected"))
-			return
+		return false
+	}
+
+	mgr := pkg.DetectManager()
+	if mgr == nil {
+		finish(fmt.Errorf("no package manager detected"))
+		return true
+	}
+
+	platform := pkg.DetectPlatform()
+	reg := tools.GetRegistry()
+	emitLine(fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
+
+	successCount := 0
+	for _, toolID := range selectedTools {
+		// Stop promptly if the install was canceled (Ctrl+C / teardown).
+		if ctx.Err() != nil {
+			finish(ctx.Err())
+			return true
 		}
-
-		platform := pkg.DetectPlatform()
-		reg := tools.GetRegistry()
-
-		emitLine(fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
-
-		successCount := 0
-		for _, toolID := range selectedTools {
-			// Stop promptly if the install was canceled (Ctrl+C / teardown).
-			if ctx.Err() != nil {
-				finish(ctx.Err())
-				return
-			}
-			stepLine(fmt.Sprintf("▶ Installing %s...", toolID))
-
-			t, ok := reg.Get(toolID)
-			if !ok {
-				emitLine(fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
-				continue
-			}
-
-			// Skip if already installed
-			if t.IsInstalled() {
-				emitLine(fmt.Sprintf("  ✓ %s already installed", toolID))
-				successCount++
-				continue
-			}
-
-			// Resolve packages via the single source of truth (which applies the
-			// Raspberry Pi -> Debian fallback). Using the raw map lookup here was a
-			// silent no-op on Pi, where standard tools define only MacOS/Arch/Debian
-			// keys: the loop printed a warning and continued with NO noteFailure, so
-			// selecting standard tools on a Pi installed nothing and never surfaced an
-			// Error screen (FIX 2 — the RC-C silent-failure class re-introduced).
-			pkgs := tools.PackagesForPlatform(t.Packages(), platform)
-			if len(pkgs) == 0 {
-				// A genuinely-unsupported selected tool must surface as a failure
-				// (Error screen), not be silently skipped.
-				emitLine(fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
-				noteFailure(fmt.Errorf("%s: no packages for this platform", toolID))
-				continue
-			}
-
-			// Install using streaming command, derived from the cancelable worker
-			// context so Ctrl+C / teardown stops the subprocess.
-			cmd, err := mgr.InstallStreaming(ctx, pkgs...)
-			if err != nil {
-				emitLine(fmt.Sprintf("  ✗ Failed to start install: %v", err))
-				noteFailure(fmt.Errorf("%s: %w", toolID, err))
-				continue
-			}
-
-			// Collect output
-			for line := range cmd.Output {
-				emitLine("  " + line)
-			}
-
-			if err := cmd.Wait(); err != nil {
-				emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
-				noteFailure(fmt.Errorf("%s: %w", toolID, err))
-			} else {
-				emitLine(fmt.Sprintf("  ✓ %s installed successfully", toolID))
-				successCount++
-			}
-		}
-
-		if successCount == len(selectedTools) {
-			emitLine(fmt.Sprintf("\n✓ All %d tools installed successfully!", successCount))
-		} else {
-			emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", successCount, len(selectedTools)))
+		if installOneTool(ctx, toolID, platform, reg, mgr, emitLine, stepLine, noteFailure) {
+			successCount++
 		}
 	}
 
+	if successCount == len(selectedTools) {
+		emitLine(fmt.Sprintf("\n✓ All %d tools installed successfully!", successCount))
+	} else {
+		emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", successCount, len(selectedTools)))
+	}
+	return false
+}
+
+// installOneTool installs a single tool, streaming its output. It returns true
+// when the tool ends up installed (already present, or installed now) and
+// records a failure (without aborting the whole run) otherwise.
+func installOneTool(ctx context.Context, toolID string, platform pkg.Platform, reg *tools.Registry, mgr pkg.PackageManager, emitLine, stepLine func(string), noteFailure func(error)) bool {
+	stepLine(fmt.Sprintf("▶ Installing %s...", toolID))
+
+	t, ok := reg.Get(toolID)
+	if !ok {
+		emitLine(fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
+		return false
+	}
+
+	// Skip if already installed.
+	if t.IsInstalled() {
+		emitLine(fmt.Sprintf("  ✓ %s already installed", toolID))
+		return true
+	}
+
+	// Resolve packages via the single source of truth (which applies the
+	// Raspberry Pi -> Debian fallback). Using the raw map lookup here was a
+	// silent no-op on Pi, where standard tools define only MacOS/Arch/Debian
+	// keys: the loop printed a warning and continued with NO noteFailure, so
+	// selecting standard tools on a Pi installed nothing and never surfaced an
+	// Error screen (FIX 2 — the RC-C silent-failure class re-introduced).
+	pkgs := tools.PackagesForPlatform(t.Packages(), platform)
+	if len(pkgs) == 0 {
+		// A genuinely-unsupported selected tool must surface as a failure
+		// (Error screen), not be silently skipped.
+		emitLine(fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
+		noteFailure(fmt.Errorf("%s: no packages for this platform", toolID))
+		return false
+	}
+
+	// Install using streaming command, derived from the cancelable worker
+	// context so Ctrl+C / teardown stops the subprocess.
+	cmd, err := mgr.InstallStreaming(ctx, pkgs...)
+	if err != nil {
+		emitLine(fmt.Sprintf("  ✗ Failed to start install: %v", err))
+		noteFailure(fmt.Errorf("%s: %w", toolID, err))
+		return false
+	}
+
+	for line := range cmd.Output {
+		emitLine("  " + line)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
+		noteFailure(fmt.Errorf("%s: %w", toolID, err))
+		return false
+	}
+	emitLine(fmt.Sprintf("  ✓ %s installed successfully", toolID))
+	return true
+}
+
+// applyToolConfigs writes every deep-dive tool configuration. These phases ALWAYS
+// run (even when nothing was installed), since this is the only path that writes
+// deep-dive configs. Failures are recorded but never abort the sequence.
+func applyToolConfigs(cfg DeepDiveConfig, theme string, emitLine, stepLine func(string), noteFailure func(error)) {
 	// configPhase runs a single configuration step, emitting a header line,
 	// advancing the progress step, and recording any failure.
 	configPhase := func(header string, run func() error, okLine string) {
@@ -304,41 +334,10 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure tmux with TPM plugins. The DeepDiveConfig -> TmuxConfig translation
 	// is shared with config-apply via tmuxConfigFrom; install additionally clones
 	// TPM (SetupTPM), which is an install-only side-effect.
-	tmuxCfg := tmuxConfigFrom(cfg)
-	stepLine("\n▶ Configuring tmux...")
-	if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
-		emitLine(fmt.Sprintf("  ⚠ Failed to configure tmux: %v", err))
-		noteFailure(fmt.Errorf("failed to configure tmux: %w", err))
-	} else {
-		emitLine("  ✓ Tmux configured with ~/.tmux.conf")
-		if tmuxCfg.TPMEnabled {
-			if tools.IsTPMInstalled() {
-				emitLine("  ✓ TPM plugins ready (run prefix+I in tmux to install)")
-			} else {
-				emitLine("  ⚠ TPM installed but plugins pending")
-			}
-		}
-	}
+	applyTmuxConfig(cfg, theme, emitLine, stepLine, noteFailure)
 
 	// Apply Claude Code MCP configuration if claude-code was selected
-	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
-		stepLine("\n▶ Configuring Claude Code MCP servers...")
-		claudeTool := tools.NewClaudeCodeTool()
-		// Use user's MCP selections from deep dive config
-		if err := claudeTool.ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs); err != nil {
-			emitLine(fmt.Sprintf("  ⚠ Failed to configure Claude MCP: %v", err))
-			noteFailure(fmt.Errorf("failed to configure Claude MCP: %w", err))
-		} else {
-			// Count enabled MCPs for status message
-			enabledCount := 0
-			for _, enabled := range cfg.ClaudeCodeMCPs {
-				if enabled {
-					enabledCount++
-				}
-			}
-			emitLine(fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
-		}
-	}
+	installClaudeCodeMCP(cfg, emitLine, stepLine, noteFailure)
 
 	// Configure Ghostty
 	configPhase("\n▶ Configuring Ghostty...", func() error {
@@ -429,10 +428,50 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 			return nil
 		}, "  ✓ Glow configured")
 	}
+}
 
-	// Surface all failures: name each failed step so the Error screen lists
-	// exactly what went wrong, not just a count + first error.
-	finish(aggregateFailures(failures))
+// applyTmuxConfig writes the tmux config and clones TPM (an install-only
+// side-effect not shared with config-apply).
+func applyTmuxConfig(cfg DeepDiveConfig, theme string, emitLine, stepLine func(string), noteFailure func(error)) {
+	tmuxCfg := tmuxConfigFrom(cfg)
+	stepLine("\n▶ Configuring tmux...")
+	if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
+		emitLine(fmt.Sprintf("  ⚠ Failed to configure tmux: %v", err))
+		noteFailure(fmt.Errorf("failed to configure tmux: %w", err))
+		return
+	}
+	emitLine("  ✓ Tmux configured with ~/.tmux.conf")
+	if tmuxCfg.TPMEnabled {
+		if tools.IsTPMInstalled() {
+			emitLine("  ✓ TPM plugins ready (run prefix+I in tmux to install)")
+		} else {
+			emitLine("  ⚠ TPM installed but plugins pending")
+		}
+	}
+}
+
+// installClaudeCodeMCP configures Claude Code MCP servers when claude-code was
+// selected in the deep-dive.
+func installClaudeCodeMCP(cfg DeepDiveConfig, emitLine, stepLine func(string), noteFailure func(error)) {
+	if !cfg.CLITools["claude-code"] && !cfg.Utilities["claude-code"] {
+		return
+	}
+	stepLine("\n▶ Configuring Claude Code MCP servers...")
+	claudeTool := tools.NewClaudeCodeTool()
+	// Use user's MCP selections from deep dive config.
+	if err := claudeTool.ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs); err != nil {
+		emitLine(fmt.Sprintf("  ⚠ Failed to configure Claude MCP: %v", err))
+		noteFailure(fmt.Errorf("failed to configure Claude MCP: %w", err))
+		return
+	}
+	// Count enabled MCPs for status message.
+	enabledCount := 0
+	for _, enabled := range cfg.ClaudeCodeMCPs {
+		if enabled {
+			enabledCount++
+		}
+	}
+	emitLine(fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
 }
 
 // aggregateFailures builds the final installation error from a slice of per-step

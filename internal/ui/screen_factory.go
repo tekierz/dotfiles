@@ -33,72 +33,58 @@ func (f *Factory) SetError(err error) {
 // panics rather than silently returning nil — failing loud in dev/test instead
 // of rendering a blank screen in production.
 func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
-	switch id {
-	case ScreenError:
+	// ScreenError needs f.data.Error, so it is not a uniform constructor(ctx)
+	// call and stays out of the map-driven lookups below.
+	if id == ScreenError {
 		return NewErrorScreen(ctx, f.data.Error)
-	case ScreenSummary:
-		return NewSummaryScreen(ctx)
-	case ScreenAnimation:
-		return NewAnimationScreen(ctx)
-	case ScreenProgress:
-		return NewProgressScreen(ctx)
-	case ScreenUsers:
-		return NewUsersScreen(ctx)
-	case ScreenWelcome:
-		return NewWelcomeScreen(ctx)
-	case ScreenThemePicker:
-		return NewThemePickerScreen(ctx)
-	case ScreenNavPicker:
-		return NewNavPickerScreen(ctx)
-	case ScreenFileTree:
-		return NewFileTreeScreen(ctx)
-	case ScreenMainMenu:
-		return NewMainMenuScreen(ctx)
-	case ScreenManage:
-		return NewManageScreen(ctx)
-	case ScreenDeepDiveMenu:
-		return NewDeepDiveMenuScreen(ctx)
-	case ScreenHotkeys:
-		return NewHotkeysScreen(ctx)
-	case ScreenBackups:
-		return NewBackupsScreen(ctx)
-	case ScreenUpdate:
-		return NewUpdateScreen(ctx)
-	case ScreenConfigGhostty:
-		return NewConfigGhosttyScreen(ctx)
-	case ScreenConfigTmux:
-		return NewConfigTmuxScreen(ctx)
-	case ScreenConfigZsh:
-		return NewConfigZshScreen(ctx)
-	case ScreenConfigNeovim:
-		return NewConfigNeovimScreen(ctx)
-	case ScreenConfigGit:
-		return NewConfigGitScreen(ctx)
-	case ScreenConfigYazi:
-		return NewConfigYaziScreen(ctx)
-	case ScreenConfigFzf:
-		return NewConfigFzfScreen(ctx)
-	case ScreenConfigUtilities:
-		return NewConfigUtilitiesScreen(ctx)
-	case ScreenConfigMacApps:
-		return NewConfigMacAppsScreen(ctx)
-	case ScreenConfigCLITools:
-		return NewConfigCLIToolsScreen(ctx)
-	case ScreenConfigGUIApps:
-		return NewConfigGUIAppsScreen(ctx)
-	case ScreenConfigCLIUtilities:
-		return NewConfigCLIUtilitiesScreen(ctx)
-	case ScreenConfigLazyGit:
-		return NewConfigLazyGitScreen(ctx)
-	case ScreenConfigBtop:
-		return NewConfigBtopScreen(ctx)
-	case ScreenConfigGlow:
-		return NewConfigGlowScreen(ctx)
-	case ScreenConfigClaudeCode:
-		return NewConfigClaudeCodeScreen(ctx)
-	default:
-		panic(fmt.Sprintf("screen factory: no handler for screen %d — every live screen must be mapped", id))
 	}
+	if h, ok := factoryCoreScreens[id]; ok {
+		return h(ctx)
+	}
+	if h, ok := factoryConfigScreens[id]; ok {
+		return h(ctx)
+	}
+	panic(fmt.Sprintf("screen factory: no handler for screen %d — every live screen must be mapped", id))
+}
+
+// factoryCoreScreens maps the non-config screens whose constructor is a uniform
+// func(*ScreenContext) ScreenHandler.
+var factoryCoreScreens = map[Screen]func(*ScreenContext) ScreenHandler{
+	ScreenSummary:      func(ctx *ScreenContext) ScreenHandler { return NewSummaryScreen(ctx) },
+	ScreenAnimation:    func(ctx *ScreenContext) ScreenHandler { return NewAnimationScreen(ctx) },
+	ScreenProgress:     func(ctx *ScreenContext) ScreenHandler { return NewProgressScreen(ctx) },
+	ScreenUsers:        func(ctx *ScreenContext) ScreenHandler { return NewUsersScreen(ctx) },
+	ScreenWelcome:      func(ctx *ScreenContext) ScreenHandler { return NewWelcomeScreen(ctx) },
+	ScreenThemePicker:  func(ctx *ScreenContext) ScreenHandler { return NewThemePickerScreen(ctx) },
+	ScreenNavPicker:    func(ctx *ScreenContext) ScreenHandler { return NewNavPickerScreen(ctx) },
+	ScreenFileTree:     func(ctx *ScreenContext) ScreenHandler { return NewFileTreeScreen(ctx) },
+	ScreenMainMenu:     func(ctx *ScreenContext) ScreenHandler { return NewMainMenuScreen(ctx) },
+	ScreenManage:       func(ctx *ScreenContext) ScreenHandler { return NewManageScreen(ctx) },
+	ScreenDeepDiveMenu: func(ctx *ScreenContext) ScreenHandler { return NewDeepDiveMenuScreen(ctx) },
+	ScreenHotkeys:      func(ctx *ScreenContext) ScreenHandler { return NewHotkeysScreen(ctx) },
+	ScreenBackups:      func(ctx *ScreenContext) ScreenHandler { return NewBackupsScreen(ctx) },
+	ScreenUpdate:       func(ctx *ScreenContext) ScreenHandler { return NewUpdateScreen(ctx) },
+}
+
+// factoryConfigScreens maps the per-tool config screens whose constructor is a
+// uniform func(*ScreenContext) ScreenHandler.
+var factoryConfigScreens = map[Screen]func(*ScreenContext) ScreenHandler{
+	ScreenConfigGhostty:      func(ctx *ScreenContext) ScreenHandler { return NewConfigGhosttyScreen(ctx) },
+	ScreenConfigTmux:         func(ctx *ScreenContext) ScreenHandler { return NewConfigTmuxScreen(ctx) },
+	ScreenConfigZsh:          func(ctx *ScreenContext) ScreenHandler { return NewConfigZshScreen(ctx) },
+	ScreenConfigNeovim:       func(ctx *ScreenContext) ScreenHandler { return NewConfigNeovimScreen(ctx) },
+	ScreenConfigGit:          func(ctx *ScreenContext) ScreenHandler { return NewConfigGitScreen(ctx) },
+	ScreenConfigYazi:         func(ctx *ScreenContext) ScreenHandler { return NewConfigYaziScreen(ctx) },
+	ScreenConfigFzf:          func(ctx *ScreenContext) ScreenHandler { return NewConfigFzfScreen(ctx) },
+	ScreenConfigUtilities:    func(ctx *ScreenContext) ScreenHandler { return NewConfigUtilitiesScreen(ctx) },
+	ScreenConfigMacApps:      func(ctx *ScreenContext) ScreenHandler { return NewConfigMacAppsScreen(ctx) },
+	ScreenConfigCLITools:     func(ctx *ScreenContext) ScreenHandler { return NewConfigCLIToolsScreen(ctx) },
+	ScreenConfigGUIApps:      func(ctx *ScreenContext) ScreenHandler { return NewConfigGUIAppsScreen(ctx) },
+	ScreenConfigCLIUtilities: func(ctx *ScreenContext) ScreenHandler { return NewConfigCLIUtilitiesScreen(ctx) },
+	ScreenConfigLazyGit:      func(ctx *ScreenContext) ScreenHandler { return NewConfigLazyGitScreen(ctx) },
+	ScreenConfigBtop:         func(ctx *ScreenContext) ScreenHandler { return NewConfigBtopScreen(ctx) },
+	ScreenConfigGlow:         func(ctx *ScreenContext) ScreenHandler { return NewConfigGlowScreen(ctx) },
+	ScreenConfigClaudeCode:   func(ctx *ScreenContext) ScreenHandler { return NewConfigClaudeCodeScreen(ctx) },
 }
 
 // CreateFactory returns a ScreenFactory function for use with ScreenManager.

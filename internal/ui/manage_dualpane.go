@@ -812,21 +812,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	item := items[a.manageIndex]
 
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("SETTINGS")
-	statusBadge := ""
-	if item.id != manageItemGlobal {
-		if item.installed {
-			statusBadge = " " + RenderBadge("INSTALLED", ColorBg, ColorGreen)
-		} else {
-			statusBadge = " " + RenderBadge("NOT INSTALLED", ColorText, ColorMuted)
-		}
-	}
-	metaName := item.name
-	if item.icon != "" {
-		metaName = item.icon + " " + metaName
-	}
-	meta := lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(metaName) +
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description) +
-		statusBadge
+	meta := renderManageSettingsMeta(item)
 
 	innerW := maxInt(0, layout.rightW-(layout.border*2)-(layout.padX*2))
 
@@ -842,44 +828,9 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	if len(fields) == 0 {
 		// No explicit fields for this tool. Show a helpful placeholder plus an
 		// install hint.
-		msgStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		strong := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
-
-		if item.id == manageItemGlobal {
-			fieldLines = append(fieldLines, msgStyle.Render("No global settings available."))
-		} else {
-			if item.configurable {
-				fieldLines = append(fieldLines, msgStyle.Render("No manager UI fields yet (tool has config)."))
-			} else {
-				fieldLines = append(fieldLines, msgStyle.Render("No configurable settings for this tool."))
-			}
-
-			if !item.installed {
-				fieldLines = append(fieldLines, strong.Render("Press I to install"))
-			} else {
-				fieldLines = append(fieldLines, msgStyle.Render("Installed — press S to save global prefs"))
-			}
-
-			// Show package names for this platform (best-effort).
-			if t, ok := tools.GetRegistry().Get(item.id); ok {
-				platform := pkg.DetectPlatform()
-				pkgs := t.Packages()[platform]
-				if len(pkgs) == 0 {
-					pkgs = t.Packages()["all"]
-				}
-				if len(pkgs) > 0 {
-					pkgLine := msgStyle.Render("Packages: ") + strong.Render(strings.Join(pkgs, ", "))
-					fieldLines = append(fieldLines, pkgLine)
-				}
-			}
-		}
+		fieldLines = renderManageFieldPlaceholder(item)
 	} else {
-		for i := a.manageFieldsScroll; i < len(fields) && len(fieldLines) < fieldCapacity; i++ {
-			f := fields[i]
-			focused := (a.managePane == managePaneSettings) && (i == a.configFieldIndex)
-			applied := manageFieldIsApplied(item.id, f.key)
-			fieldLines = append(fieldLines, truncateVisible(renderManageFieldLine(f, focused, applied), innerW))
-		}
+		fieldLines = a.renderManageFieldRows(fields, item, fieldCapacity, innerW)
 	}
 	for len(fieldLines) < fieldCapacity {
 		fieldLines = append(fieldLines, "")
@@ -893,12 +844,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	}
 
 	// Exactly 3 header lines before the fields area (matches manageLayout.rightHeaderLines).
-	actionLine := ""
-	if item.id != manageItemGlobal && !item.installed {
-		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
-	} else if item.id != manageItemGlobal && len(fields) == 0 {
-		actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
-	}
+	actionLine := manageSettingsActionLine(item, fields)
 
 	contentLines := []string{
 		title,
@@ -921,6 +867,91 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	)
 
 	return panel.Render(content)
+}
+
+// renderManageSettingsMeta builds the settings-panel meta header line: the tool
+// name (with optional icon), its description, and an install-status badge.
+func renderManageSettingsMeta(item manageItem) string {
+	statusBadge := ""
+	if item.id != manageItemGlobal {
+		if item.installed {
+			statusBadge = " " + RenderBadge("INSTALLED", ColorBg, ColorGreen)
+		} else {
+			statusBadge = " " + RenderBadge("NOT INSTALLED", ColorText, ColorMuted)
+		}
+	}
+	metaName := item.name
+	if item.icon != "" {
+		metaName = item.icon + " " + metaName
+	}
+	return lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(metaName) +
+		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description) +
+		statusBadge
+}
+
+// manageSettingsActionLine returns the action hint shown above the fields area
+// (install hint for uninstalled tools, or a "no fields" note).
+func manageSettingsActionLine(item manageItem, fields []manageField) string {
+	if item.id != manageItemGlobal && !item.installed {
+		return lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
+	}
+	if item.id != manageItemGlobal && len(fields) == 0 {
+		return lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
+	}
+	return ""
+}
+
+// renderManageFieldPlaceholder builds the placeholder field lines shown when a
+// tool has no explicit manager fields (a status/help message plus, for tools,
+// an install hint and the platform package names).
+func renderManageFieldPlaceholder(item manageItem) []string {
+	msgStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	strong := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
+
+	var fieldLines []string
+	if item.id == manageItemGlobal {
+		fieldLines = append(fieldLines, msgStyle.Render("No global settings available."))
+		return fieldLines
+	}
+
+	if item.configurable {
+		fieldLines = append(fieldLines, msgStyle.Render("No manager UI fields yet (tool has config)."))
+	} else {
+		fieldLines = append(fieldLines, msgStyle.Render("No configurable settings for this tool."))
+	}
+
+	if !item.installed {
+		fieldLines = append(fieldLines, strong.Render("Press I to install"))
+	} else {
+		fieldLines = append(fieldLines, msgStyle.Render("Installed — press S to save global prefs"))
+	}
+
+	// Show package names for this platform (best-effort).
+	if t, ok := tools.GetRegistry().Get(item.id); ok {
+		platform := pkg.DetectPlatform()
+		pkgs := t.Packages()[platform]
+		if len(pkgs) == 0 {
+			pkgs = t.Packages()["all"]
+		}
+		if len(pkgs) > 0 {
+			pkgLine := msgStyle.Render("Packages: ") + strong.Render(strings.Join(pkgs, ", "))
+			fieldLines = append(fieldLines, pkgLine)
+		}
+	}
+	return fieldLines
+}
+
+// renderManageFieldRows renders the visible settings rows (from the current
+// scroll offset, up to fieldCapacity), truncated to innerW.
+func (a *App) renderManageFieldRows(fields []manageField, item manageItem, fieldCapacity, innerW int) []string {
+	var fieldLines []string
+	for i := a.manageFieldsScroll; i < len(fields) && len(fieldLines) < fieldCapacity; i++ {
+		f := fields[i]
+		focused := (a.managePane == managePaneSettings) && (i == a.configFieldIndex)
+		applied := manageFieldIsApplied(item.id, f.key)
+		fieldLines = append(fieldLines, truncateVisible(renderManageFieldLine(f, focused, applied), innerW))
+	}
+	return fieldLines
 }
 
 // renderManageFieldLine renders one settings row. applied=false means the field is

@@ -143,6 +143,34 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return s.navigateTab(target)
 	}
 
+	// List navigation, selection toggle, log scroll and clear are handled
+	// together; the action keys below trigger commands.
+	if s.updateHandleNavKey(key) {
+		return nil
+	}
+
+	switch key {
+	case keyEnter: // Update selected or current package
+		return s.updateHandleEnter()
+	case "a": // Update all packages
+		if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
+			a.clearInstallLogs()
+			a.updateStatus = "Updating all packages..."
+			return checkSudoAndUpdateCmd(nil, true)
+		}
+	case "r": // Refresh updates
+		return s.updateHandleRefresh()
+	case keyEsc:
+		// ScreenMainMenu is migrated; route through the ScreenManager.
+		return NavigateTo(ScreenMainMenu)
+	}
+	return nil
+}
+
+// updateHandleNavKey handles cursor movement, batch-selection toggle, and log
+// scroll/clear. It returns true when the key was one of these (no command).
+func (s *updateScreen) updateHandleNavKey(key string) bool {
+	a := s.App()
 	switch key {
 	case "up", "k":
 		if a.updateIndex > 0 {
@@ -160,67 +188,82 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.updateSelected[a.updateIndex] = true
 			}
 		}
-	case keyEnter: // Update selected or current package
-		if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
-			var packagesToUpdate []pkg.Package
-			if len(a.updateSelected) > 0 {
-				// Update selected packages
-				for idx := range a.updateSelected {
-					if idx < len(a.updateResults) {
-						packagesToUpdate = append(packagesToUpdate, a.updateResults[idx])
-					}
-				}
-			} else if a.updateIndex < len(a.updateResults) {
-				// Update current package
-				packagesToUpdate = append(packagesToUpdate, a.updateResults[a.updateIndex])
-			}
-			if len(packagesToUpdate) > 0 {
-				a.clearInstallLogs()
-				a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
-				return checkSudoAndUpdateCmd(packagesToUpdate, false)
-			}
-		}
-	case "a": // Update all packages
-		if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
-			a.clearInstallLogs()
-			a.updateStatus = "Updating all packages..."
-			return checkSudoAndUpdateCmd(nil, true)
-		}
-	case "r": // Refresh updates
-		a.updateCheckDone = false
-		a.updateChecking = true
-		a.updateResults = nil
-		a.updateError = nil
-		a.updateStatus = ""
-		a.updateSelected = make(map[int]bool)
-		a.clearInstallLogs()
-		return checkUpdatesCmd()
 	case "c", "C": // Clear logs
 		if !a.updateRunning && len(a.installLogs) > 0 {
 			a.clearInstallLogs()
 			a.updateStatus = "Logs cleared"
 		}
 	case "pgup", "ctrl+u": // Scroll logs up
-		if len(a.installLogs) > 0 {
-			a.installLogScroll += 10
-			maxScroll := CalculateMaxLogScroll(len(a.installLogs), a.height-14)
-			if a.installLogScroll > maxScroll {
-				a.installLogScroll = maxScroll
-			}
-			a.installLogAutoScroll = false
-		}
+		s.updateScrollLogsUp()
 	case "pgdown", "ctrl+d": // Scroll logs down
-		if len(a.installLogs) > 0 {
-			a.installLogScroll -= 10
-			if a.installLogScroll < 0 {
-				a.installLogScroll = 0
+		s.updateScrollLogsDown()
+	default:
+		return false
+	}
+	return true
+}
+
+// updateHandleEnter updates the selected packages (or the current one when none
+// are selected), unless a check/run is already in flight.
+func (s *updateScreen) updateHandleEnter() tea.Cmd {
+	a := s.App()
+	if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
+		var packagesToUpdate []pkg.Package
+		if len(a.updateSelected) > 0 {
+			// Update selected packages
+			for idx := range a.updateSelected {
+				if idx < len(a.updateResults) {
+					packagesToUpdate = append(packagesToUpdate, a.updateResults[idx])
+				}
 			}
+		} else if a.updateIndex < len(a.updateResults) {
+			// Update current package
+			packagesToUpdate = append(packagesToUpdate, a.updateResults[a.updateIndex])
 		}
-	case keyEsc:
-		// ScreenMainMenu is migrated; route through the ScreenManager.
-		return NavigateTo(ScreenMainMenu)
+		if len(packagesToUpdate) > 0 {
+			a.clearInstallLogs()
+			a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
+			return checkSudoAndUpdateCmd(packagesToUpdate, false)
+		}
 	}
 	return nil
+}
+
+// updateHandleRefresh resets the check state and re-runs the update check.
+func (s *updateScreen) updateHandleRefresh() tea.Cmd {
+	a := s.App()
+	a.updateCheckDone = false
+	a.updateChecking = true
+	a.updateResults = nil
+	a.updateError = nil
+	a.updateStatus = ""
+	a.updateSelected = make(map[int]bool)
+	a.clearInstallLogs()
+	return checkUpdatesCmd()
+}
+
+// updateScrollLogsUp scrolls the install-log panel up (toward older lines).
+func (s *updateScreen) updateScrollLogsUp() {
+	a := s.App()
+	if len(a.installLogs) > 0 {
+		a.installLogScroll += 10
+		maxScroll := CalculateMaxLogScroll(len(a.installLogs), a.height-14)
+		if a.installLogScroll > maxScroll {
+			a.installLogScroll = maxScroll
+		}
+		a.installLogAutoScroll = false
+	}
+}
+
+// updateScrollLogsDown scrolls the install-log panel down (toward newer lines).
+func (s *updateScreen) updateScrollLogsDown() {
+	a := s.App()
+	if len(a.installLogs) > 0 {
+		a.installLogScroll -= 10
+		if a.installLogScroll < 0 {
+			a.installLogScroll = 0
+		}
+	}
 }
 
 // handleMouse handles tab-bar clicks on the update screen (routes through the

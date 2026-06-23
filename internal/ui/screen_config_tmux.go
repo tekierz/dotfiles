@@ -49,62 +49,72 @@ func tmuxAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
 	case keyLeft, keyRight, "h", "l":
-		switch a.configFieldIndex {
-		case 0: // Prefix
-			opts := []string{"ctrl-a", "ctrl-b", "ctrl-space"}
-			cfg.TmuxPrefix = cycleOption(opts, cfg.TmuxPrefix, fwd)
-		case 1: // Split binds
-			if cfg.TmuxSplitBinds == "pipes" {
-				cfg.TmuxSplitBinds = "percent"
-			} else {
-				cfg.TmuxSplitBinds = "pipes"
-			}
-		case 2: // Status bar
-			if cfg.TmuxStatusBar == tmuxStatusTop {
-				cfg.TmuxStatusBar = "bottom"
-			} else {
-				cfg.TmuxStatusBar = tmuxStatusTop
-			}
-		case 4: // History limit
-			opts := []string{"10000", "25000", "50000", "100000"}
-			current := fmt.Sprintf("%d", cfg.TmuxHistoryLimit)
-			cfg.TmuxHistoryLimit = atoi(cycleOption(opts, current, fwd), 50000)
-		case 5: // Escape time
-			opts := []string{"0", "10", "50", "100"}
-			current := fmt.Sprintf("%d", cfg.TmuxEscapeTime)
-			cfg.TmuxEscapeTime = atoi(cycleOption(opts, current, fwd), 10)
-		case 6: // Base index
-			if cfg.TmuxBaseIndex == 0 {
-				cfg.TmuxBaseIndex = 1
-			} else {
-				cfg.TmuxBaseIndex = 0
-			}
-		case 12: // Continuum interval
-			if cfg.TmuxTPMEnabled && cfg.TmuxPluginContinuum {
-				if fwd {
-					if cfg.TmuxContinuumSaveMin < 60 {
-						cfg.TmuxContinuumSaveMin += 5
-					}
-				} else if cfg.TmuxContinuumSaveMin > 5 {
-					cfg.TmuxContinuumSaveMin -= 5
-				}
-			}
-		}
+		tmuxAdjustValue(a, cfg, fwd)
 	case " ":
-		switch a.configFieldIndex {
-		case 3: // Mouse mode
-			cfg.TmuxMouseMode = !cfg.TmuxMouseMode
-		case 7: // TPM enabled
-			cfg.TmuxTPMEnabled = !cfg.TmuxTPMEnabled
-		case 8: // tmux-sensible
-			cfg.TmuxPluginSensible = !cfg.TmuxPluginSensible
-		case 9: // tmux-resurrect
-			cfg.TmuxPluginResurrect = !cfg.TmuxPluginResurrect
-		case 10: // tmux-continuum
-			cfg.TmuxPluginContinuum = !cfg.TmuxPluginContinuum
-		case 11: // tmux-yank
-			cfg.TmuxPluginYank = !cfg.TmuxPluginYank
+		tmuxToggleField(a, cfg)
+	}
+}
+
+// tmuxAdjustValue handles left/right value cycling for the focused tmux field.
+func tmuxAdjustValue(a *App, cfg *DeepDiveConfig, fwd bool) {
+	switch a.configFieldIndex {
+	case 0: // Prefix
+		opts := []string{"ctrl-a", "ctrl-b", "ctrl-space"}
+		cfg.TmuxPrefix = cycleOption(opts, cfg.TmuxPrefix, fwd)
+	case 1: // Split binds
+		if cfg.TmuxSplitBinds == "pipes" {
+			cfg.TmuxSplitBinds = "percent"
+		} else {
+			cfg.TmuxSplitBinds = "pipes"
 		}
+	case 2: // Status bar
+		if cfg.TmuxStatusBar == tmuxStatusTop {
+			cfg.TmuxStatusBar = "bottom"
+		} else {
+			cfg.TmuxStatusBar = tmuxStatusTop
+		}
+	case 4: // History limit
+		opts := []string{"10000", "25000", "50000", "100000"}
+		current := fmt.Sprintf("%d", cfg.TmuxHistoryLimit)
+		cfg.TmuxHistoryLimit = atoi(cycleOption(opts, current, fwd), 50000)
+	case 5: // Escape time
+		opts := []string{"0", "10", "50", "100"}
+		current := fmt.Sprintf("%d", cfg.TmuxEscapeTime)
+		cfg.TmuxEscapeTime = atoi(cycleOption(opts, current, fwd), 10)
+	case 6: // Base index
+		if cfg.TmuxBaseIndex == 0 {
+			cfg.TmuxBaseIndex = 1
+		} else {
+			cfg.TmuxBaseIndex = 0
+		}
+	case 12: // Continuum interval
+		if cfg.TmuxTPMEnabled && cfg.TmuxPluginContinuum {
+			if fwd {
+				if cfg.TmuxContinuumSaveMin < 60 {
+					cfg.TmuxContinuumSaveMin += 5
+				}
+			} else if cfg.TmuxContinuumSaveMin > 5 {
+				cfg.TmuxContinuumSaveMin -= 5
+			}
+		}
+	}
+}
+
+// tmuxToggleField handles space-bar toggles for the focused tmux field.
+func tmuxToggleField(a *App, cfg *DeepDiveConfig) {
+	switch a.configFieldIndex {
+	case 3: // Mouse mode
+		cfg.TmuxMouseMode = !cfg.TmuxMouseMode
+	case 7: // TPM enabled
+		cfg.TmuxTPMEnabled = !cfg.TmuxTPMEnabled
+	case 8: // tmux-sensible
+		cfg.TmuxPluginSensible = !cfg.TmuxPluginSensible
+	case 9: // tmux-resurrect
+		cfg.TmuxPluginResurrect = !cfg.TmuxPluginResurrect
+	case 10: // tmux-continuum
+		cfg.TmuxPluginContinuum = !cfg.TmuxPluginContinuum
+	case 11: // tmux-yank
+		cfg.TmuxPluginYank = !cfg.TmuxPluginYank
 	}
 }
 

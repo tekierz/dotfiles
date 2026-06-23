@@ -310,58 +310,12 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Handle new user name input.
 	if a.usersCreating {
-		switch key {
-		case keyEsc:
-			a.usersCreating = false
-			a.usersNewName = ""
-			return nil
-		case keyEnter:
-			if a.usersNewName != "" {
-				if err := config.ValidateUsername(a.usersNewName); err != nil {
-					a.usersStatus = fmt.Sprintf("Invalid: %v", err)
-					return nil
-				}
-				// Create with defaults.
-				a.usersCreating = false
-				name := a.usersNewName
-				a.usersNewName = ""
-				return saveUserCmd(name, defaultTheme, navEmacs, platformLinux)
-			}
-			return nil
-		case keyBackspace:
-			if len(a.usersNewName) > 0 {
-				a.usersNewName = a.usersNewName[:len(a.usersNewName)-1]
-			}
-			return nil
-		default:
-			// Add character to name (only alphanumeric, underscore, hyphen).
-			if len(key) == 1 && len(a.usersNewName) < 32 {
-				c := key[0]
-				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-					(c >= '0' && c <= '9' && len(a.usersNewName) > 0) ||
-					(c == '_' || c == '-') && len(a.usersNewName) > 0 {
-					a.usersNewName += key
-				}
-			}
-			return nil
-		}
+		return s.usersHandleCreateKey(key)
 	}
 
 	// Handle delete confirmation.
 	if a.usersDeleting {
-		switch key {
-		case "y", "Y":
-			a.usersDeleting = false
-			if a.usersIndex < len(a.usersItems) {
-				name := a.usersItems[a.usersIndex].name
-				return deleteUserCmd(name)
-			}
-			return nil
-		case "n", "N", keyEsc:
-			a.usersDeleting = false
-			return nil
-		}
-		return nil
+		return s.usersHandleDeleteKey(key)
 	}
 
 	// Tab navigation (number keys for tabs). A number key for the already-active
@@ -373,6 +327,80 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return s.navigateTab(target)
 	}
 
+	return s.usersHandleNavKey(key)
+}
+
+// usersHandleCreateKey processes keys while entering a new user name.
+func (s *usersScreen) usersHandleCreateKey(key string) tea.Cmd {
+	a := s.App()
+	switch key {
+	case keyEsc:
+		a.usersCreating = false
+		a.usersNewName = ""
+		return nil
+	case keyEnter:
+		if a.usersNewName != "" {
+			if err := config.ValidateUsername(a.usersNewName); err != nil {
+				a.usersStatus = fmt.Sprintf("Invalid: %v", err)
+				return nil
+			}
+			// Create with defaults.
+			a.usersCreating = false
+			name := a.usersNewName
+			a.usersNewName = ""
+			return saveUserCmd(name, defaultTheme, navEmacs, platformLinux)
+		}
+		return nil
+	case keyBackspace:
+		if len(a.usersNewName) > 0 {
+			a.usersNewName = a.usersNewName[:len(a.usersNewName)-1]
+		}
+		return nil
+	default:
+		// Add character to name (only alphanumeric, underscore, hyphen).
+		if len(key) == 1 && len(a.usersNewName) < 32 {
+			c := key[0]
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+				(c >= '0' && c <= '9' && len(a.usersNewName) > 0) ||
+				(c == '_' || c == '-') && len(a.usersNewName) > 0 {
+				a.usersNewName += key
+			}
+		}
+		return nil
+	}
+}
+
+// usersHandleDeleteKey processes keys while confirming a profile deletion.
+func (s *usersScreen) usersHandleDeleteKey(key string) tea.Cmd {
+	a := s.App()
+	switch key {
+	case "y", "Y":
+		a.usersDeleting = false
+		if a.usersIndex < len(a.usersItems) {
+			name := a.usersItems[a.usersIndex].name
+			return deleteUserCmd(name)
+		}
+		return nil
+	case "n", "N", keyEsc:
+		a.usersDeleting = false
+		return nil
+	}
+	return nil
+}
+
+// usersHandleNavKey processes the normal navigation/action keys (not in a
+// create/delete sub-mode and not a tab-navigation key).
+func (s *usersScreen) usersHandleNavKey(key string) tea.Cmd {
+	if s.usersHandleNavMotion(key) {
+		return nil
+	}
+	return s.usersHandleNavAction(key)
+}
+
+// usersHandleNavMotion handles pane toggling, cursor movement, and field cycling
+// (none of which issue a command). It returns true when the key was a motion key.
+func (s *usersScreen) usersHandleNavMotion(key string) bool {
+	a := s.App()
 	switch key {
 	case keyTab, "shift+tab":
 		// Toggle pane.
@@ -381,90 +409,64 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		} else {
 			a.usersPane = usersPaneList
 		}
-		return nil
-
 	case "up", "k":
-		if a.usersPane == usersPaneList {
+		s.usersMoveSelection(true)
+	case keyDown, "j":
+		s.usersMoveSelection(false)
+	case keyLeft, "h":
+		s.usersCycleSelectedField(-1)
+	case keyRight, "l":
+		s.usersCycleSelectedField(1)
+	default:
+		return false
+	}
+	return true
+}
+
+// usersMoveSelection moves the active cursor (list index or settings-field index,
+// depending on the focused pane) up or down within bounds.
+func (s *usersScreen) usersMoveSelection(up bool) {
+	a := s.App()
+	if a.usersPane == usersPaneList {
+		if up {
 			if a.usersIndex > 0 {
 				a.usersIndex--
 			}
-		} else {
-			if a.usersFieldIndex > 0 {
-				a.usersFieldIndex--
-			}
+		} else if a.usersIndex < len(a.usersItems)-1 {
+			a.usersIndex++
 		}
-		return nil
-
-	case keyDown, "j":
-		if a.usersPane == usersPaneList {
-			if a.usersIndex < len(a.usersItems)-1 {
-				a.usersIndex++
-			}
-		} else {
-			fields := a.getUserFields()
-			if a.usersFieldIndex < len(fields)-1 {
-				a.usersFieldIndex++
-			}
+		return
+	}
+	if up {
+		if a.usersFieldIndex > 0 {
+			a.usersFieldIndex--
 		}
-		return nil
+		return
+	}
+	fields := a.getUserFields()
+	if a.usersFieldIndex < len(fields)-1 {
+		a.usersFieldIndex++
+	}
+}
 
-	case keyLeft, "h":
-		if a.usersPane == usersPaneSettings {
-			fields := a.getUserFields()
-			if a.usersFieldIndex < len(fields) {
-				f := fields[a.usersFieldIndex]
-				if f.kind == userFieldOption {
-					a.cycleUserFieldOption(f, -1)
-					return nil
-				}
-			}
-		}
-		return nil
-
-	case keyRight, "l":
-		if a.usersPane == usersPaneSettings {
-			fields := a.getUserFields()
-			if a.usersFieldIndex < len(fields) {
-				f := fields[a.usersFieldIndex]
-				if f.kind == userFieldOption {
-					a.cycleUserFieldOption(f, 1)
-					return nil
-				}
-			}
-		}
-		return nil
-
+// usersHandleNavAction handles the non-motion action keys (enter, new, delete,
+// save, refresh, back).
+func (s *usersScreen) usersHandleNavAction(key string) tea.Cmd {
+	a := s.App()
+	switch key {
 	case keyEnter:
-		if a.usersPane == usersPaneList {
-			// Switch to selected user.
-			if a.usersIndex < len(a.usersItems) {
-				name := a.usersItems[a.usersIndex].name
-				return switchUserCmd(name)
-			}
-		} else {
-			// Cycle option field.
-			fields := a.getUserFields()
-			if a.usersFieldIndex < len(fields) {
-				f := fields[a.usersFieldIndex]
-				if f.kind == userFieldOption {
-					a.cycleUserFieldOption(f, 1)
-				}
-			}
-		}
-		return nil
+		return s.usersHandleEnter()
 
 	case "n", "a":
 		// New user.
 		a.usersCreating = true
 		a.usersNewName = ""
-		return nil
 
 	case "d", "x":
 		// Delete user (with confirmation).
 		if len(a.usersItems) > 0 && a.usersIndex < len(a.usersItems) {
 			a.usersDeleting = true
 		}
-		return nil
 
 	case "s":
 		// Save current user's settings.
@@ -472,7 +474,6 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			item := a.usersItems[a.usersIndex]
 			return saveUserCmd(item.name, item.theme, item.navStyle, item.keyboard)
 		}
-		return nil
 
 	case "r":
 		// Refresh user list.
@@ -484,6 +485,45 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return NavigateTo(ScreenMainMenu)
 	}
 
+	return nil
+}
+
+// usersCycleSelectedField cycles the selected option field by delta when the
+// settings pane is active (left/right keys). It is a no-op otherwise.
+func (s *usersScreen) usersCycleSelectedField(delta int) {
+	a := s.App()
+	if a.usersPane != usersPaneSettings {
+		return
+	}
+	fields := a.getUserFields()
+	if a.usersFieldIndex >= len(fields) {
+		return
+	}
+	if f := fields[a.usersFieldIndex]; f.kind == userFieldOption {
+		a.cycleUserFieldOption(f, delta)
+	}
+}
+
+// usersHandleEnter handles Enter: switch user (list pane) or cycle the selected
+// option field (settings pane).
+func (s *usersScreen) usersHandleEnter() tea.Cmd {
+	a := s.App()
+	if a.usersPane == usersPaneList {
+		// Switch to selected user.
+		if a.usersIndex < len(a.usersItems) {
+			name := a.usersItems[a.usersIndex].name
+			return switchUserCmd(name)
+		}
+	} else {
+		// Cycle option field.
+		fields := a.getUserFields()
+		if a.usersFieldIndex < len(fields) {
+			f := fields[a.usersFieldIndex]
+			if f.kind == userFieldOption {
+				a.cycleUserFieldOption(f, 1)
+			}
+		}
+	}
 	return nil
 }
 

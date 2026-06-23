@@ -85,52 +85,55 @@ func (s *fileTreeScreen) View(width, height int) string {
 	a.ensureInstallCache()
 
 	// Collect selected and already installed tools
-	var toInstall []string
-	var alreadyInstalled []string
+	toInstall, alreadyInstalled := s.filetreeCollectTools(cfg)
 
-	// CLI Tools
-	for id, enabled := range cfg.CLITools {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// GUI Apps
-	for id, enabled := range cfg.GUIApps {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// CLI Utilities
-	for id, enabled := range cfg.CLIUtilities {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// Utilities
-	for id, enabled := range cfg.Utilities {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// macOS Apps (only on macOS)
-	if pkg.DetectPlatform() == pkg.PlatformMacOS {
-		for id, enabled := range cfg.MacApps {
+	// Sort for stable display order (prevents flickering from map iteration)
+	sort.Strings(toInstall)
+	sort.Strings(alreadyInstalled)
+
+	// Packages to install section
+	lines = filetreeAppendInstallSections(lines, toInstall, alreadyInstalled, textStyle, pkgStyle, mutedStyle)
+
+	// Files-to-be-modified tree (config dirs + home dotfiles + bin utilities).
+	lines = filetreeAppendConfigFiles(lines, cfg, textStyle, newStyle, modStyle, mutedStyle)
+
+	tree := strings.Join(lines, "\n")
+
+	legend := mutedStyle.Render(
+		fmt.Sprintf("  %s New    %s Modified    %s Package    %s Settings Only",
+			newStyle.Render(glyphDotFilled),
+			modStyle.Render(glyphDotFilled),
+			pkgStyle.Render(glyphDotFilled),
+			mutedStyle.Render(glyphDotFilled),
+		))
+
+	help := HelpStyle.Render("[ENTER] Start Installation    [ESC] Back")
+
+	// Prevent the tree from overflowing narrow terminals.
+	treeMaxW := maxInt(20, width-6)
+	tree = lipgloss.NewStyle().MaxWidth(treeMaxW).Render(tree)
+
+	return lipgloss.Place(
+		width, height,
+		lipgloss.Center, lipgloss.Center,
+		ContainerStyle.Render(lipgloss.JoinVertical(
+			lipgloss.Left,
+			title,
+			tree,
+			legend,
+			"",
+			help,
+		)),
+	)
+}
+
+// filetreeCollectTools partitions the enabled tools/apps into those that still
+// need installing and those already installed, preserving the legacy traversal
+// order (CLI tools, GUI apps, CLI utilities, utilities, then macOS apps).
+func (s *fileTreeScreen) filetreeCollectTools(cfg *DeepDiveConfig) (toInstall, alreadyInstalled []string) {
+	a := s.App()
+	classify := func(m map[string]bool) {
+		for id, enabled := range m {
 			if enabled {
 				if a.manageInstalled[id] {
 					alreadyInstalled = append(alreadyInstalled, id)
@@ -141,11 +144,19 @@ func (s *fileTreeScreen) View(width, height int) string {
 		}
 	}
 
-	// Sort for stable display order (prevents flickering from map iteration)
-	sort.Strings(toInstall)
-	sort.Strings(alreadyInstalled)
+	classify(cfg.CLITools)     // CLI Tools
+	classify(cfg.GUIApps)      // GUI Apps
+	classify(cfg.CLIUtilities) // CLI Utilities
+	classify(cfg.Utilities)    // Utilities
+	if pkg.DetectPlatform() == pkg.PlatformMacOS {
+		classify(cfg.MacApps) // macOS Apps (only on macOS)
+	}
+	return toInstall, alreadyInstalled
+}
 
-	// Packages to install section
+// filetreeAppendInstallSections appends the "Packages to Install" and "Already
+// Installed" sections (each as a tree) to lines.
+func filetreeAppendInstallSections(lines, toInstall, alreadyInstalled []string, textStyle, pkgStyle, mutedStyle lipgloss.Style) []string {
 	if len(toInstall) > 0 {
 		lines = append(lines, textStyle.Render("  Packages to Install:"))
 		for i, toolID := range toInstall {
@@ -158,7 +169,6 @@ func (s *fileTreeScreen) View(width, height int) string {
 		lines = append(lines, "")
 	}
 
-	// Already installed section
 	if len(alreadyInstalled) > 0 {
 		lines = append(lines, mutedStyle.Render("  Already Installed (settings will update):"))
 		for i, toolID := range alreadyInstalled {
@@ -171,7 +181,12 @@ func (s *fileTreeScreen) View(width, height int) string {
 		lines = append(lines, mutedStyle.Render("  Note: Settings and themes will be applied to all tools"))
 		lines = append(lines, "")
 	}
+	return lines
+}
 
+// filetreeAppendConfigFiles appends the "Files to be Modified" tree: the
+// ~/.config/ entries, the home dotfiles, and the ~/.local/bin/ utilities.
+func filetreeAppendConfigFiles(lines []string, cfg *DeepDiveConfig, textStyle, newStyle, modStyle, mutedStyle lipgloss.Style) []string {
 	// ~/.config/ section
 	lines = append(lines, textStyle.Render("  Files to be Modified:"))
 	lines = append(lines, textStyle.Render("  ~/.config/"))
@@ -240,33 +255,5 @@ func (s *fileTreeScreen) View(width, height int) string {
 			lines = append(lines, textStyle.Render("      "+prefix+" ")+newStyle.Render(f))
 		}
 	}
-
-	tree := strings.Join(lines, "\n")
-
-	legend := mutedStyle.Render(
-		fmt.Sprintf("  %s New    %s Modified    %s Package    %s Settings Only",
-			newStyle.Render(glyphDotFilled),
-			modStyle.Render(glyphDotFilled),
-			pkgStyle.Render(glyphDotFilled),
-			mutedStyle.Render(glyphDotFilled),
-		))
-
-	help := HelpStyle.Render("[ENTER] Start Installation    [ESC] Back")
-
-	// Prevent the tree from overflowing narrow terminals.
-	treeMaxW := maxInt(20, width-6)
-	tree = lipgloss.NewStyle().MaxWidth(treeMaxW).Render(tree)
-
-	return lipgloss.Place(
-		width, height,
-		lipgloss.Center, lipgloss.Center,
-		ContainerStyle.Render(lipgloss.JoinVertical(
-			lipgloss.Left,
-			title,
-			tree,
-			legend,
-			"",
-			help,
-		)),
-	)
+	return lines
 }
