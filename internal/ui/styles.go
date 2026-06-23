@@ -49,7 +49,7 @@ var ThemePalettes = map[string]ColorPalette{
 		TextMuted:  "#97A7C7",
 		TextBright: "#FFFFFF",
 	},
-	"catppuccin-mocha": {
+	defaultTheme: {
 		Accent:     "#89b4fa", // blue
 		AccentAlt:  "#cba6f7", // mauve
 		Info:       "#89dceb", // sky
@@ -388,6 +388,12 @@ var (
 var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 var SpinnerDotsFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
 
+// Status/selection glyphs shared across screens (filled vs. empty circle).
+const (
+	glyphDotFilled = "●"
+	glyphDotEmpty  = "○"
+)
+
 // Styles - no explicit backgrounds to respect terminal transparency.
 var (
 	// Container styles.
@@ -539,7 +545,7 @@ func ProgressBarAnimated(percent float64, width int, frame int) string {
 	var bar strings.Builder
 	for i := 0; i < filled; i++ {
 		colorIdx := ((i + frame) * len(GradientCyber)) / width
-		colorIdx = colorIdx % len(GradientCyber)
+		colorIdx %= len(GradientCyber)
 		style := lipgloss.NewStyle().Foreground(GradientCyber[colorIdx])
 		bar.WriteString(style.Render("█"))
 	}
@@ -585,7 +591,7 @@ func ASCIILogo() string {
 			}
 			// Mix horizontal and vertical gradient
 			colorIdx := ((i + lineIdx*2) * len(colors)) / (len(line) + len(lines)*2)
-			colorIdx = colorIdx % len(colors)
+			colorIdx %= len(colors)
 			style := lipgloss.NewStyle().Foreground(colors[colorIdx])
 			result.WriteString(style.Render(string(char)))
 		}
@@ -599,19 +605,19 @@ func ASCIILogo() string {
 func StatusDot(status string) string {
 	switch status {
 	case "done", "complete", "success":
-		return lipgloss.NewStyle().Foreground(ColorGreen).Render("●")
+		return lipgloss.NewStyle().Foreground(ColorGreen).Render(glyphDotFilled)
 	case "installed":
-		return lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("●")
+		return lipgloss.NewStyle().Foreground(ColorNeonBlue).Render(glyphDotFilled)
 	case "running", "active", "in_progress":
-		return lipgloss.NewStyle().Foreground(ColorCyan).Render("●")
-	case "pending", "waiting":
-		return lipgloss.NewStyle().Foreground(ColorTextMuted).Render("○")
+		return lipgloss.NewStyle().Foreground(ColorCyan).Render(glyphDotFilled)
+	case statusPending, "waiting":
+		return lipgloss.NewStyle().Foreground(ColorTextMuted).Render(glyphDotEmpty)
 	case "error", "failed":
-		return lipgloss.NewStyle().Foreground(ColorRed).Render("●")
+		return lipgloss.NewStyle().Foreground(ColorRed).Render(glyphDotFilled)
 	case "warning", "partial":
-		return lipgloss.NewStyle().Foreground(ColorYellow).Render("●")
+		return lipgloss.NewStyle().Foreground(ColorYellow).Render(glyphDotFilled)
 	default:
-		return lipgloss.NewStyle().Foreground(ColorTextMuted).Render("○")
+		return lipgloss.NewStyle().Foreground(ColorTextMuted).Render(glyphDotEmpty)
 	}
 }
 
@@ -649,7 +655,7 @@ func RenderTabBar(activeScreen Screen, width int) string {
 
 	sep := lipgloss.NewStyle().Foreground(ColorBorder).Render(" ")
 
-	var parts []string
+	parts := make([]string, 0, len(tabs))
 	for i, tab := range tabs {
 		bg := inactiveBg
 		fg := inactiveFg

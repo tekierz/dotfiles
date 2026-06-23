@@ -27,7 +27,7 @@ func TestNavigateMsg(t *testing.T) {
 func TestBaseScreen(t *testing.T) {
 	ctx := &ScreenContext{
 		Theme:             "dracula",
-		NavStyle:          "vim",
+		NavStyle:          navVim,
 		AnimationsEnabled: true,
 		Width:             120,
 		Height:            40,
@@ -43,10 +43,10 @@ func TestBaseScreen(t *testing.T) {
 	if screen.Height() != 24 {
 		t.Errorf("Height() = %d, want 24 (default)", screen.Height())
 	}
-	if screen.Theme() != "catppuccin-mocha" {
+	if screen.Theme() != defaultTheme {
 		t.Errorf("Theme() = %q, want default", screen.Theme())
 	}
-	if screen.NavStyle() != "emacs" {
+	if screen.NavStyle() != navEmacs {
 		t.Errorf("NavStyle() = %q, want default", screen.NavStyle())
 	}
 	if !screen.AnimationsEnabled() {
@@ -72,8 +72,8 @@ func TestBaseScreen(t *testing.T) {
 	if screen.Theme() != "dracula" {
 		t.Errorf("Theme() = %q, want %q", screen.Theme(), "dracula")
 	}
-	if screen.NavStyle() != "vim" {
-		t.Errorf("NavStyle() = %q, want %q", screen.NavStyle(), "vim")
+	if screen.NavStyle() != navVim {
+		t.Errorf("NavStyle() = %q, want %q", screen.NavStyle(), navVim)
 	}
 	if !screen.AnimationsEnabled() {
 		t.Error("AnimationsEnabled() should be true")
@@ -89,10 +89,10 @@ func TestScreenContext(t *testing.T) {
 
 	ctx := NewScreenContext()
 
-	if ctx.Theme != "catppuccin-mocha" {
+	if ctx.Theme != defaultTheme {
 		t.Errorf("Theme = %q, want default", ctx.Theme)
 	}
-	if ctx.NavStyle != "emacs" {
+	if ctx.NavStyle != navEmacs {
 		t.Errorf("NavStyle = %q, want default", ctx.NavStyle)
 	}
 	if !ctx.AnimationsEnabled {
@@ -114,7 +114,7 @@ func TestScreenContextSeedsFromGlobalConfig(t *testing.T) {
 
 	if err := config.SaveGlobalConfig(&config.GlobalConfig{
 		Theme:             "neon-seapunk",
-		NavStyle:          "vim",
+		NavStyle:          navVim,
 		DisableAnimations: true,
 	}); err != nil {
 		t.Fatalf("SaveGlobalConfig: %v", err)
@@ -125,8 +125,8 @@ func TestScreenContextSeedsFromGlobalConfig(t *testing.T) {
 	if ctx.Theme != "neon-seapunk" {
 		t.Errorf("Theme = %q, want %q (seeded from global config)", ctx.Theme, "neon-seapunk")
 	}
-	if ctx.NavStyle != "vim" {
-		t.Errorf("NavStyle = %q, want %q (seeded from global config)", ctx.NavStyle, "vim")
+	if ctx.NavStyle != navVim {
+		t.Errorf("NavStyle = %q, want %q (seeded from global config)", ctx.NavStyle, navVim)
 	}
 	if ctx.AnimationsEnabled {
 		t.Error("AnimationsEnabled should be false when config disables animations")

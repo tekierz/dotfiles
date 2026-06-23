@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,7 +32,7 @@ type configFieldNav struct {
 	id       Screen
 	maxField func(a *App) int
 	// adjust applies a value change to the field at a.configFieldIndex.
-	// key is the raw key string ("left"/"right"/"h"/"l"/" "). fwd is true for
+	// key is the raw key string (keyLeft/keyRight/"h"/"l"/" "). fwd is true for
 	// right/l. Screens that only care about toggles can ignore fwd.
 	adjust func(a *App, key string, fwd bool)
 }
@@ -44,8 +45,8 @@ func (s *configFieldNav) ID() Screen { return s.id }
 // without going through back()) cannot leave a stale out-of-range index.
 func (s *configFieldNav) Init() tea.Cmd {
 	if a := s.App(); a != nil && s.maxField != nil {
-		max := s.maxField(a)
-		if a.configFieldIndex < 0 || a.configFieldIndex > max {
+		maxIdx := s.maxField(a)
+		if a.configFieldIndex < 0 || a.configFieldIndex > maxIdx {
 			a.configFieldIndex = 0
 		}
 	}
@@ -66,15 +67,15 @@ func (s *configFieldNav) footer() string {
 // no install step to apply the edits and no deep-dive menu to return to, so we
 // persist the in-memory deepDiveConfig to the real config files (via the shared
 // apply path) and quit instead of discarding the edits (C27).
-func (s *configFieldNav) back() (bool, tea.Cmd) {
+func (s *configFieldNav) back() tea.Cmd {
 	a := s.App()
 	if a != nil {
 		a.configFieldIndex = 0
 		if a.configStandalone {
-			return true, a.applyStandaloneConfigCmd()
+			return a.applyStandaloneConfigCmd()
 		}
 	}
-	return true, NavigateTo(ScreenDeepDiveMenu)
+	return NavigateTo(ScreenDeepDiveMenu)
 }
 
 // handleMsg processes a message using the shared field-navigation rules and
@@ -87,22 +88,21 @@ func (s *configFieldNav) handleMsg(msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		key := msg.String()
 		switch key {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return tea.Quit
 		case "up", "k":
 			if a.configFieldIndex > 0 {
 				a.configFieldIndex--
 			}
-		case "down", "j":
+		case keyDown, "j":
 			if a.configFieldIndex < s.maxField(a) {
 				a.configFieldIndex++
 			}
-		case "esc", "enter":
-			_, cmd := s.back()
-			return cmd
+		case keyEsc, keyEnter:
+			return s.back()
 		default:
 			if s.adjust != nil {
-				fwd := key == "right" || key == "l"
+				fwd := key == keyRight || key == "l"
 				s.adjust(a, key, fwd)
 			}
 		}
@@ -490,13 +490,13 @@ func (s *configListNav) handleMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return tea.Quit
 		case "up", "k":
 			if s.index(a) > 0 {
 				s.setIndex(a, s.index(a)-1)
 			}
-		case "down", "j":
+		case keyDown, "j":
 			if s.index(a) < len(s.itemIDs)-1 {
 				s.setIndex(a, s.index(a)+1)
 			}
@@ -505,7 +505,7 @@ func (s *configListNav) handleMsg(msg tea.Msg) tea.Cmd {
 			if i >= 0 && i < len(s.itemIDs) {
 				s.toggle(a, s.itemIDs[i])
 			}
-		case "esc", "enter":
+		case keyEsc, keyEnter:
 			return s.back()
 		}
 	case tea.MouseMsg:
@@ -553,4 +553,75 @@ func (s *configListNav) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// installListItem is one row of an install-state checkbox list (id/name/desc).
+type installListItem struct {
+	id   string
+	name string
+	desc string
+}
+
+// renderInstallStateList renders the shared View body used by the install-state
+// checkbox screens (CLI Utilities, GUI Apps, macOS Apps, Utilities). These four
+// screens are identical except for their title, item list, box/name widths, the
+// config map they read, and the cursor index — so the rendering is factored here
+// and each screen supplies those via params. Behavior is preserved exactly,
+// including the per-row install-state coloring and the recorded click geometry
+// (which the caller stores into a.configFieldLayout).
+//
+// title is the pre-rendered title; items is the ordered row list; focusedIndex
+// is the current cursor; nameWidth is the left-pad width for the name column;
+// enabled reports whether the item id is toggled on in the screen's config map;
+// installed reports whether the id is already installed; help is the footer.
+func renderInstallStateList(a *App, width, height, boxOuterW, nameWidth int, title string, items []installListItem, focusedIndex int, enabled, installed func(id string) bool, help string) string {
+	rec := newFieldLayoutRecorder(boxOuterW)
+
+	for i, item := range items {
+		rec.field(i)
+		focused := focusedIndex == i
+		isEnabled := enabled(item.id)
+		isInstalled := installed(item.id)
+
+		cursor := "  "
+		if focused && !isInstalled {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		} else if focused && isInstalled {
+			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
+		}
+
+		checkbox := renderCheckboxInlineWithInstallState(isEnabled, focused, isInstalled)
+
+		nameStyle := unfocusedStyle
+		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if isInstalled {
+			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
+			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		} else if focused {
+			nameStyle = focusedStyle
+			descStyle = lipgloss.NewStyle().Foreground(ColorText)
+		}
+
+		suffix := ""
+		if isInstalled {
+			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
+		}
+
+		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
+			cursor,
+			checkbox,
+			nameStyle.Render(fmt.Sprintf("%-*s", nameWidth, item.name)),
+			suffix,
+			descStyle.Render(item.desc),
+		))
+	}
+
+	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
+	a.configFieldLayout = rec.finalize(width, height, title, box, help)
+
+	return lipgloss.Place(
+		width, height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+	)
 }

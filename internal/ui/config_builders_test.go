@@ -19,14 +19,14 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 	dd.GhosttyFontFamily = "Fira Code"
 	dd.GhosttyOpacity = 85
 	dd.GhosttyBlurRadius = 30
-	dd.GhosttyTabBindings = "vim"
+	dd.GhosttyTabBindings = navVim
 	dd.GhosttyScrollbackLines = 50000
 	dd.GhosttyCursorStyle = "bar"
 	dd.GhosttyWindowDecorations = false
 	dd.GhosttyConfirmClose = false
 
 	dd.TmuxPrefix = "ctrl-b"
-	dd.TmuxSplitBinds = "vim"
+	dd.TmuxSplitBinds = navVim
 	dd.TmuxStatusBar = "top"
 	dd.TmuxMouseMode = false
 	dd.TmuxBaseIndex = 0
@@ -74,7 +74,7 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 	dd.GitMergeTool = "vimdiff"
 	dd.GitDiffTool = "difftastic"
 
-	dd.YaziKeymap = "vim"
+	dd.YaziKeymap = navVim
 	dd.YaziShowHidden = true
 	dd.YaziPreviewMode = "full"
 	dd.YaziSortBy = "size"
@@ -84,7 +84,7 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 
 	dd.FzfPreview = false
 	dd.FzfHeight = 80
-	dd.FzfLayout = "default"
+	dd.FzfLayout = optionDefault
 	dd.FzfDefaultOpts = "--cycle"
 	dd.FzfBorderStyle = "rounded"
 	dd.FzfPreviewWindow = "up:50%"
@@ -101,7 +101,7 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 	dd.BtopTempScale = "fahrenheit"
 	dd.BtopShownBoxes = "cpu mem"
 
-	dd.GlowPager = "never"
+	dd.GlowPager = optionNever
 	dd.GlowStyle = "dark"
 	dd.GlowWidth = 100
 	dd.GlowMouse = true
@@ -264,7 +264,7 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 // the two paths produce different files for the same cfg goes RED.
 func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 	cfg := sampleDeepDiveConfig()
-	const theme = "catppuccin-mocha"
+	const theme = defaultTheme
 
 	// Each case writes via the install-translation writer and via the
 	// config-apply generator, into separate temp HOMEs, then compares the file.
@@ -273,7 +273,7 @@ func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 		relPath string
 		write   func(theme string) error // install-side translation
 	}{
-		{"ghostty", ".config/ghostty/config", func(th string) error {
+		{toolGhostty, ".config/ghostty/config", func(th string) error {
 			return tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), th)
 		}},
 		{"tmux", ".tmux.conf", func(th string) error {

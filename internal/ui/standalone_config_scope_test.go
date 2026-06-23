@@ -33,7 +33,7 @@ func TestStandaloneConfigScopedToOpenedTool(t *testing.T) {
 	// config screen.
 	a.configStandalone = true
 	a.startScreen = ScreenConfigGlow
-	a.theme = "catppuccin-mocha"
+	a.theme = defaultTheme
 
 	if errs := a.applyStandaloneConfig(); len(errs) > 0 {
 		t.Fatalf("applyStandaloneConfig returned errors: %v", errs)

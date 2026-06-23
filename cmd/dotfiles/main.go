@@ -726,115 +726,24 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 	fmt.Println()
 
 	// Prompt for confirmation unless --force
-	if !force {
-		fmt.Print("Continue with uninstall? [y/N]: ")
-		reader := bufio.NewReader(os.Stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
-			os.Exit(1)
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != responseYes {
-			fmt.Println("Uninstall canceled.")
-			return
-		}
-		fmt.Println()
+	if !force && !confirmUninstall() {
+		return
 	}
 
-	// Restore from latest backup.
-	//
-	// The backups directory lives *inside* configDir, so removing configDir
-	// below destroys the only copy of the user's original configs. If a
-	// restore was requested but failed (error or 0 files restored), we must
-	// NOT delete the config dir — that would delete the safety net before
-	// confirming the rescue worked. In that case we force keepConfig on so the
-	// backups survive and the user can retry manually.
+	// Restore from latest backup. This may force keepConfig on if the restore
+	// fails, to avoid deleting the backups that live inside configDir.
 	if !noRestore {
-		fmt.Println("Checking for backups...")
-		backupDir := filepath.Join(configDir, "backups")
-		if entries, err := os.ReadDir(backupDir); err == nil && len(entries) > 0 {
-			// Find most recent backup (directories sorted by timestamp)
-			var latestBackup string
-			for _, e := range entries {
-				if e.IsDir() {
-					if latestBackup == "" || e.Name() > latestBackup {
-						latestBackup = e.Name()
-					}
-				}
-			}
-			if latestBackup != "" {
-				fmt.Printf("Restoring from backup: %s\n", latestBackup)
-				count, err := restoreBackup(latestBackup)
-				fmt.Println()
-				if (err != nil || count == 0) && !keepConfig {
-					fmt.Fprintln(os.Stderr, "Restore did not complete successfully; keeping configuration directory so backups are preserved.")
-					fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
-					fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")
-					fmt.Fprintln(os.Stderr)
-					keepConfig = true
-				}
-			}
-		} else {
-			fmt.Println("No backups found to restore.")
-			fmt.Println()
-		}
+		keepConfig = restoreBeforeUninstall(configDir, keepConfig)
 	}
 
 	// Remove binaries
 	if !keepBinaries {
-		fmt.Println("Removing binaries...")
-
-		// Binaries to remove
-		binaries := []string{
-			"dotfiles",
-			"dotfiles-tui",
-			"dotfiles-setup",
-			"hk",
-			"caff",
-			"y",
-		}
-
-		// Locations to check
-		locations := []string{
-			filepath.Join(home, ".local", "bin"),
-			"/usr/local/bin",
-		}
-
-		removed := 0
-		for _, loc := range locations {
-			for _, bin := range binaries {
-				binPath := filepath.Join(loc, bin)
-				if _, err := os.Stat(binPath); err == nil {
-					if err := os.Remove(binPath); err != nil {
-						fmt.Fprintf(os.Stderr, "  Warning: Could not remove %s: %v\n", binPath, err)
-					} else {
-						fmt.Printf("  Removed: %s\n", binPath)
-						removed++
-					}
-				}
-			}
-		}
-
-		if removed == 0 {
-			fmt.Println("  No binaries found to remove.")
-		}
-		fmt.Println()
+		removeUninstallBinaries(home)
 	}
 
 	// Remove config directory
 	if !keepConfig {
-		fmt.Printf("Removing configuration directory: %s\n", configDir)
-		if _, err := os.Stat(configDir); err == nil {
-			if err := os.RemoveAll(configDir); err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: Could not remove config directory: %v\n", err)
-			} else {
-				fmt.Println("  Configuration directory removed.")
-			}
-		} else {
-			fmt.Println("  Configuration directory not found.")
-		}
-		fmt.Println()
+		removeConfigDir(configDir)
 	}
 
 	fmt.Println("Uninstall complete!")
@@ -848,6 +757,107 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 	fmt.Println()
 	fmt.Println("To completely remove dotfiles from Homebrew:")
 	fmt.Println("  brew uninstall tekierz/tap/dotfiles")
+}
+
+// confirmUninstall prompts the user to confirm the uninstall, returning true to
+// proceed. A read error is fatal (consistent with the rest of the CLI).
+func confirmUninstall() bool {
+	fmt.Print("Continue with uninstall? [y/N]: ")
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+		os.Exit(1)
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response != "y" && response != responseYes {
+		fmt.Println("Uninstall canceled.")
+		return false
+	}
+	fmt.Println()
+	return true
+}
+
+// restoreBeforeUninstall restores the latest backup prior to removal. Because
+// the backups live inside configDir, a failed restore must not be followed by
+// deleting configDir; in that case it returns true to force keepConfig on so
+// the backups survive. Otherwise it returns keepConfig unchanged.
+func restoreBeforeUninstall(configDir string, keepConfig bool) bool {
+	fmt.Println("Checking for backups...")
+	backupDir := filepath.Join(configDir, "backups")
+	entries, err := os.ReadDir(backupDir)
+	if err != nil || len(entries) == 0 {
+		fmt.Println("No backups found to restore.")
+		fmt.Println()
+		return keepConfig
+	}
+
+	// Find most recent backup (directories sorted by timestamp).
+	var latestBackup string
+	for _, e := range entries {
+		if e.IsDir() && (latestBackup == "" || e.Name() > latestBackup) {
+			latestBackup = e.Name()
+		}
+	}
+	if latestBackup == "" {
+		return keepConfig
+	}
+
+	fmt.Printf("Restoring from backup: %s\n", latestBackup)
+	count, err := restoreBackup(latestBackup)
+	fmt.Println()
+	if (err != nil || count == 0) && !keepConfig {
+		fmt.Fprintln(os.Stderr, "Restore did not complete successfully; keeping configuration directory so backups are preserved.")
+		fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
+		fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")
+		fmt.Fprintln(os.Stderr)
+		return true
+	}
+	return keepConfig
+}
+
+// removeUninstallBinaries removes the dotfiles binaries and utility scripts from
+// the known install locations.
+func removeUninstallBinaries(home string) {
+	fmt.Println("Removing binaries...")
+	binaries := []string{"dotfiles", "dotfiles-tui", "dotfiles-setup", "hk", "caff", "y"}
+	locations := []string{filepath.Join(home, ".local", "bin"), "/usr/local/bin"}
+
+	removed := 0
+	for _, loc := range locations {
+		for _, bin := range binaries {
+			binPath := filepath.Join(loc, bin)
+			if _, err := os.Stat(binPath); err != nil {
+				continue
+			}
+			if err := os.Remove(binPath); err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: Could not remove %s: %v\n", binPath, err)
+			} else {
+				fmt.Printf("  Removed: %s\n", binPath)
+				removed++
+			}
+		}
+	}
+	if removed == 0 {
+		fmt.Println("  No binaries found to remove.")
+	}
+	fmt.Println()
+}
+
+// removeConfigDir removes the dotfiles configuration directory.
+func removeConfigDir(configDir string) {
+	fmt.Printf("Removing configuration directory: %s\n", configDir)
+	if _, err := os.Stat(configDir); err != nil {
+		fmt.Println("  Configuration directory not found.")
+		fmt.Println()
+		return
+	}
+	if err := os.RemoveAll(configDir); err != nil {
+		fmt.Fprintf(os.Stderr, "  Warning: Could not remove config directory: %v\n", err)
+	} else {
+		fmt.Println("  Configuration directory removed.")
+	}
+	fmt.Println()
 }
 
 // showCurrentUser displays the current active user.

@@ -33,8 +33,7 @@ func (s *ErrorScreen) Init() tea.Cmd {
 
 // Update handles input messages.
 func (s *ErrorScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "r":
 			// Retry - navigate to progress screen
@@ -44,7 +43,7 @@ func (s *ErrorScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			return s, NavigateTo(ScreenSummary)
 		case "q":
 			return s, tea.Quit
-		case "esc":
+		case keyEsc:
 			return s, NavigateTo(ScreenFileTree)
 		}
 	}

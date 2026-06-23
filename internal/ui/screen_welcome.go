@@ -35,9 +35,9 @@ func (s *welcomeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return s, tea.Quit
-		case "enter":
+		case keyEnter:
 			if a.deepDive {
 				// Start async install cache load for deep dive menu. NavigateTo
 				// falls back to legacy mode for the (unmigrated) deep dive menu,
@@ -53,19 +53,19 @@ func (s *welcomeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.themeStandalone = false
 			a.themeReturn = ScreenWelcome
 			return s, NavigateTo(ScreenThemePicker)
-		case "tab", "left", "right", "h", "l":
+		case keyTab, keyLeft, keyRight, "h", "l":
 			a.deepDive = !a.deepDive
 		}
 
 	case tea.MouseMsg:
-		return s, s.handleMouse(msg)
+		s.handleMouse(msg)
 	}
 	return s, nil
 }
 
 // handleMouse toggles the deep dive option based on which half of the lower
 // screen was clicked. Mirrors the legacy handleWelcomeMouse behavior.
-func (s *welcomeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
+func (s *welcomeScreen) handleMouse(msg tea.MouseMsg) {
 	a := s.App()
 	m := tea.MouseEvent(msg)
 
@@ -77,7 +77,7 @@ func (s *welcomeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		// threshold the View uses.
 		centerY := s.Height() / 2
 		if m.Y <= centerY {
-			return nil // clicks above the buttons toggle nothing
+			return // clicks above the buttons toggle nothing
 		}
 		if s.Width() < 78 {
 			// Stacked: Quick Setup on top, Deep Dive on the bottom. Split the
@@ -88,7 +88,6 @@ func (s *welcomeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			a.deepDive = m.X >= s.Width()/2
 		}
 	}
-	return nil
 }
 
 // View renders the welcome screen content.

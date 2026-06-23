@@ -27,16 +27,16 @@ func NewConfigYaziScreen(ctx *ScreenContext) *configYaziScreen {
 func yaziAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
-	case "left", "right", "h", "l":
+	case keyLeft, keyRight, "h", "l":
 		switch a.configFieldIndex {
 		case 0:
-			if cfg.YaziKeymap == "vim" {
-				cfg.YaziKeymap = "emacs"
+			if cfg.YaziKeymap == navVim {
+				cfg.YaziKeymap = navEmacs
 			} else {
-				cfg.YaziKeymap = "vim"
+				cfg.YaziKeymap = navVim
 			}
 		case 2:
-			opts := []string{"auto", "always", "never"}
+			opts := []string{"auto", "always", optionNever}
 			cfg.YaziPreviewMode = cycleOption(opts, cfg.YaziPreviewMode, fwd)
 		}
 	case " ":
@@ -63,7 +63,7 @@ func (s *configYaziScreen) View(width, height int) string {
 	keymapFocused := a.configFieldIndex == 0
 	rec.write(renderFieldLabel("Keymap Style", keymapFocused))
 	rec.write(renderOptionSelector(
-		[]string{"vim", "emacs"},
+		[]string{navVim, navEmacs},
 		[]string{"Vim (hjkl)", "Emacs (arrows)"},
 		cfg.YaziKeymap,
 		keymapFocused,
@@ -80,7 +80,7 @@ func (s *configYaziScreen) View(width, height int) string {
 	previewFocused := a.configFieldIndex == 2
 	rec.write(renderFieldLabel("File Preview", previewFocused))
 	rec.write(renderOptionSelector(
-		[]string{"auto", "always", "never"},
+		[]string{"auto", "always", optionNever},
 		[]string{"Auto", "Always", "Never"},
 		cfg.YaziPreviewMode,
 		previewFocused,

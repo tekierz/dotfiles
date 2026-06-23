@@ -238,7 +238,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	a := s.App()
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if msg.String() == keyCtrlC {
 			return s, tea.Quit
 		}
 		// 'q' quits except while typing a new user name (so it doesn't quit
@@ -311,11 +311,11 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// Handle new user name input.
 	if a.usersCreating {
 		switch key {
-		case "esc":
+		case keyEsc:
 			a.usersCreating = false
 			a.usersNewName = ""
 			return nil
-		case "enter":
+		case keyEnter:
 			if a.usersNewName != "" {
 				if err := config.ValidateUsername(a.usersNewName); err != nil {
 					a.usersStatus = fmt.Sprintf("Invalid: %v", err)
@@ -325,10 +325,10 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.usersCreating = false
 				name := a.usersNewName
 				a.usersNewName = ""
-				return saveUserCmd(name, "catppuccin-mocha", "emacs", "linux")
+				return saveUserCmd(name, defaultTheme, navEmacs, platformLinux)
 			}
 			return nil
-		case "backspace":
+		case keyBackspace:
 			if len(a.usersNewName) > 0 {
 				a.usersNewName = a.usersNewName[:len(a.usersNewName)-1]
 			}
@@ -357,7 +357,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				return deleteUserCmd(name)
 			}
 			return nil
-		case "n", "N", "esc":
+		case "n", "N", keyEsc:
 			a.usersDeleting = false
 			return nil
 		}
@@ -374,7 +374,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch key {
-	case "tab", "shift+tab":
+	case keyTab, "shift+tab":
 		// Toggle pane.
 		if a.usersPane == usersPaneList {
 			a.usersPane = usersPaneSettings
@@ -395,7 +395,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "down", "j":
+	case keyDown, "j":
 		if a.usersPane == usersPaneList {
 			if a.usersIndex < len(a.usersItems)-1 {
 				a.usersIndex++
@@ -408,7 +408,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "left", "h":
+	case keyLeft, "h":
 		if a.usersPane == usersPaneSettings {
 			fields := a.getUserFields()
 			if a.usersFieldIndex < len(fields) {
@@ -421,7 +421,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "right", "l":
+	case keyRight, "l":
 		if a.usersPane == usersPaneSettings {
 			fields := a.getUserFields()
 			if a.usersFieldIndex < len(fields) {
@@ -434,7 +434,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "enter":
+	case keyEnter:
 		if a.usersPane == usersPaneList {
 			// Switch to selected user.
 			if a.usersIndex < len(a.usersItems) {
@@ -478,7 +478,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// Refresh user list.
 		return loadUsersCmd()
 
-	case "esc":
+	case keyEsc:
 		// ScreenMainMenu is migrated; route through the ScreenManager. ('q' is
 		// handled as quit in Update, matching the legacy global quit.)
 		return NavigateTo(ScreenMainMenu)
@@ -496,7 +496,7 @@ func (a *App) getUserFields() []userField {
 	item := a.usersItems[a.usersIndex]
 	return []userField{
 		{
-			key:         "theme",
+			key:         manageFieldTheme,
 			label:       "Theme",
 			description: "Color theme for all tools",
 			kind:        userFieldOption,
@@ -509,7 +509,7 @@ func (a *App) getUserFields() []userField {
 			description: "Keyboard navigation style",
 			kind:        userFieldOption,
 			value:       item.navStyle,
-			options:     []string{"emacs", "vim"},
+			options:     []string{navEmacs, navVim},
 		},
 		{
 			key:         "keyboard",
@@ -517,7 +517,7 @@ func (a *App) getUserFields() []userField {
 			description: "Desktop keyboard style",
 			kind:        userFieldOption,
 			value:       item.keyboard,
-			options:     []string{"linux", "macos"},
+			options:     []string{platformLinux, "macos"},
 		},
 	}
 }
@@ -552,7 +552,7 @@ func (a *App) cycleUserFieldOption(f userField, delta int) {
 
 	// Update the item
 	switch f.key {
-	case "theme":
+	case manageFieldTheme:
 		item.theme = newValue
 	case "nav":
 		item.navStyle = newValue
@@ -574,7 +574,7 @@ func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// click on the already-active tab (this screen).
 	if m.Y == 0 {
 		if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-			if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+			if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 				return s.navigateTab(screen)
 			}
 		}
@@ -655,7 +655,7 @@ func (s *usersScreen) View(width, height int) string {
 	a := s.App()
 	if a.width == 0 || a.height == 0 {
 		if width <= 0 || height <= 0 {
-			return "Loading..."
+			return loadingMessage
 		}
 		a.width, a.height = width, height
 	}
@@ -664,7 +664,7 @@ func (s *usersScreen) View(width, height int) string {
 	// widths/heights (and panic in strings.Repeat). Other screens use the same
 	// "too small" fall-through; mirror that idiom here.
 	if a.width < minUsersWidth || a.height < minUsersHeight {
-		return "Loading..."
+		return loadingMessage
 	}
 
 	// Tab bar at top.
@@ -710,7 +710,8 @@ func (a *App) renderUsersListPane(width, height int) string {
 		Width(width).
 		Padding(0, 1)
 
-	if a.usersCreating {
+	switch {
+	case a.usersCreating:
 		b.WriteString(headerStyle.Render("New User: " + a.usersNewName + "█"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().
@@ -718,7 +719,7 @@ func (a *App) renderUsersListPane(width, height int) string {
 			Padding(0, 1).
 			Render("Enter name, Esc to cancel"))
 		b.WriteString("\n\n")
-	} else if a.usersDeleting && a.usersIndex < len(a.usersItems) {
+	case a.usersDeleting && a.usersIndex < len(a.usersItems):
 		b.WriteString(headerStyle.Render("Delete " + a.usersItems[a.usersIndex].name + "?"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().
@@ -726,7 +727,7 @@ func (a *App) renderUsersListPane(width, height int) string {
 			Padding(0, 1).
 			Render("Press Y to confirm, N to cancel"))
 		b.WriteString("\n\n")
-	} else {
+	default:
 		b.WriteString(headerStyle.Render("User Profiles"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().
@@ -748,10 +749,10 @@ func (a *App) renderUsersListPane(width, height int) string {
 			isSelected := i == a.usersIndex && a.usersPane == usersPaneList
 
 			// Active indicator
-			marker := "○"
+			marker := glyphDotEmpty
 			markerColor := ColorTextMuted
 			if item.isActive {
-				marker = "●"
+				marker = glyphDotFilled
 				markerColor = ColorGreen
 			}
 

@@ -44,7 +44,7 @@ func TestUsersLoadedRemainsOnSuccess(t *testing.T) {
 	s := NewUsersScreen(ctx)
 	ctx.app.usersLoaded = true
 
-	users := []userItem{{name: "alice", theme: "dracula", navStyle: "emacs", keyboard: "linux"}}
+	users := []userItem{{name: "alice", theme: "dracula", navStyle: navEmacs, keyboard: "linux"}}
 	s.Update(userLoadedMsg{users: users})
 
 	if !ctx.app.usersLoaded {

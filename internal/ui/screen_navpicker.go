@@ -43,32 +43,32 @@ func (s *navPickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return s, tea.Quit
-		case "left", "right", "h", "l", "tab":
-			if a.navStyle == "emacs" {
-				s.setNavStyle("vim")
+		case keyLeft, keyRight, "h", "l", keyTab:
+			if a.navStyle == navEmacs {
+				s.setNavStyle(navVim)
 			} else {
-				s.setNavStyle("emacs")
+				s.setNavStyle(navEmacs)
 			}
-		case "enter":
+		case keyEnter:
 			return s, NavigateTo(ScreenFileTree)
-		case "esc":
+		case keyEsc:
 			return s, NavigateTo(ScreenThemePicker)
 		}
 
 	case tea.MouseMsg:
-		return s, s.handleMouse(msg)
+		s.handleMouse(msg)
 	}
 	return s, nil
 }
 
 // handleMouse selects the nav style based on click position. Mirrors the legacy
 // handleNavPickerMouse behavior (side-by-side on wide, stacked on narrow).
-func (s *navPickerScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
+func (s *navPickerScreen) handleMouse(msg tea.MouseMsg) {
 	m := tea.MouseEvent(msg)
 	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
-		return nil
+		return
 	}
 
 	centerX := s.Width() / 2
@@ -77,19 +77,18 @@ func (s *navPickerScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	if s.Width() >= 78 {
 		// Side by side layout: Emacs on the left, Vim on the right.
 		if m.X < centerX {
-			s.setNavStyle("emacs")
+			s.setNavStyle(navEmacs)
 		} else {
-			s.setNavStyle("vim")
+			s.setNavStyle(navVim)
 		}
 	} else {
 		// Stacked layout: Emacs on top, Vim on bottom.
 		if m.Y < centerY {
-			s.setNavStyle("emacs")
+			s.setNavStyle(navEmacs)
 		} else {
-			s.setNavStyle("vim")
+			s.setNavStyle(navVim)
 		}
 	}
-	return nil
 }
 
 // View renders the navigation style selection screen.
@@ -101,7 +100,7 @@ func (s *navPickerScreen) View(width, height int) string {
 	emacsStyle := ButtonStyle
 	vimStyle := ButtonStyle
 
-	if a.navStyle == "emacs" {
+	if a.navStyle == navEmacs {
 		emacsStyle = ButtonActiveStyle
 	} else {
 		vimStyle = ButtonActiveStyle

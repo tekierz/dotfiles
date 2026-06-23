@@ -56,11 +56,6 @@ type updateRunDoneMsg struct {
 	err     error
 }
 
-// installLogMsg carries a single log line from streaming install/update.
-type installLogMsg struct {
-	line string
-}
-
 // manageSudoRequiredMsg indicates sudo is needed before manage install.
 type manageSudoRequiredMsg struct {
 	toolID string

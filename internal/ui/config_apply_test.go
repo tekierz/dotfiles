@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+// Sample config values reused across the config-apply round-trip tests.
+const (
+	testFontFamily = "Fira Code"
+	testGitBranch  = "develop"
+	testTmuxPrefix = "C-b"
+)
+
 // withTempHome points HOME at a fresh temp dir (and clears XDG_CONFIG_HOME) so
 // both config.ConfigDir() and the tools.Write*Config generators (which use
 // os.UserHomeDir / $HOME) land their output inside the temp dir. It restores
@@ -48,34 +55,34 @@ func TestApplyManageConfigWritesGeneratedFiles(t *testing.T) {
 	mc := NewManageConfig()
 	// Change values across several tools.
 	mc.GhosttyFontSize = 21
-	mc.GhosttyFontFamily = "Fira Code"
-	mc.GitDefaultBranch = "develop"
-	mc.TmuxPrefix = "C-b" // Manage vocabulary; generator expects ctrl-b -> "C-b"
+	mc.GhosttyFontFamily = testFontFamily
+	mc.GitDefaultBranch = testGitBranch
+	mc.TmuxPrefix = testTmuxPrefix // Manage vocabulary; generator expects ctrl-b -> "C-b"
 
 	dd := manageConfigToDeepDive(mc)
 	// Write each tool via the scoped config-apply path (the same path the Manage
 	// save and standalone `dotfiles config <tool>` use). This proves a Manage value
 	// reaches the generated file on disk.
-	for _, id := range []string{"ghostty", "git", "tmux"} {
-		if errs := applyOneToolConfig(id, dd, "catppuccin-mocha"); len(errs) > 0 {
+	for _, id := range []string{toolGhostty, "git", "tmux"} {
+		if errs := applyOneToolConfig(id, dd, defaultTheme); len(errs) > 0 {
 			t.Fatalf("applyOneToolConfig(%s) returned errors: %v", id, errs)
 		}
 	}
 
 	// Ghostty
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", toolGhostty, "config")
 	ghostty := readFileOrFail(t, ghosttyPath)
 	if !strings.Contains(ghostty, "font-size = 21") {
 		t.Errorf("ghostty config missing font-size 21:\n%s", ghostty)
 	}
-	if !strings.Contains(ghostty, "Fira Code") {
+	if !strings.Contains(ghostty, testFontFamily) {
 		t.Errorf("ghostty config missing font family Fira Code:\n%s", ghostty)
 	}
 
 	// Git
 	gitPath := filepath.Join(home, ".gitconfig")
 	git := readFileOrFail(t, gitPath)
-	if !strings.Contains(git, "defaultBranch = develop") && !strings.Contains(git, "develop") {
+	if !strings.Contains(git, "defaultBranch = "+testGitBranch) && !strings.Contains(git, testGitBranch) {
 		t.Errorf("gitconfig missing develop default branch:\n%s", git)
 	}
 
@@ -83,7 +90,7 @@ func TestApplyManageConfigWritesGeneratedFiles(t *testing.T) {
 	// "C-b" in the output (regression guard for the vocabulary mismatch).
 	tmuxPath := filepath.Join(home, ".tmux.conf")
 	tmux := readFileOrFail(t, tmuxPath)
-	if !strings.Contains(tmux, "C-b") {
+	if !strings.Contains(tmux, testTmuxPrefix) {
 		t.Errorf("tmux.conf missing prefix C-b:\n%s", tmux)
 	}
 }

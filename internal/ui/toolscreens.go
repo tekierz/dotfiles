@@ -19,15 +19,15 @@ import (
 // Only tools with a dedicated config screen are listed. Tools that are part of
 // a group screen report ConfigScreen() == 0 and are intentionally omitted.
 var toolConfigScreens = map[string]Screen{
-	"ghostty":     ScreenConfigGhostty,
-	"tmux":        ScreenConfigTmux,
+	toolGhostty:   ScreenConfigGhostty,
+	toolTmux:      ScreenConfigTmux,
 	"zsh":         ScreenConfigZsh,
-	"neovim":      ScreenConfigNeovim,
+	toolNeovim:    ScreenConfigNeovim,
 	"git":         ScreenConfigGit,
 	"yazi":        ScreenConfigYazi,
 	"fzf":         ScreenConfigFzf,
-	"lazygit":     ScreenConfigLazyGit,
-	"btop":        ScreenConfigBtop,
+	toolLazygit:   ScreenConfigLazyGit,
+	toolBtop:      ScreenConfigBtop,
 	"glow":        ScreenConfigGlow,
 	"claude-code": ScreenConfigClaudeCode,
 }

@@ -208,7 +208,7 @@ func TestUsersSettingsClick(t *testing.T) {
 		ctx.app.width, ctx.app.height = w, h
 		ctx.Width, ctx.Height = w, h
 		ctx.app.usersItems = []userItem{
-			{name: "alice", theme: "dracula", navStyle: "emacs", keyboard: "macos", isActive: true},
+			{name: "alice", theme: "dracula", navStyle: navEmacs, keyboard: "macos", isActive: true},
 		}
 		ctx.app.usersIndex = 0
 		ctx.app.usersPane = usersPaneSettings

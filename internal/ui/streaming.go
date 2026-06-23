@@ -110,11 +110,12 @@ func (a *App) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
 			failures++
 		}
 	}
-	if failures > 0 {
+	switch {
+	case failures > 0:
 		a.updateStatus = fmt.Sprintf("Updated %d, failed %d", successes, failures)
-	} else if successes > 0 {
+	case successes > 0:
 		a.updateStatus = fmt.Sprintf("Updated %d package(s) ✓", successes)
-	} else {
+	default:
 		a.updateStatus = "Update complete ✓"
 	}
 	// A successful update changes installed versions (and possibly install

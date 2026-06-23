@@ -224,16 +224,16 @@ func glowConfigFrom(cfg DeepDiveConfig) tools.GlowConfig {
 // WriteNeovimConfig). Config-apply — Manage save and `dotfiles config <tool>` —
 // must never clone or hit the network.
 var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) error{
-	"ghostty": func(cfg DeepDiveConfig, theme string) error {
+	toolGhostty: func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme)
 	},
-	"tmux": func(cfg DeepDiveConfig, theme string) error {
+	toolTmux: func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteTmuxConfig(tmuxConfigFrom(cfg), theme)
 	},
 	"zsh": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteZshConfig(zshConfigFrom(cfg), theme)
 	},
-	"neovim": func(cfg DeepDiveConfig, theme string) error {
+	toolNeovim: func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteNeovimUserPrefs(neovimConfigFrom(cfg), theme)
 	},
 	"git": func(cfg DeepDiveConfig, theme string) error {
@@ -245,10 +245,10 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 	"fzf": func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteFzfConfig(fzfConfigFrom(cfg), theme)
 	},
-	"lazygit": func(cfg DeepDiveConfig, theme string) error {
+	toolLazygit: func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), theme)
 	},
-	"btop": func(cfg DeepDiveConfig, theme string) error {
+	toolBtop: func(cfg DeepDiveConfig, theme string) error {
 		return tools.WriteBtopConfig(btopConfigFrom(cfg), theme)
 	},
 	"glow": func(cfg DeepDiveConfig, theme string) error {
@@ -308,14 +308,14 @@ func tmuxPrefixToGenerator(prefix string) string {
 }
 
 // glowPagerToGenerator maps the Manage UI's pager vocabulary onto the values
-// GenerateGlowConfig understands ("auto"/"less" -> pager on, "never" -> off).
+// GenerateGlowConfig understands ("auto"/"less" -> pager on, optionNever -> off).
 // The Manage options include "more" and "none" which the generator does not
 // recognize; map them to the closest supported value so the written file is
 // never wrong (C26).
 func glowPagerToGenerator(pager string) string {
 	switch pager {
 	case "none":
-		return "never"
+		return optionNever
 	case "more":
 		return "less"
 	default:

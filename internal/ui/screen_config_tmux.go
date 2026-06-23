@@ -48,7 +48,7 @@ func tmuxMaxField(a *App) int {
 func tmuxAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
-	case "left", "right", "h", "l":
+	case keyLeft, keyRight, "h", "l":
 		switch a.configFieldIndex {
 		case 0: // Prefix
 			opts := []string{"ctrl-a", "ctrl-b", "ctrl-space"}
@@ -60,10 +60,10 @@ func tmuxAdjust(a *App, key string, fwd bool) {
 				cfg.TmuxSplitBinds = "pipes"
 			}
 		case 2: // Status bar
-			if cfg.TmuxStatusBar == "top" {
+			if cfg.TmuxStatusBar == tmuxStatusTop {
 				cfg.TmuxStatusBar = "bottom"
 			} else {
-				cfg.TmuxStatusBar = "top"
+				cfg.TmuxStatusBar = tmuxStatusTop
 			}
 		case 4: // History limit
 			opts := []string{"10000", "25000", "50000", "100000"}
@@ -115,7 +115,7 @@ func (s *configTmuxScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		key := km.String()
 		switch key {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return s, tea.Quit
 		case "up", "k":
 			if a.configFieldIndex > 0 {
@@ -130,16 +130,15 @@ func (s *configTmuxScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 				}
 			}
 			return s, nil
-		case "down", "j":
+		case keyDown, "j":
 			if a.configFieldIndex < tmuxMaxField(a) {
 				a.configFieldIndex++
 			}
 			return s, nil
-		case "esc", "enter":
-			_, cmd := s.back()
-			return s, cmd
+		case keyEsc, keyEnter:
+			return s, s.back()
 		default:
-			fwd := key == "right" || key == "l"
+			fwd := key == keyRight || key == "l"
 			tmuxAdjust(a, key, fwd)
 			return s, nil
 		}
@@ -185,7 +184,7 @@ func (s *configTmuxScreen) View(width, height int) string {
 	statusFocused := a.configFieldIndex == fieldIdx
 	rec.write(renderFieldLabel("Status Bar Position", statusFocused))
 	rec.write(renderOptionSelector(
-		[]string{"bottom", "top"},
+		[]string{"bottom", tmuxStatusTop},
 		[]string{"Bottom", "Top"},
 		cfg.TmuxStatusBar,
 		statusFocused,
@@ -290,7 +289,7 @@ func (s *configTmuxScreen) View(width, height int) string {
 			rec.field(fieldIdx)
 			intervalFocused := a.configFieldIndex == fieldIdx
 			rec.write(renderFieldLabel("Auto-save Interval", intervalFocused))
-			rec.write(renderNumberControl(cfg.TmuxContinuumSaveMin, 5, 60, intervalFocused))
+			rec.write(renderNumberControl(cfg.TmuxContinuumSaveMin, intervalFocused))
 			rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" min"))
 		}
 	}

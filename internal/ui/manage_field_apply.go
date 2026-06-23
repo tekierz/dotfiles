@@ -37,7 +37,7 @@ var manageNotAppliedFields = map[string]map[string]bool{
 // what guarantees no field is silently unclassified, so the default only ever
 // applies to fields the test has already vetted.
 //
-// The "global" tool's fields (theme/nav/animations) are not tool config generator
+// The manageItemGlobal tool's fields (theme/nav/animations) are not tool config generator
 // fields — they persist through the global config + theme re-apply path — so they
 // are treated as applied (not subject to the not-applied marker).
 func manageFieldIsApplied(toolID, fieldKey string) bool {

@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -15,14 +14,14 @@ import (
 // kick any on-enter load via startTabTargetLoad. The "already on this screen"
 // suppression is the caller's responsibility, since a migrated handler knows its
 // own active screen while a.screen may be stale in managed mode.
-func (a *App) detectTabClick(x int) (Screen, tea.Cmd) {
+func (a *App) detectTabClick(x int) Screen {
 	tabs := GetManagementTabs()
 	if len(tabs) == 0 {
-		return 0, nil
+		return 0
 	}
 
 	// All screens now use unified RenderTabBar format: "N 󰒓 Name" with Padding(0,1)
-	var tabWidths []int
+	tabWidths := make([]int, 0, len(tabs))
 	for i, tab := range tabs {
 		content := fmt.Sprintf("%d %s %s", i+1, tab.Icon, tab.Name)
 		// Padding(0, 1) = 1 space each side = 2 total
@@ -37,12 +36,12 @@ func (a *App) detectTabClick(x int) (Screen, tea.Cmd) {
 		endX := currentX + tabWidths[i]
 
 		if x >= currentX && x < endX {
-			return tab.Screen, nil
+			return tab.Screen
 		}
 
 		// Move past tab width + separator (1 char)
 		currentX = endX + 1
 	}
 
-	return 0, nil
+	return 0
 }

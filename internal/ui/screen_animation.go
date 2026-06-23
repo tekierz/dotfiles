@@ -53,7 +53,7 @@ func (s *animationScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	a := s.App()
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if msg.String() == keyCtrlC {
 			return s, tea.Quit
 		}
 		// Any key skips the animation. postIntroTransition routes through the
@@ -84,11 +84,11 @@ func (s *animationScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // View renders the intro animation. It ports renderAnimation, reading the live
 // App state (animFrame, width, height). The width/height args are accepted for
 // interface conformance; the matrix layout reads a.width/a.height directly and
-// falls back to "Loading..." until a WindowSizeMsg has been seen.
+// falls back to loadingMessage until a WindowSizeMsg has been seen.
 func (s *animationScreen) View(width, height int) string {
 	a := s.App()
 	if a.width == 0 || a.height == 0 {
-		return "Loading..."
+		return loadingMessage
 	}
 
 	// Compute a stable "card" size that fits on the screen.
@@ -154,11 +154,13 @@ func (s *animationScreen) View(width, height int) string {
 	}
 	drops := make([]drop, contentW)
 	for x := 0; x < contentW; x++ {
+		//nolint:gosec // G115: terminal-bounded small positive int, no overflow
 		h := hash32(uint32(x*1337 + 42))
 		speed := 1 + int(h%3) // 1..3
 		length := 6 + int((h>>8)%10)
 		gap := 8 + int((h>>16)%10)
 		cycle := rainH + length + gap
+		//nolint:gosec // G115: terminal-bounded small positive int, no overflow
 		head := (a.animFrame*speed + int(h%uint32(cycle))) % cycle
 		head -= length // allow entering from above
 
@@ -186,6 +188,7 @@ func (s *animationScreen) View(width, height int) string {
 			}
 
 			// Pick a stable-ish character for this cell.
+			//nolint:gosec // G115: terminal-bounded small positive int, no overflow
 			sv := hash32(uint32(x*31 + y*97 + ((a.animFrame - dist) * 7)))
 			ch := chars[int(sv)%len(chars)]
 

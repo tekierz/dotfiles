@@ -393,11 +393,11 @@ func (a *App) manageItems() []manageItem {
 	// Add a global section at the top.
 	items := []manageItem{
 		{
-			id:           "global",
+			id:           manageItemGlobal,
 			name:         "Global",
 			icon:         "󰒓",
 			description:  "UI + platform preferences",
-			category:     "global",
+			category:     manageItemGlobal,
 			installed:    true,
 			configurable: true,
 		},
@@ -453,7 +453,7 @@ func fallbackToolIcon(id string, cat tools.Category) string {
 		return "󰏇"
 	}
 
-	// ID-based fallback (for unknown categories like "global").
+	// ID-based fallback (for unknown categories like manageItemGlobal).
 	if strings.Contains(id, "git") {
 		return ""
 	}
@@ -467,10 +467,10 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 	}
 
 	switch itemID {
-	case "global":
+	case manageItemGlobal:
 		return []manageField{
 			{
-				key:         "theme",
+				key:         manageFieldTheme,
 				label:       "Theme",
 				description: "Controls generated tool configs (installer) and visual accents",
 				kind:        manageFieldOption,
@@ -483,10 +483,10 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 				description: "Default navigation style throughout the TUI",
 				kind:        manageFieldOption,
 				str:         &a.navStyle,
-				options:     []string{"emacs", "vim"},
+				options:     []string{navEmacs, navVim},
 			},
 			{
-				key:         "animations",
+				key:         manageFieldAnims,
 				label:       "Animations",
 				description: "Enable animated UI elements (headers, globe, spinners)",
 				kind:        manageFieldToggle,
@@ -494,7 +494,7 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			},
 		}
 
-	case "ghostty":
+	case toolGhostty:
 		return []manageField{
 			{key: "font_family", label: "Font Family", description: "Terminal font family", kind: manageFieldText, str: &cfg.GhosttyFontFamily},
 			{key: "font_size", label: "Font Size", description: "Font size (pt)", kind: manageFieldNumber, n: &cfg.GhosttyFontSize, min: 8, max: 32, step: 1, unit: "pt"},
@@ -506,12 +506,12 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "confirm_close", label: "Confirm Close", description: "Prompt before closing window", kind: manageFieldToggle, b: &cfg.GhosttyConfirmClose},
 		}
 
-	case "tmux":
+	case toolTmux:
 		return []manageField{
 			{key: "prefix", label: "Prefix Key", description: "Leader key for tmux commands", kind: manageFieldOption, str: &cfg.TmuxPrefix, options: []string{"C-a", "C-b", "C-Space"}},
 			{key: "base", label: "Base Index", description: "Start window/pane numbering at", kind: manageFieldNumber, n: &cfg.TmuxBaseIndex, min: 0, max: 10, step: 1},
 			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.TmuxMouseMode},
-			{key: "status_pos", label: "Status Position", description: "Status bar placement", kind: manageFieldOption, str: &cfg.TmuxStatusPosition, options: []string{"top", "bottom"}},
+			{key: "status_pos", label: "Status Position", description: "Status bar placement", kind: manageFieldOption, str: &cfg.TmuxStatusPosition, options: []string{tmuxStatusTop, "bottom"}},
 			{key: "pane_border", label: "Pane Border", description: "Pane border style", kind: manageFieldOption, str: &cfg.TmuxPaneBorderStyle, options: []string{"single", "double", "heavy", "simple"}},
 			{key: "history", label: "History Limit", description: "Scrollback lines per pane", kind: manageFieldNumber, n: &cfg.TmuxHistoryLimit, min: 1000, max: 200000, step: 1000, unit: " lines"},
 			{key: "escape", label: "Escape Time", description: "Escape timing for key chords", kind: manageFieldNumber, n: &cfg.TmuxEscapeTime, min: 0, max: 1000, step: 5, unit: "ms"},
@@ -537,11 +537,11 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "autosug", label: "Auto Suggestions", description: "Inline suggestions from history", kind: manageFieldToggle, b: &cfg.ZshAutosuggestions},
 		}
 
-	case "neovim":
+	case toolNeovim:
 		return []manageField{
 			// "numbers" is the single control: relative also enables relativenumber.
 			{key: "numbers", label: "Line Numbers", description: "Absolute/relative/none (relative shows relativenumber)", kind: manageFieldOption, str: &cfg.NeovimLineNumbers, options: []string{"absolute", "relative", "none"}},
-			{key: "tab", label: "Tab Width", description: "Indent width", kind: manageFieldNumber, n: &cfg.NeovimTabWidth, min: 2, max: 8, step: 1, unit: " spaces"},
+			{key: keyTab, label: "Tab Width", description: "Indent width", kind: manageFieldNumber, n: &cfg.NeovimTabWidth, min: 2, max: 8, step: 1, unit: " spaces"},
 			{key: "expand", label: "Expand Tab", description: "Use spaces instead of tabs", kind: manageFieldToggle, b: &cfg.NeovimExpandTab},
 			{key: "wrap", label: "Line Wrap", description: "Soft wrap long lines", kind: manageFieldToggle, b: &cfg.NeovimWrap},
 			{key: "cursor", label: "Cursor Line", description: "Highlight current line", kind: manageFieldToggle, b: &cfg.NeovimCursorLine},
@@ -573,16 +573,16 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 		return []manageField{
 			{key: "opts", label: "Default Opts", description: "Extra CLI options passed to fzf", kind: manageFieldText, str: &cfg.FzfDefaultOpts},
 			{key: "height", label: "Height", description: "Height percentage for fzf UI", kind: manageFieldNumber, n: &cfg.FzfHeight, min: 20, max: 100, step: 5, unit: "%"},
-			{key: "layout", label: "Layout", description: "Layout mode", kind: manageFieldOption, str: &cfg.FzfLayout, options: []string{"reverse", "default", "reverse-list"}},
+			{key: "layout", label: "Layout", description: "Layout mode", kind: manageFieldOption, str: &cfg.FzfLayout, options: []string{"reverse", optionDefault, "reverse-list"}},
 			{key: "border", label: "Border Style", description: "Border style for fzf window", kind: manageFieldOption, str: &cfg.FzfBorderStyle, options: []string{"rounded", "sharp", "bold", "none"}},
 			{key: "preview", label: "Preview", description: "Enable preview pane", kind: manageFieldToggle, b: &cfg.FzfPreview},
 			{key: "preview_window", label: "Preview Window", description: "Preview placement/size", kind: manageFieldOption, str: &cfg.FzfPreviewWindow, options: []string{"right:50%", "up:50%", "down:50%"}},
 		}
 
-	case "lazygit":
+	case toolLazygit:
 		return []manageField{
 			{key: "side", label: "Side-by-Side Diff", description: "Use side-by-side diffs", kind: manageFieldToggle, b: &cfg.LazyGitSideBySide},
-			{key: "paging", label: "Paging", description: "Paging backend", kind: manageFieldOption, str: &cfg.LazyGitPaging, options: []string{"delta", "diff-so-fancy", "never"}},
+			{key: "paging", label: "Paging", description: "Paging backend", kind: manageFieldOption, str: &cfg.LazyGitPaging, options: []string{"delta", "diff-so-fancy", optionNever}},
 			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.LazyGitMouseMode},
 			{key: "gui_theme", label: "GUI Theme", description: "GUI theme selection", kind: manageFieldOption, str: &cfg.LazyGitGuiTheme, options: []string{"auto", "light", "dark"}},
 		}
@@ -593,9 +593,9 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "tail", label: "Logs Tail", description: "How many log lines to show", kind: manageFieldNumber, n: &cfg.LazyDockerLogsTail, min: 10, max: 2000, step: 10, unit: " lines"},
 		}
 
-	case "btop":
+	case toolBtop:
 		return []manageField{
-			{key: "theme", label: "Theme", description: "btop theme name", kind: manageFieldOption, str: &cfg.BtopTheme, options: []string{"auto", "dracula", "gruvbox", "nord", "tokyo-night"}},
+			{key: manageFieldTheme, label: "Theme", description: "btop theme name", kind: manageFieldOption, str: &cfg.BtopTheme, options: []string{"auto", "dracula", "gruvbox", "nord", "tokyo-night"}},
 			{key: "rate", label: "Update Rate", description: "Refresh interval", kind: manageFieldNumber, n: &cfg.BtopUpdateMs, min: 250, max: 10000, step: 250, unit: "ms"},
 			{key: "temp", label: "Show Temp", description: "Show CPU temperature", kind: manageFieldToggle, b: &cfg.BtopShowTemp},
 			{key: "scale", label: "Temp Scale", description: "Celsius/Fahrenheit", kind: manageFieldOption, str: &cfg.BtopTempScale, options: []string{"celsius", "fahrenheit"}},
@@ -606,7 +606,7 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 	case "glow":
 		return []manageField{
 			{key: "style", label: "Style", description: "Style theme for Glow", kind: manageFieldOption, str: &cfg.GlowStyle, options: []string{"auto", "dark", "light", "notty"}},
-			{key: "pager", label: "Pager", description: "Pager program", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"auto", "less", "never"}},
+			{key: "pager", label: "Pager", description: "Pager program", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"auto", "less", optionNever}},
 			{key: "width", label: "Width", description: "Max render width", kind: manageFieldNumber, n: &cfg.GlowWidth, min: 40, max: 240, step: 5, unit: " chars"},
 			{key: "mouse", label: "Mouse", description: "Enable mouse support in Glow", kind: manageFieldToggle, b: &cfg.GlowMouse},
 		}
@@ -697,7 +697,7 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 	toolCount := maxInt(0, len(items)-1) // exclude "Global"
 	installedCount := 0
 	for _, it := range items {
-		if it.id == "global" {
+		if it.id == manageItemGlobal {
 			continue
 		}
 		if it.installed {
@@ -716,7 +716,7 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 
 		cursor := "  "
 		nameStyle := lipgloss.NewStyle().Foreground(ColorText)
-		if it.id != "global" && !it.installed {
+		if it.id != manageItemGlobal && !it.installed {
 			nameStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
 		}
 		if focused {
@@ -724,9 +724,9 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 			nameStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 		}
 
-		status := StatusDot("pending")
-		if it.id == "global" {
-			status = lipgloss.NewStyle().Foreground(ColorCyan).Render("●")
+		status := StatusDot(statusPending)
+		if it.id == manageItemGlobal {
+			status = lipgloss.NewStyle().Foreground(ColorCyan).Render(glyphDotFilled)
 		} else if it.installed {
 			status = StatusDot("success")
 		}
@@ -738,14 +738,14 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 
 		// Right-aligned category tag (helps scanning without changing selection mapping).
 		cat := strings.ToUpper(string(it.category))
-		if it.id == "global" {
+		if it.id == manageItemGlobal {
 			cat = "GLOBAL"
 		}
 		tag := tagStyle.Render(cat)
 
 		left := fmt.Sprintf("%s%s %s%s", cursor, status, icon, nameStyle.Render(it.name))
 		// Small visual hint that settings exist.
-		if it.id != "global" && it.configurable {
+		if it.id != manageItemGlobal && it.configurable {
 			left += lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  ")
 		}
 
@@ -813,7 +813,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("SETTINGS")
 	statusBadge := ""
-	if item.id != "global" {
+	if item.id != manageItemGlobal {
 		if item.installed {
 			statusBadge = " " + RenderBadge("INSTALLED", ColorBg, ColorGreen)
 		} else {
@@ -845,7 +845,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 		msgStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 		strong := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
 
-		if item.id == "global" {
+		if item.id == manageItemGlobal {
 			fieldLines = append(fieldLines, msgStyle.Render("No global settings available."))
 		} else {
 			if item.configurable {
@@ -894,9 +894,9 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 
 	// Exactly 3 header lines before the fields area (matches manageLayout.rightHeaderLines).
 	actionLine := ""
-	if item.id != "global" && !item.installed {
+	if item.id != manageItemGlobal && !item.installed {
 		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
-	} else if item.id != "global" && len(fields) == 0 {
+	} else if item.id != manageItemGlobal && len(fields) == 0 {
 		actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
 	}
 

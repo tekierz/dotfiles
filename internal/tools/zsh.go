@@ -101,55 +101,10 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	sb.WriteString("export PATH=\"$HOME/.local/bin:$PATH\"\n\n")
 
 	// Plugin sources based on platform
-	sb.WriteString("# Plugins\n")
-	if cfg.SyntaxHighlight {
-		switch platform {
-		case pkg.PlatformMacOS:
-			sb.WriteString("source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null\n")
-		case pkg.PlatformArch:
-			sb.WriteString("source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null\n")
-		case pkg.PlatformDebian, pkg.PlatformPi:
-			sb.WriteString("source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null\n")
-		case pkg.PlatformUnknown:
-			// Unknown platform: no plugin source path available.
-		}
-	}
-	if cfg.Autosuggestions {
-		switch platform {
-		case pkg.PlatformMacOS:
-			sb.WriteString("source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null\n")
-		case pkg.PlatformArch:
-			sb.WriteString("source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null\n")
-		case pkg.PlatformDebian, pkg.PlatformPi:
-			sb.WriteString("source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null\n")
-		case pkg.PlatformUnknown:
-			// Unknown platform: no plugin source path available.
-		}
-	}
-	sb.WriteString("\n")
+	writeZshPlugins(&sb, cfg, platform)
 
 	// Aliases
-	sb.WriteString("# Aliases\n")
-	if cfg.Aliases["ll"] {
-		sb.WriteString("alias ll='ls -la'\n")
-	}
-	if cfg.Aliases["la"] {
-		sb.WriteString("alias la='ls -A'\n")
-	}
-	if cfg.Aliases["gs"] {
-		sb.WriteString("alias gs='git status'\n")
-	}
-	if cfg.Aliases["gp"] {
-		sb.WriteString("alias gp='git push'\n")
-	}
-	if cfg.Aliases["gc"] {
-		sb.WriteString("alias gc='git commit'\n")
-	}
-	if cfg.Aliases["docker"] {
-		sb.WriteString("alias d='docker'\n")
-		sb.WriteString("alias dc='docker compose'\n")
-	}
-	sb.WriteString("\n")
+	writeZshAliases(&sb, cfg)
 
 	// Modern tool aliases (if available)
 	sb.WriteString("# Modern tool aliases (if installed)\n")
@@ -158,6 +113,64 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	sb.WriteString("command -v zoxide &>/dev/null && eval \"$(zoxide init zsh)\"\n\n")
 
 	// Prompt configuration
+	writeZshPrompt(&sb, cfg)
+
+	return sb.String()
+}
+
+// zshPluginSource returns the line that sources the named zsh plugin (e.g.
+// "zsh-syntax-highlighting") for the given platform: the plugin lives in a
+// like-named directory as "<name>.zsh". An empty string means no known path.
+func zshPluginSource(platform pkg.Platform, name string) string {
+	switch platform {
+	case pkg.PlatformMacOS:
+		return fmt.Sprintf("source $(brew --prefix)/share/%s/%s.zsh 2>/dev/null\n", name, name)
+	case pkg.PlatformArch:
+		return fmt.Sprintf("source /usr/share/zsh/plugins/%s/%s.zsh 2>/dev/null\n", name, name)
+	case pkg.PlatformDebian, pkg.PlatformPi:
+		return fmt.Sprintf("source /usr/share/%s/%s.zsh 2>/dev/null\n", name, name)
+	case pkg.PlatformUnknown:
+		return "" // No plugin source path available for unknown platforms.
+	}
+	return ""
+}
+
+// writeZshPlugins appends the syntax-highlighting and autosuggestion plugin
+// source lines for the detected platform.
+func writeZshPlugins(sb *strings.Builder, cfg ZshConfig, platform pkg.Platform) {
+	sb.WriteString("# Plugins\n")
+	if cfg.SyntaxHighlight {
+		sb.WriteString(zshPluginSource(platform, "zsh-syntax-highlighting"))
+	}
+	if cfg.Autosuggestions {
+		sb.WriteString(zshPluginSource(platform, "zsh-autosuggestions"))
+	}
+	sb.WriteString("\n")
+}
+
+// writeZshAliases appends the user-selected shell aliases.
+func writeZshAliases(sb *strings.Builder, cfg ZshConfig) {
+	sb.WriteString("# Aliases\n")
+	for _, a := range []struct{ key, line string }{
+		{"ll", "alias ll='ls -la'\n"},
+		{"la", "alias la='ls -A'\n"},
+		{"gs", "alias gs='git status'\n"},
+		{"gp", "alias gp='git push'\n"},
+		{"gc", "alias gc='git commit'\n"},
+	} {
+		if cfg.Aliases[a.key] {
+			sb.WriteString(a.line)
+		}
+	}
+	if cfg.Aliases["docker"] {
+		sb.WriteString("alias d='docker'\n")
+		sb.WriteString("alias dc='docker compose'\n")
+	}
+	sb.WriteString("\n")
+}
+
+// writeZshPrompt appends the prompt initialization for the configured style.
+func writeZshPrompt(sb *strings.Builder, cfg ZshConfig) {
 	sb.WriteString("# Prompt\n")
 	switch cfg.PromptStyle {
 	case "starship":
@@ -174,8 +187,6 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	case "minimal":
 		sb.WriteString("PROMPT='%~ > '\n")
 	}
-
-	return sb.String()
 }
 
 // WriteZshConfig writes the .zshrc file to disk.

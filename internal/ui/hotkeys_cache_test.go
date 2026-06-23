@@ -7,6 +7,9 @@ import (
 	"github.com/tekierz/dotfiles/internal/hotkeys"
 )
 
+// testNavigateDesc is the hotkey item description exercised across these tests.
+const testNavigateDesc = "Navigate"
+
 // TestHotkeysActiveUsernameIsPerApp verifies that two App instances do NOT share
 // the active-username cache (previously a package-global). Each App must carry
 // its own cache fields (hotkeysActiveUser / hotkeysActiveUserCached).
@@ -54,18 +57,18 @@ func TestHotkeysActiveUsernameCacheInitiallyEmpty(t *testing.T) {
 
 // TestHotkeysActiveUsernameDefaultsToDefault verifies that when no active user
 // is configured in global.json (or the file doesn't exist), getCurrentUsername
-// returns "default".
+// returns optionDefault.
 func TestHotkeysActiveUsernameDefaultsToDefault(t *testing.T) {
 	t.Parallel()
 
 	app := NewApp(true)
 	// Simulate the no-user-configured case by bypassing disk read.
-	app.hotkeysActiveUser = "default"
+	app.hotkeysActiveUser = optionDefault
 	app.hotkeysActiveUserCached = true
 
 	u := app.getCurrentUsername()
-	if u != "default" {
-		t.Errorf("getCurrentUsername() = %q, want %q", u, "default")
+	if u != optionDefault {
+		t.Errorf("getCurrentUsername() = %q, want %q", u, optionDefault)
 	}
 }
 
@@ -83,7 +86,7 @@ func TestHotkeysFavoriteSurvivesNavStyleSwitch(t *testing.T) {
 	}
 
 	// Set nav style to emacs and bypass disk read for username.
-	app.navStyle = "emacs"
+	app.navStyle = navEmacs
 	app.hotkeysActiveUser = "testuser"
 	app.hotkeysActiveUserCached = true
 
@@ -91,9 +94,9 @@ func TestHotkeysFavoriteSurvivesNavStyleSwitch(t *testing.T) {
 	cats := app.hotkeyCategories()
 	var emacsNavigateItem *hotkeys.Item
 	for _, cat := range cats {
-		if cat.ID == "neovim" {
+		if cat.ID == toolNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == testNavigateDesc {
 					itCopy := it
 					emacsNavigateItem = &itCopy
 				}
@@ -108,23 +111,23 @@ func TestHotkeysFavoriteSurvivesNavStyleSwitch(t *testing.T) {
 	}
 
 	// Favorite the item using its stable ID.
-	app.toggleHotkeyFavorite("neovim", emacsNavigateItem.ID)
+	app.toggleHotkeyFavorite(toolNeovim, emacsNavigateItem.ID)
 
 	// Verify it is favorited under emacs nav style.
-	if !app.isHotkeyFavorite("neovim", emacsNavigateItem.ID) {
+	if !app.isHotkeyFavorite(toolNeovim, emacsNavigateItem.ID) {
 		t.Fatal("item should be favorited under emacs nav style")
 	}
 
 	// Now switch to vim nav style.
-	app.navStyle = "vim"
+	app.navStyle = navVim
 
 	// Re-fetch categories — the same item now has Keys="h/j/k/l".
 	cats = app.hotkeyCategories()
 	var vimNavigateItem *hotkeys.Item
 	for _, cat := range cats {
-		if cat.ID == "neovim" {
+		if cat.ID == toolNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == testNavigateDesc {
 					itCopy := it
 					vimNavigateItem = &itCopy
 				}
@@ -145,7 +148,7 @@ func TestHotkeysFavoriteSurvivesNavStyleSwitch(t *testing.T) {
 
 	// CRITICAL: the favorite must still show as favorited under vim nav style.
 	// This was the bug: Keys changed so the old Keys-keyed lookup returned false.
-	if !app.isHotkeyFavorite("neovim", vimNavigateItem.ID) {
+	if !app.isHotkeyFavorite(toolNeovim, vimNavigateItem.ID) {
 		t.Error("favorite was orphaned when switching nav style from emacs to vim — this is the bug C21 fixes")
 	}
 }
@@ -164,7 +167,7 @@ func TestHotkeysFavoriteToggleRoundTrip(t *testing.T) {
 
 	// Find an item with a stable ID.
 	var item *hotkeys.Item
-	for _, cat := range hotkeys.Categories("emacs") {
+	for _, cat := range hotkeys.Categories(navEmacs) {
 		if cat.ID == "lazygit" {
 			it := cat.Items[0]
 			item = &it

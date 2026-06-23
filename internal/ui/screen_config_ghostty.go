@@ -101,7 +101,7 @@ func (s *configGhosttyScreen) View(width, height int) string {
 	rec.field(fieldIdx)
 	fontFocused := a.configFieldIndex == fieldIdx
 	rec.write(renderFieldLabel("Font Size", fontFocused))
-	rec.write(renderNumberControl(cfg.GhosttyFontSize, 8, 32, fontFocused))
+	rec.write(renderNumberControl(cfg.GhosttyFontSize, fontFocused))
 	rec.write("\n\n")
 	fieldIdx++
 

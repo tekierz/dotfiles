@@ -31,17 +31,17 @@ func TestManageSaveScopedToChangedTool(t *testing.T) {
 	current := NewManageConfig()
 	current.GhosttyFontSize = baseline.GhosttyFontSize + 3
 
-	changed := changedManageTools(baseline, current, "catppuccin-mocha", "catppuccin-mocha")
-	if len(changed) != 1 || changed[0] != "ghostty" {
+	changed := changedManageTools(baseline, current, defaultTheme, defaultTheme)
+	if len(changed) != 1 || changed[0] != toolGhostty {
 		t.Fatalf("changedManageTools = %v, want [ghostty]", changed)
 	}
 
-	if errs := applyChangedManageTools(changed, manageConfigToDeepDive(current), "catppuccin-mocha"); len(errs) > 0 {
+	if errs := applyChangedManageTools(changed, manageConfigToDeepDive(current), defaultTheme); len(errs) > 0 {
 		t.Fatalf("applyChangedManageTools returned errors: %v", errs)
 	}
 
 	// Ghostty's own config MUST have been written.
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", toolGhostty, "config")
 	if _, err := os.Stat(ghosttyPath); err != nil {
 		t.Errorf("ghostty config not written by scoped Manage save: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestManageSaveNoChangeWritesNothing(t *testing.T) {
 	baseline := NewManageConfig()
 	current := NewManageConfig()
 
-	changed := changedManageTools(baseline, current, "catppuccin-mocha", "catppuccin-mocha")
+	changed := changedManageTools(baseline, current, defaultTheme, defaultTheme)
 	if len(changed) != 0 {
 		t.Fatalf("changedManageTools with no change = %v, want []", changed)
 	}
@@ -77,7 +77,7 @@ func TestManageSaveThemeChangeReappliesAll(t *testing.T) {
 	baseline := NewManageConfig()
 	current := NewManageConfig()
 
-	changed := changedManageTools(baseline, current, "catppuccin-mocha", "nord")
+	changed := changedManageTools(baseline, current, defaultTheme, "nord")
 	// All generator tools (and claude-code) should be in the set on a theme change.
 	if len(changed) < len(manageGeneratorToolOrder) {
 		t.Fatalf("theme change should re-apply all tools; got %v", changed)
@@ -93,17 +93,17 @@ func TestManageSaveTmuxNeovimNoClone(t *testing.T) {
 
 	baseline := NewManageConfig()
 	current := NewManageConfig()
-	current.TmuxPrefix = "C-b"
+	current.TmuxPrefix = testTmuxPrefix
 	current.NeovimTabWidth = baseline.NeovimTabWidth + 1
 
-	changed := changedManageTools(baseline, current, "catppuccin-mocha", "catppuccin-mocha")
-	if errs := applyChangedManageTools(changed, manageConfigToDeepDive(current), "catppuccin-mocha"); len(errs) > 0 {
+	changed := changedManageTools(baseline, current, defaultTheme, defaultTheme)
+	if errs := applyChangedManageTools(changed, manageConfigToDeepDive(current), defaultTheme); len(errs) > 0 {
 		t.Fatalf("applyChangedManageTools returned errors (cloned?): %v", errs)
 	}
 
 	// tmux.conf written with the new prefix, no TPM clone required.
 	tmuxconf := readFileOrFail(t, filepath.Join(home, ".tmux.conf"))
-	if want := "C-b"; !strings.Contains(tmuxconf, want) {
+	if want := testTmuxPrefix; !strings.Contains(tmuxconf, want) {
 		t.Errorf("tmux.conf missing prefix %q after scoped save:\n%s", want, tmuxconf)
 	}
 	// TPM must NOT have been cloned by a config write.
@@ -140,8 +140,8 @@ func TestNeovimUserPrefsWritesWhenInstalled(t *testing.T) {
 	current := NewManageConfig()
 	current.NeovimTabWidth = baseline.NeovimTabWidth + 1
 
-	changed := changedManageTools(baseline, current, "catppuccin-mocha", "catppuccin-mocha")
-	if errs := applyChangedManageTools(changed, manageConfigToDeepDive(current), "catppuccin-mocha"); len(errs) > 0 {
+	changed := changedManageTools(baseline, current, defaultTheme, defaultTheme)
+	if errs := applyChangedManageTools(changed, manageConfigToDeepDive(current), defaultTheme); len(errs) > 0 {
 		t.Fatalf("applyChangedManageTools returned errors: %v", errs)
 	}
 

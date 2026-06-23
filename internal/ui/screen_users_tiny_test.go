@@ -58,7 +58,7 @@ func TestUsersC19FirstClickNoShift(t *testing.T) {
 		ctx.app.width = 80
 		ctx.app.height = 24
 		ctx.app.usersItems = []userItem{
-			{name: "alice", theme: "catppuccin-mocha", navStyle: "emacs", keyboard: "linux"},
+			{name: "alice", theme: defaultTheme, navStyle: navEmacs, keyboard: "linux"},
 		}
 		ctx.app.usersPane = usersPaneList
 		ctx.app.usersFieldIndex = 0
@@ -133,7 +133,7 @@ func TestUsersScreenViewNoPanicWithUsers(t *testing.T) {
 			ctx.app.width = w
 			ctx.app.height = h
 			ctx.app.usersItems = []userItem{
-				{name: "alice", theme: "catppuccin-mocha", navStyle: "emacs", keyboard: "linux"},
+				{name: "alice", theme: defaultTheme, navStyle: navEmacs, keyboard: "linux"},
 			}
 			screen := NewUsersScreen(ctx)
 			_ = screen.View(w, h)

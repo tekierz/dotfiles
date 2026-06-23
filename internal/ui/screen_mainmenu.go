@@ -77,6 +77,14 @@ func (s *mainMenuScreen) selectItem(index int) tea.Cmd {
 		// it and return here, NOT advance through the install wizard (C7, C8).
 		a.themeStandalone = true
 		a.themeReturn = ScreenMainMenu
+	case ScreenAnimation, ScreenWelcome, ScreenNavPicker, ScreenFileTree,
+		ScreenProgress, ScreenSummary, ScreenError, ScreenDeepDiveMenu,
+		ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh, ScreenConfigNeovim,
+		ScreenConfigGit, ScreenConfigYazi, ScreenConfigFzf, ScreenConfigUtilities,
+		ScreenConfigMacApps, ScreenMainMenu, ScreenConfigCLITools, ScreenConfigGUIApps,
+		ScreenConfigCLIUtilities, ScreenConfigLazyGit, ScreenConfigBtop, ScreenConfigGlow,
+		ScreenConfigClaudeCode:
+		// No on-enter async load needed for these destinations.
 	}
 	return nav
 }
@@ -88,17 +96,17 @@ func (s *mainMenuScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case tea.KeyMsg:
 		items := GetMainMenuItems()
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return s, tea.Quit
 		case "up", "k":
 			if a.mainMenuIndex > 0 {
 				a.mainMenuIndex--
 			}
-		case "down", "j":
+		case keyDown, "j":
 			if a.mainMenuIndex < len(items)-1 {
 				a.mainMenuIndex++
 			}
-		case "enter":
+		case keyEnter:
 			return s, s.selectItem(a.mainMenuIndex)
 		}
 
@@ -154,7 +162,7 @@ func (s *mainMenuScreen) View(width, height int) string {
 		Render(truncateVisible("Terminal environment management platform", maxLineW))
 
 	// Menu items
-	var menuLines []string
+	menuLines := make([]string, 0, len(items))
 	for i, item := range items {
 		cursor := "  "
 		itemStyle := lipgloss.NewStyle().Foreground(ColorText)

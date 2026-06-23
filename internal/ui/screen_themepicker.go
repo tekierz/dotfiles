@@ -50,7 +50,7 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c":
+		case keyCtrlC:
 			return s, tea.Quit
 		case "q":
 			if a.themeStandalone {
@@ -63,11 +63,11 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			if a.themeIndex > 0 {
 				s.applyTheme(a.themeIndex - 1)
 			}
-		case "down", "j":
+		case keyDown, "j":
 			if a.themeIndex < len(themes)-1 {
 				s.applyTheme(a.themeIndex + 1)
 			}
-		case "enter":
+		case keyEnter:
 			if a.themeStandalone {
 				// Standalone mode: persist the already-live theme.
 				a.persistTheme()
@@ -81,7 +81,7 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			}
 			// Wizard step: advance to nav-style picker.
 			return s, NavigateTo(ScreenNavPicker)
-		case "esc":
+		case keyEsc:
 			if a.themeStandalone {
 				// Cancel the standalone change: revert the preview to the saved theme,
 				// then route symmetrically with the Enter branch.
@@ -103,14 +103,14 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		return s, s.handleMouse(msg)
+		s.handleMouse(msg)
 	}
 	return s, nil
 }
 
 // handleMouse handles scroll-wheel navigation and click-to-select on the theme
 // list. Mirrors the legacy handleThemePickerMouse behavior.
-func (s *themePickerScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
+func (s *themePickerScreen) handleMouse(msg tea.MouseMsg) {
 	a := s.App()
 	m := tea.MouseEvent(msg)
 
@@ -119,12 +119,16 @@ func (s *themePickerScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		if a.themeIndex > 0 {
 			s.applyTheme(a.themeIndex - 1)
 		}
-		return nil
+		return
 	case tea.MouseButtonWheelDown:
 		if a.themeIndex < len(themes)-1 {
 			s.applyTheme(a.themeIndex + 1)
 		}
-		return nil
+		return
+	case tea.MouseButtonNone, tea.MouseButtonLeft, tea.MouseButtonMiddle,
+		tea.MouseButtonRight, tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight,
+		tea.MouseButtonBackward, tea.MouseButtonForward, tea.MouseButton10, tea.MouseButton11:
+		// Non-wheel buttons fall through to the click handling below.
 	}
 
 	if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
@@ -136,7 +140,7 @@ func (s *themePickerScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		// shifted every row by ~2-3 and used a wrong X span (C20).
 		fl := a.themeListLayout
 		if fl.hasXBounds && (m.X < fl.boxLeft || m.X > fl.boxRight) {
-			return nil
+			return
 		}
 		if idx, ok := fl.fieldAt(m.Y); ok {
 			if idx >= 0 && idx < len(themes) {
@@ -144,7 +148,6 @@ func (s *themePickerScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			}
 		}
 	}
-	return nil
 }
 
 // View renders the theme selection screen.

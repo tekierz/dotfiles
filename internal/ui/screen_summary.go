@@ -32,12 +32,11 @@ func (s *SummaryScreen) Init() tea.Cmd {
 
 // Update handles input messages.
 func (s *SummaryScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
-		case "enter":
+		case keyEnter:
 			return s, tea.Quit
-		case "esc", "q":
+		case keyEsc, "q":
 			return s, tea.Quit
 		}
 	}
@@ -74,7 +73,7 @@ func (s *SummaryScreen) View(width, height int) string {
 		lipgloss.NewStyle().Foreground(ColorCyan).Render(theme),
 		lipgloss.NewStyle().Foreground(ColorCyan).Render(navStyle),
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("source ~/.zshrc"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("tmux"),
+		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render(toolTmux),
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("nvim"),
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("p10k configure"),
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("hk"),

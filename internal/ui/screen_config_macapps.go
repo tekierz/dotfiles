@@ -1,10 +1,6 @@
 package ui
 
 import (
-	"fmt"
-
-	"github.com/charmbracelet/lipgloss"
-
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -67,55 +63,13 @@ func (s *configMacAppsScreen) View(width, height int) string {
 
 	title := renderConfigTitle("", "macOS Apps", "Optional productivity applications")
 
-	cfg := a.deepDiveConfig
-	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(65))
-
+	items := make([]installListItem, len(macAppItems))
 	for i, app := range macAppItems {
-		rec.field(i)
-		focused := a.macAppIndex == i
-		enabled := cfg.MacApps[app.id]
-		installed := a.manageInstalled[app.id]
-
-		cursor := "  "
-		if focused && !installed {
-			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
-		} else if focused && installed {
-			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
-		}
-
-		checkbox := renderCheckboxInlineWithInstallState(enabled, focused, installed)
-
-		nameStyle := unfocusedStyle
-		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if installed {
-			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
-			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
-		} else if focused {
-			nameStyle = focusedStyle
-			descStyle = lipgloss.NewStyle().Foreground(ColorText)
-		}
-
-		suffix := ""
-		if installed {
-			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
-		}
-
-		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
-			cursor,
-			checkbox,
-			nameStyle.Render(fmt.Sprintf("%-16s", app.name)),
-			suffix,
-			descStyle.Render(app.desc),
-		))
+		items[i] = installListItem{id: app.id, name: app.name, desc: app.desc}
 	}
 
-	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
-	help := s.footerInstalled()
-	a.configFieldLayout = rec.finalize(width, height, title, box, help)
-
-	return lipgloss.Place(
-		width, height,
-		lipgloss.Center, lipgloss.Center,
-		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
-	)
+	return renderInstallStateList(a, width, height, a.deepDiveBoxWidth(65), 16, title, items, a.macAppIndex,
+		func(id string) bool { return a.deepDiveConfig.MacApps[id] },
+		func(id string) bool { return a.manageInstalled[id] },
+		s.footerInstalled())
 }

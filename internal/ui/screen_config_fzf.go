@@ -27,7 +27,7 @@ func NewConfigFzfScreen(ctx *ScreenContext) *configFzfScreen {
 func fzfAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
-	case "left", "right", "h", "l":
+	case keyLeft, keyRight, "h", "l":
 		switch a.configFieldIndex {
 		case 1:
 			if fwd {
@@ -38,7 +38,7 @@ func fzfAdjust(a *App, key string, fwd bool) {
 				cfg.FzfHeight -= 10
 			}
 		case 2:
-			opts := []string{"reverse", "default", "reverse-list"}
+			opts := []string{"reverse", optionDefault, "reverse-list"}
 			cfg.FzfLayout = cycleOption(opts, cfg.FzfLayout, fwd)
 		}
 	case " ":
@@ -77,7 +77,7 @@ func (s *configFzfScreen) View(width, height int) string {
 	layoutFocused := a.configFieldIndex == 2
 	rec.write(renderFieldLabel("Layout", layoutFocused))
 	rec.write(renderOptionSelector(
-		[]string{"reverse", "default", "reverse-list"},
+		[]string{"reverse", optionDefault, "reverse-list"},
 		[]string{"Reverse ↑", "Default ↓", "Reverse List"},
 		cfg.FzfLayout,
 		layoutFocused,

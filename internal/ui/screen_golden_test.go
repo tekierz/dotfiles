@@ -53,7 +53,7 @@ func newGoldenContext(t *testing.T) *ScreenContext {
 	ctx := &ScreenContext{
 		app:               app,
 		Theme:             "neon-seapunk",
-		NavStyle:          "emacs",
+		NavStyle:          navEmacs,
 		AnimationsEnabled: false,
 		Width:             80,
 		Height:            24,
@@ -121,7 +121,7 @@ func TestSummaryScreenGolden(t *testing.T) {
 		"[ENTER] Exit",
 		// Theme/nav values come from the context.
 		"neon-seapunk",
-		"emacs",
+		navEmacs,
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(out, want) {
@@ -221,7 +221,7 @@ func TestThemePickerLivePreview(t *testing.T) {
 // navPickerScreen.
 func TestNavPickerScreenGolden(t *testing.T) {
 	ctx := newGoldenContext(t)
-	ctx.app.navStyle = "emacs"
+	ctx.app.navStyle = navEmacs
 
 	screen := NewNavPickerScreen(ctx)
 	out := screen.View(ctx.Width, ctx.Height)
@@ -243,10 +243,10 @@ func TestNavPickerScreenGolden(t *testing.T) {
 	}
 
 	// 'tab' should toggle the nav style on both App and context.
-	if _, _ = screen.Update(keyMsg("tab")); ctx.app.navStyle != "vim" {
+	if _, _ = screen.Update(keyMsg("tab")); ctx.app.navStyle != navVim {
 		t.Errorf("navStyle = %q, want vim after 'tab'", ctx.app.navStyle)
 	}
-	if ctx.NavStyle != "vim" {
+	if ctx.NavStyle != navVim {
 		t.Errorf("ctx.NavStyle = %q, want vim (toggle must update context)", ctx.NavStyle)
 	}
 }
@@ -1403,8 +1403,8 @@ func newManageContext(t *testing.T) *ScreenContext {
 	}
 	// Seeded install-status cache (deterministic; no package-manager calls).
 	ctx.app.manageInstalled = map[string]bool{
-		"ghostty": true,
-		"tmux":    true,
+		toolGhostty: true,
+		"tmux":      true,
 	}
 	ctx.app.manageInstalledReady = true
 	ctx.app.installCacheLoading = false
@@ -1485,7 +1485,7 @@ func TestManageScreenInstalledBadge(t *testing.T) {
 	items := ctx.app.manageItems()
 	ghosttyIdx := -1
 	for i, it := range items {
-		if it.id == "ghostty" {
+		if it.id == toolGhostty {
 			ghosttyIdx = i
 			break
 		}
@@ -1517,7 +1517,7 @@ func TestManageScreenReachableViaManager(t *testing.T) {
 	app.screenMgr.SetSize(80, 24)
 	app.width, app.height = 80, 24
 	// Seed the cache so the render shows the panes, not the loading spinner.
-	app.manageInstalled = map[string]bool{"ghostty": true}
+	app.manageInstalled = map[string]bool{toolGhostty: true}
 	app.manageInstalledReady = true
 	app.installCacheLoading = false
 
@@ -1549,11 +1549,11 @@ func TestManageScreenInstallDoneAsyncInHandler(t *testing.T) {
 	// Simulate an install in progress with a ready cache (so the reload is the
 	// one triggered by the completion, not a pre-existing load).
 	ctx.app.manageInstalling = true
-	ctx.app.manageInstallID = "ghostty"
+	ctx.app.manageInstallID = toolGhostty
 	ctx.app.manageInstalledReady = true
 	ctx.app.installCacheLoading = false
 
-	_, cmd := ctx.app.Update(manageInstallDoneMsg{toolID: "ghostty", err: nil})
+	_, cmd := ctx.app.Update(manageInstallDoneMsg{toolID: toolGhostty, err: nil})
 
 	if ctx.app.manageInstalling {
 		t.Error("manageInstallDoneMsg should clear manageInstalling")
@@ -1583,13 +1583,13 @@ func TestManageScreenInstallDoneAsyncInHandler(t *testing.T) {
 func TestManageScreenInstallWithLogsAsyncInHandler(t *testing.T) {
 	ctx := newManageContext(t)
 	ctx.app.manageInstalling = true
-	ctx.app.manageInstallID = "ghostty"
+	ctx.app.manageInstallID = toolGhostty
 	ctx.app.manageInstalledReady = true
 	ctx.app.installCacheLoading = false
 	ctx.app.clearInstallLogs()
 
 	_, cmd := ctx.app.Update(manageInstallWithLogsMsg{
-		toolID: "ghostty",
+		toolID: toolGhostty,
 		logs:   []string{"Installing ghostty...", "done"},
 		err:    nil,
 	})
@@ -2110,8 +2110,8 @@ func TestUsersScreenPopulatedGolden(t *testing.T) {
 	ctx.app.usersIndex = 0
 	ctx.app.usersPane = usersPaneSettings
 	ctx.app.usersItems = []userItem{
-		{name: "alice", theme: "dracula", navStyle: "vim", keyboard: "macos", isActive: true},
-		{name: "bob", theme: "nord", navStyle: "emacs", keyboard: "linux", isActive: false},
+		{name: "alice", theme: "dracula", navStyle: navVim, keyboard: "macos", isActive: true},
+		{name: "bob", theme: "nord", navStyle: navEmacs, keyboard: "linux", isActive: false},
 	}
 
 	screen := NewUsersScreen(ctx)
@@ -2143,7 +2143,7 @@ func TestUsersScreenAsyncInHandler(t *testing.T) {
 	screen := NewUsersScreen(ctx)
 
 	loaded := userLoadedMsg{users: []userItem{
-		{name: "async-user", theme: "nord", navStyle: "emacs", keyboard: "linux"},
+		{name: "async-user", theme: "nord", navStyle: navEmacs, keyboard: "linux"},
 	}}
 	next, _ := screen.Update(loaded)
 	if next != screen {

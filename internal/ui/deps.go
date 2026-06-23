@@ -8,8 +8,8 @@ import (
 // persisted config to seed the theme / nav style / animation defaults.
 func NewScreenContext() *ScreenContext {
 	ctx := &ScreenContext{
-		Theme:             "catppuccin-mocha",
-		NavStyle:          "emacs",
+		Theme:             defaultTheme,
+		NavStyle:          navEmacs,
 		AnimationsEnabled: true,
 		Width:             80,
 		Height:            24,

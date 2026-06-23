@@ -100,7 +100,7 @@ func TestFieldNavScreensUseSharedFooter(t *testing.T) {
 		name   string
 		screen ScreenHandler
 	}{
-		{"neovim", func() ScreenHandler {
+		{toolNeovim, func() ScreenHandler {
 			ctx := newDeepDiveContext(t)
 			ctx.app.width, ctx.app.height = w, h
 			ctx.Width, ctx.Height = w, h
@@ -112,7 +112,7 @@ func TestFieldNavScreensUseSharedFooter(t *testing.T) {
 			ctx.Width, ctx.Height = w, h
 			return NewConfigZshScreen(ctx)
 		}()},
-		{"ghostty", func() ScreenHandler {
+		{toolGhostty, func() ScreenHandler {
 			ctx := newDeepDiveContext(t)
 			ctx.app.width, ctx.app.height = w, h
 			ctx.Width, ctx.Height = w, h

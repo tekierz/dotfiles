@@ -32,7 +32,7 @@ func NewConfigLazyGitScreen(ctx *ScreenContext) *configLazyGitScreen {
 func lazyGitAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
-	case "left", "right", "h", "l":
+	case keyLeft, keyRight, "h", "l":
 		if a.configFieldIndex == 2 {
 			opts := []string{"auto", "dark", "light"}
 			cfg.LazyGitTheme = cycleOption(opts, cfg.LazyGitTheme, fwd)

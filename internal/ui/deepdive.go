@@ -245,7 +245,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GitDiffTool:         "delta",
 
 		// Yazi defaults
-		YaziKeymap:      "vim",
+		YaziKeymap:      navVim,
 		YaziShowHidden:  false,
 		YaziPreviewMode: "auto",
 		YaziSortBy:      "alphabetical",
@@ -323,7 +323,7 @@ type DeepDiveMenuItem struct {
 	Screen      Screen
 	Icon        string
 	Category    string // Category header (empty = same category as previous)
-	Platform    string // Platform filter: "macos", "linux", or "" for all
+	Platform    string // Platform filter: "macos", platformLinux, or "" for all
 }
 
 // GetDeepDiveMenuItems returns the menu items for deep dive configuration

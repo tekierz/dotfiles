@@ -55,7 +55,7 @@ func GetFilteredDeepDiveMenuItems() []DeepDiveMenuItem {
 			continue
 		}
 		// If item is for linux, only include on Linux (arch or debian)
-		if item.Platform == "linux" && (platform == pkg.PlatformArch || platform == pkg.PlatformDebian) {
+		if item.Platform == platformLinux && (platform == pkg.PlatformArch || platform == pkg.PlatformDebian) {
 			filtered = append(filtered, item)
 			continue
 		}
@@ -93,7 +93,7 @@ func renderFieldLabel(label string, focused bool) string {
 	return cursor + style.Render(label) + "\n"
 }
 
-func renderNumberControl(value, min, max int, focused bool) string {
+func renderNumberControl(value int, focused bool) string {
 	leftArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("◀")
 	rightArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("▶")
 	if focused {
@@ -112,8 +112,8 @@ func renderNumberControl(value, min, max int, focused bool) string {
 	return fmt.Sprintf("    %s %s %s", leftArrow, valueStyle.Render(fmt.Sprintf("%d", value)), rightArrow)
 }
 
-func renderSliderControl(value, max, width int, focused bool) string {
-	filled := (value * width) / max
+func renderSliderControl(value, maxVal, width int, focused bool) string {
+	filled := (value * width) / maxVal
 	if filled > width {
 		filled = width
 	}
@@ -220,10 +220,10 @@ func renderRadioOption(label, desc string, selected, focused bool) string {
 		cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
 	}
 
-	radio := "○"
+	radio := glyphDotEmpty
 	radioStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 	if selected {
-		radio = "●"
+		radio = glyphDotFilled
 		radioStyle = lipgloss.NewStyle().Foreground(ColorGreen)
 	}
 	if focused {

@@ -46,7 +46,7 @@ func sudoKeepAliveLoop(stop <-chan struct{}, interval time.Duration, refresh fun
 // normal-completion path (installDoneMsg) and the cancel/teardown path
 // (teardownStream), so the keep-alive never outlives the install.
 func startSudoKeepAlive(refresh func() error) (stop func()) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != platformLinux {
 		return func() {}
 	}
 	stopCh := make(chan struct{})

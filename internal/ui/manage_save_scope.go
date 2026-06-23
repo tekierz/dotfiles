@@ -8,7 +8,7 @@ import "fmt"
 // claude-code, which is gated and handled separately) so the scoped Manage save
 // and the install path agree on which tools exist.
 var manageGeneratorToolOrder = []string{
-	"ghostty", "tmux", "zsh", "neovim", "git", "yazi", "fzf", "lazygit", "btop", "glow",
+	toolGhostty, toolTmux, "zsh", toolNeovim, "git", "yazi", "fzf", toolLazygit, toolBtop, "glow",
 }
 
 // toolDeepDiveFields returns the slice of DeepDiveConfig values that the named
@@ -21,13 +21,13 @@ var manageGeneratorToolOrder = []string{
 // element-by-element without reflection over the whole DeepDiveConfig.
 func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 	switch toolID {
-	case "ghostty":
+	case toolGhostty:
 		return []any{
 			cfg.GhosttyFontSize, cfg.GhosttyFontFamily, cfg.GhosttyOpacity,
 			cfg.GhosttyBlurRadius, cfg.GhosttyTabBindings, cfg.GhosttyScrollbackLines,
 			cfg.GhosttyCursorStyle, cfg.GhosttyWindowDecorations, cfg.GhosttyConfirmClose,
 		}
-	case "tmux":
+	case toolTmux:
 		return []any{
 			cfg.TmuxPrefix, cfg.TmuxSplitBinds, cfg.TmuxStatusBar, cfg.TmuxMouseMode,
 			cfg.TmuxBaseIndex, cfg.TmuxPaneBorderStyle, cfg.TmuxHistoryLimit,
@@ -42,7 +42,7 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 			cfg.ZshSyntaxHighlight, cfg.ZshAutosuggestions,
 			cfg.ZshHistoryIgnoreDups, cfg.ZshCorrection, cfg.ZshCompletionMenu,
 		}
-	case "neovim":
+	case toolNeovim:
 		return []any{
 			cfg.NeovimConfig, cfg.NeovimTabWidth, cfg.NeovimWrap,
 			cfg.NeovimCursorLine, cfg.NeovimClipboard,
@@ -65,12 +65,12 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 			cfg.FzfPreview, cfg.FzfHeight, cfg.FzfLayout,
 			cfg.FzfDefaultOpts, cfg.FzfBorderStyle, cfg.FzfPreviewWindow,
 		}
-	case "lazygit":
+	case toolLazygit:
 		return []any{
 			cfg.LazyGitSideBySide, cfg.LazyGitMouseMode, cfg.LazyGitTheme,
 			cfg.LazyGitPaging,
 		}
-	case "btop":
+	case toolBtop:
 		return []any{
 			cfg.BtopTheme, cfg.BtopUpdateMs, cfg.BtopShowTemp, cfg.BtopGraphType,
 			cfg.BtopTempScale, cfg.BtopShownBoxes,

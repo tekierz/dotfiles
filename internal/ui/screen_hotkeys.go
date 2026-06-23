@@ -57,7 +57,7 @@ func (s *hotkeysScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		if msg.String() == "q" {
 			return s, tea.Quit
 		}
-		if msg.String() == "ctrl+c" {
+		if msg.String() == keyCtrlC {
 			return s, tea.Quit
 		}
 		return s, s.handleKey(msg)
@@ -91,7 +91,7 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	cats := a.hotkeyCategories()
 	if len(cats) == 0 {
-		if key == "esc" {
+		if key == keyEsc {
 			return s.exit()
 		}
 		return nil
@@ -154,10 +154,10 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch key {
-	case "esc":
+	case keyEsc:
 		return s.exit()
 
-	case "tab":
+	case keyTab:
 		if a.hotkeysPane == hotkeysPaneCategories {
 			a.hotkeysPane = hotkeysPaneItems
 		} else {
@@ -177,7 +177,7 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			ensureCatVisible()
 			return nil
-		case "down", "j":
+		case keyDown, "j":
 			if a.hotkeyCategory < len(cats)-1 {
 				a.hotkeyCategory++
 				a.hotkeyCursor = 0
@@ -185,7 +185,7 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			ensureCatVisible()
 			return nil
-		case "right", "l", "enter":
+		case keyRight, "l", keyEnter:
 			a.hotkeysPane = hotkeysPaneItems
 			return nil
 		case "F":
@@ -206,13 +206,13 @@ func (s *hotkeysScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		ensureItemVisible()
 		return nil
-	case "down", "j":
+	case keyDown, "j":
 		if a.hotkeyCursor < len(displayItems)-1 {
 			a.hotkeyCursor++
 		}
 		ensureItemVisible()
 		return nil
-	case "left", "h":
+	case keyLeft, "h":
 		a.hotkeysPane = hotkeysPaneCategories
 		return nil
 	case "f":
@@ -280,18 +280,18 @@ func (s *hotkeysScreen) handleAliasInput(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
 	switch key {
-	case "esc":
+	case keyEsc:
 		a.hotkeysCancelAlias()
 		return nil
 
-	case "enter":
+	case keyEnter:
 		if a.hotkeysAliasName != "" && a.hotkeysAliasCommand != "" {
 			a.hotkeysSaveAlias()
 		}
 		a.hotkeysCancelAlias()
 		return nil
 
-	case "tab":
+	case keyTab:
 		// Switch between name and command fields
 		a.hotkeysAliasField = (a.hotkeysAliasField + 1) % 2
 		// Move cursor to end of new field
@@ -302,13 +302,13 @@ func (s *hotkeysScreen) handleAliasInput(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "left", "h":
+	case keyLeft, "h":
 		if a.hotkeysAliasCursor > 0 {
 			a.hotkeysAliasCursor--
 		}
 		return nil
 
-	case "right", "l":
+	case keyRight, "l":
 		maxLen := a.hotkeysAliasCurrentFieldLen()
 		if a.hotkeysAliasCursor < maxLen {
 			a.hotkeysAliasCursor++
@@ -323,11 +323,11 @@ func (s *hotkeysScreen) handleAliasInput(msg tea.KeyMsg) tea.Cmd {
 		a.hotkeysAliasCursor = a.hotkeysAliasCurrentFieldLen()
 		return nil
 
-	case "backspace":
+	case keyBackspace:
 		a.hotkeysAliasBackspace()
 		return nil
 
-	case "delete":
+	case keyDelete:
 		a.hotkeysAliasDelete()
 		return nil
 
@@ -355,7 +355,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the
 	// already-active tab (this screen).
 	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+		if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -374,7 +374,9 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			delta = -1
 		case tea.MouseButtonWheelDown:
 			delta = 1
-		default:
+		case tea.MouseButtonNone, tea.MouseButtonLeft, tea.MouseButtonMiddle,
+			tea.MouseButtonRight, tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight,
+			tea.MouseButtonBackward, tea.MouseButtonForward, tea.MouseButton10, tea.MouseButton11:
 			return nil
 		}
 
@@ -451,7 +453,7 @@ func (s *hotkeysScreen) View(width, height int) string {
 	a := s.App()
 
 	if width == 0 || height == 0 {
-		return "Loading..."
+		return loadingMessage
 	}
 
 	// Resolve the active user once per frame so the per-row favorite lookups
@@ -697,14 +699,14 @@ func (a *App) hotkeyCategories() []hotkeys.Category {
 func (a *App) refreshHotkeysCurrentUser() {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil || cfg == nil || cfg.ActiveUser == "" {
-		a.hotkeysActiveUser = "default"
+		a.hotkeysActiveUser = optionDefault
 	} else {
 		a.hotkeysActiveUser = cfg.ActiveUser
 	}
 	a.hotkeysActiveUserCached = true
 }
 
-// getCurrentUsername returns the active user name from global config, or "default"
+// getCurrentUsername returns the active user name from global config, or optionDefault
 // if none set. It serves the value cached by refreshHotkeysCurrentUser for the
 // current frame, falling back to a disk read only if the cache is cold.
 func (a *App) getCurrentUsername() string {
@@ -862,10 +864,10 @@ func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 		statusText = fmt.Sprintf("%s %s — %d items", cat.Icon, cat.Name, len(cat.Items))
 	}
 	if a.hotkeyFilter != "" {
-		statusText = statusText + lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  (filtered)")
+		statusText += lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  (filtered)")
 	}
 	if a.hotkeysFavoritesOnly {
-		statusText = statusText + lipgloss.NewStyle().Foreground(ColorYellow).Render("  [favorites only]")
+		statusText += lipgloss.NewStyle().Foreground(ColorYellow).Render("  [favorites only]")
 	}
 	if statusText == "" {
 		statusText = " "
@@ -969,23 +971,18 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 	cat := cats[clampInt(a.hotkeyCategory, 0, len(cats)-1)]
 	items := cat.Items
 
-	// Filter to favorites only if mode is enabled
+	// Filter to favorites only if mode is enabled. The cursor, scroll, and click
+	// handlers all index into displayItems directly (display-index space), so no
+	// display->original index mapping is needed here.
 	displayItems := items
-	itemIndices := make([]int, len(items)) // Map display index to original index
-	for i := range items {
-		itemIndices[i] = i
-	}
 	if a.hotkeysFavoritesOnly {
 		var filteredItems []hotkeys.Item
-		var filteredIndices []int
-		for i, it := range items {
+		for _, it := range items {
 			if a.isHotkeyFavorite(cat.ID, it.ID) {
 				filteredItems = append(filteredItems, it)
-				filteredIndices = append(filteredIndices, i)
 			}
 		}
 		displayItems = filteredItems
-		itemIndices = filteredIndices
 	}
 
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("ITEMS")
@@ -1101,8 +1098,8 @@ func (a *App) renderHotkeysAliasDialog(width int) string {
 		return truncateVisible(display, width-10)
 	}
 
-	nameLabel := "Name:    "
-	cmdLabel := "Command: "
+	var nameLabel string
+	var cmdLabel string
 
 	if a.hotkeysAliasField == 0 {
 		nameLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Name:    ")

@@ -6,6 +6,9 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
+// testZshVersion is a sample installed zsh version reused across cache tests.
+const testZshVersion = "5.9"
+
 // mockCaskManager embeds the shared mock and adds cask enumeration so it
 // satisfies the caskLister interface used by batchInstalledPackages.
 type mockCaskManager struct {
@@ -29,7 +32,7 @@ func TestBatchInstalledPackages_NilManager(t *testing.T) {
 
 func TestBatchInstalledPackages_FormulaeOnly(t *testing.T) {
 	mgr := pkg.NewMockPackageManager()
-	mgr.InstalledPkgs["zsh"] = "5.9"
+	mgr.InstalledPkgs["zsh"] = testZshVersion
 
 	got := batchInstalledPackages(mgr)
 	if !got["zsh"] {
@@ -42,7 +45,7 @@ func TestBatchInstalledPackages_FormulaeOnly(t *testing.T) {
 
 func TestBatchInstalledPackages_MergesCasks(t *testing.T) {
 	base := pkg.NewMockPackageManager()
-	base.InstalledPkgs["zsh"] = "5.9"
+	base.InstalledPkgs["zsh"] = testZshVersion
 	mgr := &mockCaskManager{
 		MockPackageManager: base,
 		casks:              []string{"sunshine", "zen-browser"},
@@ -62,7 +65,7 @@ func TestBatchInstalledPackages_MergesCasks(t *testing.T) {
 
 func TestBatchInstalledPackages_CaskErrorIgnored(t *testing.T) {
 	base := pkg.NewMockPackageManager()
-	base.InstalledPkgs["zsh"] = "5.9"
+	base.InstalledPkgs["zsh"] = testZshVersion
 	mgr := &mockCaskManager{
 		MockPackageManager: base,
 		caskErr:            errCaskList,

@@ -71,7 +71,7 @@ func (s *updateScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	a := s.App()
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if msg.String() == keyCtrlC {
 			// Tear down any in-flight update worker + subprocess before quitting so
 			// nothing is orphaned when the TUI exits.
 			a.teardownStream()
@@ -148,7 +148,7 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if a.updateIndex > 0 {
 			a.updateIndex--
 		}
-	case "down", "j":
+	case keyDown, "j":
 		if a.updateIndex < len(a.updateResults)-1 {
 			a.updateIndex++
 		}
@@ -160,7 +160,7 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.updateSelected[a.updateIndex] = true
 			}
 		}
-	case "enter": // Update selected or current package
+	case keyEnter: // Update selected or current package
 		if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
 			var packagesToUpdate []pkg.Package
 			if len(a.updateSelected) > 0 {
@@ -216,7 +216,7 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.installLogScroll = 0
 			}
 		}
-	case "esc":
+	case keyEsc:
 		// ScreenMainMenu is migrated; route through the ScreenManager.
 		return NavigateTo(ScreenMainMenu)
 	}
@@ -245,7 +245,7 @@ func (s *updateScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 	// Ignore a click on the already-active tab (this screen).
-	if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+	if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 		return s.navigateTab(screen)
 	}
 	return nil
@@ -334,21 +334,21 @@ func (s *updateScreen) View(width, height int) string {
 	innerTextW := maxInt(20, boxOuterW-4) // border(2) + paddingX(2)
 
 	// Package list
-	var pkgLines []string
+	pkgLines := make([]string, 0, len(updates)+2)
 	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
 	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")), innerTextW))
 	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
 
 	for i, p := range updates {
 		cursor := "  "
-		checkbox := "○"
+		checkbox := glyphDotEmpty
 		style := lipgloss.NewStyle().Foreground(ColorText)
 		versionStyle := lipgloss.NewStyle().Foreground(ColorYellow)
 		newStyle := lipgloss.NewStyle().Foreground(ColorGreen)
 		checkStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 
 		if a.updateSelected[i] {
-			checkbox = "●"
+			checkbox = glyphDotFilled
 			checkStyle = lipgloss.NewStyle().Foreground(ColorCyan)
 		}
 

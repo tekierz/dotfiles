@@ -35,7 +35,7 @@ func NewConfigBtopScreen(ctx *ScreenContext) *configBtopScreen {
 func btopAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
-	case "left", "right", "h", "l":
+	case keyLeft, keyRight, "h", "l":
 		switch a.configFieldIndex {
 		case 0:
 			opts := []string{"auto", "dracula", "gruvbox", "nord", "tokyo-night"}

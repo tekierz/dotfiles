@@ -52,6 +52,14 @@ func startTabTargetLoad(a *App, target Screen) tea.Cmd {
 			a.backupsLoading = true
 			return loadBackupsCmd()
 		}
+	case ScreenAnimation, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
+		ScreenFileTree, ScreenProgress, ScreenSummary, ScreenError, ScreenDeepDiveMenu,
+		ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh, ScreenConfigNeovim,
+		ScreenConfigGit, ScreenConfigYazi, ScreenConfigFzf, ScreenConfigUtilities,
+		ScreenConfigMacApps, ScreenMainMenu, ScreenHotkeys, ScreenConfigCLITools,
+		ScreenConfigGUIApps, ScreenConfigCLIUtilities, ScreenConfigLazyGit,
+		ScreenConfigBtop, ScreenConfigGlow, ScreenConfigClaudeCode:
+		// Not a management tab destination with an on-enter load.
 	}
 	return nil
 }
@@ -79,12 +87,12 @@ func atoi(s string, defaultVal int) int {
 }
 
 // getDeepDiveItemStatus returns the install status for a deep dive menu item
-// Returns "installed" (blue) if all installed, "partial" (yellow) if partially installed, "pending" (grey) if not.
+// Returns "installed" (blue) if all installed, "partial" (yellow) if partially installed, statusPending (grey) if not.
 func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 	toolIDs, ok := ScreenToolIDs[item.Screen]
 	if !ok || len(toolIDs) == 0 {
 		// No tool mapping (e.g., utilities) - show as pending
-		return "pending"
+		return statusPending
 	}
 
 	installedCount := 0
@@ -99,7 +107,7 @@ func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 	} else if installedCount > 0 {
 		return "partial" // Partially installed (yellow)
 	}
-	return "pending" // None installed (grey)
+	return statusPending // None installed (grey)
 }
 
 // togglePlugin adds or removes a plugin from the list.

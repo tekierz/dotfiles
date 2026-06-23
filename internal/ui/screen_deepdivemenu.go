@@ -78,19 +78,19 @@ func (s *deepDiveMenuScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		menuItems := GetFilteredDeepDiveMenuItems()
 		maxIdx := len(menuItems) // last index is the "Continue" option
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return s, tea.Quit
 		case "up", "k":
 			if a.deepDiveMenuIndex > 0 {
 				a.deepDiveMenuIndex--
 			}
-		case "down", "j":
+		case keyDown, "j":
 			if a.deepDiveMenuIndex < maxIdx {
 				a.deepDiveMenuIndex++
 			}
-		case "enter":
+		case keyEnter:
 			return s, s.selectItem(a.deepDiveMenuIndex)
-		case "esc":
+		case keyEsc:
 			return s, NavigateTo(ScreenWelcome)
 		}
 
@@ -260,9 +260,9 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 
 	// Status legend.
 	legendStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-	installedDot := lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("●")
-	partialDot := lipgloss.NewStyle().Foreground(ColorYellow).Render("●")
-	pendingDot := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("○")
+	installedDot := lipgloss.NewStyle().Foreground(ColorNeonBlue).Render(glyphDotFilled)
+	partialDot := lipgloss.NewStyle().Foreground(ColorYellow).Render(glyphDotFilled)
+	pendingDot := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(glyphDotEmpty)
 	legend := legendStyle.Render(fmt.Sprintf("%s installed  %s partial  %s not installed",
 		installedDot, partialDot, pendingDot))
 

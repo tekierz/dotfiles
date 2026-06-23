@@ -190,7 +190,7 @@ func TestGhosttyTabBindingOptionsAllGenerate(t *testing.T) {
 	uiOptions := []string{"super", "ctrl", "ctrl-shift"} // must match screen_config_ghostty.go
 	for _, opt := range uiOptions {
 		cfg := tools.GhosttyConfig{TabBindings: opt}
-		out := tools.GenerateGhosttyConfig(cfg, "catppuccin-mocha")
+		out := tools.GenerateGhosttyConfig(cfg, defaultTheme)
 		if !strings.Contains(out, "=new_tab") {
 			t.Errorf("TabBindings=%q generated no new_tab keybinding:\n%s", opt, out)
 		}

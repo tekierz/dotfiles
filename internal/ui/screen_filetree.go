@@ -12,6 +12,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
+// Tree branch glyphs used when rendering the install summary file tree.
+const (
+	treeBranch = "├──"
+	treeLeaf   = "└──"
+)
+
 // fileTreeScreen is the migrated ScreenHandler for the installation summary
 // (file tree) screen shown before installation starts.
 //
@@ -40,12 +46,11 @@ func (s *fileTreeScreen) Init() tea.Cmd { return nil }
 // Update handles keyboard input for the file tree screen. (Mouse is a no-op,
 // matching the legacy handleSummaryMouse for ScreenFileTree.)
 func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return s, tea.Quit
-		case "enter":
+		case keyEnter:
 			// Begin installation: navigate to the migrated progress screen. The
 			// install is triggered by progressScreen.Init() (which does the sudo
 			// check itself), so we deliberately do NOT emit a separate
@@ -53,7 +58,7 @@ func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// tea.Batch is not guaranteed, and the message would have no migrated
 			// handler until Progress is active.
 			return s, NavigateTo(ScreenProgress)
-		case "esc":
+		case keyEsc:
 			return s, NavigateTo(ScreenNavPicker)
 		}
 	}
@@ -144,9 +149,9 @@ func (s *fileTreeScreen) View(width, height int) string {
 	if len(toInstall) > 0 {
 		lines = append(lines, textStyle.Render("  Packages to Install:"))
 		for i, toolID := range toInstall {
-			prefix := "├──"
+			prefix := treeBranch
 			if i == len(toInstall)-1 {
-				prefix = "└──"
+				prefix = treeLeaf
 			}
 			lines = append(lines, textStyle.Render("  "+prefix+" ")+pkgStyle.Render(toolID))
 		}
@@ -157,9 +162,9 @@ func (s *fileTreeScreen) View(width, height int) string {
 	if len(alreadyInstalled) > 0 {
 		lines = append(lines, mutedStyle.Render("  Already Installed (settings will update):"))
 		for i, toolID := range alreadyInstalled {
-			prefix := "├──"
+			prefix := treeBranch
 			if i == len(alreadyInstalled)-1 {
-				prefix = "└──"
+				prefix = treeLeaf
 			}
 			lines = append(lines, textStyle.Render("  "+prefix+" ")+mutedStyle.Render(toolID+" ✓"))
 		}
@@ -228,9 +233,9 @@ func (s *fileTreeScreen) View(width, height int) string {
 	if len(binFiles) > 0 {
 		lines = append(lines, textStyle.Render("  └── .local/bin/"))
 		for i, f := range binFiles {
-			prefix := "├──"
+			prefix := treeBranch
 			if i == len(binFiles)-1 {
-				prefix = "└──"
+				prefix = treeLeaf
 			}
 			lines = append(lines, textStyle.Render("      "+prefix+" ")+newStyle.Render(f))
 		}
@@ -240,10 +245,10 @@ func (s *fileTreeScreen) View(width, height int) string {
 
 	legend := mutedStyle.Render(
 		fmt.Sprintf("  %s New    %s Modified    %s Package    %s Settings Only",
-			newStyle.Render("●"),
-			modStyle.Render("●"),
-			pkgStyle.Render("●"),
-			mutedStyle.Render("●"),
+			newStyle.Render(glyphDotFilled),
+			modStyle.Render(glyphDotFilled),
+			pkgStyle.Render(glyphDotFilled),
+			mutedStyle.Render(glyphDotFilled),
 		))
 
 	help := HelpStyle.Render("[ENTER] Start Installation    [ESC] Back")

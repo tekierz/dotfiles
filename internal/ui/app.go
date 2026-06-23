@@ -79,7 +79,7 @@ var themes = []struct {
 	desc  string
 	color string
 }{
-	{"catppuccin-mocha", "Dark, warm pastels", "#89b4fa"},
+	{defaultTheme, "Dark, warm pastels", "#89b4fa"},
 	{"catppuccin-latte", "Light, warm pastels", "#1e66f5"},
 	{"catppuccin-frappe", "Muted, cozy dark", "#8caaee"},
 	{"catppuccin-macchiato", "Dark, punchy contrast", "#8aadf4"},
@@ -313,7 +313,7 @@ type App struct {
 	backupsLoaded       bool
 	backupsLoading      bool
 	backupConfirmMode   bool
-	backupConfirmType   string // "restore" or "delete"
+	backupConfirmType   string // "restore" or keyDelete
 	backupStatus        string // Status message for backup operations
 	backupRunning       bool   // Currently running a backup operation
 	backupError         error  // Error from backup operation
@@ -398,6 +398,14 @@ func (a *App) postIntroTransition() tea.Cmd {
 		}
 	case ScreenManage, ScreenHotkeys:
 		async = a.startInstallCacheLoad()
+	case ScreenAnimation, ScreenWelcome, ScreenThemePicker, ScreenNavPicker,
+		ScreenFileTree, ScreenProgress, ScreenSummary, ScreenError, ScreenDeepDiveMenu,
+		ScreenConfigGhostty, ScreenConfigTmux, ScreenConfigZsh, ScreenConfigNeovim,
+		ScreenConfigGit, ScreenConfigYazi, ScreenConfigFzf, ScreenConfigUtilities,
+		ScreenConfigMacApps, ScreenMainMenu, ScreenBackups, ScreenUsers,
+		ScreenConfigCLITools, ScreenConfigGUIApps, ScreenConfigCLIUtilities,
+		ScreenConfigLazyGit, ScreenConfigBtop, ScreenConfigGlow, ScreenConfigClaudeCode:
+		// Other destinations need no on-enter async load.
 	}
 
 	nav := NavigateTo(target)
@@ -415,8 +423,8 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 
 	app := &App{
 		skipIntro:            skipIntro,
-		theme:                "catppuccin-mocha",
-		navStyle:             "emacs",
+		theme:                defaultTheme,
+		navStyle:             navEmacs,
 		animationsEnabled:    true,
 		installOutput:        make([]string, 0, 100),
 		deepDiveConfig:       NewDeepDiveConfig(),
@@ -736,7 +744,7 @@ func cleanupBackups() {
 		modTime time.Time
 	}
 
-	var backups []backupInfo
+	backups := make([]backupInfo, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue

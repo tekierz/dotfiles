@@ -10,14 +10,14 @@ import (
 )
 
 // drainWorker runs runInstallWorker synchronously and returns all events.
-// selectedTools is the slice of tool IDs to install (empty = config-only path).
+// The worker always runs the config-only path (no selected tools).
 // cfg is the deepDiveConfig snapshot the worker receives.
-func drainWorker(t *testing.T, selectedTools []string, cfg DeepDiveConfig) []installEventMsg {
+func drainWorker(t *testing.T, cfg DeepDiveConfig) []installEventMsg {
 	t.Helper()
 	events := make(chan installEventMsg, 256)
 	ctx := context.Background()
-	go runInstallWorker(ctx, events, selectedTools, cfg, "catppuccin-mocha")
-	var out []installEventMsg
+	go runInstallWorker(ctx, events, nil, cfg, defaultTheme)
+	out := make([]installEventMsg, 0, cap(events))
 	for ev := range events {
 		out = append(out, ev)
 	}
@@ -55,7 +55,7 @@ func TestConfigGating_DeselectedToolSkipsConfig(t *testing.T) {
 	cfg.CLITools["glow"] = true
 
 	// Run the config-only path (no packages to install).
-	events := drainWorker(t, nil, cfg)
+	events := drainWorker(t, cfg)
 
 	lines := collectLines(events)
 
@@ -81,7 +81,7 @@ func TestConfigGating_DeselectedToolSkipsConfig(t *testing.T) {
 	}
 
 	// Ghostty config SHOULD be written (always-core).
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", toolGhostty, "config")
 	if _, err := os.Stat(ghosttyPath); err != nil {
 		t.Errorf("ghostty config not written even though it is always-core: %v (lines: %v)", err, lines)
 	}
@@ -110,7 +110,7 @@ func TestConfigGating_SelectedToolWritesConfig(t *testing.T) {
 	cfg.CLITools["glow"] = true
 	cfg.CLITools["btop"] = true
 
-	_ = drainWorker(t, nil, cfg)
+	_ = drainWorker(t, cfg)
 
 	// lazygit config should exist.
 	lazygitPath := filepath.Join(home, ".config", "lazygit", "config.yml")
@@ -141,7 +141,7 @@ func TestFailureAggregation_NamesAllFailedSteps(t *testing.T) {
 	cfg.CLITools["btop"] = true
 	cfg.CLITools["glow"] = true
 
-	events := drainWorker(t, nil, cfg)
+	events := drainWorker(t, cfg)
 
 	// Find the done event and inspect its error.
 	var doneEv *installEventMsg
@@ -243,7 +243,7 @@ func TestProgressSteps_CountMatchesPlannedPhases(t *testing.T) {
 	cfg.CLITools["claude-code"] = false
 	cfg.Utilities["claude-code"] = false
 
-	events := drainWorker(t, nil, cfg)
+	events := drainWorker(t, cfg)
 
 	var stepCount int
 	for _, ev := range events {

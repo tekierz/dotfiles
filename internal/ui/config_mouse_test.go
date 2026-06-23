@@ -220,7 +220,7 @@ func TestConfigFieldClickFamily(t *testing.T) {
 		},
 		{
 			// neovim: radio configs (Kickstart=field 0) + editor settings + LSP loop.
-			name:  "neovim",
+			name:  toolNeovim,
 			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigNeovimScreen(ctx) },
 			want:  []fieldCase{{"Kickstart.nvim", 0}, {"Tab Width", 4}, {"Line Wrapping", 5}},
 		},
@@ -273,7 +273,7 @@ func TestConfigFieldClickWidthSweep(t *testing.T) {
 		fields []fieldCase
 	}{
 		{
-			name:  "ghostty",
+			name:  toolGhostty,
 			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigGhosttyScreen(ctx) },
 			fields: []fieldCase{
 				{"Font Family", 0},

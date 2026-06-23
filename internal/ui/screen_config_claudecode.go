@@ -80,24 +80,24 @@ func (s *configClaudeCodeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case keyCtrlC, "q":
 			return s, tea.Quit
 		case "up", "k":
 			// Allow navigating to -1 for the install toggle.
 			if a.configFieldIndex > -1 {
 				a.configFieldIndex--
 			}
-		case "down", "j":
+		case keyDown, "j":
 			if a.configFieldIndex < len(claudeCodeMCPItems)-1 {
 				a.configFieldIndex++
 			}
 		case " ":
 			s.toggle(a)
-		case "esc", "enter":
+		case keyEsc, keyEnter:
 			return s, s.back()
 		}
 	case tea.MouseMsg:
-		return s, s.handleMouse(msg)
+		s.handleMouse(msg)
 	}
 	return s, nil
 }
@@ -107,7 +107,7 @@ func (s *configClaudeCodeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // row under the cursor using the per-row geometry recorded by View (so the
 // install toggle, the MCP header block, and each MCP row map correctly); clicks
 // outside the box or off every row select nothing.
-func (s *configClaudeCodeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
+func (s *configClaudeCodeScreen) handleMouse(msg tea.MouseMsg) {
 	a := s.App()
 	m := tea.MouseEvent(msg)
 
@@ -115,26 +115,25 @@ func (s *configClaudeCodeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		if a.configFieldIndex > -1 {
 			a.configFieldIndex--
 		}
-		return nil
+		return
 	}
 	if m.Button == tea.MouseButtonWheelDown {
 		if a.configFieldIndex < len(claudeCodeMCPItems)-1 {
 			a.configFieldIndex++
 		}
-		return nil
+		return
 	}
 
 	if m.Action != tea.MouseActionPress || m.Button != tea.MouseButtonLeft {
-		return nil
+		return
 	}
 	fl := a.configFieldLayout
 	if fl.hasXBounds && (m.X < fl.boxLeft || m.X > fl.boxRight) {
-		return nil
+		return
 	}
 	if idx, ok := fl.fieldAt(m.Y); ok {
 		a.configFieldIndex = idx
 	}
-	return nil
 }
 
 // View renders the Claude Code MCP configuration screen.

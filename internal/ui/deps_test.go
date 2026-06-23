@@ -6,8 +6,8 @@ package ui
 // test setup.
 func NewTestScreenContext() *ScreenContext {
 	return &ScreenContext{
-		Theme:             "catppuccin-mocha",
-		NavStyle:          "emacs",
+		Theme:             defaultTheme,
+		NavStyle:          navEmacs,
 		AnimationsEnabled: false, // Disable for tests
 		Width:             80,
 		Height:            24,

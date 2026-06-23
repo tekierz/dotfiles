@@ -29,9 +29,9 @@ var cliToolItems = []struct {
 	name string
 	desc string
 }{
-	{"lazygit", "LazyGit", "Simple terminal UI for Git"},
+	{toolLazygit, "LazyGit", "Simple terminal UI for Git"},
 	{"lazydocker", "LazyDocker", "Simple terminal UI for Docker"},
-	{"btop", "btop", "Resource monitor with TUI"},
+	{toolBtop, toolBtop, "Resource monitor with TUI"},
 	{"glow", "Glow", "Render markdown on the CLI"},
 	{"claude-code", "Claude Code", "AI-powered coding assistant (npm)"},
 }

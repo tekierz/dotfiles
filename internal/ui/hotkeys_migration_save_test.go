@@ -14,8 +14,8 @@ import (
 // to seed an already-migrated favorites file.
 func neovimNavigateStableID(t *testing.T) string {
 	t.Helper()
-	for _, cat := range hotkeys.Categories("emacs") {
-		if cat.ID == "neovim" {
+	for _, cat := range hotkeys.Categories(navEmacs) {
+		if cat.ID == toolNeovim {
 			for _, it := range cat.Items {
 				if it.Description == "Navigate" {
 					return it.ID
@@ -44,7 +44,7 @@ func TestNewApp_NoOpMigrationDoesNotRewriteHotkeys(t *testing.T) {
 	path := filepath.Join(dir, "hotkeys.json")
 	cfg := &config.HotkeysConfig{
 		Users: map[string]*config.UserHotkeys{
-			"default": {Favorites: map[string][]string{"neovim": {id}}},
+			optionDefault: {Favorites: map[string][]string{toolNeovim: {id}}},
 		},
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -100,7 +100,7 @@ func TestNewApp_LegacyMigrationRewritesHotkeys(t *testing.T) {
 	path := filepath.Join(dir, "hotkeys.json")
 	cfg := &config.HotkeysConfig{
 		Users: map[string]*config.UserHotkeys{
-			"default": {Favorites: map[string][]string{"neovim": {"Arrow keys"}}}, // legacy key
+			optionDefault: {Favorites: map[string][]string{toolNeovim: {"Arrow keys"}}}, // legacy key
 		},
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -118,7 +118,7 @@ func TestNewApp_LegacyMigrationRewritesHotkeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload hotkeys: %v", err)
 	}
-	favs := out.Users["default"].Favorites["neovim"]
+	favs := out.Users[optionDefault].Favorites[toolNeovim]
 	if len(favs) != 1 || favs[0] != id {
 		t.Errorf("legacy migration not persisted: got %v, want [%q]", favs, id)
 	}

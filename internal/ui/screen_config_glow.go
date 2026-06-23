@@ -34,7 +34,7 @@ func NewConfigGlowScreen(ctx *ScreenContext) *configGlowScreen {
 func glowAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
-	case "left", "right", "h", "l":
+	case keyLeft, keyRight, "h", "l":
 		switch a.configFieldIndex {
 		case 0:
 			opts := []string{"auto", "dark", "light", "notty"}

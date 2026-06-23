@@ -29,7 +29,7 @@ func NewConfigGitScreen(ctx *ScreenContext) *configGitScreen {
 func gitAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
-	case "left", "right", "h", "l":
+	case keyLeft, keyRight, "h", "l":
 		switch a.configFieldIndex {
 		case 1: // Default branch
 			opts := []string{"main", "master", "develop"}
@@ -105,7 +105,6 @@ func (s *configGitScreen) View(width, height int) string {
 		credFocused,
 	))
 	rec.write("\n\n")
-	fieldIdx++
 
 	// Trailing reference section (non-field content): excluded from hit extents.
 	rec.write(sectionHeaderStyle.Render("Included Aliases"))

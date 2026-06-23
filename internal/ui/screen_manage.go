@@ -85,7 +85,7 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	a := s.App()
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if msg.String() == keyCtrlC {
 			// Tear down any in-flight install worker + subprocess before quitting.
 			a.teardownStream()
 			return s, tea.Quit
@@ -132,22 +132,22 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// bindings.
 	if a.manageEditing {
 		switch key {
-		case "esc":
+		case keyEsc:
 			a.manageCancelEditing()
 			return nil
 
-		case "enter":
+		case keyEnter:
 			a.manageCommitEditing()
 			a.manageStatus = "Updated ✓"
 			return nil
 
-		case "left", "h":
+		case keyLeft, "h":
 			if a.manageEditCursor > 0 {
 				a.manageEditCursor--
 			}
 			return nil
 
-		case "right", "l":
+		case keyRight, "l":
 			if a.manageEditCursor < utf8.RuneCountInString(a.manageEditValue) {
 				a.manageEditCursor++
 			}
@@ -161,7 +161,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.manageEditCursor = utf8.RuneCountInString(a.manageEditValue)
 			return nil
 
-		case "backspace":
+		case keyBackspace:
 			r := []rune(a.manageEditValue)
 			cur := clampInt(a.manageEditCursor, 0, len(r))
 			if cur > 0 {
@@ -171,7 +171,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			return nil
 
-		case "delete":
+		case keyDelete:
 			r := []rune(a.manageEditValue)
 			cur := clampInt(a.manageEditCursor, 0, len(r))
 			if cur < len(r) {
@@ -204,7 +204,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// Non-editing manage UI.
 	items := a.manageItems()
 	if len(items) == 0 {
-		if key == "esc" {
+		if key == keyEsc {
 			// ScreenMainMenu is migrated; route through the ScreenManager.
 			return NavigateTo(ScreenMainMenu)
 		}
@@ -234,7 +234,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		case manageFieldOption:
 			if f.str != nil && len(f.options) > 0 {
 				*f.str = cycleStringOption(f.options, *f.str, dir > 0)
-				if f.key == "theme" {
+				if f.key == manageFieldTheme {
 					a.syncThemeIndex()
 				}
 			}
@@ -246,6 +246,8 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				}
 				*f.n = clampInt(*f.n+(dir*step), f.min, f.max)
 			}
+		case manageFieldText, manageFieldToggle:
+			// Text/toggle fields are not adjusted by left/right cycling.
 		}
 	}
 
@@ -272,8 +274,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// would drop it, strand manageInstalling=true, and orphan the install
 	// subprocess. (The 'i' install trigger is already guarded.)
 	if a.manageInstalling {
-		switch key {
-		case "esc":
+		if key == keyEsc {
 			a.manageStatus = "Install in progress…"
 			return nil
 		}
@@ -294,14 +295,14 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch key {
 	// Global navigation.
-	case "esc":
+	case keyEsc:
 		a.manageStatus = ""
 		a.manageCancelEditing()
 		a.managePane = managePaneTools
 		// ScreenMainMenu is migrated; route through the ScreenManager.
 		return NavigateTo(ScreenMainMenu)
 
-	case "tab":
+	case keyTab:
 		if a.managePane == managePaneTools {
 			a.managePane = managePaneSettings
 		} else {
@@ -320,7 +321,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		item := items[a.manageIndex]
-		if item.id == "global" {
+		if item.id == manageItemGlobal {
 			a.manageStatus = "Select a tool/app to install"
 			return nil
 		}
@@ -343,7 +344,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// Jump to hotkeys/cheatsheet for the selected tool.
 		item := items[a.manageIndex]
 		a.hotkeyFilter = ""
-		if item.id != "global" {
+		if item.id != manageItemGlobal {
 			a.hotkeyFilter = item.id
 		}
 		a.hotkeyCategory = 0
@@ -398,7 +399,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.manageEnsureToolsVisible(layout, len(items))
 			return nil
 
-		case "down", "j":
+		case keyDown, "j":
 			if a.manageIndex < len(items)-1 {
 				a.manageIndex++
 				a.configFieldIndex = 0
@@ -407,7 +408,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.manageEnsureToolsVisible(layout, len(items))
 			return nil
 
-		case "right", "l", "enter":
+		case keyRight, "l", keyEnter:
 			a.managePane = managePaneSettings
 			return nil
 		}
@@ -424,18 +425,18 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.manageEnsureFieldsVisible(layout, len(fields))
 		return nil
 
-	case "down", "j":
+	case keyDown, "j":
 		if a.configFieldIndex < len(fields)-1 {
 			a.configFieldIndex++
 		}
 		a.manageEnsureFieldsVisible(layout, len(fields))
 		return nil
 
-	case "left", "h":
+	case keyLeft, "h":
 		adjustField(-1)
 		return nil
 
-	case "right", "l":
+	case keyRight, "l":
 		adjustField(1)
 		return nil
 
@@ -446,7 +447,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			case manageFieldToggle:
 				wasEnabled := a.animationsEnabled
 				toggleField()
-				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+				if f.key == manageFieldAnims && a.animationsEnabled && !wasEnabled {
 					// Restart the UI tick when enabling animations.
 					return tickUI()
 				}
@@ -454,18 +455,20 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				adjustField(1)
 			case manageFieldNumber:
 				adjustField(1)
+			case manageFieldText:
+				// Space does not start editing a text field; only enter does.
 			}
 		}
 		return nil
 
-	case "enter":
+	case keyEnter:
 		// Enter toggles boolean fields, or starts editing for text fields.
 		if f, ok := currentField(); ok {
 			switch f.kind {
 			case manageFieldToggle:
 				wasEnabled := a.animationsEnabled
 				toggleField()
-				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+				if f.key == manageFieldAnims && a.animationsEnabled && !wasEnabled {
 					return tickUI()
 				}
 			case manageFieldText:
@@ -506,7 +509,7 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// through navigateTab (NavigateTo + on-enter load). Blocked while installing
 	// so the streaming install message can't be dropped by a screen switch.
 	if !a.manageInstalling && m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+		if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -530,7 +533,9 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			delta = -1
 		case tea.MouseButtonWheelDown:
 			delta = 1
-		default:
+		case tea.MouseButtonNone, tea.MouseButtonLeft, tea.MouseButtonMiddle,
+			tea.MouseButtonRight, tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight,
+			tea.MouseButtonBackward, tea.MouseButtonForward, tea.MouseButton10, tea.MouseButton11:
 			return nil
 		}
 
@@ -604,7 +609,7 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			if f.b != nil {
 				wasEnabled := a.animationsEnabled
 				*f.b = !*f.b
-				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
+				if f.key == manageFieldAnims && a.animationsEnabled && !wasEnabled {
 					// Restart UI tick if animations were turned back on via mouse.
 					return tickUI()
 				}
@@ -614,7 +619,7 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			forward := m.X >= (layout.rightX + layout.rightW/2)
 			if f.str != nil && len(f.options) > 0 {
 				*f.str = cycleStringOption(f.options, *f.str, forward)
-				if f.key == "theme" {
+				if f.key == manageFieldTheme {
 					a.syncThemeIndex()
 				}
 			}
@@ -652,7 +657,7 @@ func (s *manageScreen) View(width, height int) string {
 		// Fall back to the manager-provided dimensions if the App hasn't seen a
 		// WindowSizeMsg yet; otherwise the layout cannot be computed.
 		if width <= 0 || height <= 0 {
-			return "Loading..."
+			return loadingMessage
 		}
 		a.width, a.height = width, height
 	}

@@ -63,10 +63,10 @@ func (a *App) startInstallation() tea.Cmd {
 	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
 		plannedSteps++ // claude-code step
 	}
-	if cfg.CLITools["lazygit"] {
+	if cfg.CLITools[toolLazygit] {
 		plannedSteps++
 	}
-	if cfg.CLITools["btop"] {
+	if cfg.CLITools[toolBtop] {
 		plannedSteps++
 	}
 	if cfg.CLITools["glow"] {
@@ -296,7 +296,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Install dotfiles binary and utilities to ~/.local/bin
 	configPhase("\n▶ Installing dotfiles utilities...", func() error {
 		if err := installUtilities(cfg.Utilities); err != nil {
-			return fmt.Errorf("Failed to install utilities: %w", err)
+			return fmt.Errorf("failed to install utilities: %w", err)
 		}
 		return nil
 	}, "  ✓ Utilities installed to ~/.local/bin")
@@ -308,7 +308,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	stepLine("\n▶ Configuring tmux...")
 	if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
 		emitLine(fmt.Sprintf("  ⚠ Failed to configure tmux: %v", err))
-		noteFailure(fmt.Errorf("Failed to configure tmux: %w", err))
+		noteFailure(fmt.Errorf("failed to configure tmux: %w", err))
 	} else {
 		emitLine("  ✓ Tmux configured with ~/.tmux.conf")
 		if tmuxCfg.TPMEnabled {
@@ -327,7 +327,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 		// Use user's MCP selections from deep dive config
 		if err := claudeTool.ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs); err != nil {
 			emitLine(fmt.Sprintf("  ⚠ Failed to configure Claude MCP: %v", err))
-			noteFailure(fmt.Errorf("Failed to configure Claude MCP: %w", err))
+			noteFailure(fmt.Errorf("failed to configure Claude MCP: %w", err))
 		} else {
 			// Count enabled MCPs for status message
 			enabledCount := 0
@@ -343,7 +343,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure Ghostty
 	configPhase("\n▶ Configuring Ghostty...", func() error {
 		if err := tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure Ghostty: %w", err)
+			return fmt.Errorf("failed to configure Ghostty: %w", err)
 		}
 		return nil
 	}, "  ✓ Ghostty configured")
@@ -351,7 +351,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure Zsh
 	configPhase("\n▶ Configuring Zsh...", func() error {
 		if err := tools.WriteZshConfig(zshConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure Zsh: %w", err)
+			return fmt.Errorf("failed to configure Zsh: %w", err)
 		}
 		return nil
 	}, "  ✓ Zsh configured with ~/.zshrc")
@@ -367,7 +367,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	}
 	configPhase("\n▶ Configuring Neovim...", func() error {
 		if err := tools.WriteNeovimConfig(neovimCfg, theme); err != nil {
-			return fmt.Errorf("Failed to configure Neovim: %w", err)
+			return fmt.Errorf("failed to configure Neovim: %w", err)
 		}
 		return nil
 	}, neovimSuccessMsg)
@@ -375,7 +375,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure Git
 	configPhase("\n▶ Configuring Git...", func() error {
 		if err := tools.WriteGitConfig(gitConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure Git: %w", err)
+			return fmt.Errorf("failed to configure Git: %w", err)
 		}
 		return nil
 	}, "  ✓ Git configured with ~/.gitconfig")
@@ -383,7 +383,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure Yazi
 	configPhase("\n▶ Configuring Yazi...", func() error {
 		if err := tools.WriteYaziConfig(yaziConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure Yazi: %w", err)
+			return fmt.Errorf("failed to configure Yazi: %w", err)
 		}
 		return nil
 	}, "  ✓ Yazi configured")
@@ -391,7 +391,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure FZF
 	configPhase("\n▶ Configuring FZF...", func() error {
 		if err := tools.WriteFzfConfig(fzfConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure FZF: %w", err)
+			return fmt.Errorf("failed to configure FZF: %w", err)
 		}
 		return nil
 	}, "  ✓ FZF configured")
@@ -399,10 +399,10 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure LazyGit — only when the user selected it in the deep-dive.
 	// lazygit is in CLITools (UIGroupCLITools) and therefore has an explicit
 	// selection flag; skipping its config when deselected matches user intent.
-	if cfg.CLITools["lazygit"] {
+	if cfg.CLITools[toolLazygit] {
 		configPhase("\n▶ Configuring LazyGit...", func() error {
 			if err := tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("Failed to configure LazyGit: %w", err)
+				return fmt.Errorf("failed to configure LazyGit: %w", err)
 			}
 			return nil
 		}, "  ✓ LazyGit configured")
@@ -410,10 +410,10 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 
 	// Configure Btop — only when the user selected it in the deep-dive.
 	// btop is in CLITools (UIGroupCLITools) and has an explicit selection flag.
-	if cfg.CLITools["btop"] {
+	if cfg.CLITools[toolBtop] {
 		configPhase("\n▶ Configuring Btop...", func() error {
 			if err := tools.WriteBtopConfig(btopConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("Failed to configure Btop: %w", err)
+				return fmt.Errorf("failed to configure Btop: %w", err)
 			}
 			return nil
 		}, "  ✓ Btop configured")
@@ -424,7 +424,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	if cfg.CLITools["glow"] {
 		configPhase("\n▶ Configuring Glow...", func() error {
 			if err := tools.WriteGlowConfig(glowConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("Failed to configure Glow: %w", err)
+				return fmt.Errorf("failed to configure Glow: %w", err)
 			}
 			return nil
 		}, "  ✓ Glow configured")
@@ -518,6 +518,7 @@ func installUtilities(utilities map[string]bool) error {
 		scriptPath := filepath.Join(binDir, name)
 		// Private per-user executables: owner-only (rwx) per the project's
 		// documented permission policy (config dirs 700, settings 600).
+		//nolint:gosec // G306: executable script needs owner execute bit (0700)
 		if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil {
 			return fmt.Errorf("cannot write %s: %w", name, err)
 		}
@@ -708,7 +709,7 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 		}
 	}
 
-	var pkgNames []string
+	pkgNames := make([]string, 0, len(packages))
 	for _, p := range packages {
 		pkgNames = append(pkgNames, p.Name)
 	}

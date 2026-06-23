@@ -106,7 +106,7 @@ func (s *BaseScreen) Height() int {
 // Theme returns the current theme from context.
 func (s *BaseScreen) Theme() string {
 	if s.ctx == nil {
-		return "catppuccin-mocha"
+		return defaultTheme
 	}
 	return s.ctx.Theme
 }
@@ -114,7 +114,7 @@ func (s *BaseScreen) Theme() string {
 // NavStyle returns the current nav style from context.
 func (s *BaseScreen) NavStyle() string {
 	if s.ctx == nil {
-		return "emacs"
+		return navEmacs
 	}
 	return s.ctx.NavStyle
 }
