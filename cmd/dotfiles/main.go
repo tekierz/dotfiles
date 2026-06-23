@@ -93,9 +93,15 @@ var updateCmd = &cobra.Command{
 
 // themeCmd handles theme operations.
 var themeCmd = &cobra.Command{
-	Use:   "theme [set <name>]",
+	Use:   "theme [set <name>|list]",
 	Short: "View or change theme",
 	Run: func(cmd *cobra.Command, args []string) {
+		listFlag, _ := cmd.Flags().GetBool("list")
+		if listFlag {
+			listThemes()
+			return
+		}
+
 		if len(args) == 0 {
 			// No args: launch TUI picker
 			launchTUI(ui.ScreenThemePicker)
@@ -293,6 +299,9 @@ func init() {
 
 	// Hotkeys flags
 	hotkeysCmd.Flags().String("tool", "", "Filter hotkeys by tool (tmux, zsh, neovim, etc.)")
+
+	// Theme flags
+	themeCmd.Flags().Bool("list", false, "List available themes")
 
 	// Uninstall flags
 	uninstallCmd.Flags().Bool("keep-config", false, "Keep ~/.config/dotfiles directory")
@@ -718,7 +727,7 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 	}
 	if !keepBinaries {
 		fmt.Println("  • Remove dotfiles binaries (dotfiles, dotfiles-tui, dotfiles-setup)")
-		fmt.Println("  • Remove utility scripts (hk, caff, y)")
+		fmt.Println("  • Remove utility scripts (hk, caff, sshh)")
 	}
 	if !keepConfig {
 		fmt.Printf("  • Remove configuration directory (%s)\n", configDir)
@@ -820,7 +829,7 @@ func restoreBeforeUninstall(configDir string, keepConfig bool) bool {
 // the known install locations.
 func removeUninstallBinaries(home string) {
 	fmt.Println("Removing binaries...")
-	binaries := []string{"dotfiles", "dotfiles-tui", "dotfiles-setup", "hk", "caff", "y"}
+	binaries := uninstallBinaryNames()
 	locations := []string{filepath.Join(home, ".local", "bin"), "/usr/local/bin"}
 
 	removed := 0
@@ -842,6 +851,10 @@ func removeUninstallBinaries(home string) {
 		fmt.Println("  No binaries found to remove.")
 	}
 	fmt.Println()
+}
+
+func uninstallBinaryNames() []string {
+	return []string{"dotfiles", "dotfiles-tui", "dotfiles-setup", "hk", "caff", "sshh"}
 }
 
 // removeConfigDir removes the dotfiles configuration directory.

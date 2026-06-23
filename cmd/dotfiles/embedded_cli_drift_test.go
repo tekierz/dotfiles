@@ -119,3 +119,33 @@ func TestEmbeddedRestoreGuardMatchesOuter(t *testing.T) {
 		t.Fatalf("is_safe_restore_path drifted between the outer script and the embedded CLI; the two copies must stay identical")
 	}
 }
+
+func TestLegacyCaffValidatesPidBeforeKill(t *testing.T) {
+	src, _ := readSetupSource(t)
+	const startMarker = "cat > ~/.local/bin/caff << 'CAFF_EOF'"
+	const endMarker = "\nCAFF_EOF"
+
+	start := strings.Index(src, startMarker)
+	if start < 0 {
+		t.Fatal("legacy caff heredoc start marker not found")
+	}
+	bodyStart := start + len(startMarker)
+	bodyStart += strings.IndexByte(src[bodyStart:], '\n') + 1
+	end := strings.Index(src[bodyStart:], endMarker)
+	if end < 0 {
+		t.Fatal("legacy caff heredoc end marker not found")
+	}
+	caff := src[bodyStart : bodyStart+end]
+
+	for _, want := range []string{
+		"read_pid()",
+		"is_caffeine()",
+		`[[ "$pid" =~ ^[0-9]+$ ]]`,
+		"if pid=$(read_pid) && is_caffeine \"$pid\"; then",
+		"umask 077",
+	} {
+		if !strings.Contains(caff, want) {
+			t.Fatalf("legacy caff script missing %q", want)
+		}
+	}
+}

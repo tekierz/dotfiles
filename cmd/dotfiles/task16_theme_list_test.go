@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"os"
 	"testing"
 
 	"github.com/tekierz/dotfiles/internal/config"
@@ -31,4 +33,31 @@ func TestListThemesWithConfigNonNilNoPanic(t *testing.T) {
 
 	cfg := config.DefaultGlobalConfig()
 	listThemesWithConfig(cfg)
+}
+
+func TestThemeListFlagRuns(t *testing.T) {
+	if themeCmd.Flags().Lookup("list") == nil {
+		t.Fatal("theme --list flag is not registered")
+	}
+
+	originalStdout := os.Stdout
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	defer devNull.Close()
+	os.Stdout = devNull
+	defer func() {
+		os.Stdout = originalStdout
+		if err := themeCmd.Flags().Set("list", "false"); err != nil {
+			t.Fatalf("reset theme list flag: %v", err)
+		}
+	}()
+
+	themeCmd.SetOut(io.Discard)
+	themeCmd.SetErr(io.Discard)
+	if err := themeCmd.Flags().Set("list", "true"); err != nil {
+		t.Fatalf("set theme list flag: %v", err)
+	}
+	themeCmd.Run(themeCmd, nil)
 }
