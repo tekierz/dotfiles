@@ -160,12 +160,6 @@ func TestFieldNavScreensUseSharedFooter(t *testing.T) {
 			ctx.Width, ctx.Height = w, h
 			return NewConfigTmuxScreen(ctx)
 		}()},
-		{"lazydocker", func() ScreenHandler {
-			ctx := newDeepDiveContext(t)
-			ctx.app.width, ctx.app.height = w, h
-			ctx.Width, ctx.Height = w, h
-			return NewConfigLazyDockerScreen(ctx)
-		}()},
 	}
 
 	for _, tc := range cases {

@@ -147,7 +147,11 @@ var simpleTools = []simpleToolSpec{
 		configPath:     []string{".config", "lazydocker", "config.yml"},
 		heavy:          true, // Skip on low-memory systems (Pi Zero 2)
 		uiGroup:        UIGroupCLITools,
-		configScreen:   29, // ScreenConfigLazyDocker - has dedicated config screen
+		// configScreen: 0 — lazydocker has NO config generator (no
+		// tools.WriteLazyDockerConfig), so it is installable but not "configurable".
+		// `dotfiles config lazydocker` is intentionally not offered; its
+		// install-time selection lives on the CLI Tools group screen.
+		configScreen:   0,
 		defaultEnabled: true,
 	},
 }

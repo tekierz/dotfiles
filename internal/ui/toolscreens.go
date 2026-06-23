@@ -27,7 +27,6 @@ var toolConfigScreens = map[string]Screen{
 	"yazi":        ScreenConfigYazi,
 	"fzf":         ScreenConfigFzf,
 	"lazygit":     ScreenConfigLazyGit,
-	"lazydocker":  ScreenConfigLazyDocker,
 	"btop":        ScreenConfigBtop,
 	"glow":        ScreenConfigGlow,
 	"claude-code": ScreenConfigClaudeCode,

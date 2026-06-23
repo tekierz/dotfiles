@@ -63,7 +63,11 @@ const (
 	ScreenConfigCLIUtilities // bat, eza, zoxide, ripgrep, fd, delta, fswatch
 	// Individual CLI tool config screens (installer)
 	ScreenConfigLazyGit
-	ScreenConfigLazyDocker
+	_ // retired: ScreenConfigLazyDocker. LazyDocker has no config generator, so
+	// it is installable but not configurable (no `dotfiles config lazydocker`).
+	// Slot reserved so the remaining iota values (btop=30, glow=31,
+	// claude-code=32) stay stable for the raw ConfigScreen() ints in the tools
+	// package (see toolscreens.go / verifyToolConfigScreens).
 	ScreenConfigBtop
 	ScreenConfigGlow
 	ScreenConfigClaudeCode
@@ -455,11 +459,18 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 	// Best-effort: load hotkeys favorites config and migrate any legacy
 	// Key-string-keyed favorites to the new stable-ID format.
 	if hkCfg, err := config.LoadHotkeysConfig(); err == nil && hkCfg != nil {
+		migrated := false
 		for _, uh := range hkCfg.Users {
-			config.MigrateLegacyFavorites(uh)
+			if config.MigrateLegacyFavorites(uh) {
+				migrated = true
+			}
 		}
-		// Persist the migrated config so the migration is one-time.
-		_ = config.SaveHotkeysConfig(hkCfg)
+		// Persist the migrated config so the migration is one-time — but only when
+		// something actually changed, so an already-migrated config does not incur a
+		// disk write on every launch.
+		if migrated {
+			_ = config.SaveHotkeysConfig(hkCfg)
+		}
 		app.hotkeysFavorites = hkCfg
 	} else {
 		app.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]*config.UserHotkeys)}

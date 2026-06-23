@@ -76,8 +76,7 @@ type DeepDiveConfig struct {
 	NeovimWrap        bool   // Line wrapping
 	NeovimCursorLine  bool   // Highlight current line
 	NeovimClipboard   string // Clipboard integration (unnamedplus, unnamed, none)
-	NeovimLineNumbers string // absolute/relative/none
-	NeovimRelativeNum bool   // relative line numbers
+	NeovimLineNumbers string // absolute/relative/none — also drives relativenumber
 	NeovimExpandTab   bool   // spaces instead of tabs
 	NeovimUndoFile    bool   // persistent undo
 
@@ -226,8 +225,9 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		NeovimWrap:        false,
 		NeovimCursorLine:  true,
 		NeovimClipboard:   "unnamedplus",
-		NeovimLineNumbers: "absolute",
-		NeovimRelativeNum: true,
+		// "relative" preserves the prior default (number=true, relativenumber=true)
+		// now that LineNumbers is the single source for both opts.
+		NeovimLineNumbers: "relative",
 		NeovimExpandTab:   true,
 		NeovimUndoFile:    true,
 

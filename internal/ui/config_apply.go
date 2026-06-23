@@ -129,7 +129,6 @@ func neovimConfigFrom(cfg DeepDiveConfig) tools.NeovimConfig {
 		CursorLine:   cfg.NeovimCursorLine,
 		Clipboard:    cfg.NeovimClipboard,
 		LineNumbers:  cfg.NeovimLineNumbers,
-		RelativeNum:  cfg.NeovimRelativeNum,
 		ExpandTab:    cfg.NeovimExpandTab,
 		UndoFile:     cfg.NeovimUndoFile,
 	}
@@ -392,7 +391,6 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.NeovimCursorLine = mc.NeovimCursorLine
 	dd.NeovimClipboard = mc.NeovimClipboard
 	dd.NeovimLineNumbers = mc.NeovimLineNumbers
-	dd.NeovimRelativeNum = mc.NeovimRelativeNum
 	dd.NeovimExpandTab = mc.NeovimExpandTab
 	dd.NeovimUndoFile = mc.NeovimUndoFile
 

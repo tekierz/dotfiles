@@ -184,7 +184,6 @@ var allNavigableScreens = []Screen{
 	ScreenConfigGUIApps,
 	ScreenConfigCLIUtilities,
 	ScreenConfigLazyGit,
-	ScreenConfigLazyDocker,
 	ScreenConfigBtop,
 	ScreenConfigGlow,
 	ScreenConfigClaudeCode,

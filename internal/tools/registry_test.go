@@ -117,7 +117,7 @@ var expectedTools = map[string]toolSpec{
 	},
 	"lazydocker": {
 		name: "LazyDocker", description: "Simple terminal UI for Docker", category: CategoryContainer, icon: "",
-		uiGroup: UIGroupCLITools, configScreen: 29, isHeavy: true, defaultEnabled: true, platformFilter: "",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: true, defaultEnabled: true, platformFilter: "",
 		hasConfig: true, configPaths: 1,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"lazydocker"}, pkg.PlatformMacOS: {"lazydocker"}},
 	},

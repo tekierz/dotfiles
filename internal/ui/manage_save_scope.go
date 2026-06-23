@@ -46,7 +46,7 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 		return []any{
 			cfg.NeovimConfig, cfg.NeovimTabWidth, cfg.NeovimWrap,
 			cfg.NeovimCursorLine, cfg.NeovimClipboard,
-			cfg.NeovimLineNumbers, cfg.NeovimRelativeNum, cfg.NeovimExpandTab,
+			cfg.NeovimLineNumbers, cfg.NeovimExpandTab,
 			cfg.NeovimUndoFile,
 		}
 	case "git":

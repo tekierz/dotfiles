@@ -41,8 +41,7 @@ type ManageConfig struct {
 	ZshAutosuggestions   bool
 
 	// Neovim detailed settings
-	NeovimLineNumbers string
-	NeovimRelativeNum bool
+	NeovimLineNumbers string // absolute/relative/none — also drives relativenumber
 	NeovimTabWidth    int
 	NeovimExpandTab   bool
 	NeovimWrap        bool
@@ -152,9 +151,9 @@ func NewManageConfig() *ManageConfig {
 		ZshSyntaxHighlight:   true,
 		ZshAutosuggestions:   true,
 
-		// Neovim
-		NeovimLineNumbers: "absolute",
-		NeovimRelativeNum: true,
+		// Neovim. "relative" preserves the prior default (number + relativenumber
+		// both on) now that LineNumbers is the single source for both opts.
+		NeovimLineNumbers: "relative",
 		NeovimTabWidth:    4,
 		NeovimExpandTab:   true,
 		NeovimWrap:        false,

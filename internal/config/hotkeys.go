@@ -151,9 +151,13 @@ func (u *UserHotkeys) GetFavoriteCount() int {
 //     in place (not dropped) so no favorite is ever silently lost.
 //
 // Calling this function on an already-migrated map is safe (idempotent).
-func MigrateLegacyFavorites(u *UserHotkeys) {
+//
+// It returns true only if it actually rewrote at least one favorites entry, so
+// callers can persist the config exclusively when something changed (avoiding a
+// disk write on every launch for an already-migrated config).
+func MigrateLegacyFavorites(u *UserHotkeys) bool {
 	if u == nil || len(u.Favorites) == 0 {
-		return
+		return false
 	}
 
 	// Build the lookup tables for both nav styles.
@@ -176,6 +180,7 @@ func MigrateLegacyFavorites(u *UserHotkeys) {
 		}
 	}
 
+	changed := false
 	for catID, entries := range u.Favorites {
 		catKeys := keysToID[catID] // may be nil if catID is unknown
 
@@ -206,6 +211,26 @@ func MigrateLegacyFavorites(u *UserHotkeys) {
 				migrated = append(migrated, entry)
 			}
 		}
+		// Report a change if the rewritten slice differs from the original (an
+		// entry was remapped to a stable ID, or a duplicate was collapsed).
+		if !stringSliceEqual(entries, migrated) {
+			changed = true
+		}
 		u.Favorites[catID] = migrated
 	}
+	return changed
+}
+
+// stringSliceEqual reports whether two string slices have identical length and
+// element-wise contents (order-sensitive).
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

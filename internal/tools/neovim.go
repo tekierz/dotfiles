@@ -20,10 +20,13 @@ type NeovimConfig struct {
 	CursorLine   bool
 	Clipboard    string // "unnamedplus", "unnamed", "none"
 
-	LineNumbers string // "absolute", "relative", "none"
-	RelativeNum bool   // show relative line numbers
-	ExpandTab   bool   // use spaces instead of tabs
-	UndoFile    bool   // persistent undo on disk
+	// LineNumbers is the SINGLE control for the line-number gutter:
+	//   "absolute" -> number=true,  relativenumber=false
+	//   "relative" -> number=true,  relativenumber=true
+	//   "none"     -> number=false, relativenumber=false
+	LineNumbers string
+	ExpandTab   bool // use spaces instead of tabs
+	UndoFile    bool // persistent undo on disk
 }
 
 // NeovimTool represents the Neovim editor
@@ -94,9 +97,10 @@ func GenerateNeovimConfig(cfg NeovimConfig, theme string) string {
 
 	// Basic settings
 	sb.WriteString("-- Basic settings\n")
-	// "absolute"/"relative" both show the number column; "none" hides it.
+	// LineNumbers is the single source for both opts: "absolute"/"relative" show
+	// the number column ("none" hides it); only "relative" enables relative numbers.
 	sb.WriteString(fmt.Sprintf("vim.opt.number = %t\n", cfg.LineNumbers != "none"))
-	sb.WriteString(fmt.Sprintf("vim.opt.relativenumber = %t\n", cfg.RelativeNum))
+	sb.WriteString(fmt.Sprintf("vim.opt.relativenumber = %t\n", cfg.LineNumbers == "relative"))
 	sb.WriteString(fmt.Sprintf("vim.opt.tabstop = %d\n", cfg.TabWidth))
 	sb.WriteString(fmt.Sprintf("vim.opt.shiftwidth = %d\n", cfg.TabWidth))
 	sb.WriteString(fmt.Sprintf("vim.opt.expandtab = %t\n", cfg.ExpandTab))

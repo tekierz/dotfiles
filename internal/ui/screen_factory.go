@@ -90,8 +90,6 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewConfigCLIUtilitiesScreen(ctx)
 	case ScreenConfigLazyGit:
 		return NewConfigLazyGitScreen(ctx)
-	case ScreenConfigLazyDocker:
-		return NewConfigLazyDockerScreen(ctx)
 	case ScreenConfigBtop:
 		return NewConfigBtopScreen(ctx)
 	case ScreenConfigGlow:

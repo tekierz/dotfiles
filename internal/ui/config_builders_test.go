@@ -61,7 +61,6 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 	dd.NeovimCursorLine = false
 	dd.NeovimClipboard = "unnamed"
 	dd.NeovimLineNumbers = "relative"
-	dd.NeovimRelativeNum = true
 	dd.NeovimExpandTab = false
 	dd.NeovimUndoFile = false
 
@@ -164,7 +163,6 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 		CursorLine:   cfg.NeovimCursorLine,
 		Clipboard:    cfg.NeovimClipboard,
 		LineNumbers:  cfg.NeovimLineNumbers,
-		RelativeNum:  cfg.NeovimRelativeNum,
 		ExpandTab:    cfg.NeovimExpandTab,
 		UndoFile:     cfg.NeovimUndoFile,
 	}); !reflect.DeepEqual(got, want) {

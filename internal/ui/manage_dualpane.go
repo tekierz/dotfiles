@@ -539,8 +539,8 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 
 	case "neovim":
 		return []manageField{
-			{key: "numbers", label: "Line Numbers", description: "Absolute/relative/none", kind: manageFieldOption, str: &cfg.NeovimLineNumbers, options: []string{"absolute", "relative", "none"}},
-			{key: "rel", label: "Relative Num", description: "Show relative line numbers", kind: manageFieldToggle, b: &cfg.NeovimRelativeNum},
+			// "numbers" is the single control: relative also enables relativenumber.
+			{key: "numbers", label: "Line Numbers", description: "Absolute/relative/none (relative shows relativenumber)", kind: manageFieldOption, str: &cfg.NeovimLineNumbers, options: []string{"absolute", "relative", "none"}},
 			{key: "tab", label: "Tab Width", description: "Indent width", kind: manageFieldNumber, n: &cfg.NeovimTabWidth, min: 2, max: 8, step: 1, unit: " spaces"},
 			{key: "expand", label: "Expand Tab", description: "Use spaces instead of tabs", kind: manageFieldToggle, b: &cfg.NeovimExpandTab},
 			{key: "wrap", label: "Line Wrap", description: "Soft wrap long lines", kind: manageFieldToggle, b: &cfg.NeovimWrap},

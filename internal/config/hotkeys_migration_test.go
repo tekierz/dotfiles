@@ -210,6 +210,56 @@ func TestMigrateLegacyFavorites_UnrecognizedEntryPreserved(t *testing.T) {
 	}
 }
 
+// TestMigrateLegacyFavorites_ReportsChangeOnlyWhenRewritten verifies the changed
+// bool: a legacy-key migration reports true, while an already-migrated (or empty)
+// map reports false so callers can skip an unnecessary disk write on every launch.
+func TestMigrateLegacyFavorites_ReportsChangeOnlyWhenRewritten(t *testing.T) {
+	t.Parallel()
+
+	var navigateID string
+	for _, cat := range hotkeys.Categories("emacs") {
+		if cat.ID == "neovim" {
+			for _, it := range cat.Items {
+				if it.Description == "Navigate" {
+					navigateID = it.ID
+				}
+			}
+		}
+	}
+	if navigateID == "" {
+		t.Fatal("could not determine stable ID")
+	}
+
+	// 1) Legacy key -> must report a change.
+	legacy := &UserHotkeys{Favorites: map[string][]string{"neovim": {"Arrow keys"}}}
+	if !MigrateLegacyFavorites(legacy) {
+		t.Error("MigrateLegacyFavorites on legacy-keyed favorites = false, want true")
+	}
+
+	// 2) Already migrated -> must report no change.
+	already := &UserHotkeys{Favorites: map[string][]string{"neovim": {navigateID}}}
+	if MigrateLegacyFavorites(already) {
+		t.Error("MigrateLegacyFavorites on already-migrated favorites = true, want false")
+	}
+
+	// 3) Empty favorites -> no change.
+	empty := &UserHotkeys{Favorites: map[string][]string{}}
+	if MigrateLegacyFavorites(empty) {
+		t.Error("MigrateLegacyFavorites on empty favorites = true, want false")
+	}
+
+	// 4) nil receiver -> no change.
+	if MigrateLegacyFavorites(nil) {
+		t.Error("MigrateLegacyFavorites(nil) = true, want false")
+	}
+
+	// 5) De-dup collapse -> a change (two entries become one).
+	dup := &UserHotkeys{Favorites: map[string][]string{"neovim": {"Arrow keys", "h/j/k/l"}}}
+	if !MigrateLegacyFavorites(dup) {
+		t.Error("MigrateLegacyFavorites on duplicate-collapsing favorites = false, want true")
+	}
+}
+
 // TestIsFavoriteUsesStableID verifies that IsFavorite checks against item ID not Keys.
 func TestIsFavoriteUsesStableID(t *testing.T) {
 	t.Parallel()
