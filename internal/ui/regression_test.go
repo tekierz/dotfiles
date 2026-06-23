@@ -184,6 +184,49 @@ func TestTabNavigationTargetCoversAllTabs(t *testing.T) {
 	}
 }
 
+func TestBackupCompletionHandledAfterTabAway(t *testing.T) {
+	ctx := newGoldenContext(t)
+	a := ctx.app
+	a.screenMgr.Navigate(ScreenManage)
+	a.backupRunning = true
+	a.backupsLoaded = true
+	a.backupsLoading = false
+
+	_, cmd := a.Update(backupCreateDoneMsg{name: "2026-01-01_00-00-00"})
+
+	if a.backupRunning {
+		t.Fatal("backupCreateDoneMsg must clear backupRunning even when Backups is not active")
+	}
+	if !strings.Contains(a.backupStatus, "Created backup") {
+		t.Fatalf("backupStatus = %q, want create success status", a.backupStatus)
+	}
+	if a.backupsLoaded || !a.backupsLoading {
+		t.Fatalf("backup refresh flags = loaded:%v loading:%v, want loaded:false loading:true", a.backupsLoaded, a.backupsLoading)
+	}
+	if cmd == nil {
+		t.Fatal("backupCreateDoneMsg should return loadBackupsCmd to refresh the list")
+	}
+}
+
+func TestUserCompletionHandledAfterTabAway(t *testing.T) {
+	ctx := newGoldenContext(t)
+	a := ctx.app
+	a.screenMgr.Navigate(ScreenManage)
+	a.usersIndex = 2
+
+	_, cmd := a.Update(userDeletedMsg{name: "alice"})
+
+	if !strings.Contains(a.usersStatus, "Deleted alice") {
+		t.Fatalf("usersStatus = %q, want delete status", a.usersStatus)
+	}
+	if a.usersIndex != 1 {
+		t.Fatalf("usersIndex = %d, want 1 after deleting selected user", a.usersIndex)
+	}
+	if cmd == nil {
+		t.Fatal("userDeletedMsg should return loadUsersCmd to refresh the list")
+	}
+}
+
 // TestGhosttyTabBindingOptionsAllGenerate pins down the fix for the Ghostty
 // "New Tab Keybinding" field: every option the UI offers must produce a real
 // new_tab keybinding (the old "alt" option matched no generator case and emitted

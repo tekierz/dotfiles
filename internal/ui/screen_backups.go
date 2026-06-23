@@ -84,51 +84,14 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		return s, nil
 
 	case backupRestoreDoneMsg:
-		a.backupRunning = false
-		a.backupConfirmMode = false
-		switch {
-		case msg.err != nil:
-			a.backupStatus = fmt.Sprintf("Restore failed: %v", msg.err)
-		case msg.skipped > 0:
-			// Some (or all) files could not be restored. Report it as a warning,
-			// never as green success (C3). The "skipped" keyword drives the
-			// yellow style in the renderer below.
-			a.backupStatus = fmt.Sprintf("Restored %d files from %s, %d skipped", msg.count, msg.name, msg.skipped)
-		default:
-			a.backupStatus = fmt.Sprintf("Restored %d files from %s", msg.count, msg.name)
-		}
+		a.handleBackupRestoreDoneMsg(msg)
 		return s, nil
 
 	case backupDeleteDoneMsg:
-		a.backupRunning = false
-		a.backupConfirmMode = false
-		if msg.err != nil {
-			a.backupStatus = fmt.Sprintf("Delete failed: %v", msg.err)
-		} else {
-			a.backupStatus = fmt.Sprintf("Deleted backup: %s", msg.name)
-			// Adjust index if needed
-			if a.backupIndex > 0 && a.backupIndex >= len(a.backups)-1 {
-				a.backupIndex--
-			}
-			// Refresh backup list (re-issue the load so the chain continues).
-			a.backupsLoaded = false
-			a.backupsLoading = true
-			return s, loadBackupsCmd()
-		}
-		return s, nil
+		return s, a.handleBackupDeleteDoneMsg(msg)
 
 	case backupCreateDoneMsg:
-		a.backupRunning = false
-		if msg.err != nil {
-			a.backupStatus = fmt.Sprintf("Backup failed: %v", msg.err)
-		} else {
-			a.backupStatus = fmt.Sprintf("Created backup: %s", msg.name)
-			// Refresh backup list (re-issue the load so the chain continues).
-			a.backupsLoaded = false
-			a.backupsLoading = true
-			return s, loadBackupsCmd()
-		}
-		return s, nil
+		return s, a.handleBackupCreateDoneMsg(msg)
 	}
 	return s, nil
 }

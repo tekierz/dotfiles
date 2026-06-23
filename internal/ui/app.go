@@ -714,6 +714,88 @@ func createBackupCmd() tea.Cmd {
 	}
 }
 
+// handleBackupRestoreDoneMsg finalizes a restore. Unlike delete/create it issues
+// no reload command (restore does not change the backup list), so it returns no
+// tea.Cmd; the caller proceeds with a nil command.
+func (a *App) handleBackupRestoreDoneMsg(msg backupRestoreDoneMsg) {
+	a.backupRunning = false
+	a.backupConfirmMode = false
+	switch {
+	case msg.err != nil:
+		a.backupStatus = fmt.Sprintf("Restore failed: %v", msg.err)
+	case msg.skipped > 0:
+		// Some (or all) files could not be restored. Report it as a warning,
+		// never as green success (C3). The "skipped" keyword drives the yellow
+		// style in the renderer.
+		a.backupStatus = fmt.Sprintf("Restored %d files from %s, %d skipped", msg.count, msg.name, msg.skipped)
+	default:
+		a.backupStatus = fmt.Sprintf("Restored %d files from %s", msg.count, msg.name)
+	}
+}
+
+func (a *App) handleBackupDeleteDoneMsg(msg backupDeleteDoneMsg) tea.Cmd {
+	a.backupRunning = false
+	a.backupConfirmMode = false
+	if msg.err != nil {
+		a.backupStatus = fmt.Sprintf("Delete failed: %v", msg.err)
+		return nil
+	}
+
+	a.backupStatus = fmt.Sprintf("Deleted backup: %s", msg.name)
+	if a.backupIndex > 0 && a.backupIndex >= len(a.backups)-1 {
+		a.backupIndex--
+	}
+	a.backupsLoaded = false
+	a.backupsLoading = true
+	return loadBackupsCmd()
+}
+
+func (a *App) handleBackupCreateDoneMsg(msg backupCreateDoneMsg) tea.Cmd {
+	a.backupRunning = false
+	if msg.err != nil {
+		a.backupStatus = fmt.Sprintf("Backup failed: %v", msg.err)
+		return nil
+	}
+
+	a.backupStatus = fmt.Sprintf("Created backup: %s", msg.name)
+	a.backupsLoaded = false
+	a.backupsLoading = true
+	return loadBackupsCmd()
+}
+
+func (a *App) handleUserSavedMsg(msg userSavedMsg) tea.Cmd {
+	if msg.err != nil {
+		a.usersStatus = fmt.Sprintf("Save failed: %v", msg.err)
+		return nil
+	}
+
+	a.usersStatus = fmt.Sprintf("Saved %s ✓", msg.name)
+	return loadUsersCmd()
+}
+
+func (a *App) handleUserDeletedMsg(msg userDeletedMsg) tea.Cmd {
+	if msg.err != nil {
+		a.usersStatus = fmt.Sprintf("Delete failed: %v", msg.err)
+		return nil
+	}
+
+	a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
+	if a.usersIndex > 0 {
+		a.usersIndex--
+	}
+	return loadUsersCmd()
+}
+
+func (a *App) handleUserSwitchedMsg(msg userSwitchedMsg) tea.Cmd {
+	if msg.err != nil {
+		a.usersStatus = fmt.Sprintf("Switch failed: %v", msg.err)
+		return nil
+	}
+
+	a.usersStatus = fmt.Sprintf("Switched to %s ✓", msg.name)
+	return loadUsersCmd()
+}
+
 // defaultBackupFiles is the fixed set of dotfiles captured by both the manual
 // "create backup" action and the pre-install auto-backup. Paths are relative
 // to the user's home directory.
@@ -839,6 +921,30 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 	return autoBackupResult{enabled: true, count: count}, nil
 }
 
+// handleOperationCompletionMsg applies Backups/Users operation-completion results
+// (restore/delete/create, save/delete/switch) globally — tab navigation is
+// allowed while these async commands are in flight, so the active screen may no
+// longer be the originator when the command returns. Returns (cmd, true) when msg
+// was one of these results; the screen handlers delegate to the same methods.
+func (a *App) handleOperationCompletionMsg(msg tea.Msg) (tea.Cmd, bool) {
+	switch m := msg.(type) {
+	case backupRestoreDoneMsg:
+		a.handleBackupRestoreDoneMsg(m)
+		return nil, true
+	case backupDeleteDoneMsg:
+		return a.handleBackupDeleteDoneMsg(m), true
+	case backupCreateDoneMsg:
+		return a.handleBackupCreateDoneMsg(m), true
+	case userSavedMsg:
+		return a.handleUserSavedMsg(m), true
+	case userDeletedMsg:
+		return a.handleUserDeletedMsg(m), true
+	case userSwitchedMsg:
+		return a.handleUserSwitchedMsg(m), true
+	}
+	return nil, false
+}
+
 // Update handles messages.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle window resize for screen manager
@@ -914,6 +1020,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.usersStatus = ""
 		}
 		return a, nil
+	}
+
+	// Operation-completion results for Backups/Users are also applied globally:
+	// tab navigation is allowed while those async commands are in flight, so the
+	// active screen may no longer be the originator when the command returns.
+	// Dropping these messages would leave running/status state stale and skip
+	// the refresh command that reconciles the tab on re-entry.
+	if cmd, ok := a.handleOperationCompletionMsg(msg); ok {
+		return a, cmd
 	}
 
 	// Streaming/terminal async messages for the package-update and tool-install

@@ -267,37 +267,13 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		return s, nil
 
 	case userSavedMsg:
-		if msg.err != nil {
-			a.usersStatus = fmt.Sprintf("Save failed: %v", msg.err)
-		} else {
-			a.usersStatus = fmt.Sprintf("Saved %s ✓", msg.name)
-			// Reload user list.
-			return s, loadUsersCmd()
-		}
-		return s, nil
+		return s, a.handleUserSavedMsg(msg)
 
 	case userDeletedMsg:
-		if msg.err != nil {
-			a.usersStatus = fmt.Sprintf("Delete failed: %v", msg.err)
-		} else {
-			a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
-			// Reload user list and adjust index.
-			if a.usersIndex > 0 {
-				a.usersIndex--
-			}
-			return s, loadUsersCmd()
-		}
-		return s, nil
+		return s, a.handleUserDeletedMsg(msg)
 
 	case userSwitchedMsg:
-		if msg.err != nil {
-			a.usersStatus = fmt.Sprintf("Switch failed: %v", msg.err)
-		} else {
-			a.usersStatus = fmt.Sprintf("Switched to %s ✓", msg.name)
-			// Reload user list to update active indicator.
-			return s, loadUsersCmd()
-		}
-		return s, nil
+		return s, a.handleUserSwitchedMsg(msg)
 	}
 	return s, nil
 }
