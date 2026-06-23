@@ -87,3 +87,26 @@ Deferred (recommended follow-ups, not blocking):
   symlink planted inside the user's own backup dir could still read outside it
   (low: needs prior write to ~/.config/dotfiles/backups; destination stays HOME-contained)
 - caff: chmod 700 also runs when $XDG_RUNTIME_DIR is pre-existing (harmless no-op)
+
+## Phase H — Independent Merge-Readiness Re-Audit — DONE
+- [x] Confirm branch/worktree state and changed-file inventory
+- [x] Run automated pre-PR verification: build, vet, gofmt, golangci-lint(0),
+      staticcheck(0), govulncheck(0 @1.25.8), shellcheck(11 baseline), test -race — all green
+- [x] Review UI ScreenManager/async/navigation changes for regressions
+- [x] Review CLI, backup/restore, legacy bash, and security-sensitive paths
+- [x] Review package manager/tool/config/CI changes for correctness and merge risk
+- [x] Fix confirmed blockers with focused patches:
+      - app.go: globalize Backups/Users operation-completion results
+        (restore/delete/create, save/delete/switch) so a result arriving after the
+        user tabbed away is not dropped — same drop-on-navigate class as the load
+        results, extended to action completions (handlers extracted; screens delegate)
+      - main.go/bin/dotfiles-setup: uninstall listed a non-existent `y` script;
+        corrected to the real `sshh` utility via uninstallBinaryNames()
+      - bin/dotfiles-setup caff: validate the PID is numeric AND belongs to a
+        caffeinate/systemd-inhibit process before signalling it; write PID with umask 077
+      - cmd: add `dotfiles theme --list` flag
+- [x] Re-run targeted + full verification after fixes — all green
+- [x] Record findings: no remaining merge blockers. Recommendation: MERGE-READY.
+      Regression tests added: TestBackup/UserCompletionHandledAfterTabAway,
+      TestLegacyCaffValidatesPidBeforeKill, TestUninstallBinaryNamesIncludeInstalledUtilities,
+      TestThemeListFlagRuns.
