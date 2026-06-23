@@ -134,7 +134,7 @@ func SaveClaudeConfig(cfg *ClaudeConfig) error {
 			raw = make(map[string]json.RawMessage)
 		}
 		// Back up the existing file before overwriting it.
-		if err := writeFileAtomic(path+".bak", existing, 0600); err != nil {
+		if err := writeFileAtomic(path+".bak", existing); err != nil {
 			return err
 		}
 	}
@@ -154,5 +154,5 @@ func SaveClaudeConfig(cfg *ClaudeConfig) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, data, 0600)
+	return writeFileAtomic(path, data)
 }

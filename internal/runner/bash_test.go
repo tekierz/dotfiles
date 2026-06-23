@@ -15,7 +15,7 @@ import (
 // returns the joined text plus the terminal error from Wait().
 func drain(t *testing.T, sc *StreamingCmd) (string, error) {
 	t.Helper()
-	var lines []string
+	var lines []string //nolint:prealloc // length depends on streamed channel output, not statically knowable
 	for line := range sc.Output {
 		lines = append(lines, line)
 	}

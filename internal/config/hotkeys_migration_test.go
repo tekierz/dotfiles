@@ -6,6 +6,13 @@ import (
 	"github.com/tekierz/dotfiles/internal/hotkeys"
 )
 
+// Test fixtures: the neovim category ID and the "Navigate" item description
+// exercised throughout the favorites-migration tests.
+const (
+	catIDNeovim  = "neovim"
+	itemNavigate = "Navigate"
+)
+
 // TestMigrateLegacyFavorites_EmacsKey verifies that an emacs-style Keys string
 // stored in the old format is correctly migrated to the stable item ID.
 func TestMigrateLegacyFavorites_EmacsKey(t *testing.T) {
@@ -15,15 +22,15 @@ func TestMigrateLegacyFavorites_EmacsKey(t *testing.T) {
 	// Under emacs, neovim "Navigate" has Keys="Arrow keys".
 	userHotkeys := &UserHotkeys{
 		Favorites: map[string][]string{
-			"neovim": {"Arrow keys"}, // old-format emacs key
+			catIDNeovim: {"Arrow keys"}, // old-format emacs key
 		},
 	}
 
 	MigrateLegacyFavorites(userHotkeys)
 
-	// After migration, the favorites for "neovim" should contain the stable ID,
+	// After migration, the favorites for catIDNeovim should contain the stable ID,
 	// not the raw Keys string.
-	favs := userHotkeys.Favorites["neovim"]
+	favs := userHotkeys.Favorites[catIDNeovim]
 	if len(favs) == 0 {
 		t.Fatal("favorites for 'neovim' are empty after migration")
 	}
@@ -31,9 +38,9 @@ func TestMigrateLegacyFavorites_EmacsKey(t *testing.T) {
 	// Find the stable ID for neovim/Navigate
 	var wantID string
 	for _, cat := range hotkeys.Categories("emacs") {
-		if cat.ID == "neovim" {
+		if cat.ID == catIDNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == itemNavigate {
 					wantID = it.ID
 				}
 			}
@@ -62,13 +69,13 @@ func TestMigrateLegacyFavorites_VimKey(t *testing.T) {
 	// Under vim, neovim "Navigate" has Keys="h/j/k/l".
 	userHotkeys := &UserHotkeys{
 		Favorites: map[string][]string{
-			"neovim": {"h/j/k/l"}, // old-format vim key
+			catIDNeovim: {"h/j/k/l"}, // old-format vim key
 		},
 	}
 
 	MigrateLegacyFavorites(userHotkeys)
 
-	favs := userHotkeys.Favorites["neovim"]
+	favs := userHotkeys.Favorites[catIDNeovim]
 	if len(favs) == 0 {
 		t.Fatal("favorites for 'neovim' are empty after migration")
 	}
@@ -76,18 +83,18 @@ func TestMigrateLegacyFavorites_VimKey(t *testing.T) {
 	// The stable ID must be the same regardless of which nav style the old key came from.
 	var emacsID, vimID string
 	for _, cat := range hotkeys.Categories("emacs") {
-		if cat.ID == "neovim" {
+		if cat.ID == catIDNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == itemNavigate {
 					emacsID = it.ID
 				}
 			}
 		}
 	}
-	for _, cat := range hotkeys.Categories("vim") {
-		if cat.ID == "neovim" {
+	for _, cat := range hotkeys.Categories(navStyleVim) {
+		if cat.ID == catIDNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == itemNavigate {
 					vimID = it.ID
 				}
 			}
@@ -117,19 +124,19 @@ func TestMigrateLegacyFavorites_NoLoss(t *testing.T) {
 	// migration must be idempotent and not create duplicates).
 	userHotkeys := &UserHotkeys{
 		Favorites: map[string][]string{
-			"neovim": {"Arrow keys", "h/j/k/l"}, // both styles of the same item
+			catIDNeovim: {"Arrow keys", "h/j/k/l"}, // both styles of the same item
 		},
 	}
 
 	MigrateLegacyFavorites(userHotkeys)
 
-	favs := userHotkeys.Favorites["neovim"]
+	favs := userHotkeys.Favorites[catIDNeovim]
 	// Should collapse to exactly ONE entry (the stable ID).
 	var wantID string
 	for _, cat := range hotkeys.Categories("emacs") {
-		if cat.ID == "neovim" {
+		if cat.ID == catIDNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == itemNavigate {
 					wantID = it.ID
 				}
 			}
@@ -154,9 +161,9 @@ func TestMigrateLegacyFavorites_AlreadyMigrated(t *testing.T) {
 
 	var wantID string
 	for _, cat := range hotkeys.Categories("emacs") {
-		if cat.ID == "neovim" {
+		if cat.ID == catIDNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == itemNavigate {
 					wantID = it.ID
 				}
 			}
@@ -169,13 +176,13 @@ func TestMigrateLegacyFavorites_AlreadyMigrated(t *testing.T) {
 	// Already in the new format.
 	userHotkeys := &UserHotkeys{
 		Favorites: map[string][]string{
-			"neovim": {wantID},
+			catIDNeovim: {wantID},
 		},
 	}
 
 	MigrateLegacyFavorites(userHotkeys)
 
-	favs := userHotkeys.Favorites["neovim"]
+	favs := userHotkeys.Favorites[catIDNeovim]
 	if len(favs) != 1 || favs[0] != wantID {
 		t.Fatalf("after idempotent migration expected [%q], got %v", wantID, favs)
 	}
@@ -189,13 +196,13 @@ func TestMigrateLegacyFavorites_UnrecognizedEntryPreserved(t *testing.T) {
 
 	userHotkeys := &UserHotkeys{
 		Favorites: map[string][]string{
-			"neovim": {"some-completely-unknown-key"},
+			catIDNeovim: {"some-completely-unknown-key"},
 		},
 	}
 
 	MigrateLegacyFavorites(userHotkeys)
 
-	favs := userHotkeys.Favorites["neovim"]
+	favs := userHotkeys.Favorites[catIDNeovim]
 	if len(favs) == 0 {
 		t.Fatal("unrecognized entry was silently dropped — must be preserved")
 	}
@@ -218,9 +225,9 @@ func TestMigrateLegacyFavorites_ReportsChangeOnlyWhenRewritten(t *testing.T) {
 
 	var navigateID string
 	for _, cat := range hotkeys.Categories("emacs") {
-		if cat.ID == "neovim" {
+		if cat.ID == catIDNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == itemNavigate {
 					navigateID = it.ID
 				}
 			}
@@ -231,13 +238,13 @@ func TestMigrateLegacyFavorites_ReportsChangeOnlyWhenRewritten(t *testing.T) {
 	}
 
 	// 1) Legacy key -> must report a change.
-	legacy := &UserHotkeys{Favorites: map[string][]string{"neovim": {"Arrow keys"}}}
+	legacy := &UserHotkeys{Favorites: map[string][]string{catIDNeovim: {"Arrow keys"}}}
 	if !MigrateLegacyFavorites(legacy) {
 		t.Error("MigrateLegacyFavorites on legacy-keyed favorites = false, want true")
 	}
 
 	// 2) Already migrated -> must report no change.
-	already := &UserHotkeys{Favorites: map[string][]string{"neovim": {navigateID}}}
+	already := &UserHotkeys{Favorites: map[string][]string{catIDNeovim: {navigateID}}}
 	if MigrateLegacyFavorites(already) {
 		t.Error("MigrateLegacyFavorites on already-migrated favorites = true, want false")
 	}
@@ -254,7 +261,7 @@ func TestMigrateLegacyFavorites_ReportsChangeOnlyWhenRewritten(t *testing.T) {
 	}
 
 	// 5) De-dup collapse -> a change (two entries become one).
-	dup := &UserHotkeys{Favorites: map[string][]string{"neovim": {"Arrow keys", "h/j/k/l"}}}
+	dup := &UserHotkeys{Favorites: map[string][]string{catIDNeovim: {"Arrow keys", "h/j/k/l"}}}
 	if !MigrateLegacyFavorites(dup) {
 		t.Error("MigrateLegacyFavorites on duplicate-collapsing favorites = false, want true")
 	}
@@ -266,9 +273,9 @@ func TestIsFavoriteUsesStableID(t *testing.T) {
 
 	var navigateID string
 	for _, cat := range hotkeys.Categories("emacs") {
-		if cat.ID == "neovim" {
+		if cat.ID == catIDNeovim {
 			for _, it := range cat.Items {
-				if it.Description == "Navigate" {
+				if it.Description == itemNavigate {
 					navigateID = it.ID
 				}
 			}
@@ -280,17 +287,17 @@ func TestIsFavoriteUsesStableID(t *testing.T) {
 
 	userHotkeys := &UserHotkeys{
 		Favorites: map[string][]string{
-			"neovim": {navigateID},
+			catIDNeovim: {navigateID},
 		},
 	}
 
 	// IsFavorite must return true when given the stable ID.
-	if !userHotkeys.IsFavorite("neovim", navigateID) {
-		t.Errorf("IsFavorite(%q, %q) = false, want true", "neovim", navigateID)
+	if !userHotkeys.IsFavorite(catIDNeovim, navigateID) {
+		t.Errorf("IsFavorite(%q, %q) = false, want true", catIDNeovim, navigateID)
 	}
 
 	// IsFavorite must return false for the old Keys string (no longer the key).
-	if userHotkeys.IsFavorite("neovim", "Arrow keys") {
-		t.Errorf("IsFavorite(%q, %q) = true, want false — should not match old Keys string", "neovim", "Arrow keys")
+	if userHotkeys.IsFavorite(catIDNeovim, "Arrow keys") {
+		t.Errorf("IsFavorite(%q, %q) = true, want false — should not match old Keys string", catIDNeovim, "Arrow keys")
 	}
 }

@@ -62,7 +62,7 @@ func SaveHotkeysConfig(cfg *HotkeysConfig) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, data, 0600)
+	return writeFileAtomic(path, data)
 }
 
 // GetUserHotkeys gets or creates hotkeys for a specific user.

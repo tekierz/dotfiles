@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+// Shared test fixtures for the config package tests.
+const (
+	testUserName         = "testuser"
+	themeCatppuccinMocha = "catppuccin-mocha"
+	themeDracula         = "dracula"
+	navStyleVim          = "vim"
+)
+
 func TestValidateUsername(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -52,7 +60,7 @@ func TestIsValidNavStyle(t *testing.T) {
 		valid bool
 	}{
 		{"emacs", true},
-		{"vim", true},
+		{navStyleVim, true},
 		{"Emacs", false},
 		{"VIM", false},
 		{"", false},
@@ -93,13 +101,13 @@ func TestIsValidKeyboardStyle(t *testing.T) {
 }
 
 func TestDefaultUserProfile(t *testing.T) {
-	profile := DefaultUserProfile("testuser")
+	profile := DefaultUserProfile(testUserName)
 
-	if profile.Name != "testuser" {
-		t.Errorf("Name = %q, want %q", profile.Name, "testuser")
+	if profile.Name != testUserName {
+		t.Errorf("Name = %q, want %q", profile.Name, testUserName)
 	}
-	if profile.Theme != "catppuccin-mocha" {
-		t.Errorf("Theme = %q, want %q", profile.Theme, "catppuccin-mocha")
+	if profile.Theme != themeCatppuccinMocha {
+		t.Errorf("Theme = %q, want %q", profile.Theme, themeCatppuccinMocha)
 	}
 	if profile.NavStyle != "emacs" {
 		t.Errorf("NavStyle = %q, want %q", profile.NavStyle, "emacs")
@@ -109,7 +117,7 @@ func TestDefaultUserProfile(t *testing.T) {
 	}
 }
 
-func setupTestConfigDir(t *testing.T) (string, func()) {
+func setupTestConfigDir(t *testing.T) func() {
 	t.Helper()
 
 	// Create temp directory
@@ -138,24 +146,24 @@ func setupTestConfigDir(t *testing.T) (string, func()) {
 		}
 	}
 
-	return dir, cleanup
+	return cleanup
 }
 
 func TestUserProfileCRUD(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Test Save
-	profile := DefaultUserProfile("testuser")
-	profile.Theme = "dracula"
-	profile.NavStyle = "vim"
+	profile := DefaultUserProfile(testUserName)
+	profile.Theme = themeDracula
+	profile.NavStyle = navStyleVim
 
 	if err := SaveUserProfile(profile); err != nil {
 		t.Fatalf("SaveUserProfile failed: %v", err)
 	}
 
 	// Test UserExists
-	if !UserExists("testuser") {
+	if !UserExists(testUserName) {
 		t.Error("UserExists returned false for existing user")
 	}
 	if UserExists("nonexistent") {
@@ -163,18 +171,18 @@ func TestUserProfileCRUD(t *testing.T) {
 	}
 
 	// Test Load
-	loaded, err := LoadUserProfile("testuser")
+	loaded, err := LoadUserProfile(testUserName)
 	if err != nil {
 		t.Fatalf("LoadUserProfile failed: %v", err)
 	}
-	if loaded.Name != "testuser" {
-		t.Errorf("Name = %q, want %q", loaded.Name, "testuser")
+	if loaded.Name != testUserName {
+		t.Errorf("Name = %q, want %q", loaded.Name, testUserName)
 	}
-	if loaded.Theme != "dracula" {
-		t.Errorf("Theme = %q, want %q", loaded.Theme, "dracula")
+	if loaded.Theme != themeDracula {
+		t.Errorf("Theme = %q, want %q", loaded.Theme, themeDracula)
 	}
-	if loaded.NavStyle != "vim" {
-		t.Errorf("NavStyle = %q, want %q", loaded.NavStyle, "vim")
+	if loaded.NavStyle != navStyleVim {
+		t.Errorf("NavStyle = %q, want %q", loaded.NavStyle, navStyleVim)
 	}
 	if loaded.CreatedAt == "" {
 		t.Error("CreatedAt should be set")
@@ -188,7 +196,7 @@ func TestUserProfileCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUserProfiles failed: %v", err)
 	}
-	if len(users) != 1 || users[0] != "testuser" {
+	if len(users) != 1 || users[0] != testUserName {
 		t.Errorf("ListUserProfiles = %v, want [testuser]", users)
 	}
 
@@ -211,21 +219,21 @@ func TestUserProfileCRUD(t *testing.T) {
 	}
 
 	// Test Delete
-	if err := DeleteUserProfile("testuser"); err != nil {
+	if err := DeleteUserProfile(testUserName); err != nil {
 		t.Fatalf("DeleteUserProfile failed: %v", err)
 	}
-	if UserExists("testuser") {
+	if UserExists(testUserName) {
 		t.Error("user should not exist after delete")
 	}
 
 	// Delete non-existent should fail
-	if err := DeleteUserProfile("testuser"); err == nil {
+	if err := DeleteUserProfile(testUserName); err == nil {
 		t.Error("deleting non-existent user should fail")
 	}
 }
 
 func TestLoadUserProfile_Errors(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Invalid username
@@ -253,13 +261,13 @@ func TestSaveUserProfile_InvalidUsername(t *testing.T) {
 }
 
 func TestApplyUserProfile(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Create a user profile
-	profile := DefaultUserProfile("testuser")
+	profile := DefaultUserProfile(testUserName)
 	profile.Theme = "nord"
-	profile.NavStyle = "vim"
+	profile.NavStyle = navStyleVim
 
 	if err := SaveUserProfile(profile); err != nil {
 		t.Fatalf("SaveUserProfile failed: %v", err)
@@ -279,16 +287,16 @@ func TestApplyUserProfile(t *testing.T) {
 	if cfg.Theme != "nord" {
 		t.Errorf("Theme = %q, want %q", cfg.Theme, "nord")
 	}
-	if cfg.NavStyle != "vim" {
-		t.Errorf("NavStyle = %q, want %q", cfg.NavStyle, "vim")
+	if cfg.NavStyle != navStyleVim {
+		t.Errorf("NavStyle = %q, want %q", cfg.NavStyle, navStyleVim)
 	}
-	if cfg.ActiveUser != "testuser" {
-		t.Errorf("ActiveUser = %q, want %q", cfg.ActiveUser, "testuser")
+	if cfg.ActiveUser != testUserName {
+		t.Errorf("ActiveUser = %q, want %q", cfg.ActiveUser, testUserName)
 	}
 }
 
 func TestGetActiveUser(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// No active user initially
@@ -323,7 +331,7 @@ func TestGetActiveUser(t *testing.T) {
 }
 
 func TestClearActiveUser(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Set an active user

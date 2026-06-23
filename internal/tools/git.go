@@ -9,6 +9,9 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
+// diffToolDifftastic is the diff-tool identifier for difftastic (difft).
+const diffToolDifftastic = "difftastic"
+
 // GitConfig holds Git configuration settings.
 type GitConfig struct {
 	DeltaSideBySide  bool
@@ -59,8 +62,8 @@ func NewGitTool() *GitTool {
 // DiffTool field) defaults to delta so the generated config is unchanged for them.
 func normalizeDiffTool(diffTool string) string {
 	switch diffTool {
-	case "difftastic":
-		return "difftastic"
+	case diffToolDifftastic:
+		return diffToolDifftastic
 	case "vimdiff", "nvimdiff":
 		return diffTool
 	default:
@@ -94,7 +97,7 @@ func GenerateGitConfig(cfg GitConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("\tautoSetupRemote = %t\n\n", cfg.AutoSetupRemote))
 
 	// Credential helper
-	if cfg.CredentialHelper != "" && cfg.CredentialHelper != "none" {
+	if cfg.CredentialHelper != "" && cfg.CredentialHelper != optionNone {
 		sb.WriteString("[credential]\n")
 		sb.WriteString(fmt.Sprintf("\thelper = %s\n\n", cfg.CredentialHelper))
 	}
@@ -110,7 +113,7 @@ func GenerateGitConfig(cfg GitConfig, theme string) string {
 	// emits a [delta] block; difftastic and vimdiff/nvimdiff must NOT force the
 	// delta pager (that was the bug — the diff-tool selection was ignored).
 	switch normalizeDiffTool(cfg.DiffTool) {
-	case "difftastic":
+	case diffToolDifftastic:
 		// difftastic's documented git integration: register it as the external
 		// diff driver. Leave core.pager unset so git uses its own pager.
 		sb.WriteString("[core]\n")

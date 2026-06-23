@@ -26,8 +26,8 @@ extra/vim-runtime 9.1.0-1
 	}
 
 	// First package
-	if pkgs[0].Name != "linux" {
-		t.Errorf("pkgs[0].Name = %q, want %q", pkgs[0].Name, "linux")
+	if pkgs[0].Name != pkgNameLinux {
+		t.Errorf("pkgs[0].Name = %q, want %q", pkgs[0].Name, pkgNameLinux)
 	}
 	if pkgs[0].Description != "The Linux kernel and modules" {
 		t.Errorf("pkgs[0].Description = %q", pkgs[0].Description)

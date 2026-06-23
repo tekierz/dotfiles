@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -21,6 +23,19 @@ var (
 	skipIntro bool
 	version   = "2.0.1"
 )
+
+// responseYes is the affirmative answer accepted at confirmation prompts.
+const responseYes = "yes"
+
+// titleFirst upper-cases the first rune of s, leaving the rest unchanged.
+// It replaces the deprecated strings.Title for our single-word inputs.
+func titleFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[size:]
+}
 
 // rootCmd is the base command.
 var rootCmd = &cobra.Command{
@@ -499,7 +514,7 @@ func showStatus() {
 					names = append(names, t.Name())
 				}
 			}
-			fmt.Printf("  %s: %s\n", strings.Title(string(cat)), strings.Join(names, ", "))
+			fmt.Printf("  %s: %s\n", titleFirst(string(cat)), strings.Join(names, ", "))
 		}
 	}
 
@@ -720,7 +735,7 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 			os.Exit(1)
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
+		if response != "y" && response != responseYes {
 			fmt.Println("Uninstall canceled.")
 			return
 		}
@@ -875,7 +890,7 @@ func switchToUser(name string) {
 			os.Exit(1)
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
+		if response != "y" && response != responseYes {
 			fmt.Println("Canceled.")
 			return
 		}
@@ -922,7 +937,7 @@ func addUser(name, theme, nav, keyboard string) {
 			os.Exit(1)
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
+		if response != "y" && response != responseYes {
 			fmt.Println("Canceled.")
 			return
 		}
@@ -1003,7 +1018,7 @@ func deleteUser(name string, force bool) {
 			os.Exit(1)
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
+		if response != "y" && response != responseYes {
 			fmt.Println("Canceled.")
 			return
 		}

@@ -100,7 +100,7 @@ func (r *Registry) Get(id string) (Tool, bool) {
 
 // All returns all registered tools sorted by name.
 func (r *Registry) All() []Tool {
-	var tools []Tool
+	tools := make([]Tool, 0, len(r.tools))
 	for _, t := range r.tools {
 		tools = append(tools, t)
 	}
@@ -241,7 +241,7 @@ func (r *Registry) IsLightweightMode() bool {
 // On low-memory systems (< 1GB), heavy tools are excluded.
 func (r *Registry) AllForSystem() []Tool {
 	lightweight := r.IsLightweightMode()
-	var tools []Tool
+	tools := make([]Tool, 0, len(r.tools))
 	for _, t := range r.tools {
 		if lightweight && t.IsHeavy() {
 			continue

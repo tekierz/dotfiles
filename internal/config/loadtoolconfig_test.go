@@ -17,7 +17,7 @@ type sampleToolConfig struct {
 func sampleDefaults() *sampleToolConfig {
 	return &sampleToolConfig{
 		FontSize: 14,
-		Theme:    "catppuccin-mocha",
+		Theme:    themeCatppuccinMocha,
 		Enabled:  true,
 	}
 }
@@ -27,7 +27,7 @@ func sampleDefaults() *sampleToolConfig {
 // intended defaults rather than the Go zero value (config-medium). Only keys
 // actually present in the file should override the defaults.
 func TestLoadToolConfigKeepsDefaultsForAbsentKeys(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	if err := EnsureDirs(); err != nil {
@@ -50,8 +50,8 @@ func TestLoadToolConfigKeepsDefaultsForAbsentKeys(t *testing.T) {
 		t.Errorf("FontSize = %d, want 22 (present in file)", cfg.FontSize)
 	}
 	// Absent keys keep their defaults (not "" / false).
-	if cfg.Theme != "catppuccin-mocha" {
-		t.Errorf("Theme = %q, want default %q for absent key", cfg.Theme, "catppuccin-mocha")
+	if cfg.Theme != themeCatppuccinMocha {
+		t.Errorf("Theme = %q, want default %q for absent key", cfg.Theme, themeCatppuccinMocha)
 	}
 	if !cfg.Enabled {
 		t.Error("Enabled = false, want default true for absent key")
@@ -61,7 +61,7 @@ func TestLoadToolConfigKeepsDefaultsForAbsentKeys(t *testing.T) {
 // TestLoadToolConfigMissingFileReturnsDefaults guards the existing
 // not-found-returns-defaults path still holds after the change.
 func TestLoadToolConfigMissingFileReturnsDefaults(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg, err := LoadToolConfig("does-not-exist", sampleDefaults)

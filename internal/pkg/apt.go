@@ -10,6 +10,9 @@ import (
 	"github.com/tekierz/dotfiles/internal/runner"
 )
 
+// aptInstallVerb is the apt subcommand used to install packages.
+const aptInstallVerb = "install"
+
 // AptManager implements PackageManager for Debian/Ubuntu.
 type AptManager struct {
 	aptPath string
@@ -34,7 +37,7 @@ func (a *AptManager) Install(packages ...string) error {
 		return nil
 	}
 
-	args := []string{"apt", "install", "-y"}
+	args := []string{"apt", aptInstallVerb, "-y"}
 	args = append(args, packages...)
 	cmd := exec.Command("sudo", args...)
 	return cmd.Run()
@@ -146,7 +149,7 @@ func (a *AptManager) Update(packages ...string) error {
 	_ = updateCmd.Run()
 
 	// Install specific packages (will upgrade if already installed)
-	args := []string{"apt", "install", "-y"}
+	args := []string{"apt", aptInstallVerb, "-y"}
 	args = append(args, packages...)
 	cmd := exec.Command("sudo", args...)
 	return cmd.Run()
@@ -248,7 +251,7 @@ func (a *AptManager) ListInstalled() ([]Package, error) {
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	for _, line := range lines {
 		parts := strings.Fields(line)
-		if len(parts) >= 2 && parts[1] == "install" {
+		if len(parts) >= 2 && parts[1] == aptInstallVerb {
 			name := parts[0]
 			// Look up version from pre-fetched map instead of individual GetVersion call
 			version := versions[name]
@@ -274,7 +277,7 @@ func (a *AptManager) InstallStreaming(ctx context.Context, packages ...string) (
 		return nil, fmt.Errorf("no packages specified")
 	}
 
-	args := []string{"install", "-y"}
+	args := []string{aptInstallVerb, "-y"}
 	args = append(args, packages...)
 	return runner.RunStreamingWithSudo(ctx, a.aptPath, args...)
 }
@@ -285,7 +288,7 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 		return nil, fmt.Errorf("no packages specified")
 	}
 
-	args := []string{"install", "-y"}
+	args := []string{aptInstallVerb, "-y"}
 	args = append(args, packages...)
 	return runner.RunStreamingWithSudo(ctx, a.aptPath, args...)
 }

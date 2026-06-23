@@ -9,8 +9,8 @@ import (
 func TestDefaultGlobalConfig(t *testing.T) {
 	cfg := DefaultGlobalConfig()
 
-	if cfg.Theme != "catppuccin-mocha" {
-		t.Errorf("Theme = %q, want %q", cfg.Theme, "catppuccin-mocha")
+	if cfg.Theme != themeCatppuccinMocha {
+		t.Errorf("Theme = %q, want %q", cfg.Theme, themeCatppuccinMocha)
 	}
 	if cfg.NavStyle != "emacs" {
 		t.Errorf("NavStyle = %q, want %q", cfg.NavStyle, "emacs")
@@ -109,7 +109,7 @@ func TestEnsureDirs(t *testing.T) {
 }
 
 func TestGlobalConfigCRUD(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Load when file doesn't exist - should return defaults
@@ -117,13 +117,13 @@ func TestGlobalConfigCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadGlobalConfig failed: %v", err)
 	}
-	if cfg.Theme != "catppuccin-mocha" {
+	if cfg.Theme != themeCatppuccinMocha {
 		t.Errorf("Theme = %q, want default", cfg.Theme)
 	}
 
 	// Save modified config
-	cfg.Theme = "dracula"
-	cfg.NavStyle = "vim"
+	cfg.Theme = themeDracula
+	cfg.NavStyle = navStyleVim
 	cfg.DisableAnimations = true
 
 	if err := SaveGlobalConfig(cfg); err != nil {
@@ -135,11 +135,11 @@ func TestGlobalConfigCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadGlobalConfig failed: %v", err)
 	}
-	if loaded.Theme != "dracula" {
-		t.Errorf("Theme = %q, want %q", loaded.Theme, "dracula")
+	if loaded.Theme != themeDracula {
+		t.Errorf("Theme = %q, want %q", loaded.Theme, themeDracula)
 	}
-	if loaded.NavStyle != "vim" {
-		t.Errorf("NavStyle = %q, want %q", loaded.NavStyle, "vim")
+	if loaded.NavStyle != navStyleVim {
+		t.Errorf("NavStyle = %q, want %q", loaded.NavStyle, navStyleVim)
 	}
 	if !loaded.DisableAnimations {
 		t.Error("DisableAnimations should be true")
@@ -151,8 +151,8 @@ func TestIsValidTheme(t *testing.T) {
 		theme string
 		valid bool
 	}{
-		{"catppuccin-mocha", true},
-		{"dracula", true},
+		{themeCatppuccinMocha, true},
+		{themeDracula, true},
 		{"nord", true},
 		{"neon-seapunk", true},
 		{"invalid-theme", false},
@@ -200,7 +200,7 @@ func DefaultTestToolConfig() *TestToolConfig {
 }
 
 func TestToolConfigCRUD(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Load when file doesn't exist - should return defaults

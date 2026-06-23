@@ -11,6 +11,9 @@ import (
 	"testing"
 )
 
+// osWindows is the runtime.GOOS value for Windows, used in skip guards.
+const osWindows = "windows"
+
 // ---------------------------------------------------------------------------
 // GetScript dispatch
 // ---------------------------------------------------------------------------
@@ -63,7 +66,7 @@ func TestGetScriptUnknownReturnsEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestScriptsWrittenAt0700(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		t.Skip("POSIX permission bits are not meaningful on Windows")
 	}
 	t.Parallel()
@@ -131,10 +134,10 @@ func extractFunc(t *testing.T, src, fn string) string {
 }
 
 func TestReadPidValidation(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	t.Parallel()
+	if runtime.GOOS == osWindows {
 		t.Skip("bash harness not applicable on Windows")
 	}
-	t.Parallel()
 
 	cases := []struct {
 		name        string
@@ -240,10 +243,10 @@ func shellSingleQuote(s string) string {
 }
 
 func TestIsCaffeineRefusesUnrelatedProcess(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	t.Parallel()
+	if runtime.GOOS == osWindows {
 		t.Skip("bash harness not applicable on Windows")
 	}
-	t.Parallel()
 
 	cases := []struct {
 		name   string

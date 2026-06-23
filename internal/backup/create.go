@@ -25,7 +25,7 @@ func Create(home, backupDir string, files []string) (int, error) {
 		return 0, err
 	}
 
-	var manifest []string
+	manifest := make([]string, 0, len(files))
 	count := 0
 	for _, relPath := range files {
 		srcPath := filepath.Join(home, relPath)

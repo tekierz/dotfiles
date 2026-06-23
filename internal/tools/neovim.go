@@ -10,6 +10,10 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
+// optionNone is the sentinel value used by tool configs to mean "disabled"
+// (e.g. no line numbers, no clipboard integration, no credential helper).
+const optionNone = "none"
+
 // NeovimConfig holds Neovim configuration settings.
 type NeovimConfig struct {
 	ConfigPreset string   // "kickstart", "lazyvim", "custom", "minimal"
@@ -99,7 +103,7 @@ func GenerateNeovimConfig(cfg NeovimConfig, theme string) string {
 	sb.WriteString("-- Basic settings\n")
 	// LineNumbers is the single source for both opts: "absolute"/"relative" show
 	// the number column ("none" hides it); only "relative" enables relative numbers.
-	sb.WriteString(fmt.Sprintf("vim.opt.number = %t\n", cfg.LineNumbers != "none"))
+	sb.WriteString(fmt.Sprintf("vim.opt.number = %t\n", cfg.LineNumbers != optionNone))
 	sb.WriteString(fmt.Sprintf("vim.opt.relativenumber = %t\n", cfg.LineNumbers == "relative"))
 	sb.WriteString(fmt.Sprintf("vim.opt.tabstop = %d\n", cfg.TabWidth))
 	sb.WriteString(fmt.Sprintf("vim.opt.shiftwidth = %d\n", cfg.TabWidth))
@@ -111,7 +115,7 @@ func GenerateNeovimConfig(cfg NeovimConfig, theme string) string {
 
 	// Clipboard
 	sb.WriteString("-- Clipboard\n")
-	if cfg.Clipboard != "none" {
+	if cfg.Clipboard != optionNone {
 		sb.WriteString(fmt.Sprintf("vim.opt.clipboard = \"%s\"\n", cfg.Clipboard))
 	}
 	sb.WriteString("\n")
@@ -227,6 +231,7 @@ func WriteNeovimUserPrefs(cfg NeovimConfig, theme string) error {
 	// No existing config dir => nothing to overlay. Do NOT create it (that is the
 	// install-time preset clone's job) and do NOT clone here.
 	if _, statErr := os.Stat(nvimDir); statErr != nil {
+		//nolint:nilerr // stat failure means no existing nvim dir to overlay; skipping is correct
 		return nil
 	}
 

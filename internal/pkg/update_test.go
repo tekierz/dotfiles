@@ -4,15 +4,21 @@ import (
 	"testing"
 )
 
+// Test fixtures shared across the pkg package tests.
+const (
+	managerPacman = "pacman" // the pacman source-manager identifier
+	pkgNameLinux  = "linux"  // a representative Arch package name
+)
+
 // TestCheckAllUpdates_DedupPreservesSourceManager verifies the dedup keyed on
 // Name+InstalledBy (regression for pkg-4): same-named packages from different
 // source managers must both survive so each is routed to the manager that can
 // actually upgrade it. Exact duplicates (same name + same source) collapse.
 func TestDedupByNameAndInstalledBy(t *testing.T) {
 	allPackages := []Package{
-		{Name: "vim", InstalledBy: "pacman"},
-		{Name: "vim", InstalledBy: "pacman"}, // exact dup -> collapsed
-		{Name: "yay", InstalledBy: "pacman"},
+		{Name: "vim", InstalledBy: managerPacman},
+		{Name: "vim", InstalledBy: managerPacman}, // exact dup -> collapsed
+		{Name: "yay", InstalledBy: managerPacman},
 		{Name: "yay", InstalledBy: "aur"}, // same name, different source -> kept
 	}
 
@@ -44,7 +50,7 @@ func TestDedupByNameAndInstalledBy(t *testing.T) {
 	hasPacman, hasAur := false, false
 	for _, s := range sources {
 		switch s {
-		case "pacman":
+		case managerPacman:
 			hasPacman = true
 		case "aur":
 			hasAur = true
@@ -64,17 +70,17 @@ func TestParsePacmanUpdates(t *testing.T) {
 		"vim 9.0.0-1 -> 9.1.0-1\n" +
 		"garbage-line-without-arrow\n" // no " -> " skipped
 
-	pkgs := parsePacmanUpdates(output, "pacman")
+	pkgs := parsePacmanUpdates(output, managerPacman)
 	if len(pkgs) != 2 {
 		t.Fatalf("parsePacmanUpdates returned %d packages, want 2: %+v", len(pkgs), pkgs)
 	}
 
-	if pkgs[0].Name != "linux" || pkgs[0].CurrentVersion != "6.8.1-1" || pkgs[0].LatestVersion != "6.8.2-1" {
+	if pkgs[0].Name != pkgNameLinux || pkgs[0].CurrentVersion != "6.8.1-1" || pkgs[0].LatestVersion != "6.8.2-1" {
 		t.Errorf("first package = %+v, want linux 6.8.1-1 -> 6.8.2-1", pkgs[0])
 	}
 	for _, p := range pkgs {
-		if p.InstalledBy != "pacman" {
-			t.Errorf("InstalledBy = %q, want %q", p.InstalledBy, "pacman")
+		if p.InstalledBy != managerPacman {
+			t.Errorf("InstalledBy = %q, want %q", p.InstalledBy, managerPacman)
 		}
 		if !p.Outdated {
 			t.Errorf("package %q Outdated should be true", p.Name)
@@ -98,10 +104,10 @@ func TestParsePacmanUpdates_TagsAUR(t *testing.T) {
 // case) yields no packages rather than a phantom entry (regression for pkg-2,
 // where an empty string previously parsed to a single blank record).
 func TestParsePacmanUpdates_Empty(t *testing.T) {
-	if pkgs := parsePacmanUpdates("", "pacman"); len(pkgs) != 0 {
+	if pkgs := parsePacmanUpdates("", managerPacman); len(pkgs) != 0 {
 		t.Errorf("empty output should yield 0 packages, got %d: %+v", len(pkgs), pkgs)
 	}
-	if pkgs := parsePacmanUpdates("   \n  \n", "pacman"); len(pkgs) != 0 {
+	if pkgs := parsePacmanUpdates("   \n  \n", managerPacman); len(pkgs) != 0 {
 		t.Errorf("whitespace-only output should yield 0 packages, got %d: %+v", len(pkgs), pkgs)
 	}
 }

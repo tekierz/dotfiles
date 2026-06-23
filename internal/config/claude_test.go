@@ -13,7 +13,7 @@ import (
 // critical data-loss bug: SaveClaudeConfig must never drop keys it does not
 // own (model, permissions, hooks, statusLine, etc.) in ~/.claude.json.
 func TestSaveClaudeConfigPreservesUnrelatedKeys(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	home, err := os.UserHomeDir()
@@ -92,7 +92,7 @@ func TestSaveClaudeConfigPreservesUnrelatedKeys(t *testing.T) {
 // ~/.claude.json and NOT to ~/.claude/settings.json (which Claude Code uses
 // for model/permissions/hooks and must not be touched).
 func TestSaveClaudeConfigWritesToClaudeJSON(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	home, _ := os.UserHomeDir()
@@ -115,7 +115,7 @@ func TestSaveClaudeConfigWritesToClaudeJSON(t *testing.T) {
 // TestSaveClaudeConfigBacksUpExisting verifies a backup is taken before
 // overwriting an existing ~/.claude.json.
 func TestSaveClaudeConfigBacksUpExisting(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	home, _ := os.UserHomeDir()
@@ -144,7 +144,7 @@ func TestSaveClaudeConfigBacksUpExisting(t *testing.T) {
 // TestLoadClaudeConfigMissingFile verifies a missing file yields an empty map,
 // not an error.
 func TestLoadClaudeConfigMissingFile(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg, err := LoadClaudeConfig()
@@ -203,7 +203,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "out.json")
 
-	if err := writeFileAtomic(path, []byte("hello"), 0600); err != nil {
+	if err := writeFileAtomic(path, []byte("hello")); err != nil {
 		t.Fatalf("writeFileAtomic failed: %v", err)
 	}
 
@@ -232,7 +232,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 
 	// Overwrite must succeed and replace content.
-	if err := writeFileAtomic(path, []byte("world"), 0600); err != nil {
+	if err := writeFileAtomic(path, []byte("world")); err != nil {
 		t.Fatalf("overwrite failed: %v", err)
 	}
 	data, _ = os.ReadFile(path)

@@ -108,8 +108,10 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 			sb.WriteString("source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null\n")
 		case pkg.PlatformArch:
 			sb.WriteString("source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null\n")
-		case pkg.PlatformDebian:
+		case pkg.PlatformDebian, pkg.PlatformPi:
 			sb.WriteString("source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null\n")
+		case pkg.PlatformUnknown:
+			// Unknown platform: no plugin source path available.
 		}
 	}
 	if cfg.Autosuggestions {
@@ -118,8 +120,10 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 			sb.WriteString("source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null\n")
 		case pkg.PlatformArch:
 			sb.WriteString("source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null\n")
-		case pkg.PlatformDebian:
+		case pkg.PlatformDebian, pkg.PlatformPi:
 			sb.WriteString("source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null\n")
+		case pkg.PlatformUnknown:
+			// Unknown platform: no plugin source path available.
 		}
 	}
 	sb.WriteString("\n")

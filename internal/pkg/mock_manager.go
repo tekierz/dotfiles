@@ -116,7 +116,7 @@ func (m *MockPackageManager) Search(query string) ([]Package, error) {
 
 // ListInstalled returns all installed packages.
 func (m *MockPackageManager) ListInstalled() ([]Package, error) {
-	var result []Package
+	result := make([]Package, 0, len(m.InstalledPkgs))
 	for name, version := range m.InstalledPkgs {
 		result = append(result, Package{
 			Name:           name,

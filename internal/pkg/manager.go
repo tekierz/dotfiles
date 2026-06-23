@@ -152,6 +152,8 @@ func detectManagerImpl() PackageManager {
 		if apt := NewAptManager(); apt.IsAvailable() {
 			return apt
 		}
+	case PlatformUnknown:
+		// No known package manager for an unidentified platform.
 	}
 
 	return nil

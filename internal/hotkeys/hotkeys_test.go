@@ -4,6 +4,9 @@ import (
 	"testing"
 )
 
+// zshEmacsName is the display name of the emacs/Mac-style Zsh hotkey category.
+const zshEmacsName = "Zsh (emacs/Mac-style)"
+
 // findCategory returns the category with the given ID, or nil.
 func findCategory(cats []Category, id string) *Category {
 	for i := range cats {
@@ -144,8 +147,8 @@ func TestZshTitleFlipsByNavStyle(t *testing.T) {
 	if vimZsh.Name != "Zsh (vim mode)" {
 		t.Fatalf("vim zsh Name = %q, want %q", vimZsh.Name, "Zsh (vim mode)")
 	}
-	if emacsZsh.Name != "Zsh (emacs/Mac-style)" {
-		t.Fatalf("emacs zsh Name = %q, want %q", emacsZsh.Name, "Zsh (emacs/Mac-style)")
+	if emacsZsh.Name != zshEmacsName {
+		t.Fatalf("emacs zsh Name = %q, want %q", emacsZsh.Name, zshEmacsName)
 	}
 }
 
@@ -160,7 +163,7 @@ func TestUnknownNavStyleBehavesAsEmacs(t *testing.T) {
 			t.Fatalf("nav %q: tmux nav = %q, want emacs default %q", ns, got, "Alt-Arrow")
 		}
 		zsh := findCategory(cats, "zsh")
-		if zsh.Name != "Zsh (emacs/Mac-style)" {
+		if zsh.Name != zshEmacsName {
 			t.Fatalf("nav %q: zsh title = %q, want emacs default", ns, zsh.Name)
 		}
 	}

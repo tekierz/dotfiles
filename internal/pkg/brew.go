@@ -11,6 +11,9 @@ import (
 	"github.com/tekierz/dotfiles/internal/runner"
 )
 
+// brewName is the Homebrew executable and manager identifier.
+const brewName = "brew"
+
 // BrewManager implements PackageManager for Homebrew.
 type BrewManager struct {
 	brewPath string
@@ -18,12 +21,12 @@ type BrewManager struct {
 
 // NewBrewManager creates a new Homebrew manager.
 func NewBrewManager() *BrewManager {
-	path, _ := exec.LookPath("brew")
+	path, _ := exec.LookPath(brewName)
 	return &BrewManager{brewPath: path}
 }
 
 func (b *BrewManager) Name() string {
-	return "brew"
+	return brewName
 }
 
 func (b *BrewManager) IsAvailable() bool {
@@ -141,7 +144,7 @@ func parseBrewOutdated(data []byte) ([]Package, error) {
 		return nil, err
 	}
 
-	var packages []Package
+	packages := make([]Package, 0, len(outdated.Formulae)+len(outdated.Casks))
 
 	for _, f := range outdated.Formulae {
 		// Skip pinned formulae: `brew upgrade <name>` refuses to move a pinned
@@ -160,7 +163,7 @@ func parseBrewOutdated(data []byte) ([]Package, error) {
 			CurrentVersion: currentVer,
 			LatestVersion:  f.CurrentVersion,
 			Outdated:       true,
-			InstalledBy:    "brew",
+			InstalledBy:    brewName,
 		})
 	}
 
@@ -212,7 +215,7 @@ func (b *BrewManager) Search(query string) ([]Package, error) {
 		if line != "" && !strings.HasPrefix(line, "==>") {
 			packages = append(packages, Package{
 				Name:        strings.TrimSpace(line),
-				InstalledBy: "brew",
+				InstalledBy: brewName,
 			})
 		}
 	}
@@ -237,7 +240,7 @@ func (b *BrewManager) ListInstalled() ([]Package, error) {
 			packages = append(packages, Package{
 				Name:           parts[0],
 				CurrentVersion: parts[1],
-				InstalledBy:    "brew",
+				InstalledBy:    brewName,
 			})
 		}
 	}

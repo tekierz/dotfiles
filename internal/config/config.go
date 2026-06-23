@@ -17,7 +17,7 @@ var ErrNoConfigDir = errors.New("cannot determine config directory: HOME and XDG
 // file in the same directory and renaming it over the destination. This
 // prevents a truncated/half-written file if the process is interrupted
 // mid-write (rename is atomic on the same filesystem).
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+func writeFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -33,7 +33,8 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(perm); err != nil {
+	// Config files are owner-only (0600); all callers wrote them this way.
+	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -153,7 +154,7 @@ func SaveToolConfig[T any](toolName string, cfg *T) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := writeFileAtomic(path, data, 0600); err != nil {
+	if err := writeFileAtomic(path, data); err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 
@@ -196,7 +197,7 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 		return fmt.Errorf("failed to marshal global config: %w", err)
 	}
 
-	if err := writeFileAtomic(path, data, 0600); err != nil {
+	if err := writeFileAtomic(path, data); err != nil {
 		return fmt.Errorf("failed to write global config: %w", err)
 	}
 

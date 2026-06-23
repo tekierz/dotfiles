@@ -143,6 +143,8 @@ func CheckDotfilesUpdates() ([]Package, error) {
 	switch DetectPlatform() {
 	case PlatformDebian, PlatformPi:
 		allowList = DotfilesDebianPackages
+	case PlatformMacOS, PlatformArch, PlatformUnknown:
+		allowList = DotfilesPackages
 	default:
 		allowList = DotfilesPackages
 	}
