@@ -10,7 +10,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// NeovimConfig holds Neovim configuration settings
+// NeovimConfig holds Neovim configuration settings.
 type NeovimConfig struct {
 	ConfigPreset string   // "kickstart", "lazyvim", "custom", "minimal"
 	LSPs         []string // LSP servers to configure
@@ -29,12 +29,12 @@ type NeovimConfig struct {
 	UndoFile    bool // persistent undo on disk
 }
 
-// NeovimTool represents the Neovim editor
+// NeovimTool represents the Neovim editor.
 type NeovimTool struct {
 	BaseTool
 }
 
-// NewNeovimTool creates a new Neovim tool
+// NewNeovimTool creates a new Neovim tool.
 func NewNeovimTool() *NeovimTool {
 	home, _ := os.UserHomeDir()
 	return &NeovimTool{
@@ -143,7 +143,7 @@ func GenerateNeovimConfig(cfg NeovimConfig, theme string) string {
 	return sb.String()
 }
 
-// WriteNeovimConfig writes the neovim configuration to disk
+// WriteNeovimConfig writes the neovim configuration to disk.
 func WriteNeovimConfig(cfg NeovimConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -169,7 +169,7 @@ func WriteNeovimConfig(cfg NeovimConfig, theme string) error {
 	}
 }
 
-// setupNeovimPreset clones a preset config and adds user customizations
+// setupNeovimPreset clones a preset config and adds user customizations.
 func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
 	repoURL, ok := neovimConfigRepos[cfg.ConfigPreset]
 	if !ok {
@@ -233,7 +233,7 @@ func WriteNeovimUserPrefs(cfg NeovimConfig, theme string) error {
 	return writeNeovimUserPrefs(cfg, theme, nvimDir)
 }
 
-// writeNeovimUserPrefs writes user preferences to a separate file
+// writeNeovimUserPrefs writes user preferences to a separate file.
 func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 	prefsPath := filepath.Join(nvimDir, "lua", "custom", "options.lua")
 	content := GenerateNeovimConfig(cfg, theme)
@@ -256,7 +256,7 @@ func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 	return nil
 }
 
-// writeMinimalNeovimConfig writes a minimal standalone neovim config
+// writeMinimalNeovimConfig writes a minimal standalone neovim config.
 func writeMinimalNeovimConfig(cfg NeovimConfig, theme, nvimDir string) error {
 	initPath := filepath.Join(nvimDir, "init.lua")
 	content := GenerateNeovimConfig(cfg, theme)

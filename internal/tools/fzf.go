@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// FzfConfig holds FZF configuration settings
+// FzfConfig holds FZF configuration settings.
 type FzfConfig struct {
 	Preview bool
 	Height  int    // Percentage (e.g., 40 for 40%)
@@ -20,12 +20,12 @@ type FzfConfig struct {
 	PreviewWindow string // "right:50%", "up:50%", "down:50%"
 }
 
-// FzfTool represents the fzf fuzzy finder
+// FzfTool represents the fzf fuzzy finder.
 type FzfTool struct {
 	BaseTool
 }
 
-// NewFzfTool creates a new fzf tool
+// NewFzfTool creates a new fzf tool.
 func NewFzfTool() *FzfTool {
 	return &FzfTool{
 		BaseTool: BaseTool{
@@ -48,7 +48,7 @@ func NewFzfTool() *FzfTool {
 	}
 }
 
-// GenerateFzfConfig builds the fzf environment configuration
+// GenerateFzfConfig builds the fzf environment configuration.
 func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 	var sb strings.Builder
 
@@ -129,7 +129,7 @@ func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 	return sb.String()
 }
 
-// WriteFzfConfig writes the fzf configuration to a sourceable file
+// WriteFzfConfig writes the fzf configuration to a sourceable file.
 func WriteFzfConfig(cfg FzfConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -10,12 +10,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/runner"
 )
 
-// AptManager implements PackageManager for Debian/Ubuntu
+// AptManager implements PackageManager for Debian/Ubuntu.
 type AptManager struct {
 	aptPath string
 }
 
-// NewAptManager creates a new apt manager
+// NewAptManager creates a new apt manager.
 func NewAptManager() *AptManager {
 	path, _ := exec.LookPath("apt")
 	return &AptManager{aptPath: path}
@@ -263,12 +263,12 @@ func (a *AptManager) ListInstalled() ([]Package, error) {
 	return packages, nil
 }
 
-// NeedsSudo returns true for apt (requires sudo for package operations)
+// NeedsSudo returns true for apt (requires sudo for package operations).
 func (a *AptManager) NeedsSudo() bool {
 	return true
 }
 
-// InstallStreaming installs packages with real-time output streaming
+// InstallStreaming installs packages with real-time output streaming.
 func (a *AptManager) InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
@@ -279,7 +279,7 @@ func (a *AptManager) InstallStreaming(ctx context.Context, packages ...string) (
 	return runner.RunStreamingWithSudo(ctx, a.aptPath, args...)
 }
 
-// UpdateStreaming updates packages with real-time output streaming
+// UpdateStreaming updates packages with real-time output streaming.
 func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
@@ -291,7 +291,7 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 }
 
 // UpdateAllStreaming updates all packages with real-time output streaming
-// This runs apt update && apt upgrade -y sequentially without shell injection risk
+// This runs apt update && apt upgrade -y sequentially without shell injection risk.
 func (a *AptManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
 	// Run update first using safe exec.Command (no shell interpolation)
 	updateCmd, err := runner.RunStreamingWithSudo(ctx, a.aptPath, "update")

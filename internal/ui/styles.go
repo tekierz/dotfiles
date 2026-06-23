@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ColorPalette represents a theme's color scheme for the TUI
+// ColorPalette represents a theme's color scheme for the TUI.
 type ColorPalette struct {
 	// Primary accent colors
 	Accent    lipgloss.Color // Main accent (selections, highlights)
@@ -32,7 +32,7 @@ type ColorPalette struct {
 	TextBright lipgloss.Color // Bright/emphasized text
 }
 
-// ThemePalettes maps theme names to their color palettes
+// ThemePalettes maps theme names to their color palettes.
 var ThemePalettes = map[string]ColorPalette{
 	"neon-seapunk": {
 		Accent:     "#00F5D4", // seafoam neon
@@ -276,7 +276,7 @@ var ThemePalettes = map[string]ColorPalette{
 	},
 }
 
-// CurrentPalette holds the active theme's colors
+// CurrentPalette holds the active theme's colors.
 var CurrentPalette = ThemePalettes["neon-seapunk"]
 
 // themeMu serializes the SetTheme write sequence. In production there is a
@@ -285,7 +285,7 @@ var CurrentPalette = ThemePalettes["neon-seapunk"]
 // cannot race write-write on the package-global palette/color/style vars.
 var themeMu sync.Mutex
 
-// SetTheme updates the current palette based on theme name
+// SetTheme updates the current palette based on theme name.
 func SetTheme(theme string) {
 	themeMu.Lock()
 	defer themeMu.Unlock()
@@ -295,7 +295,7 @@ func SetTheme(theme string) {
 	}
 }
 
-// updateDynamicColors updates the legacy color variables from CurrentPalette
+// updateDynamicColors updates the legacy color variables from CurrentPalette.
 func updateDynamicColors() {
 	ColorCyan = CurrentPalette.Accent
 	ColorNeonBlue = CurrentPalette.Info
@@ -325,7 +325,7 @@ func updateDynamicColors() {
 	updateStyles()
 }
 
-// updateStyles recreates all styles with current theme colors
+// updateStyles recreates all styles with current theme colors.
 func updateStyles() {
 	ContainerStyle = lipgloss.NewStyle().
 		Padding(1, 2).
@@ -354,7 +354,7 @@ func updateStyles() {
 		Padding(1, 0)
 }
 
-// Legacy color variables (updated by SetTheme via updateDynamicColors)
+// Legacy color variables (updated by SetTheme via updateDynamicColors).
 var (
 	// Accents (aqua / hot pink / purple) with high-contrast but clean usage.
 	ColorCyan       = lipgloss.Color("#00F5D4") // seafoam neon
@@ -384,25 +384,25 @@ var (
 	ColorTextBright = lipgloss.Color("#FFFFFF")
 )
 
-// Spinner frames for animation
+// Spinner frames for animation.
 var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 var SpinnerDotsFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
 
-// Styles - no explicit backgrounds to respect terminal transparency
+// Styles - no explicit backgrounds to respect terminal transparency.
 var (
-	// Container styles
+	// Container styles.
 	ContainerStyle = lipgloss.NewStyle().
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBorder)
 
-	// Title styles
+		// Title styles.
 	TitleStyle = lipgloss.NewStyle().
 			Foreground(ColorCyan).
 			Bold(true).
 			Padding(0, 1)
 
-	// Button styles
+		// Button styles.
 	ButtonStyle = lipgloss.NewStyle().
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
@@ -415,7 +415,7 @@ var (
 				Foreground(ColorCyan).
 				Bold(true)
 
-	// Help text style
+		// Help text style.
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorTextMuted).
 			Padding(1, 0)
@@ -431,7 +431,7 @@ func RenderBadge(label string, fg, bg lipgloss.Color) string {
 		Render(label)
 }
 
-// GradientText renders text with a horizontal gradient
+// GradientText renders text with a horizontal gradient.
 func GradientText(text string, colors []lipgloss.Color) string {
 	if len(colors) == 0 || len(text) == 0 {
 		return text
@@ -449,7 +449,7 @@ func GradientText(text string, colors []lipgloss.Color) string {
 	return result.String()
 }
 
-// CyberBorder creates a cyberpunk-style border decoration
+// CyberBorder creates a cyberpunk-style border decoration.
 func CyberBorder(width int) string {
 	if width < 4 {
 		return ""
@@ -471,7 +471,7 @@ func CyberBorder(width int) string {
 	return left + middle + right
 }
 
-// AnimatedSpinnerDots returns the current dots spinner frame
+// AnimatedSpinnerDots returns the current dots spinner frame.
 func AnimatedSpinnerDots(frame int) string {
 	idx := frame % len(SpinnerDotsFrames)
 	return lipgloss.NewStyle().Foreground(ColorMagenta).Render(SpinnerDotsFrames[idx])
@@ -504,7 +504,7 @@ func ShimmerDivider(width int, frame int, enabled bool) string {
 	return sb.String()
 }
 
-// ProgressBar renders a progress bar with gradient
+// ProgressBar renders a progress bar with gradient.
 func ProgressBar(percent float64, width int) string {
 	filled := int(percent * float64(width))
 	if filled > width {
@@ -528,7 +528,7 @@ func ProgressBar(percent float64, width int) string {
 	return bar.String()
 }
 
-// ProgressBarAnimated renders an animated progress bar
+// ProgressBarAnimated renders an animated progress bar.
 func ProgressBarAnimated(percent float64, width int, frame int) string {
 	filled := int(percent * float64(width))
 	if filled > width {
@@ -558,7 +558,7 @@ func ProgressBarAnimated(percent float64, width int, frame int) string {
 	return bar.String()
 }
 
-// ASCIILogo returns an ASCII art logo with gradient
+// ASCIILogo returns an ASCII art logo with gradient.
 func ASCIILogo() string {
 	logo := `
     ██████╗  ██████╗ ████████╗███████╗██╗██╗     ███████╗███████╗
@@ -595,7 +595,7 @@ func ASCIILogo() string {
 	return result.String()
 }
 
-// StatusDot returns a colored status dot
+// StatusDot returns a colored status dot.
 func StatusDot(status string) string {
 	switch status {
 	case "done", "complete", "success":
@@ -615,14 +615,14 @@ func StatusDot(status string) string {
 	}
 }
 
-// ManagementTab represents a tab in the management UI
+// ManagementTab represents a tab in the management UI.
 type ManagementTab struct {
 	Name   string
 	Icon   string
 	Screen Screen
 }
 
-// GetManagementTabs returns the tabs for the management UI
+// GetManagementTabs returns the tabs for the management UI.
 func GetManagementTabs() []ManagementTab {
 	return []ManagementTab{
 		{Name: "Manage", Icon: "󰒓", Screen: ScreenManage},

@@ -143,7 +143,7 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 	}
 }
 
-// checkSudoAndInstallCmd checks if sudo is needed and either prompts or starts install
+// checkSudoAndInstallCmd checks if sudo is needed and either prompts or starts install.
 func (a *App) checkSudoAndInstallCmd(toolID string) tea.Cmd {
 	return func() tea.Msg {
 		mgr := pkg.DetectManager()
@@ -1107,7 +1107,7 @@ func truncatePlain(s string, width int) string {
 	return string(r[:width-1]) + "…"
 }
 
-// renderManageLogPanel renders the log panel when installing/updating
+// renderManageLogPanel renders the log panel when installing/updating.
 func (a *App) renderManageLogPanel(layout manageLayout, items []manageItem) string {
 	borderColor := ColorCyan
 	if !a.manageInstalling {

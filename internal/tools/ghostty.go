@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// GhosttyConfig holds Ghostty configuration settings
+// GhosttyConfig holds Ghostty configuration settings.
 type GhosttyConfig struct {
 	FontSize        int
 	FontFamily      string
@@ -23,12 +23,12 @@ type GhosttyConfig struct {
 	ConfirmClose      bool // Prompt before closing a surface
 }
 
-// GhosttyTool represents the Ghostty terminal emulator
+// GhosttyTool represents the Ghostty terminal emulator.
 type GhosttyTool struct {
 	BaseTool
 }
 
-// NewGhosttyTool creates a new Ghostty tool
+// NewGhosttyTool creates a new Ghostty tool.
 func NewGhosttyTool() *GhosttyTool {
 	home, _ := os.UserHomeDir()
 	return &GhosttyTool{
@@ -54,7 +54,7 @@ func NewGhosttyTool() *GhosttyTool {
 	}
 }
 
-// GenerateGhosttyConfig builds the Ghostty config file content
+// GenerateGhosttyConfig builds the Ghostty config file content.
 func GenerateGhosttyConfig(cfg GhosttyConfig, theme string) string {
 	var sb strings.Builder
 
@@ -123,7 +123,7 @@ func GenerateGhosttyConfig(cfg GhosttyConfig, theme string) string {
 	return sb.String()
 }
 
-// WriteGhosttyConfig writes the Ghostty config file to disk
+// WriteGhosttyConfig writes the Ghostty config file to disk.
 func WriteGhosttyConfig(cfg GhosttyConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

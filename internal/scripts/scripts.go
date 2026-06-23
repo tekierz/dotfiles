@@ -1,6 +1,6 @@
 package scripts
 
-// HKScript is the hotkey reference script that delegates to dotfiles hotkeys
+// HKScript is the hotkey reference script that delegates to dotfiles hotkeys.
 const HKScript = `#!/usr/bin/env bash
 #
 # hk - Hotkey reference
@@ -104,7 +104,7 @@ cat << 'EOF'
 EOF
 `
 
-// CaffScript is the caffeine script to keep the system awake
+// CaffScript is the caffeine script to keep the system awake.
 const CaffScript = `#!/usr/bin/env bash
 
 # Store the PID in a per-user runtime directory rather than the shared,
@@ -201,7 +201,7 @@ case "${1:-toggle}" in
 esac
 `
 
-// SSHHScript is the SSH quick connect manager
+// SSHHScript is the SSH quick connect manager.
 const SSHHScript = `#!/usr/bin/env bash
 #
 # sshh - Quick SSH connection manager
@@ -313,7 +313,7 @@ fi
 echo -e "${RED}✗${NC} Invalid selection" && exit 1
 `
 
-// GetScript returns the script content for a given utility name
+// GetScript returns the script content for a given utility name.
 func GetScript(name string) string {
 	switch name {
 	case "hk":

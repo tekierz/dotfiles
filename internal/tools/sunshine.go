@@ -6,12 +6,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// SunshineTool represents the Sunshine game streaming server
+// SunshineTool represents the Sunshine game streaming server.
 type SunshineTool struct {
 	BaseTool
 }
 
-// NewSunshineTool creates a new Sunshine tool
+// NewSunshineTool creates a new Sunshine tool.
 func NewSunshineTool() *SunshineTool {
 	return &SunshineTool{
 		BaseTool: BaseTool{

@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// BtopConfig holds btop configuration settings
+// BtopConfig holds btop configuration settings.
 type BtopConfig struct {
 	Theme     string // "auto", "Default", "TTY", custom theme name
 	UpdateMs  int    // Update interval in milliseconds
@@ -20,12 +20,12 @@ type BtopConfig struct {
 	ShownBoxes string // e.g. "cpu mem net proc"
 }
 
-// BtopTool represents btop system monitor
+// BtopTool represents btop system monitor.
 type BtopTool struct {
 	BaseTool
 }
 
-// NewBtopTool creates a new btop tool
+// NewBtopTool creates a new btop tool.
 func NewBtopTool() *BtopTool {
 	home, _ := os.UserHomeDir()
 	return &BtopTool{
@@ -52,7 +52,7 @@ func NewBtopTool() *BtopTool {
 	}
 }
 
-// GenerateBtopConfig builds the btop.conf content
+// GenerateBtopConfig builds the btop.conf content.
 func GenerateBtopConfig(cfg BtopConfig, theme string) string {
 	var sb strings.Builder
 
@@ -137,7 +137,7 @@ func GenerateBtopConfig(cfg BtopConfig, theme string) string {
 	return sb.String()
 }
 
-// WriteBtopConfig writes the btop config to disk
+// WriteBtopConfig writes the btop config to disk.
 func WriteBtopConfig(cfg BtopConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

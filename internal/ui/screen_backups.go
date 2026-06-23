@@ -156,9 +156,10 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
 				a.backupRunning = true
 				backup := a.backups[a.backupIndex]
-				if a.backupConfirmType == "restore" {
+				switch a.backupConfirmType {
+				case "restore":
 					return restoreBackupCmd(backup)
-				} else if a.backupConfirmType == "delete" {
+				case "delete":
 					return deleteBackupCmd(backup)
 				}
 			}

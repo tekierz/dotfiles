@@ -23,7 +23,7 @@ var (
 	cachedManagerOnce sync.Once
 )
 
-// Package represents a package with version info
+// Package represents a package with version info.
 type Package struct {
 	Name           string `json:"name"`
 	CurrentVersion string `json:"current_version"`
@@ -33,7 +33,7 @@ type Package struct {
 	Description    string `json:"description,omitempty"`
 }
 
-// PackageManager defines the interface for package management operations
+// PackageManager defines the interface for package management operations.
 type PackageManager interface {
 	// Name returns the package manager name (brew, pacman, apt)
 	Name() string
@@ -81,7 +81,7 @@ type PackageManager interface {
 	UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error)
 }
 
-// Platform represents the current operating system
+// Platform represents the current operating system.
 type Platform string
 
 const (
@@ -92,7 +92,7 @@ const (
 	PlatformUnknown Platform = "unknown"
 )
 
-// DetectPlatform detects the current platform (cached after first call)
+// DetectPlatform detects the current platform (cached after first call).
 func DetectPlatform() Platform {
 	cachedPlatformOnce.Do(func() {
 		cachedPlatform = detectPlatformImpl()
@@ -100,7 +100,7 @@ func DetectPlatform() Platform {
 	return cachedPlatform
 }
 
-// detectPlatformImpl performs the actual platform detection
+// detectPlatformImpl performs the actual platform detection.
 func detectPlatformImpl() Platform {
 	switch runtime.GOOS {
 	case "darwin":
@@ -122,7 +122,7 @@ func detectPlatformImpl() Platform {
 	return PlatformUnknown
 }
 
-// DetectManager returns the appropriate package manager for the current system (cached after first call)
+// DetectManager returns the appropriate package manager for the current system (cached after first call).
 func DetectManager() PackageManager {
 	cachedManagerOnce.Do(func() {
 		cachedManager = detectManagerImpl()
@@ -130,7 +130,7 @@ func DetectManager() PackageManager {
 	return cachedManager
 }
 
-// detectManagerImpl performs the actual package manager detection
+// detectManagerImpl performs the actual package manager detection.
 func detectManagerImpl() PackageManager {
 	platform := DetectPlatform()
 
@@ -157,7 +157,7 @@ func detectManagerImpl() PackageManager {
 	return nil
 }
 
-// AllManagers returns all available package managers on the system
+// AllManagers returns all available package managers on the system.
 func AllManagers() []PackageManager {
 	var managers []PackageManager
 
@@ -187,7 +187,7 @@ func fileExists(path string) bool {
 	return !info.IsDir()
 }
 
-// isRaspberryPi detects if running on a Raspberry Pi by checking device tree model
+// isRaspberryPi detects if running on a Raspberry Pi by checking device tree model.
 func isRaspberryPi() bool {
 	// Check device tree model (most reliable method)
 	if data, err := os.ReadFile("/sys/firmware/devicetree/base/model"); err == nil {
@@ -216,13 +216,13 @@ func isRaspberryPi() bool {
 	return false
 }
 
-// Cached memory detection
+// Cached memory detection.
 var (
 	cachedTotalMemoryMB     int
 	cachedTotalMemoryMBOnce sync.Once
 )
 
-// GetTotalMemoryMB returns the total system memory in MB (cached after first call)
+// GetTotalMemoryMB returns the total system memory in MB (cached after first call).
 func GetTotalMemoryMB() int {
 	cachedTotalMemoryMBOnce.Do(func() {
 		cachedTotalMemoryMB = getTotalMemoryMBImpl()
@@ -230,7 +230,7 @@ func GetTotalMemoryMB() int {
 	return cachedTotalMemoryMB
 }
 
-// getTotalMemoryMBImpl reads total memory from /proc/meminfo
+// getTotalMemoryMBImpl reads total memory from /proc/meminfo.
 func getTotalMemoryMBImpl() int {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {

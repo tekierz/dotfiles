@@ -186,7 +186,7 @@ func TestAvailableThemes(t *testing.T) {
 	}
 }
 
-// TestToolConfig is a simple config for testing
+// TestToolConfig is a simple config for testing.
 type TestToolConfig struct {
 	Option1 string `json:"option1"`
 	Option2 int    `json:"option2"`

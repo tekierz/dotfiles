@@ -10,12 +10,12 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// ZenBrowserTool represents Zen Browser
+// ZenBrowserTool represents Zen Browser.
 type ZenBrowserTool struct {
 	BaseTool
 }
 
-// NewZenBrowserTool creates a new Zen Browser tool
+// NewZenBrowserTool creates a new Zen Browser tool.
 func NewZenBrowserTool() *ZenBrowserTool {
 	return &ZenBrowserTool{
 		BaseTool: BaseTool{
@@ -37,7 +37,7 @@ func NewZenBrowserTool() *ZenBrowserTool {
 	}
 }
 
-// IsInstalled checks if Zen Browser is available (package, flatpak, app bundle, or command)
+// IsInstalled checks if Zen Browser is available (package, flatpak, app bundle, or command).
 func (t *ZenBrowserTool) IsInstalled() bool {
 	// Check command
 	if _, err := exec.LookPath("zen-browser"); err == nil {
@@ -66,12 +66,12 @@ func (t *ZenBrowserTool) IsInstalled() bool {
 	return t.BaseTool.IsInstalled()
 }
 
-// CursorTool represents Cursor IDE
+// CursorTool represents Cursor IDE.
 type CursorTool struct {
 	BaseTool
 }
 
-// NewCursorTool creates a new Cursor tool
+// NewCursorTool creates a new Cursor tool.
 func NewCursorTool() *CursorTool {
 	return &CursorTool{
 		BaseTool: BaseTool{
@@ -93,7 +93,7 @@ func NewCursorTool() *CursorTool {
 	}
 }
 
-// IsInstalled checks if Cursor is available
+// IsInstalled checks if Cursor is available.
 func (t *CursorTool) IsInstalled() bool {
 	if _, err := exec.LookPath("cursor"); err == nil {
 		return true
@@ -113,12 +113,12 @@ func (t *CursorTool) IsInstalled() bool {
 	return t.BaseTool.IsInstalled()
 }
 
-// LMStudioTool represents LM Studio
+// LMStudioTool represents LM Studio.
 type LMStudioTool struct {
 	BaseTool
 }
 
-// NewLMStudioTool creates a new LM Studio tool
+// NewLMStudioTool creates a new LM Studio tool.
 func NewLMStudioTool() *LMStudioTool {
 	return &LMStudioTool{
 		BaseTool: BaseTool{
@@ -144,7 +144,7 @@ func NewLMStudioTool() *LMStudioTool {
 	}
 }
 
-// IsInstalled checks if LM Studio is available
+// IsInstalled checks if LM Studio is available.
 func (t *LMStudioTool) IsInstalled() bool {
 	if _, err := exec.LookPath("lm-studio"); err == nil {
 		return true
@@ -178,12 +178,12 @@ func (t *LMStudioTool) IsInstalled() bool {
 	return t.BaseTool.IsInstalled()
 }
 
-// OBSTool represents OBS Studio
+// OBSTool represents OBS Studio.
 type OBSTool struct {
 	BaseTool
 }
 
-// NewOBSTool creates a new OBS tool
+// NewOBSTool creates a new OBS tool.
 func NewOBSTool() *OBSTool {
 	return &OBSTool{
 		BaseTool: BaseTool{
@@ -206,7 +206,7 @@ func NewOBSTool() *OBSTool {
 	}
 }
 
-// IsInstalled checks if OBS Studio is available
+// IsInstalled checks if OBS Studio is available.
 func (t *OBSTool) IsInstalled() bool {
 	if _, err := exec.LookPath("obs"); err == nil {
 		return true
@@ -222,12 +222,12 @@ func (t *OBSTool) IsInstalled() bool {
 	return t.BaseTool.IsInstalled()
 }
 
-// RectangleTool represents Rectangle window manager
+// RectangleTool represents Rectangle window manager.
 type RectangleTool struct {
 	BaseTool
 }
 
-// NewRectangleTool creates a new Rectangle tool
+// NewRectangleTool creates a new Rectangle tool.
 func NewRectangleTool() *RectangleTool {
 	return &RectangleTool{
 		BaseTool: BaseTool{
@@ -249,7 +249,7 @@ func NewRectangleTool() *RectangleTool {
 	}
 }
 
-// IsInstalled checks if Rectangle is available (Homebrew or app bundle)
+// IsInstalled checks if Rectangle is available (Homebrew or app bundle).
 func (t *RectangleTool) IsInstalled() bool {
 	// Check macOS app bundle first
 	if hasMacOSApp("Rectangle") {
@@ -259,12 +259,12 @@ func (t *RectangleTool) IsInstalled() bool {
 	return t.BaseTool.IsInstalled()
 }
 
-// RaycastTool represents Raycast launcher
+// RaycastTool represents Raycast launcher.
 type RaycastTool struct {
 	BaseTool
 }
 
-// NewRaycastTool creates a new Raycast tool
+// NewRaycastTool creates a new Raycast tool.
 func NewRaycastTool() *RaycastTool {
 	return &RaycastTool{
 		BaseTool: BaseTool{
@@ -286,7 +286,7 @@ func NewRaycastTool() *RaycastTool {
 	}
 }
 
-// IsInstalled checks if Raycast is available (Homebrew or app bundle)
+// IsInstalled checks if Raycast is available (Homebrew or app bundle).
 func (t *RaycastTool) IsInstalled() bool {
 	// Check macOS app bundle first
 	if hasMacOSApp("Raycast") {
@@ -296,12 +296,12 @@ func (t *RaycastTool) IsInstalled() bool {
 	return t.BaseTool.IsInstalled()
 }
 
-// IINATool represents IINA media player
+// IINATool represents IINA media player.
 type IINATool struct {
 	BaseTool
 }
 
-// NewIINATool creates a new IINA tool
+// NewIINATool creates a new IINA tool.
 func NewIINATool() *IINATool {
 	return &IINATool{
 		BaseTool: BaseTool{
@@ -323,7 +323,7 @@ func NewIINATool() *IINATool {
 	}
 }
 
-// IsInstalled checks if IINA is available (Homebrew or app bundle)
+// IsInstalled checks if IINA is available (Homebrew or app bundle).
 func (t *IINATool) IsInstalled() bool {
 	// Check macOS app bundle first
 	if hasMacOSApp("IINA") {
@@ -333,12 +333,12 @@ func (t *IINATool) IsInstalled() bool {
 	return t.BaseTool.IsInstalled()
 }
 
-// AppCleanerTool represents AppCleaner
+// AppCleanerTool represents AppCleaner.
 type AppCleanerTool struct {
 	BaseTool
 }
 
-// NewAppCleanerTool creates a new AppCleaner tool
+// NewAppCleanerTool creates a new AppCleaner tool.
 func NewAppCleanerTool() *AppCleanerTool {
 	return &AppCleanerTool{
 		BaseTool: BaseTool{
@@ -360,7 +360,7 @@ func NewAppCleanerTool() *AppCleanerTool {
 	}
 }
 
-// IsInstalled checks if AppCleaner is available (Homebrew or app bundle)
+// IsInstalled checks if AppCleaner is available (Homebrew or app bundle).
 func (t *AppCleanerTool) IsInstalled() bool {
 	// Check macOS app bundle first
 	if hasMacOSApp("AppCleaner") {
@@ -372,7 +372,7 @@ func (t *AppCleanerTool) IsInstalled() bool {
 
 // Helper functions for detecting installed apps
 
-// isFlatpakInstalled checks if a flatpak app is installed (Linux only)
+// isFlatpakInstalled checks if a flatpak app is installed (Linux only).
 func isFlatpakInstalled(appIDs ...string) bool {
 	flatpak, err := exec.LookPath("flatpak")
 	if err != nil {
@@ -465,7 +465,7 @@ func hasDesktopEntryExec(path string, names ...string) bool {
 	return false
 }
 
-// hasAppImage checks if an AppImage exists in common locations (Linux only)
+// hasAppImage checks if an AppImage exists in common locations (Linux only).
 func hasAppImage(patterns ...string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -507,7 +507,7 @@ func hasAppImage(patterns ...string) bool {
 	return false
 }
 
-// hasMacOSApp checks if a .app bundle exists in /Applications (macOS only)
+// hasMacOSApp checks if a .app bundle exists in /Applications (macOS only).
 func hasMacOSApp(names ...string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil {

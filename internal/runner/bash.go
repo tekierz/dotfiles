@@ -11,14 +11,14 @@ import (
 	"sync"
 )
 
-// OutputLine represents a line of output from the bash script
+// OutputLine represents a line of output from the bash script.
 type OutputLine struct {
 	Text   string
 	Type   OutputType
 	Source string // stdout or stderr
 }
 
-// OutputType categorizes output lines
+// OutputType categorizes output lines.
 type OutputType int
 
 const (
@@ -30,15 +30,15 @@ const (
 	OutputError
 )
 
-// Runner executes bash functions and captures output
+// Runner executes bash functions and captures output.
 type Runner struct{}
 
-// NewRunner creates a new bash runner
+// NewRunner creates a new bash runner.
 func NewRunner() *Runner {
 	return &Runner{}
 }
 
-// NeedsSudo returns true if the current OS requires sudo for package installation
+// NeedsSudo returns true if the current OS requires sudo for package installation.
 func NeedsSudo() bool {
 	// Check if we're on Linux (macOS uses Homebrew which doesn't need sudo)
 	cmd := exec.Command("uname", "-s")
@@ -49,7 +49,7 @@ func NeedsSudo() bool {
 	return strings.TrimSpace(string(output)) == "Linux"
 }
 
-// CheckSudoCached returns true if sudo credentials are already cached
+// CheckSudoCached returns true if sudo credentials are already cached.
 func CheckSudoCached() bool {
 	cmd := exec.Command("sudo", "-n", "true")
 	return cmd.Run() == nil
@@ -67,7 +67,7 @@ func RefreshSudo() error {
 	return cmd.Run()
 }
 
-// StreamingCmd wraps an exec.Cmd with real-time output streaming
+// StreamingCmd wraps an exec.Cmd with real-time output streaming.
 type StreamingCmd struct {
 	Cmd    *exec.Cmd
 	Output <-chan string
@@ -75,20 +75,20 @@ type StreamingCmd struct {
 	cancel context.CancelFunc
 }
 
-// Cancel stops the running command
+// Cancel stops the running command.
 func (s *StreamingCmd) Cancel() {
 	if s.cancel != nil {
 		s.cancel()
 	}
 }
 
-// Wait blocks until the command completes and returns the error (if any)
+// Wait blocks until the command completes and returns the error (if any).
 func (s *StreamingCmd) Wait() error {
 	return <-s.Done
 }
 
 // RunStreaming executes a command and streams output line-by-line
-// Returns a StreamingCmd that provides channels for output and completion
+// Returns a StreamingCmd that provides channels for output and completion.
 func RunStreaming(ctx context.Context, name string, args ...string) (*StreamingCmd, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -158,7 +158,7 @@ func RunStreaming(ctx context.Context, name string, args ...string) (*StreamingC
 }
 
 // RunStreamingWithSudo executes a command with sudo and streams output
-// The sudo credentials should be cached before calling this function
+// The sudo credentials should be cached before calling this function.
 func RunStreamingWithSudo(ctx context.Context, name string, args ...string) (*StreamingCmd, error) {
 	sudoArgs := append([]string{name}, args...)
 	return RunStreaming(ctx, "sudo", sudoArgs...)

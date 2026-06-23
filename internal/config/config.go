@@ -47,7 +47,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
-// GlobalConfig holds global dotfiles settings
+// GlobalConfig holds global dotfiles settings.
 type GlobalConfig struct {
 	Theme             string `json:"theme"`
 	NavStyle          string `json:"nav_style"`
@@ -60,7 +60,7 @@ type GlobalConfig struct {
 	BackupMaxAgeDays int  `json:"backup_max_age_days"` // Delete backups older than this (0 = keep forever)
 }
 
-// DefaultGlobalConfig returns default global settings
+// DefaultGlobalConfig returns default global settings.
 func DefaultGlobalConfig() *GlobalConfig {
 	return &GlobalConfig{
 		Theme:            "catppuccin-mocha",
@@ -72,7 +72,7 @@ func DefaultGlobalConfig() *GlobalConfig {
 }
 
 // ConfigDir returns the dotfiles config directory path
-// Returns empty string if HOME is not set and XDG_CONFIG_HOME is not available
+// Returns empty string if HOME is not set and XDG_CONFIG_HOME is not available.
 func ConfigDir() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Clean(filepath.Join(xdg, "dotfiles"))
@@ -89,12 +89,12 @@ func ConfigDir() string {
 	return filepath.Clean(filepath.Join(home, ".config", "dotfiles"))
 }
 
-// ToolsDir returns the per-tool config directory path
+// ToolsDir returns the per-tool config directory path.
 func ToolsDir() string {
 	return filepath.Join(ConfigDir(), "tools")
 }
 
-// EnsureDirs creates config directories if they don't exist
+// EnsureDirs creates config directories if they don't exist.
 func EnsureDirs() error {
 	if ConfigDir() == "" {
 		return ErrNoConfigDir
@@ -113,7 +113,7 @@ func EnsureDirs() error {
 	return nil
 }
 
-// LoadToolConfig loads a tool config from JSON file, returning defaults if not found
+// LoadToolConfig loads a tool config from JSON file, returning defaults if not found.
 func LoadToolConfig[T any](toolName string, defaultFn func() *T) (*T, error) {
 	if ConfigDir() == "" {
 		return nil, ErrNoConfigDir
@@ -140,7 +140,7 @@ func LoadToolConfig[T any](toolName string, defaultFn func() *T) (*T, error) {
 	return cfg, nil
 }
 
-// SaveToolConfig saves a tool config to JSON file
+// SaveToolConfig saves a tool config to JSON file.
 func SaveToolConfig[T any](toolName string, cfg *T) error {
 	if err := EnsureDirs(); err != nil {
 		return err
@@ -160,7 +160,7 @@ func SaveToolConfig[T any](toolName string, cfg *T) error {
 	return nil
 }
 
-// LoadGlobalConfig loads global config from settings file
+// LoadGlobalConfig loads global config from settings file.
 func LoadGlobalConfig() (*GlobalConfig, error) {
 	if ConfigDir() == "" {
 		return nil, ErrNoConfigDir
@@ -183,7 +183,7 @@ func LoadGlobalConfig() (*GlobalConfig, error) {
 	return &cfg, nil
 }
 
-// SaveGlobalConfig saves global config to settings file
+// SaveGlobalConfig saves global config to settings file.
 func SaveGlobalConfig(cfg *GlobalConfig) error {
 	if err := EnsureDirs(); err != nil {
 		return err
@@ -203,7 +203,7 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 	return nil
 }
 
-// AvailableThemes returns the list of available themes
+// AvailableThemes returns the list of available themes.
 var AvailableThemes = []string{
 	"catppuccin-mocha",
 	"catppuccin-latte",
@@ -223,7 +223,7 @@ var AvailableThemes = []string{
 	"neon-seapunk",
 }
 
-// IsValidTheme checks if a theme name is valid
+// IsValidTheme checks if a theme name is valid.
 func IsValidTheme(theme string) bool {
 	for _, t := range AvailableThemes {
 		if t == theme {

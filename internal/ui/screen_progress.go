@@ -169,7 +169,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		}
 		if msg.err != nil {
 			if msg.context != "" {
-				a.lastError = fmt.Errorf("%v\n\nOutput:\n%s", msg.err, msg.context)
+				a.lastError = fmt.Errorf("%w\n\nOutput:\n%s", msg.err, msg.context)
 			} else {
 				a.lastError = msg.err
 			}
@@ -182,7 +182,6 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		tools.GetRegistry().InvalidateCache()
 		a.manageInstalledReady = false
 		return s, nil
-
 	}
 	return s, nil
 }

@@ -1,6 +1,7 @@
 package scripts
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -173,7 +174,8 @@ func TestReadPidValidation(t *testing.T) {
 			out := string(outBytes)
 			rc := 0
 			if err != nil {
-				if ee, ok := err.(*exec.ExitError); ok {
+				ee := &exec.ExitError{}
+				if errors.As(err, &ee) {
 					rc = ee.ExitCode()
 				} else {
 					t.Fatalf("harness error: %v", err)
@@ -286,7 +288,8 @@ func runCaffHarnessWithBin(t *testing.T, fakeBinDir, body string) int {
 	if err == nil {
 		return 0
 	}
-	if ee, ok := err.(*exec.ExitError); ok {
+	ee := &exec.ExitError{}
+	if errors.As(err, &ee) {
 		return ee.ExitCode()
 	}
 	t.Fatalf("harness error: %v", err)

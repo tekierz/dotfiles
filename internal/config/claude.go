@@ -13,7 +13,7 @@ type ClaudeConfig struct {
 	MCPServers map[string]MCPServer `json:"mcpServers"`
 }
 
-// MCPServer defines an MCP server configuration
+// MCPServer defines an MCP server configuration.
 type MCPServer struct {
 	Type    string            `json:"type"`
 	Command string            `json:"command,omitempty"`
@@ -21,7 +21,7 @@ type MCPServer struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
-// AllMCPServers returns all available MCP server configurations
+// AllMCPServers returns all available MCP server configurations.
 func AllMCPServers() map[string]MCPServer {
 	return map[string]MCPServer{
 		"context7": {

@@ -57,7 +57,7 @@ func TestUsersLoadedRemainsOnSuccess(t *testing.T) {
 
 // TestConfigFieldIndexClampOnInit is the regression guard for the audit
 // finding: a stale out-of-range configFieldIndex must be clamped to a valid
-// range when a config screen is initialised, decoupling correctness from the
+// range when a config screen is initialized, decoupling correctness from the
 // back() reset path.
 func TestConfigFieldIndexClampOnInit(t *testing.T) {
 	ctx := newDeepDiveContext(t)

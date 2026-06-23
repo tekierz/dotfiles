@@ -28,7 +28,7 @@ import (
 
 // teardownStream cancels the active install/update worker context and the
 // underlying StreamingCmd, then clears the retained handles. It is idempotent
-// and safe to call when nothing is streaming. Cancelling the context unblocks
+// and safe to call when nothing is streaming. Canceling the context unblocks
 // any worker goroutine parked on a bounded channel send (the worker selects on
 // ctx.Done()) and closes the StreamingCmd's subprocess, so the worker's range
 // loop ends cleanly instead of leaking.
@@ -71,7 +71,7 @@ func (a *App) handleUpdateSudoRequiredMsg(msg updateSudoRequiredMsg) tea.Cmd {
 		if err != nil {
 			return updateRunDoneMsg{err: err}
 		}
-		return updateStartMsg{packages: msg.packages, all: msg.all}
+		return updateStartMsg(msg)
 	})
 }
 
@@ -141,7 +141,7 @@ func (a *App) handleManageSudoRequiredMsg(msg manageSudoRequiredMsg) tea.Cmd {
 		if err != nil {
 			return manageInstallDoneMsg{toolID: msg.toolID, err: err}
 		}
-		return manageStartInstallMsg{toolID: msg.toolID}
+		return manageStartInstallMsg(msg)
 	})
 }
 

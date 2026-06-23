@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-// checkUpdatesCmd starts an async update check
+// checkUpdatesCmd starts an async update check.
 func checkUpdatesCmd() tea.Cmd {
 	return func() tea.Msg {
 		updates, err := pkg.CheckDotfilesUpdates()
@@ -73,7 +73,7 @@ func allPackagesInBatch(installedPkgs map[string]bool, pkgs []string) bool {
 }
 
 // loadInstallCacheCmd loads installation status for all tools asynchronously
-// This uses batch checking where supported (brew list --versions) for better performance
+// This uses batch checking where supported (brew list --versions) for better performance.
 func loadInstallCacheCmd() tea.Cmd {
 	return func() tea.Msg {
 		reg := tools.GetRegistry()
@@ -126,7 +126,7 @@ func loadInstallCacheCmd() tea.Cmd {
 	}
 }
 
-// appendInstallLog adds a line to the install log buffer (max 500 lines)
+// appendInstallLog adds a line to the install log buffer (max 500 lines).
 func (a *App) appendInstallLog(line string) {
 	const maxLogLines = 500
 	a.installLogs = append(a.installLogs, line)
@@ -141,7 +141,7 @@ func (a *App) appendInstallLog(line string) {
 	}
 }
 
-// clearInstallLogs clears the log buffer and resets scroll
+// clearInstallLogs clears the log buffer and resets scroll.
 func (a *App) clearInstallLogs() {
 	a.installLogs = make([]string, 0, 500)
 	a.installLogScroll = 0

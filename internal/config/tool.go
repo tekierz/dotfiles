@@ -1,13 +1,13 @@
 package config
 
-// GhosttyConfig holds Ghostty terminal settings
+// GhosttyConfig holds Ghostty terminal settings.
 type GhosttyConfig struct {
 	FontSize    int    `json:"font_size"`
 	Opacity     int    `json:"opacity"`
 	TabBindings string `json:"tab_bindings"`
 }
 
-// TmuxConfig holds tmux settings
+// TmuxConfig holds tmux settings.
 type TmuxConfig struct {
 	Prefix     string `json:"prefix"`
 	SplitBinds string `json:"split_binds"`
@@ -15,42 +15,42 @@ type TmuxConfig struct {
 	MouseMode  bool   `json:"mouse_mode"`
 }
 
-// ZshConfig holds zsh shell settings
+// ZshConfig holds zsh shell settings.
 type ZshConfig struct {
 	PromptStyle string          `json:"prompt_style"`
 	Plugins     []string        `json:"plugins"`
 	Aliases     map[string]bool `json:"aliases"`
 }
 
-// NeovimConfig holds neovim settings
+// NeovimConfig holds neovim settings.
 type NeovimConfig struct {
 	Config  string   `json:"config"`
 	LSPs    []string `json:"lsps"`
 	Plugins []string `json:"plugins"`
 }
 
-// GitConfig holds git settings
+// GitConfig holds git settings.
 type GitConfig struct {
 	DeltaSideBySide bool     `json:"delta_side_by_side"`
 	DefaultBranch   string   `json:"default_branch"`
 	Aliases         []string `json:"aliases"`
 }
 
-// YaziConfig holds yazi file manager settings
+// YaziConfig holds yazi file manager settings.
 type YaziConfig struct {
 	Keymap      string `json:"keymap"`
 	ShowHidden  bool   `json:"show_hidden"`
 	PreviewMode string `json:"preview_mode"`
 }
 
-// FzfConfig holds fzf fuzzy finder settings
+// FzfConfig holds fzf fuzzy finder settings.
 type FzfConfig struct {
 	Preview bool   `json:"preview"`
 	Height  int    `json:"height"`
 	Layout  string `json:"layout"`
 }
 
-// AppsConfig holds optional application selections
+// AppsConfig holds optional application selections.
 type AppsConfig struct {
 	// macOS productivity apps
 	Rectangle      bool `json:"rectangle"`
@@ -71,7 +71,7 @@ type AppsConfig struct {
 	OBS        bool `json:"obs"`
 }
 
-// UtilitiesConfig holds utility tool selections
+// UtilitiesConfig holds utility tool selections.
 type UtilitiesConfig struct {
 	// Existing utilities
 	HK   bool `json:"hk"`

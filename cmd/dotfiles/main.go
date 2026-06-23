@@ -22,7 +22,7 @@ var (
 	version   = "2.0.1"
 )
 
-// rootCmd is the base command
+// rootCmd is the base command.
 var rootCmd = &cobra.Command{
 	Use:   "dotfiles",
 	Short: "Terminal environment management",
@@ -39,7 +39,7 @@ Quick user switch:
 	},
 }
 
-// installCmd launches the installation wizard
+// installCmd launches the installation wizard.
 var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Launch installation wizard",
@@ -52,7 +52,7 @@ var installCmd = &cobra.Command{
 	},
 }
 
-// manageCmd launches the tool management screen
+// manageCmd launches the tool management screen.
 var manageCmd = &cobra.Command{
 	Use:   "manage",
 	Short: "Manage tool configurations",
@@ -61,7 +61,7 @@ var manageCmd = &cobra.Command{
 	},
 }
 
-// updateCmd handles package updates
+// updateCmd handles package updates.
 var updateCmd = &cobra.Command{
 	Use:   "update [check]",
 	Short: "Check and install package updates",
@@ -76,7 +76,7 @@ var updateCmd = &cobra.Command{
 	},
 }
 
-// themeCmd handles theme operations
+// themeCmd handles theme operations.
 var themeCmd = &cobra.Command{
 	Use:   "theme [set <name>]",
 	Short: "View or change theme",
@@ -119,7 +119,7 @@ var configCmd = &cobra.Command{
 	},
 }
 
-// hotkeysCmd launches the hotkey viewer
+// hotkeysCmd launches the hotkey viewer.
 var hotkeysCmd = &cobra.Command{
 	Use:     "hotkeys",
 	Aliases: []string{"hk"},
@@ -134,7 +134,7 @@ var hotkeysCmd = &cobra.Command{
 	},
 }
 
-// statusCmd shows current status
+// statusCmd shows current status.
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current configuration status",
@@ -143,7 +143,7 @@ var statusCmd = &cobra.Command{
 	},
 }
 
-// backupsCmd lists available backups
+// backupsCmd lists available backups.
 var backupsCmd = &cobra.Command{
 	Use:   "backups",
 	Short: "List available backups",
@@ -152,7 +152,7 @@ var backupsCmd = &cobra.Command{
 	},
 }
 
-// restoreCmd restores from backup
+// restoreCmd restores from backup.
 var restoreCmd = &cobra.Command{
 	Use:   "restore [backup-name]",
 	Short: "Restore from a backup",
@@ -169,7 +169,7 @@ var restoreCmd = &cobra.Command{
 	},
 }
 
-// versionCmd shows version
+// versionCmd shows version.
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version information",
@@ -178,7 +178,7 @@ var versionCmd = &cobra.Command{
 	},
 }
 
-// userCmd handles user operations
+// userCmd handles user operations.
 var userCmd = &cobra.Command{
 	Use:   "user [name]",
 	Short: "Switch to or manage user profile",
@@ -201,7 +201,7 @@ Examples:
 	},
 }
 
-// userAddCmd creates a new user profile
+// userAddCmd creates a new user profile.
 var userAddCmd = &cobra.Command{
 	Use:   "add <name>",
 	Short: "Create new user profile",
@@ -226,7 +226,7 @@ Examples:
 	},
 }
 
-// userDeleteCmd deletes a user profile
+// userDeleteCmd deletes a user profile.
 var userDeleteCmd = &cobra.Command{
 	Use:     "delete <name>",
 	Aliases: []string{"rm", "remove"},
@@ -238,7 +238,7 @@ var userDeleteCmd = &cobra.Command{
 	},
 }
 
-// usersCmd lists all users
+// usersCmd lists all users.
 var usersCmd = &cobra.Command{
 	Use:   "users",
 	Short: "List all user profiles",
@@ -247,7 +247,7 @@ var usersCmd = &cobra.Command{
 	},
 }
 
-// uninstallCmd removes dotfiles and restores original config
+// uninstallCmd removes dotfiles and restores original config.
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Remove dotfiles and restore original configuration",
@@ -340,7 +340,7 @@ func main() {
 	}
 }
 
-// launchTUI launches the TUI at a specific screen
+// launchTUI launches the TUI at a specific screen.
 func launchTUI(screen ui.Screen) {
 	app := ui.NewApp(skipIntro)
 	app.SetStartScreen(screen)
@@ -352,7 +352,7 @@ func launchTUI(screen ui.Screen) {
 	}
 }
 
-// launchToolConfig launches TUI for a specific tool config
+// launchToolConfig launches TUI for a specific tool config.
 func launchToolConfig(tool string) {
 	app := ui.NewApp(true)
 
@@ -372,7 +372,7 @@ func launchToolConfig(tool string) {
 	}
 }
 
-// launchHotkeysFiltered launches hotkey viewer filtered to a tool
+// launchHotkeysFiltered launches hotkey viewer filtered to a tool.
 func launchHotkeysFiltered(tool string) {
 	app := ui.NewApp(true)
 	app.SetStartScreen(ui.ScreenHotkeys)
@@ -385,7 +385,7 @@ func launchHotkeysFiltered(tool string) {
 	}
 }
 
-// setTheme sets the theme directly via CLI
+// setTheme sets the theme directly via CLI.
 func setTheme(theme string) {
 	if !config.IsValidTheme(theme) {
 		fmt.Fprintf(os.Stderr, "Invalid theme: %s\n", theme)
@@ -412,7 +412,7 @@ func setTheme(theme string) {
 	fmt.Println("Run 'dotfiles install' to apply the new theme to all tools.")
 }
 
-// listThemes prints available themes
+// listThemes prints available themes.
 func listThemes() {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
@@ -442,7 +442,7 @@ func listThemesWithConfig(cfg *config.GlobalConfig) {
 	}
 }
 
-// showStatus prints current configuration status
+// showStatus prints current configuration status.
 func showStatus() {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
@@ -514,7 +514,7 @@ func showStatus() {
 	}
 }
 
-// checkUpdates prints outdated packages (CLI mode)
+// checkUpdates prints outdated packages (CLI mode).
 func checkUpdates() {
 	fmt.Println("Checking for updates...")
 
@@ -547,7 +547,7 @@ func checkUpdates() {
 	fmt.Println("Run 'dotfiles update' for interactive update selection.")
 }
 
-// listBackups prints available backups
+// listBackups prints available backups.
 func listBackups() {
 	backupDir := filepath.Join(config.ConfigDir(), "backups")
 
@@ -682,7 +682,7 @@ func restoreBackup(name string) (int, error) {
 	return result.Count(), nil
 }
 
-// runUninstall removes dotfiles and optionally restores original configuration
+// runUninstall removes dotfiles and optionally restores original configuration.
 func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -721,7 +721,7 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
-			fmt.Println("Uninstall cancelled.")
+			fmt.Println("Uninstall canceled.")
 			return
 		}
 		fmt.Println()
@@ -835,7 +835,7 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 	fmt.Println("  brew uninstall tekierz/tap/dotfiles")
 }
 
-// showCurrentUser displays the current active user
+// showCurrentUser displays the current active user.
 func showCurrentUser() {
 	profile, err := config.GetActiveUser()
 	if err != nil {
@@ -857,7 +857,7 @@ func showCurrentUser() {
 	fmt.Printf("  Keyboard: %s\n", profile.KeyboardStyle)
 }
 
-// switchToUser switches to a user profile, prompting to create if it doesn't exist
+// switchToUser switches to a user profile, prompting to create if it doesn't exist.
 func switchToUser(name string) {
 	if err := config.ValidateUsername(name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -876,7 +876,7 @@ func switchToUser(name string) {
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
-			fmt.Println("Cancelled.")
+			fmt.Println("Canceled.")
 			return
 		}
 
@@ -904,7 +904,7 @@ func switchToUser(name string) {
 	fmt.Println("Run 'dotfiles install' to apply theme changes to all tools.")
 }
 
-// addUser creates a new user profile
+// addUser creates a new user profile.
 func addUser(name, theme, nav, keyboard string) {
 	if err := config.ValidateUsername(name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -923,7 +923,7 @@ func addUser(name, theme, nav, keyboard string) {
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
-			fmt.Println("Cancelled.")
+			fmt.Println("Canceled.")
 			return
 		}
 	}
@@ -974,7 +974,7 @@ func addUser(name, theme, nav, keyboard string) {
 	fmt.Printf("Switch to this user with: dotfiles user %s\n", name)
 }
 
-// deleteUser removes a user profile
+// deleteUser removes a user profile.
 func deleteUser(name string, force bool) {
 	if err := config.ValidateUsername(name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -1004,7 +1004,7 @@ func deleteUser(name string, force bool) {
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
-			fmt.Println("Cancelled.")
+			fmt.Println("Canceled.")
 			return
 		}
 	}
@@ -1024,7 +1024,7 @@ func deleteUser(name string, force bool) {
 	fmt.Printf("Deleted user profile: %s\n", name)
 }
 
-// listUsers displays all user profiles
+// listUsers displays all user profiles.
 func listUsers() {
 	users, err := config.ListUserProfiles()
 	if err != nil {

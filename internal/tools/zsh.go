@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// ZshConfig holds Zsh configuration settings
+// ZshConfig holds Zsh configuration settings.
 type ZshConfig struct {
 	PromptStyle     string          // "p10k", "starship", "pure", "minimal"
 	Plugins         []string        // List of plugins to source
@@ -24,12 +24,12 @@ type ZshConfig struct {
 	CompletionMenu    bool // zstyle menu select
 }
 
-// ZshTool represents the Zsh shell
+// ZshTool represents the Zsh shell.
 type ZshTool struct {
 	BaseTool
 }
 
-// NewZshTool creates a new Zsh tool
+// NewZshTool creates a new Zsh tool.
 func NewZshTool() *ZshTool {
 	home, _ := os.UserHomeDir()
 	return &ZshTool{
@@ -56,7 +56,7 @@ func NewZshTool() *ZshTool {
 	}
 }
 
-// GenerateZshConfig builds the .zshrc content
+// GenerateZshConfig builds the .zshrc content.
 func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	var sb strings.Builder
 	platform := pkg.DetectPlatform()
@@ -174,7 +174,7 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	return sb.String()
 }
 
-// WriteZshConfig writes the .zshrc file to disk
+// WriteZshConfig writes the .zshrc file to disk.
 func WriteZshConfig(cfg ZshConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

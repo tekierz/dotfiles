@@ -133,7 +133,7 @@ func TestScreenContextSeedsFromGlobalConfig(t *testing.T) {
 	}
 }
 
-// mockScreenHandler is a minimal ScreenHandler for testing
+// mockScreenHandler is a minimal ScreenHandler for testing.
 type mockScreenHandler struct {
 	BaseScreen
 	screenID     Screen

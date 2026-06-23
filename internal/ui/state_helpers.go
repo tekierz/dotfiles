@@ -56,7 +56,7 @@ func startTabTargetLoad(a *App, target Screen) tea.Cmd {
 	return nil
 }
 
-// cycleOption cycles through options forward or backward
+// cycleOption cycles through options forward or backward.
 func cycleOption(opts []string, current string, forward bool) string {
 	for i, o := range opts {
 		if o == current {
@@ -69,7 +69,7 @@ func cycleOption(opts []string, current string, forward bool) string {
 	return opts[0]
 }
 
-// atoi converts a string to int with a default value
+// atoi converts a string to int with a default value.
 func atoi(s string, defaultVal int) int {
 	var n int
 	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
@@ -79,7 +79,7 @@ func atoi(s string, defaultVal int) int {
 }
 
 // getDeepDiveItemStatus returns the install status for a deep dive menu item
-// Returns "installed" (blue) if all installed, "partial" (yellow) if partially installed, "pending" (grey) if not
+// Returns "installed" (blue) if all installed, "partial" (yellow) if partially installed, "pending" (grey) if not.
 func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 	toolIDs, ok := ScreenToolIDs[item.Screen]
 	if !ok || len(toolIDs) == 0 {
@@ -102,7 +102,7 @@ func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 	return "pending" // None installed (grey)
 }
 
-// togglePlugin adds or removes a plugin from the list
+// togglePlugin adds or removes a plugin from the list.
 func togglePlugin(plugins *[]string, plugin string) {
 	for i, p := range *plugins {
 		if p == plugin {

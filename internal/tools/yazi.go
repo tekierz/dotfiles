@@ -9,7 +9,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
-// YaziConfig holds Yazi configuration settings
+// YaziConfig holds Yazi configuration settings.
 type YaziConfig struct {
 	Keymap      string // "vim", "emacs"
 	ShowHidden  bool
@@ -21,12 +21,12 @@ type YaziConfig struct {
 	ScrollOff   int    // items kept visible above/below cursor
 }
 
-// YaziTool represents the Yazi file manager
+// YaziTool represents the Yazi file manager.
 type YaziTool struct {
 	BaseTool
 }
 
-// NewYaziTool creates a new Yazi tool
+// NewYaziTool creates a new Yazi tool.
 func NewYaziTool() *YaziTool {
 	home, _ := os.UserHomeDir()
 	return &YaziTool{
@@ -54,7 +54,7 @@ func NewYaziTool() *YaziTool {
 	}
 }
 
-// GenerateYaziConfig builds the yazi.toml content
+// GenerateYaziConfig builds the yazi.toml content.
 func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 	var sb strings.Builder
 
@@ -118,7 +118,7 @@ func yaziSortBy(sortBy string) string {
 	}
 }
 
-// GenerateYaziKeymap builds the keymap.toml content
+// GenerateYaziKeymap builds the keymap.toml content.
 func GenerateYaziKeymap(cfg YaziConfig, theme string) string {
 	var sb strings.Builder
 
@@ -170,7 +170,7 @@ func GenerateYaziKeymap(cfg YaziConfig, theme string) string {
 	return sb.String()
 }
 
-// WriteYaziConfig writes all Yazi config files to disk
+// WriteYaziConfig writes all Yazi config files to disk.
 func WriteYaziConfig(cfg YaziConfig, theme string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
