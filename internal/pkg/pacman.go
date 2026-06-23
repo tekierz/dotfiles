@@ -125,6 +125,22 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 	return packages, nil
 }
 
+// classifyCheckupdatesErr interprets the exit status of `checkupdates`. The
+// helper exits 2 specifically when there are no updates available, which is not
+// an error for us; exit 0 (err == nil) means updates were found. Any other
+// nonzero exit (e.g. a stale/locked temp DB or mirror error) is a genuine
+// failure that must be surfaced rather than silently reported as "up to date".
+func classifyCheckupdatesErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+		return nil
+	}
+	return fmt.Errorf("checkupdates failed: %w", err)
+}
+
 // checkOfficialUpdates returns the raw "name oldver -> newver" lines describing
 // pending official-repo updates. It prefers the `checkupdates` helper (from the
 // optional pacman-contrib package, which queries a private sync DB without
@@ -139,16 +155,8 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 		// checkupdates exits 2 when there are no updates (not an error for us)
 		// and 0 when updates are available. Any other exit code is a genuine
 		// failure (e.g. a stale temp DB) that should be surfaced.
-		err := cmd.Run()
-		if err != nil {
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
-				// Exit 2 specifically means "no updates available" — not an error.
-				return "", nil
-			}
-			// Any other failure (stale/locked DB, network/mirror error) must be
-			// surfaced, not silently reported as "up to date".
-			return "", fmt.Errorf("checkupdates failed: %w", err)
+		if err := classifyCheckupdatesErr(cmd.Run()); err != nil {
+			return "", err
 		}
 		return out.String(), nil
 	}

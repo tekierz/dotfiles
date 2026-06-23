@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -309,6 +311,80 @@ func TestStreamingMsgSurvivesNavigation(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("re-armed command did not produce an updateStreamMsg; got %v", msgs)
+		}
+	})
+}
+
+// TestLoadResultSurvivesNavigation pins down the durable fix for the on-enter
+// LOAD results of the management tabs (Update check, Backups list, Users list).
+// These async results must be fully applied by App.Update even when a DIFFERENT
+// screen is active when they arrive. Before the fix they were handled ONLY by the
+// owning screen's Update, so navigating away while the load was in flight dropped
+// the result, stranded the in-flight guard flag set (updateChecking /
+// backupsLoading / usersLoaded), and wedged the screen on "Checking/Loading..."
+// forever (re-entry sees the guard set and never re-kicks). Each subtask
+// navigates to a screen OTHER than the one that owns the message, then feeds the
+// result to App.Update; on the buggy code the assertions below would fail because
+// the global cases in App.Update did not exist.
+func TestLoadResultSurvivesNavigation(t *testing.T) {
+	t.Run("updateCheckDoneMsg applied from another screen", func(t *testing.T) {
+		withTempHome(t)
+		app := NewApp(true)
+		// Update check kicked on entry to ScreenUpdate, then the user navigated to
+		// the main menu before the check completed.
+		app.screenMgr.Navigate(ScreenMainMenu)
+		app.updateChecking = true
+
+		app.Update(updateCheckDoneMsg{updates: []pkg.Package{}})
+
+		if app.updateChecking {
+			t.Error("updateChecking still true after updateCheckDoneMsg on another screen; screen would wedge on \"Checking...\"")
+		}
+		if !app.updateCheckDone {
+			t.Error("updateCheckDone not set; re-entry would re-kick or show stale state")
+		}
+	})
+
+	t.Run("backupsLoadedMsg applied from another screen", func(t *testing.T) {
+		withTempHome(t)
+		app := NewApp(true)
+		app.screenMgr.Navigate(ScreenMainMenu)
+		app.backupsLoading = true
+
+		app.Update(backupsLoadedMsg{backups: []BackupEntry{}})
+
+		if app.backupsLoading {
+			t.Error("backupsLoading still true after backupsLoadedMsg on another screen; screen would wedge on \"Loading...\"")
+		}
+		if !app.backupsLoaded {
+			t.Error("backupsLoaded not set; re-entry would re-kick or show stale state")
+		}
+	})
+
+	t.Run("userLoadedMsg success populates the list from another screen", func(t *testing.T) {
+		withTempHome(t)
+		app := NewApp(true)
+		app.screenMgr.Navigate(ScreenMainMenu)
+		app.usersLoaded = true // guard set on entry to ScreenUsers
+
+		const wantUser = "alice"
+		app.Update(userLoadedMsg{users: []userItem{{name: wantUser}}})
+
+		if len(app.usersItems) != 1 || app.usersItems[0].name != wantUser {
+			t.Errorf("usersItems = %v after userLoadedMsg on another screen; want one entry %q", app.usersItems, wantUser)
+		}
+	})
+
+	t.Run("userLoadedMsg error resets guard so re-entry retries", func(t *testing.T) {
+		withTempHome(t)
+		app := NewApp(true)
+		app.screenMgr.Navigate(ScreenMainMenu)
+		app.usersLoaded = true // guard set on entry to ScreenUsers
+
+		app.Update(userLoadedMsg{err: errors.New("disk gone")})
+
+		if app.usersLoaded {
+			t.Error("usersLoaded still true after a load error; re-entering Users would never retry the load")
 		}
 	})
 }

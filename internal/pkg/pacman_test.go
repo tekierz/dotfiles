@@ -1,8 +1,49 @@
 package pkg
 
 import (
+	"os/exec"
+	"strconv"
 	"testing"
 )
+
+// runExit runs `sh -c "exit N"` and returns the resulting error so tests can
+// exercise classifyCheckupdatesErr with real *exec.ExitError values (exit code
+// preserved by the OS) instead of synthesizing one. The exit code is a fixed
+// integer from the test table, never user input.
+func runExit(t *testing.T, code int) error {
+	t.Helper()
+	return exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
+}
+
+// TestClassifyCheckupdatesErr guards the pacman checkupdates exit-code
+// handling. The regression silently treated *any* nonzero exit as "no updates
+// available" (returning nil), masking real failures such as a stale/locked
+// temp DB or mirror error. The fix narrows the "no updates" case to exit code 2
+// only; every other nonzero exit must surface as an error.
+//
+// Against the buggy code these would FAIL: exit 1 and exit 3 returned nil but
+// the assertions below require a non-nil error for them.
+func TestClassifyCheckupdatesErr(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantErr bool
+	}{
+		{name: "nil means updates found", err: nil, wantErr: false},
+		{name: "exit 2 means no updates", err: runExit(t, 2), wantErr: false},
+		{name: "exit 1 is a real failure", err: runExit(t, 1), wantErr: true},
+		{name: "exit 3 is a real failure", err: runExit(t, 3), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyCheckupdatesErr(tt.err)
+			if (got != nil) != tt.wantErr {
+				t.Errorf("classifyCheckupdatesErr(%v) error = %v, wantErr = %v", tt.err, got, tt.wantErr)
+			}
+		})
+	}
+}
 
 // TestParsePacmanSearch_MultiLine verifies that pacman -Ss output is parsed
 // correctly regardless of multi-line descriptions or leading blank output.
