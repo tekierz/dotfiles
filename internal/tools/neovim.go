@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
@@ -183,25 +184,61 @@ func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
 		return writeNeovimUserPrefs(cfg, theme, nvimDir)
 	}
 
-	// Backup existing config if present
-	if _, err := os.Stat(nvimDir); err == nil {
-		backupDir := nvimDir + ".backup"
-		_ = os.RemoveAll(backupDir)
-		_ = os.Rename(nvimDir, backupDir)
+	parentDir := filepath.Dir(nvimDir)
+	if err := os.MkdirAll(parentDir, 0700); err != nil {
+		return fmt.Errorf("failed to create neovim config parent: %w", err)
 	}
 
-	// Clone the preset
-	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, nvimDir)
+	tempDir, err := os.MkdirTemp(parentDir, ".nvim-clone-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary neovim config directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	// Clone the preset into a temp directory first.  The user's existing config
+	// must not be moved unless the network/git operation has fully succeeded.
+	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to clone %s config: %w", cfg.ConfigPreset, err)
 	}
 
 	// Remove .git directory to make it user-owned
-	gitDir := filepath.Join(nvimDir, ".git")
+	gitDir := filepath.Join(tempDir, ".git")
 	_ = os.RemoveAll(gitDir)
+
+	var backupDir string
+	if _, err := os.Stat(nvimDir); err == nil {
+		backupDir = timestampedNeovimBackupDir(nvimDir)
+		if err := os.Rename(nvimDir, backupDir); err != nil {
+			return fmt.Errorf("failed to backup existing neovim config: %w", err)
+		}
+	}
+
+	if err := os.Rename(tempDir, nvimDir); err != nil {
+		if backupDir != "" {
+			if rollbackErr := os.Rename(backupDir, nvimDir); rollbackErr != nil {
+				return fmt.Errorf("failed to install neovim config: %w; also failed to restore backup: %v", err, rollbackErr)
+			}
+		}
+		return fmt.Errorf("failed to install neovim config: %w", err)
+	}
 
 	// Write user preferences
 	return writeNeovimUserPrefs(cfg, theme, nvimDir)
+}
+
+func timestampedNeovimBackupDir(nvimDir string) string {
+	timestamp := time.Now().Format("20060102_150405.000000000")
+	backupDir := nvimDir + ".backup." + timestamp
+	if _, err := os.Stat(backupDir); err != nil {
+		return backupDir
+	}
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s.%d", backupDir, i)
+		if _, err := os.Stat(candidate); err != nil {
+			return candidate
+		}
+	}
 }
 
 // WriteNeovimUserPrefs writes ONLY the user-preferences overlay
