@@ -13,25 +13,25 @@ P0+P1 are release blockers; P2 should ship but won't eat data; P3+ is post-relea
 
 ## P0 — Data-loss bugs (must fix before any release)
 
-- [ ] **Self-destructing binary**: `installUtilities` (internal/ui/installation.go) deletes
+- [x] **Self-destructing binary**: `installUtilities` (internal/ui/installation.go) deletes
       the currently running `dotfiles` binary before copying the replacement; if the copy
       fails the user has no binary. Write to temp + rename, never remove-then-copy.
-- [ ] **Backup format schism (cluster)**: bash script writes directory-format backups; Go
+- [x] **Backup format schism (cluster)**: bash script writes directory-format backups; Go
       restore silently skips them (`internal/backup/backup.go` fallback drops dirs and does
       lossy `_`→`/` name mapping). Consequences to fix together:
-      - [ ] `dotfiles uninstall` "restores" a bash-format backup as a no-op, then
+      - [x] `dotfiles uninstall` "restores" a bash-format backup as a no-op, then
             `RemoveAll`s the backups directory — unrecoverable loss (cmd/dotfiles/main.go).
             Uninstall must refuse to delete backups it could not actually restore.
-      - [ ] TUI restore reports success on backups it silently skipped.
-      - [ ] Either teach Go restore the bash manifest format, or migrate/refuse loudly.
-- [ ] **Bash restore half-aborts**: `((var++))` under `set -e` still aborts
+      - [x] TUI restore reports success on backups it silently skipped.
+      - [x] Either teach Go restore the bash manifest format, or migrate/refuse loudly.
+- [x] **Bash restore half-aborts**: `((var++))` under `set -e` still aborts
       `restore_backup` partway in one copy of the logic (bin/dotfiles-setup:~824); the
       duplicated later copy was fixed, the earlier one wasn't. Fix both / dedupe.
-- [ ] **neovim preset destroys config + its only backup** (internal/tools/neovim.go):
+- [x] **neovim preset destroys config + its only backup** (internal/tools/neovim.go):
       re-running the preset flow moves the user's config to a fixed backup path,
       clobbering the previous backup, then a failed clone leaves nothing. Timestamped
       backups + clone-to-temp-then-swap.
-- [ ] **Git config clobber (residual)**: Go `WriteGitConfig` now preserves identity but
+- [x] **Git config clobber (residual)**: Go `WriteGitConfig` now preserves identity but
       bash `setup_git` (bin/dotfiles-setup:~1845) still replaces `~/.gitconfig` wholesale.
 
 ## P1 — Release blockers (broken promises, versioning, dead gates)
