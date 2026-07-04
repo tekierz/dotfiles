@@ -37,14 +37,14 @@ P0+P1 are release blockers; P2 should ship but won't eat data; P3+ is post-relea
 ## P1 — Release blockers (broken promises, versioning, dead gates)
 
 Versioning / distribution:
-- [ ] Align version to the release tag everywhere: `Makefile` still hardcodes
+- [x] Align version to the release tag everywhere: `Makefile` still hardcodes
       `VERSION = 2.0.1`; cmd/dotfiles/main.go fallback constant stale. Single-source from
       git tag via ldflags.
-- [ ] Stop tracking the compiled `bin/dotfiles` ELF binary in git (it ships stale —
+- [x] Stop tracking the compiled `bin/dotfiles` ELF binary in git (it ships stale —
       currently reports 2.0.1). Add to .gitignore; adjust Makefile/README accordingly.
-- [ ] Delete or fix the stale in-repo `Formula/dotfiles-setup.rb` (placeholder sha256);
+- [x] Delete or fix the stale in-repo `Formula/dotfiles-setup.rb` (placeholder sha256);
       the real formula lives in the homebrew-tap repo — having both invites drift.
-- [ ] Decide the fate of `bin/dotfiles-setup.ps1` for the initial release: it is
+- [x] Decide the fate of `bin/dotfiles-setup.ps1` for the initial release: it is
       undocumented-in-flow, version "1.0.0", pipes `get.scoop.sh` over plain HTTP to
       `Invoke-Expression`, clobbers `$PROFILE` with no backup, silently weakens execution
       policy, suppresses all install failures, and prints "Windows Terminal configured"
@@ -52,35 +52,35 @@ Versioning / distribution:
       (or mark experimental + fix the four HIGHs). Full list in the audit report.
 
 CI / quality gates:
-- [ ] `.golangci.yml` is incompatible with the current golangci-lint, and the CI lint step
+- [x] `.golangci.yml` is incompatible with the current golangci-lint, and the CI lint step
       is `continue-on-error` — linting is silently dead. Fix config, make it blocking.
-- [ ] Make the CI Security job able to fail: `govulncheck` and `staticcheck` are
+- [x] Make the CI Security job able to fail: `govulncheck` and `staticcheck` are
       `continue-on-error` (race gate is already blocking).
 
 Features that don't do what the UI says:
-- [ ] Zsh "Plugins" checkboxes are dead UI — five plugins selectable, none ever wired
+- [x] Zsh "Plugins" checkboxes are dead UI — five plugins selectable, none ever wired
       into the generated .zshrc (internal/ui/screen_config_zsh.go + internal/tools/zsh.go).
       Wire them or remove the section.
-- [ ] Default "p10k" prompt style generates a .zshrc that never loads Powerlevel10k and
+- [x] Default "p10k" prompt style generates a .zshrc that never loads Powerlevel10k and
       nothing installs it — new users get a broken prompt out of the box (internal/tools/zsh.go).
-- [ ] fzf config screen is a no-op: generated config file is never sourced (internal/tools/fzf.go).
-- [ ] macOS Apps screen offers 6 apps that don't exist in the tool registry (screen list drift).
-- [ ] tmux percent-style split bindings are bound then immediately unbound (internal/tools/tmux.go).
-- [ ] Hotkeys aliases: input can't accept `h`, `l`, or space; saved aliases are never
+- [x] fzf config screen is a no-op: generated config file is never sourced (internal/tools/fzf.go).
+- [x] macOS Apps screen offers 6 apps that don't exist in the tool registry (screen list drift).
+- [x] tmux percent-style split bindings are bound then immediately unbound (internal/tools/tmux.go).
+- [x] Hotkeys aliases: input can't accept `h`, `l`, or space; saved aliases are never
       consumed by anything; and `q` while typing an alias instantly quits the TUI
       (internal/ui/screen_hotkeys.go — last unguarded quit path).
-- [ ] Manage screen: keyboard input while the install-log panel is shown still mutates
+- [x] Manage screen: keyboard input while the install-log panel is shown still mutates
       hidden settings fields (mouse path was fixed; keyboard + misleading "↑↓: scroll"
       footer remain) (internal/ui/screen_manage.go).
 
 Bash installer (still the documented fallback path):
-- [ ] `--list-backups` prints one entry then exits 1 (`((count++))` under `set -e`).
-- [ ] `setup_utilities` writes a legacy bash CLI to `~/.local/bin/dotfiles`, shadowing or
+- [x] `--list-backups` prints one entry then exits 1 (`((count++))` under `set -e`).
+- [x] `setup_utilities` writes a legacy bash CLI to `~/.local/bin/dotfiles`, shadowing or
       clobbering the Go binary of the same name.
-- [ ] Generated CLI calls `sed_i` which is never defined inside the heredoc (runtime crash).
-- [ ] KDE systems without `kwriteconfig` abort the entire install under `set -e`.
-- [ ] Raspberry Pi model detection lost in a `$( )` subshell — Pi-specific setup never runs.
-- [ ] Embedded CLI theme table drifted: 13 themes vs 16 (frappe/macchiato silently get mocha).
+- [x] Generated CLI calls `sed_i` which is never defined inside the heredoc (runtime crash).
+- [x] KDE systems without `kwriteconfig` abort the entire install under `set -e`.
+- [x] Raspberry Pi model detection lost in a `$( )` subshell — Pi-specific setup never runs.
+- [x] Embedded CLI theme table drifted: 13 themes vs 16 (frappe/macchiato silently get mocha).
 
 ## P2 — Should fix before release (correctness/security, non-data-loss)
 
