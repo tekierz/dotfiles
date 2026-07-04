@@ -25,9 +25,8 @@ internal/
   tools/                 # Tool registry (30 tools)
   ui/                    # Bubble Tea TUI (~15,700 lines)
 bin/
-  dotfiles               # Built Go binary
+  dotfiles               # Built Go binary (gitignored build output)
   dotfiles-setup         # Legacy bash script
-  dotfiles-setup.ps1     # Windows PowerShell setup script
 docs/
   tools.md               # Detailed tool reference
   security-scanning.md   # Security scanning reference

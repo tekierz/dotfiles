@@ -2,7 +2,7 @@
 
 A cross-platform terminal environment management platform with **16 customizable themes**.
 
-Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. Features an interactive TUI for installation and configuration, or use CLI commands directly. A separate native Windows installer (`bin/dotfiles-setup.ps1`, PowerShell) is also available.
+Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. Features an interactive TUI for installation and configuration, or use CLI commands directly.
 
 ## Quick Start
 
@@ -23,6 +23,8 @@ make build
 ./bin/dotfiles
 ```
 
+`make build` creates `./bin/dotfiles` locally; the compiled binary is a build artifact and is not shipped in the repository.
+
 ## Commands
 
 | Command | Description |
@@ -40,7 +42,7 @@ make build
 | `dotfiles users` | List all user profiles |
 | `dotfiles backups` | List configuration backups |
 | `dotfiles restore [name]` | Restore a backup (opens TUI picker if no name) |
-| `dotfiles version` | Show version information |
+| `dotfiles version` / `dotfiles --version` | Show version information |
 | `dotfiles uninstall` | Remove dotfiles and restore original config |
 
 ## What It Installs & Configures
@@ -75,6 +77,8 @@ make build
 | **trippy** | Visual traceroute + ping |
 
 ### macOS Quality-of-Life Apps (optional, macOS only)
+
+> The Go TUI's app picker offers **Rectangle, Raycast, IINA, and AppCleaner**. The remaining apps below are installed only by the legacy bash script.
 
 | App | Description |
 |-----|-------------|

@@ -5,13 +5,15 @@ DOTFILES_BIN = bin/dotfiles
 SETUP_SCRIPT = bin/dotfiles-setup
 
 # Go build flags
-LDFLAGS = -s -w
-VERSION = 2.0.1
+# Release builds must be made from the v2.1.2 git tag; untagged builds report
+# the nearest tag-derived value, commit hash, or "dev" when git is unavailable.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS = -s -w -X main.version=$(VERSION)
 
 # Build the main dotfiles CLI (new)
 build:
 	@echo "Building dotfiles CLI..."
-	go build -ldflags "$(LDFLAGS) -X main.version=$(VERSION)" -o $(DOTFILES_BIN) ./cmd/dotfiles
+	go build -ldflags "$(LDFLAGS)" -o $(DOTFILES_BIN) ./cmd/dotfiles
 
 # Build for development (with debug info)
 dev:

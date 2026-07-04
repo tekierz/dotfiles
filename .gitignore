@@ -1,4 +1,5 @@
 # Go binaries
+bin/dotfiles
 bin/dotfiles-installer
 *.exe
 *.exe~

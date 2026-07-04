@@ -19,7 +19,7 @@ import (
 
 var (
 	skipIntro bool
-	version   = "2.0.1"
+	version   = "dev"
 )
 
 // rootCmd is the base command
@@ -273,6 +273,9 @@ Use --no-restore to skip restoring backups.`,
 }
 
 func init() {
+	rootCmd.Version = version
+	rootCmd.SetVersionTemplate("dotfiles version {{.Version}}\n")
+
 	// Global flags
 	rootCmd.PersistentFlags().BoolVar(&skipIntro, "skip-intro", false, "Skip intro animation")
 
