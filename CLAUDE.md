@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is **dotfiles**: a cross-platform terminal environment management platform that creates a consistent terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. It includes:
 
 - **Go TUI Application** (`cmd/dotfiles/`) - Interactive installer and management platform using Bubble Tea
-- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,500 lines of bash)
+- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,700 lines of bash)
 
 The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 25+ other terminal tools with unified theming. v2.1 added Tailscale (VPN), Sunshine/Moonlight (game streaming), and Claude Code (MCP configuration).
 
@@ -16,7 +16,6 @@ The Go application provides installation, configuration, and updates for zsh, tm
 ```
 cmd/
   dotfiles/              # Go CLI entry point (Cobra + Bubble Tea)
-  installer/             # Standalone installer entry point (main.go)
 internal/
   config/                # Configuration loading/saving (JSON)
   hotkeys/               # Hotkey definitions for tools
@@ -24,16 +23,20 @@ internal/
   runner/                # Bash script execution
   scripts/               # Embedded utility scripts (hk, caff, sshh)
   tools/                 # Tool registry (30 tools)
-  ui/                    # Bubble Tea TUI (~14,600 lines)
+  ui/                    # Bubble Tea TUI (~15,700 lines)
 bin/
   dotfiles               # Built Go binary
   dotfiles-setup         # Legacy bash script
   dotfiles-setup.ps1     # Windows PowerShell setup script
 docs/
   tools.md               # Detailed tool reference
-  beta.plan              # Planned improvements for next release
-  v2-analysis-plan.md    # v2 analysis / planning notes
   security-scanning.md   # Security scanning reference
+  archive/               # Completed/superseded planning docs (historical)
+tasks/
+  todo.md                # Active plan (release readiness)
+  release-audit-2026-07-03.md  # Full audit report backing the plan
+  new-tools-spec.md      # Open spec: six AI CLI tools (not yet implemented)
+  archive/               # Completed remediation plans (historical)
 ```
 
 ## Homebrew Distribution
@@ -62,7 +65,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 
 ### Screen Navigation
 
-The TUI uses screen-based navigation with 33 screens (the `Screen` enum in
+The TUI uses screen-based navigation with 31 screens (the `Screen` enum in
 `internal/ui/app.go`):
 - Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
 - Management: MainMenu, Manage, Update, Hotkeys, Backups

@@ -1,5 +1,12 @@
 # Deep-Audit Findings & Remediation Plan
 
+> **✅ STATUS: ARCHIVED 2026-07-03 — EXECUTED.** The remediation described here landed on
+> `main` (June 2026 commit series through `c04c1d6`). A follow-up full-codebase audit on
+> 2026-07-03 re-verified `main`: the systemic root causes (streaming message delivery,
+> ScreenManager migration, data races) are fixed. Residual and newly-confirmed items are
+> tracked in `tasks/todo.md` (release-readiness plan) backed by
+> `tasks/release-audit-2026-07-03.md`.
+
 **Date:** 2026-06-18  
 **Source:** deep second-pass adversarial audit (45 agents, 96 raw findings)  
 **Stats:** 96 findings total -> 30 confirmed CRITICAL/HIGH, 66 MEDIUM/LOW. All 30 critical/high were independently re-verified against source (0 refuted).

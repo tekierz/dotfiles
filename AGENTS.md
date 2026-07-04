@@ -1,15 +1,15 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to coding agents (Codex, Claude Code, etc.) when working with code in this repository. Keep in sync with CLAUDE.md.
 
 ## Project Overview
 
 This is **dotfiles**: a cross-platform terminal environment management platform that creates a consistent terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. It includes:
 
 - **Go TUI Application** (`cmd/dotfiles/`) - Interactive installer and management platform using Bubble Tea
-- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,200 lines of bash)
+- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,700 lines of bash)
 
-The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 20+ other terminal tools with unified theming.
+The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 25+ other terminal tools with unified theming. v2.1 added Tailscale (VPN), Sunshine/Moonlight (game streaming), and Claude Code (MCP configuration).
 
 ## Repository Structure
 
@@ -22,14 +22,21 @@ internal/
   pkg/                   # Package manager abstraction (brew/pacman/apt)
   runner/                # Bash script execution
   scripts/               # Embedded utility scripts (hk, caff, sshh)
-  tools/                 # Tool registry (27+ tools)
-  ui/                    # Bubble Tea TUI (~12,600 lines)
+  tools/                 # Tool registry (30 tools)
+  ui/                    # Bubble Tea TUI (~15,700 lines)
 bin/
   dotfiles               # Built Go binary
   dotfiles-setup         # Legacy bash script
+  dotfiles-setup.ps1     # Windows PowerShell setup script
 docs/
   tools.md               # Detailed tool reference
-  beta.plan              # Planned improvements for next release
+  security-scanning.md   # Security scanning reference
+  archive/               # Completed/superseded planning docs (historical)
+tasks/
+  todo.md                # Active plan (release readiness)
+  release-audit-2026-07-03.md  # Full audit report backing the plan
+  new-tools-spec.md      # Open spec: six AI CLI tools (not yet implemented)
+  archive/               # Completed remediation plans (historical)
 ```
 
 ## Homebrew Distribution
@@ -50,7 +57,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 | Package | Purpose |
 |---------|---------|
 | `internal/ui/` | Bubble Tea TUI (Model-Update-View pattern) |
-| `internal/tools/` | Tool registry with 27+ tools |
+| `internal/tools/` | Tool registry with 30 tools |
 | `internal/pkg/` | Package manager abstraction |
 | `internal/config/` | JSON configuration management |
 | `internal/hotkeys/` | Hotkey definitions |
@@ -58,16 +65,24 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 
 ### Screen Navigation
 
-The TUI uses screen-based navigation with 43 screens:
+The TUI uses screen-based navigation with 31 screens (the `Screen` enum in
+`internal/ui/app.go`):
 - Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
 - Management: MainMenu, Manage, Update, Hotkeys, Backups
 - Config: Per-tool configuration screens
+
+Each screen is a `ScreenHandler` implemented in package `ui` in a `screen_*.go`
+file (e.g. `screen_welcome.go`, `screen_manage.go`, `screen_config_*.go`).
+`App.Update` delegates to the `ScreenManager` (`uiTickMsg` and
+`installCacheDoneMsg` are handled globally first); `App.View` delegates to
+`ScreenManager.View()`. `NewApp` always wires the `ScreenManager` via
+`initScreenManager()`.
 
 ### Async Patterns
 
 The TUI uses Bubble Tea's message-based async pattern for long-running operations:
 
-**Install Cache Loading** (`internal/ui/app.go`):
+**Install Cache Loading** (`internal/ui/cache.go`):
 - `loadInstallCacheCmd()` - Async command to check all tool installation status
 - Uses batch package manager queries (`brew list --versions`) for performance
 - Shows loading spinner while cache populates
@@ -86,16 +101,21 @@ Neon-seapunk color palette defined in `internal/ui/styles.go`:
 ## CLI Commands
 
 ```bash
-dotfiles                # Launch TUI main menu
-dotfiles install        # Launch TUI installer
-dotfiles manage         # Launch TUI management
-dotfiles hotkeys        # Launch TUI hotkey viewer
-dotfiles status         # Print status (CLI)
-dotfiles backups        # List backups (CLI)
-dotfiles restore <name> # Restore backup (CLI)
-dotfiles theme --list   # List themes (CLI)
-dotfiles update         # Check for updates
-dotfiles uninstall      # Remove dotfiles and restore config
+dotfiles                  # Launch TUI main menu
+dotfiles install          # Launch TUI installer
+dotfiles manage           # Launch TUI management
+dotfiles hotkeys          # Launch TUI hotkey viewer
+dotfiles config <tool>    # Configure a specific tool
+dotfiles status           # Print status (CLI)
+dotfiles backups          # List backups (CLI)
+dotfiles restore <name>   # Restore backup (CLI)
+dotfiles theme list       # List themes (CLI)
+dotfiles theme set <name> # Set theme directly (CLI)
+dotfiles user [name]      # Manage users (add/delete subcommands)
+dotfiles users            # List users (CLI)
+dotfiles update           # Check for updates
+dotfiles version          # Print version
+dotfiles uninstall        # Remove dotfiles and restore config
 ```
 
 ## Key Concepts
@@ -146,7 +166,7 @@ Test infrastructure includes:
 
 ### Pre-PR Checklist
 
-See `.Codex/skills/pre-pr-tests/SKILL.md` for comprehensive testing checklist including:
+See `.claude/skills/pre-pr-tests/SKILL.md` for comprehensive testing checklist including:
 - Automated tests (build, vet, fmt, security scan)
 - Manual TUI testing
 - Cross-repository compatibility checks
@@ -166,7 +186,7 @@ See `.Codex/skills/pre-pr-tests/SKILL.md` for comprehensive testing checklist in
 
 ## Git Commit Rules
 
-- Never add "Generated with Codex" tags to commits
-- Never add "Co-Authored-By: Codex" lines to commits
+- Never add "Generated with Claude Code" tags to commits
+- Never add "Co-Authored-By: Claude" lines to commits
 - Keep commit messages clean and concise
 - When asked to "push", only commit - user handles `git push` (SSH auth required)

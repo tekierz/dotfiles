@@ -1,5 +1,16 @@
 # Beta Development Plan
 
+> **⚠️ STATUS: ARCHIVED 2026-07-03 — superseded by `tasks/todo.md` (release-readiness plan).**
+> This document dates from the v2.0.1 era; its line references no longer match the code
+> (two audit-remediation cycles have landed since). Item status at archival time:
+> - Priority 1 (error handling): partially addressed by remediation work, but not as
+>   specified here — `installCacheDoneMsg` still has no `err` field and `SetTheme` still
+>   silently ignores unknown theme names.
+> - Priority 2 (performance): per-frame subprocess/render issues were fixed by the audits.
+> - Priorities 3–5 and Backlog (features, testing, docs): still open; carried forward to
+>   the release plan's post-release backlog where still relevant.
+> Do not treat as an open work list.
+
 This document tracks improvements and features planned for the beta development cycle following the v2.0.1 release.
 
 ## Priority 1: Error Handling Improvements

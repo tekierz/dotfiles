@@ -1,5 +1,9 @@
 # Manual Test Plan — `worktree-audit-remediation` (macOS)
 
+> **⚠️ STATUS: ARCHIVED 2026-07-03.** This test plan targeted the `worktree-audit-remediation`
+> branch, which has been merged to `main`. For current pre-release testing use the
+> `pre-pr-tests` skill checklist (`.claude/skills/pre-pr-tests/SKILL.md`).
+
 Focused on what this branch changed. Most of it is **safe** (navigate + quit).
 A few steps **modify your real machine** — those are marked ⚠️ with how to stay safe.
 
