@@ -32,26 +32,53 @@ jobs:
         run: go vet ./...
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
-        # Advisory: pinned to v2.5.0 (golangci-lint supports Go 1.25 since
-        # v2.4.0). Flip to blocking once it has run clean against the project's
-        # Go version for a few cycles. internal/ui is excluded from gocyclo/dupl
-        # in .golangci.yml (large switch-based View/Update funcs) — revisit.
-        continue-on-error: true
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.5.0
           args: --timeout=5m
 
       - name: Run staticcheck
-        uses: dominikh/staticcheck-action@v1
-        # Advisory: kept at `latest` — no tagged staticcheck release is built
-        # with / confirmed against Go 1.25 yet (2025.1.x is built with Go 1.24
-        # and has known Go 1.25 compatibility issues, dominikh/go-tools#1674).
-        # Pin to an exact tag and flip to blocking once a Go 1.25 release ships.
-        continue-on-error: true
-        with:
-          version: latest
-          install-go: false
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.6.1
+
+          set +e
+          staticcheck ./... > staticcheck.out 2>&1
+          status=$?
+          set -e
+
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+
+          # Existing findings are in files owned by other release lanes. Keep
+          # this gate blocking by allowing only these check IDs and messages;
+          # line and column numbers are intentionally not pinned.
+          cat > staticcheck-allowed.regex <<'EOF'
+          ^cmd/dotfiles/main\.go:[0-9]+:[0-9]+: strings\.Title has been deprecated .*\(SA1019\)$
+          ^internal/ui/installation\.go:[0-9]+:[0-9]+: error strings should not be capitalized \(ST1005\)$
+          ^internal/ui/messages\.go:[0-9]+:[0-9]+: type installLogMsg is unused \(U1000\)$
+          ^internal/ui/screen_hotkeys\.go:[0-9]+:[0-9]+: this result of append is never used, except maybe in other appends \(SA4010\)$
+          ^internal/ui/screen_hotkeys\.go:[0-9]+:[0-9]+: this value of itemIndices is never used \(SA4006\)$
+          ^internal/ui/streaming\.go:[0-9]+:[0-9]+: should convert msg \(type updateSudoRequiredMsg\) to updateStartMsg instead of using struct literal \(S1016\)$
+          ^internal/ui/streaming\.go:[0-9]+:[0-9]+: should convert msg \(type manageSudoRequiredMsg\) to manageStartInstallMsg instead of using struct literal \(S1016\)$
+          EOF
+
+          set +e
+          grep -Ev -f staticcheck-allowed.regex staticcheck.out > staticcheck-unexpected.out
+          grep_status=$?
+          set -e
+
+          if [ "$grep_status" -gt 1 ]; then
+            exit "$grep_status"
+          fi
+
+          if [ -s staticcheck-unexpected.out ]; then
+            cat staticcheck-unexpected.out
+            exit "$status"
+          fi
+
+          cat staticcheck.out
+          echo "Only allowed Staticcheck findings were present."
 
   security:
     name: Security
@@ -65,10 +92,6 @@ jobs:
           cache: true
 
       - name: Run govulncheck
-        # Advisory: pinned to v1.1.4 (latest tagged x/vuln release; compiles
-        # against the Go 1.25 toolchain installed by setup-go). Flip to blocking
-        # once it has run clean against the project's Go version for a few cycles.
-        continue-on-error: true
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
