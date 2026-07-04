@@ -492,18 +492,8 @@ func installUtilities(utilities map[string]bool) error {
 
 	// Copy the binary to ~/.local/bin/dotfiles
 	destPath := filepath.Join(binDir, "dotfiles")
-	// Remove existing binary first to avoid "text file busy" error
-	// (Linux allows deleting a running binary, but not overwriting it)
-	_ = os.Remove(destPath)
-	if err := copyFile(execPath, destPath); err != nil {
-		return fmt.Errorf("cannot copy binary: %w", err)
-	}
-
-	// Make it executable. Owner-only (0700) matches the per-user script policy
-	// used for hk/caff/sshh and the bin directory above; this is the final
-	// authoritative mode on the binary.
-	if err := os.Chmod(destPath, 0o700); err != nil {
-		return fmt.Errorf("cannot set permissions: %w", err)
+	if err := installBinary(execPath, destPath); err != nil {
+		return err
 	}
 
 	// Install selected utility scripts
@@ -522,6 +512,39 @@ func installUtilities(utilities map[string]bool) error {
 			return fmt.Errorf("cannot write %s: %w", name, err)
 		}
 	}
+
+	return nil
+}
+
+func installBinary(execPath, destPath string) error {
+	tempFile, err := os.CreateTemp(filepath.Dir(destPath), ".dotfiles-*")
+	if err != nil {
+		return fmt.Errorf("cannot create temporary binary: %w", err)
+	}
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("cannot close temporary binary: %w", err)
+	}
+	if err := copyFile(execPath, tempPath); err != nil {
+		return fmt.Errorf("cannot copy binary: %w", err)
+	}
+	// Owner-only (0700) matches the per-user script policy used for
+	// hk/caff/sshh and the bin directory above; this is the final
+	// authoritative mode on the binary.
+	if err := os.Chmod(tempPath, 0o700); err != nil {
+		return fmt.Errorf("cannot set permissions: %w", err)
+	}
+	if err := os.Rename(tempPath, destPath); err != nil {
+		return fmt.Errorf("cannot replace binary: %w", err)
+	}
+	cleanupTemp = false
 
 	return nil
 }

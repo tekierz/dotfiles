@@ -49,3 +49,74 @@ func TestCopyFilePermsNeverGroupOrOtherWritable(t *testing.T) {
 		t.Errorf("copied contents = %q, want %q", got, "binary contents")
 	}
 }
+
+func TestInstallBinaryCopyFailureLeavesExistingBinaryUntouched(t *testing.T) {
+	dir := t.TempDir()
+
+	dest := filepath.Join(dir, "dotfiles")
+	original := []byte("original binary")
+	if err := os.WriteFile(dest, original, 0o755); err != nil {
+		t.Fatalf("write dest: %v", err)
+	}
+
+	err := installBinary(filepath.Join(dir, "missing-source"), dest)
+	if err == nil {
+		t.Fatal("installBinary succeeded with missing source")
+	}
+
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Errorf("dest contents = %q, want %q", got, original)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(dir, ".dotfiles-*"))
+	if err != nil {
+		t.Fatalf("glob temp files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temp files left behind: %v", matches)
+	}
+}
+
+// TestInstallBinarySelfReplace covers the original audit scenario: the running
+// binary replacing itself (execPath == destPath). The staged-temp-plus-rename
+// flow must leave the binary intact and executable with no temp litter.
+func TestInstallBinarySelfReplace(t *testing.T) {
+	dir := t.TempDir()
+
+	dest := filepath.Join(dir, "dotfiles")
+	contents := []byte("running binary")
+	if err := os.WriteFile(dest, contents, 0o700); err != nil {
+		t.Fatalf("write dest: %v", err)
+	}
+
+	if err := installBinary(dest, dest); err != nil {
+		t.Fatalf("installBinary self-replace: %v", err)
+	}
+
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(got) != string(contents) {
+		t.Errorf("dest contents = %q, want %q", got, contents)
+	}
+	info, err := os.Stat(dest)
+	if err != nil {
+		t.Fatalf("stat dest: %v", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("dest mode = %v, want 0700", info.Mode().Perm())
+	}
+
+	matches, err := filepath.Glob(filepath.Join(dir, ".dotfiles-*"))
+	if err != nil {
+		t.Fatalf("glob temp files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temp files left behind: %v", matches)
+	}
+}
