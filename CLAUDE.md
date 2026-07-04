@@ -65,7 +65,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 
 ### Screen Navigation
 
-The TUI uses screen-based navigation with 31 screens (the `Screen` enum in
+The TUI uses screen-based navigation (the `Screen` enum in
 `internal/ui/app.go`):
 - Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
 - Management: MainMenu, Manage, Update, Hotkeys, Backups

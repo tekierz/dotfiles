@@ -56,7 +56,7 @@ const (
     ScreenWelcome
     ScreenThemePicker
     ScreenNavPicker
-    // ... 33 total screens
+    // ... remaining screens
 )
 ```
 
