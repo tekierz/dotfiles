@@ -480,8 +480,8 @@ rules = [
   { mime = "application/gzip", fg = "${T_MAGENTA}" },
   { mime = "application/x-tar", fg = "${T_MAGENTA}" },
   { mime = "application/pdf", fg = "${T_ACCENT3}" },
-  { name = "*", fg = "${T_FG}" },
-  { name = "*/", fg = "${T_ACCENT}" },
+  { url = "*", fg = "${T_FG}" },
+  { url = "*/", fg = "${T_ACCENT}" },
 ]
 EOF
 }
@@ -3101,8 +3101,8 @@ rules = [
   { mime = "application/gzip", fg = "${T_MAGENTA}" },
   { mime = "application/x-tar", fg = "${T_MAGENTA}" },
   { mime = "application/pdf", fg = "${T_ACCENT3}" },
-  { name = "*", fg = "${T_FG}" },
-  { name = "*/", fg = "${T_ACCENT}" },
+  { url = "*", fg = "${T_FG}" },
+  { url = "*/", fg = "${T_ACCENT}" },
 ]
 EOF
 }
