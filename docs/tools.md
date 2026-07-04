@@ -140,7 +140,7 @@ These are prompted one-by-one unless using `--macos-apps -y`:
 | **trash** | [Optional] | Move files to Trash from command line instead of permanent deletion. |
 | **switchaudio-osx** | [Optional] | Switch audio input/output devices from command line. |
 
-> **Legacy only:** `mas`, `trash`, and `switchaudio-osx` are installed only by the legacy bash script. They are **not** offered in the Go TUI macOS app picker, which lists only: Rectangle, Raycast, Stats, AltTab, MonitorControl, Mos, Karabiner-Elements, IINA, The Unarchiver, and AppCleaner.
+> **Go TUI picker:** the Go TUI macOS app picker offers only Rectangle, Raycast, IINA, and AppCleaner. Everything else in these tables (including `mas`, `trash`, and `switchaudio-osx`) is installed only by the legacy bash script.
 
 ---
 

@@ -23,13 +23,7 @@ var macAppItems = []struct {
 }{
 	{"rectangle", "Rectangle", "Window management"},
 	{"raycast", "Raycast", "Spotlight replacement"},
-	{"stats", "Stats", "System monitor"},
-	{"alt-tab", "AltTab", "Window switcher"},
-	{"monitor-control", "MonitorControl", "Display brightness"},
-	{"mos", "Mos", "Smooth scrolling"},
-	{"karabiner", "Karabiner", "Keyboard customizer"},
 	{"iina", "IINA", "Media player"},
-	{"the-unarchiver", "The Unarchiver", "Archive utility"},
 	{"appcleaner", "AppCleaner", "App uninstaller"},
 }
 

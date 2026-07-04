@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 // keyMsg builds a deterministic tea.KeyMsg for the named keys used by these
@@ -551,6 +552,41 @@ func TestConfigMacAppsScreenGolden(t *testing.T) {
 
 	if screen.ID() != ScreenConfigMacApps {
 		t.Errorf("configMacAppsScreen.ID() = %v, want ScreenConfigMacApps", screen.ID())
+	}
+}
+
+func TestConfigMacAppsItemsHaveRegistryBacking(t *testing.T) {
+	registry := tools.NewRegistry()
+	screenIDs := make(map[string]struct{}, len(macAppItems))
+
+	for _, app := range macAppItems {
+		if _, exists := screenIDs[app.id]; exists {
+			t.Errorf("macAppItems contains duplicate id %q", app.id)
+		}
+		screenIDs[app.id] = struct{}{}
+
+		tool, ok := registry.Get(app.id)
+		if !ok {
+			t.Errorf("macAppItems contains %q without a registry entry", app.id)
+			continue
+		}
+		if tool.UIGroup() != tools.UIGroupMacApps {
+			t.Errorf("macAppItems contains %q with UIGroup %q, want %q", app.id, tool.UIGroup(), tools.UIGroupMacApps)
+		}
+	}
+
+	registryIDs := make(map[string]struct{})
+	for _, tool := range registry.All() {
+		if tool.UIGroup() == tools.UIGroupMacApps {
+			registryIDs[tool.ID()] = struct{}{}
+			if _, ok := screenIDs[tool.ID()]; !ok {
+				t.Errorf("UIGroupMacApps registry tool %q is missing from macAppItems", tool.ID())
+			}
+		}
+	}
+
+	if len(screenIDs) != len(registryIDs) {
+		t.Errorf("macAppItems count = %d, UIGroupMacApps registry count = %d", len(screenIDs), len(registryIDs))
 	}
 }
 

@@ -27,6 +27,7 @@ type FzfTool struct {
 
 // NewFzfTool creates a new fzf tool
 func NewFzfTool() *FzfTool {
+	home, _ := os.UserHomeDir()
 	return &FzfTool{
 		BaseTool: BaseTool{
 			id:          "fzf",
@@ -39,7 +40,9 @@ func NewFzfTool() *FzfTool {
 				pkg.PlatformArch:   {"fzf"},
 				pkg.PlatformDebian: {"fzf"},
 			},
-			configPaths: []string{},
+			configPaths: []string{
+				filepath.Join(home, ".config", "fzf", "fzf.zsh"),
+			},
 			// UI metadata
 			uiGroup:        UIGroupNone,
 			configScreen:   15, // ScreenConfigFzf
@@ -118,7 +121,7 @@ func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 	sb.WriteString("# Enable fzf key bindings and completion\n")
 	sb.WriteString("if [[ -f /usr/share/fzf/key-bindings.zsh ]]; then\n")
 	sb.WriteString("  source /usr/share/fzf/key-bindings.zsh\n")
-	sb.WriteString("  source /usr/share/fzf/completion.zsh\n")
+	sb.WriteString("  [[ -f /usr/share/fzf/completion.zsh ]] && source /usr/share/fzf/completion.zsh\n")
 	sb.WriteString("elif [[ -f ~/.fzf.zsh ]]; then\n")
 	sb.WriteString("  source ~/.fzf.zsh\n")
 	sb.WriteString("elif command -v brew &>/dev/null; then\n")

@@ -136,12 +136,13 @@ func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
 	if cfg.SplitBinds == "pipes" {
 		sb.WriteString("bind | split-window -h -c \"#{pane_current_path}\"\n")
 		sb.WriteString("bind - split-window -v -c \"#{pane_current_path}\"\n")
+		sb.WriteString("unbind '\"'\n")
+		sb.WriteString("unbind %\n")
 	} else {
 		sb.WriteString("bind % split-window -h -c \"#{pane_current_path}\"\n")
 		sb.WriteString("bind '\"' split-window -v -c \"#{pane_current_path}\"\n")
 	}
-	sb.WriteString("unbind '\"'\n")
-	sb.WriteString("unbind %\n\n")
+	sb.WriteString("\n")
 
 	// Mouse mode
 	sb.WriteString("# Mouse\n")

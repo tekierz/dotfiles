@@ -88,7 +88,7 @@ var expectedTools = map[string]toolSpec{
 	"fzf": {
 		name: "fzf", description: "Command-line fuzzy finder", category: CategoryUtility, icon: "\U000f0349",
 		uiGroup: UIGroupNone, configScreen: 15, isHeavy: false, defaultEnabled: true, platformFilter: "",
-		hasConfig: false, configPaths: 0,
+		hasConfig: true, configPaths: 1,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"fzf"}, pkg.PlatformDebian: {"fzf"}, pkg.PlatformMacOS: {"fzf"}},
 	},
 	"ghostty": {
@@ -209,7 +209,7 @@ var expectedTools = map[string]toolSpec{
 		name: "Zsh", description: "Z shell with plugins and customization", category: CategoryShell, icon: "",
 		uiGroup: UIGroupNone, configScreen: 11, isHeavy: false, defaultEnabled: true, platformFilter: "",
 		hasConfig: true, configPaths: 2,
-		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions"}, pkg.PlatformDebian: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting"}, pkg.PlatformMacOS: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions"}},
+		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "zsh-theme-powerlevel10k"}, pkg.PlatformDebian: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting"}, pkg.PlatformMacOS: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "powerlevel10k"}},
 	},
 }
 

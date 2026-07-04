@@ -51,13 +51,14 @@ func (s *hotkeysScreen) Init() tea.Cmd { return nil }
 func (s *hotkeysScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// 'q' quits from the hotkeys screen (matches the legacy global quit which
-		// only suppressed 'q' during installs / inline edits, neither of which
-		// apply here).
-		if msg.String() == "q" {
+		if msg.String() == "ctrl+c" {
 			return s, tea.Quit
 		}
-		if msg.String() == "ctrl+c" {
+		a := s.App()
+		// 'q' quits from the Hotkeys screen except while the alias editor is
+		// active (so typing 'q' into an alias doesn't quit). This mirrors the
+		// text-capture guard used by Manage and Users.
+		if msg.String() == "q" && (a == nil || !a.hotkeysAddingAlias) {
 			return s, tea.Quit
 		}
 		return s, s.handleKey(msg)
@@ -302,13 +303,13 @@ func (s *hotkeysScreen) handleAliasInput(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "left", "h":
+	case "left":
 		if a.hotkeysAliasCursor > 0 {
 			a.hotkeysAliasCursor--
 		}
 		return nil
 
-	case "right", "l":
+	case "right":
 		maxLen := a.hotkeysAliasCurrentFieldLen()
 		if a.hotkeysAliasCursor < maxLen {
 			a.hotkeysAliasCursor++
@@ -332,8 +333,9 @@ func (s *hotkeysScreen) handleAliasInput(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	default:
-		// Insert typed runes (ignore non-rune keys and alt-modified keys)
-		if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 && !msg.Alt {
+		// Insert typed runes (ignore non-rune keys and alt-modified keys).
+		// Bubble Tea reports a lone space as KeySpace rather than KeyRunes.
+		if (msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace) && len(msg.Runes) > 0 && !msg.Alt {
 			a.hotkeysAliasInsertRunes(msg.Runes)
 		}
 		return nil

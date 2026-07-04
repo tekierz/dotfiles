@@ -283,6 +283,54 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
+	logPanelVisible := a.manageInstalling || len(a.installLogs) > 0
+	if logPanelVisible {
+		switch key {
+		case "esc":
+			if a.manageInstalling {
+				a.manageStatus = "Install in progress…"
+				return nil
+			}
+			a.manageStatus = ""
+			a.manageCancelEditing()
+			a.managePane = managePaneTools
+			return NavigateTo(ScreenMainMenu)
+
+		case "c", "C":
+			if !a.manageInstalling && len(a.installLogs) > 0 {
+				a.clearInstallLogs()
+				a.manageStatus = "Logs cleared"
+			}
+			return nil
+
+		case "pgup", "ctrl+u":
+			if len(a.installLogs) > 0 {
+				a.installLogScroll += 10
+				maxScroll := CalculateMaxLogScroll(len(a.installLogs), layout.bodyH-6)
+				if a.installLogScroll > maxScroll {
+					a.installLogScroll = maxScroll
+				}
+				a.installLogAutoScroll = false
+			}
+			return nil
+
+		case "pgdown", "ctrl+d":
+			if len(a.installLogs) > 0 {
+				a.installLogScroll -= 10
+				if a.installLogScroll < 0 {
+					a.installLogScroll = 0
+				}
+			}
+			return nil
+
+		default:
+			// While the install-log view occupies the right pane, the settings
+			// fields are not rendered. Swallow every other key so hidden field
+			// selection/edit state cannot change underneath the log panel.
+			return nil
+		}
+	}
+
 	// Handle tab navigation first (1-5 keys). A number key for the already-active
 	// tab is a no-op.
 	if target, ok := tabNavigationTarget(key); ok {
@@ -355,35 +403,6 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// ScreenHotkeys is migrated; route through the ScreenManager.
 		return NavigateTo(ScreenHotkeys)
 
-	case "c", "C":
-		// Clear install logs (only when not installing).
-		if !a.manageInstalling && len(a.installLogs) > 0 {
-			a.clearInstallLogs()
-			a.manageStatus = "Logs cleared"
-		}
-		return nil
-
-	case "pgup", "ctrl+u":
-		// Scroll logs up (when viewing logs).
-		if len(a.installLogs) > 0 {
-			a.installLogScroll += 10
-			maxScroll := CalculateMaxLogScroll(len(a.installLogs), layout.bodyH-6)
-			if a.installLogScroll > maxScroll {
-				a.installLogScroll = maxScroll
-			}
-			a.installLogAutoScroll = false
-		}
-		return nil
-
-	case "pgdown", "ctrl+d":
-		// Scroll logs down (when viewing logs).
-		if len(a.installLogs) > 0 {
-			a.installLogScroll -= 10
-			if a.installLogScroll < 0 {
-				a.installLogScroll = 0
-			}
-		}
-		return nil
 	}
 
 	// Pane-specific navigation.

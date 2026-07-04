@@ -1196,7 +1196,7 @@ func (a *App) renderManageLogPanel(layout manageLayout, items []manageItem) stri
 	if a.manageInstalling {
 		footerText = "Installing..."
 	} else if len(a.installLogs) > 0 {
-		footerText = "C: clear • ↑↓: scroll"
+		footerText = "C: clear • PgUp/PgDn: scroll"
 	}
 	footer := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(footerText)
 

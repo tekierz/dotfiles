@@ -13,8 +13,7 @@ import (
 // treated left/right/h/l/space identically (a single case), which maps directly
 // onto the shared adjust callback.
 //
-// Fields: 0-3=prompt radios, 4=history, 5=autocd, 6=syntax, 7=autosuggestions,
-// 8-12=plugins.
+// Fields: 0-3=prompt radios, 4=history, 5=autocd, 6-7=plugins.
 type configZshScreen struct {
 	configFieldNav
 }
@@ -23,7 +22,7 @@ type configZshScreen struct {
 func NewConfigZshScreen(ctx *ScreenContext) *configZshScreen {
 	s := &configZshScreen{}
 	s.id = ScreenConfigZsh
-	s.maxField = func(*App) int { return 12 } // 4 prompts + 4 shell options + 5 plugins - 1
+	s.maxField = func(*App) int { return 7 } // 4 prompts + 2 shell options + 2 plugins - 1
 	s.adjust = zshAdjust
 	s.SetContext(ctx)
 	return s
@@ -42,15 +41,21 @@ func zshAdjust(a *App, _ string, fwd bool) {
 		cfg.ZshHistorySize = atoi(cycleOption(opts, current, fwd), 10000)
 	case idx == 5: // Auto CD
 		cfg.ZshAutoCD = !cfg.ZshAutoCD
-	case idx == 6: // Syntax highlighting
-		cfg.ZshSyntaxHighlight = !cfg.ZshSyntaxHighlight
-	case idx == 7: // Autosuggestions
-		cfg.ZshAutosuggestions = !cfg.ZshAutosuggestions
 	default: // Plugin toggle
-		plugins := []string{"zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "fzf-tab", "zsh-history-substring-search"}
-		pluginIdx := idx - 8
+		plugins := []string{"zsh-autosuggestions", "zsh-syntax-highlighting"}
+		pluginIdx := idx - 6
 		if pluginIdx >= 0 && pluginIdx < len(plugins) {
-			togglePlugin(&cfg.ZshPlugins, plugins[pluginIdx])
+			plugin := plugins[pluginIdx]
+			switch plugin {
+			case "zsh-autosuggestions":
+				enabled := !cfg.ZshAutosuggestions
+				cfg.ZshAutosuggestions = enabled
+				setZshPluginSelected(&cfg.ZshPlugins, plugin, enabled)
+			case "zsh-syntax-highlighting":
+				enabled := !cfg.ZshSyntaxHighlight
+				cfg.ZshSyntaxHighlight = enabled
+				setZshPluginSelected(&cfg.ZshPlugins, plugin, enabled)
+			}
 		}
 	}
 }
@@ -111,18 +116,6 @@ func (s *configZshScreen) View(width, height int) string {
 	rec.write("\n")
 	fieldIdx++
 
-	rec.field(fieldIdx)
-	syntaxFocused := a.configFieldIndex == fieldIdx
-	rec.write(renderCheckbox("Syntax Highlighting", cfg.ZshSyntaxHighlight, syntaxFocused))
-	rec.write("\n")
-	fieldIdx++
-
-	rec.field(fieldIdx)
-	suggestFocused := a.configFieldIndex == fieldIdx
-	rec.write(renderCheckbox("Auto-suggestions", cfg.ZshAutosuggestions, suggestFocused))
-	rec.write("\n")
-	fieldIdx++
-
 	rec.write(sectionHeaderStyle.Render("Plugins"))
 	rec.write("\n")
 	plugins := []struct {
@@ -131,20 +124,11 @@ func (s *configZshScreen) View(width, height int) string {
 	}{
 		{"zsh-autosuggestions", "Auto-suggestions"},
 		{"zsh-syntax-highlighting", "Syntax highlighting"},
-		{"zsh-completions", "Extra completions"},
-		{"fzf-tab", "FZF tab completion"},
-		{"zsh-history-substring-search", "History search"},
 	}
 	for _, p := range plugins {
 		rec.field(fieldIdx)
 		focused := a.configFieldIndex == fieldIdx
-		enabled := false
-		for _, ep := range cfg.ZshPlugins {
-			if ep == p.id {
-				enabled = true
-				break
-			}
-		}
+		enabled := zshPluginEnabledInConfig(cfg, p.id)
 		rec.write(renderCheckbox(p.name, enabled, focused))
 		rec.write("\n")
 		fieldIdx++
@@ -158,4 +142,38 @@ func (s *configZshScreen) View(width, height int) string {
 		width, height,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
+}
+
+func zshPluginSelected(plugins []string, plugin string) bool {
+	for _, selected := range plugins {
+		if selected == plugin {
+			return true
+		}
+	}
+	return false
+}
+
+func zshPluginEnabledInConfig(cfg *DeepDiveConfig, plugin string) bool {
+	switch plugin {
+	case "zsh-autosuggestions":
+		return cfg.ZshAutosuggestions
+	case "zsh-syntax-highlighting":
+		return cfg.ZshSyntaxHighlight
+	default:
+		return zshPluginSelected(cfg.ZshPlugins, plugin)
+	}
+}
+
+func setZshPluginSelected(plugins *[]string, plugin string, enabled bool) {
+	next := (*plugins)[:0]
+	for _, selected := range *plugins {
+		if selected == plugin {
+			continue
+		}
+		next = append(next, selected)
+	}
+	if enabled {
+		next = append(next, plugin)
+	}
+	*plugins = next
 }
