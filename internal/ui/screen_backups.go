@@ -94,6 +94,11 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// never as green success (C3). The "skipped" keyword drives the
 			// yellow style in the renderer below.
 			a.backupStatus = fmt.Sprintf("Restored %d files from %s, %d skipped", msg.count, msg.name, msg.skipped)
+			if len(msg.details) > 0 {
+				a.backupStatus += ": " + strings.Join(firstStrings(msg.details, 3), "; ")
+			}
+		case msg.removed > 0:
+			a.backupStatus = fmt.Sprintf("Restored %d files and removed %d from %s", msg.count, msg.removed, msg.name)
 		default:
 			a.backupStatus = fmt.Sprintf("Restored %d files from %s", msg.count, msg.name)
 		}
@@ -477,4 +482,11 @@ func (s *backupsScreen) View(width, height int) string {
 	return lipgloss.Place(width, height,
 		lipgloss.Center, lipgloss.Top,
 		content)
+}
+
+func firstStrings(values []string, maxCount int) []string {
+	if len(values) <= maxCount {
+		return values
+	}
+	return values[:maxCount]
 }

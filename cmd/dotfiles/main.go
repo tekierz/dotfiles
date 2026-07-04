@@ -162,7 +162,7 @@ var restoreCmd = &cobra.Command{
 			launchTUI(ui.ScreenBackups)
 		} else {
 			// CLI mode: restore specific backup
-			if _, err := restoreBackup(args[0]); err != nil {
+			if _, _, err := restoreBackup(args[0]); err != nil {
 				os.Exit(1)
 			}
 		}
@@ -610,10 +610,10 @@ func listBackups() {
 }
 
 // restoreBackup restores a specific backup. It returns the number of files
-// successfully restored and a fatal error for failures that prevent any
-// restore (missing/invalid backup, unreadable backup dir, unknown home). The
-// path mapping, traversal guard, and mode preservation are shared with the TUI
-// via the internal/backup package so the two paths cannot diverge.
+// successfully restored, the number of entries skipped, and a fatal error for
+// failures that prevent a clean restore. The path mapping, traversal guard, and
+// mode preservation are shared with the TUI via the internal/backup package so
+// the two paths cannot diverge.
 // isValidBackupName reports whether name is a safe single-component backup name.
 // A backup lives at <config>/backups/<name>; allowing "..", absolute paths, or
 // path separators would let an externally-supplied name traverse out of the
@@ -632,11 +632,11 @@ func isValidBackupName(name string) bool {
 	return name == filepath.Base(name)
 }
 
-func restoreBackup(name string) (int, error) {
+func restoreBackup(name string) (int, int, error) {
 	if !isValidBackupName(name) {
 		fmt.Fprintf(os.Stderr, "Invalid backup name: %q\n", name)
 		fmt.Println("Run 'dotfiles backups' to see available backups.")
-		return 0, fmt.Errorf("invalid backup name: %q", name)
+		return 0, 0, fmt.Errorf("invalid backup name: %q", name)
 	}
 
 	backupDir := filepath.Join(config.ConfigDir(), "backups", name)
@@ -646,21 +646,21 @@ func restoreBackup(name string) (int, error) {
 		if os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "Backup '%s' not found.\n", name)
 			fmt.Println("Run 'dotfiles backups' to see available backups.")
-			return 0, err
+			return 0, 0, err
 		}
 		fmt.Fprintf(os.Stderr, "Error accessing backup: %v\n", err)
-		return 0, err
+		return 0, 0, err
 	}
 
 	if !info.IsDir() {
 		fmt.Fprintf(os.Stderr, "'%s' is not a valid backup directory.\n", name)
-		return 0, fmt.Errorf("%q is not a valid backup directory", name)
+		return 0, 0, fmt.Errorf("%q is not a valid backup directory", name)
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
-		return 0, err
+		return 0, 0, err
 	}
 
 	fmt.Printf("Restoring backup: %s\n", name)
@@ -668,18 +668,27 @@ func restoreBackup(name string) (int, error) {
 	result, err := backup.Restore(backupDir, home)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading backup: %v\n", err)
-		return 0, err
+		return 0, 0, err
 	}
 
 	for _, relPath := range result.Restored {
 		fmt.Printf("  Restored: %s\n", relPath)
+	}
+	for _, relPath := range result.Removed {
+		fmt.Printf("  Removed: %s\n", relPath)
 	}
 	for item, reason := range result.Skipped {
 		fmt.Fprintf(os.Stderr, "  Warning: Skipping %s - %s\n", item, reason)
 	}
 
 	fmt.Printf("\nRestored %d files from backup.\n", result.Count())
-	return result.Count(), nil
+	if len(result.Removed) > 0 {
+		fmt.Printf("Removed %d files/directories created after the backup.\n", len(result.Removed))
+	}
+	if len(result.Skipped) > 0 {
+		return result.Count(), len(result.Skipped), fmt.Errorf("%d backup entries could not be restored", len(result.Skipped))
+	}
+	return result.Count(), 0, nil
 }
 
 // runUninstall removes dotfiles and optionally restores original configuration
@@ -750,9 +759,9 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 			}
 			if latestBackup != "" {
 				fmt.Printf("Restoring from backup: %s\n", latestBackup)
-				count, err := restoreBackup(latestBackup)
+				count, skipped, err := restoreBackup(latestBackup)
 				fmt.Println()
-				if (err != nil || count == 0) && !keepConfig {
+				if (err != nil || skipped > 0 || count == 0) && !keepConfig {
 					fmt.Fprintln(os.Stderr, "Restore did not complete successfully; keeping configuration directory so backups are preserved.")
 					fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
 					fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")

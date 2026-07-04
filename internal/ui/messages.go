@@ -102,7 +102,9 @@ type backupsLoadedMsg struct {
 type backupRestoreDoneMsg struct {
 	name    string
 	count   int // files successfully restored
+	removed int // files/directories removed because they did not exist before
 	skipped int // files that could NOT be restored (traversal/symlink/IO errors)
+	details []string
 	err     error
 }
 
