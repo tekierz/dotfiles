@@ -798,7 +798,7 @@ list_backups() {
             # on one line and swallow the exit status so `set -e` stays happy.
             local files; files=$(grep -c "|yes" "$manifest" 2>/dev/null || true); files=${files:-0}
             echo -e "  ${CYAN}$name${NC} - $files files backed up"
-            ((count++))
+            count=$((count + 1))
         fi
     done
 
@@ -876,7 +876,7 @@ restore_backup() {
         # Refuse to rm/cp paths that escape $HOME (corrupted/tampered manifest).
         if ! is_safe_restore_path "$original"; then
             print_warning "Skipping unsafe restore path: $original"
-            ((errors++))
+            errors=$((errors + 1))
             continue
         fi
 
@@ -904,9 +904,9 @@ restore_backup() {
         else
             # File didn't exist before - remove it
             if [[ "$type" == "directory" ]]; then
-                [[ -d "$original" ]] && rm -rf "$original" && ((removed++))
+                [[ -d "$original" ]] && rm -rf "$original" && removed=$((removed + 1))
             else
-                [[ -f "$original" ]] && rm -f "$original" && ((removed++))
+                [[ -f "$original" ]] && rm -f "$original" && removed=$((removed + 1))
             fi
         fi
     done < "$manifest"
@@ -1928,39 +1928,34 @@ setup_git() {
     local dark_mode="true"
     [[ "$T_IS_LIGHT" == "true" ]] && dark_mode="false"
 
-    cat > ~/.gitconfig << GIT_EOF
-[core]
-    pager = delta
+    git_config_set_if_missing() {
+        local key="$1"
+        local value="$2"
+        if ! git config --global --get "$key" &>/dev/null; then
+            git config --global "$key" "$value"
+        fi
+    }
 
-[interactive]
-    diffFilter = delta --color-only
-
-[delta]
-    navigate = true
-    dark = $dark_mode
-    side-by-side = true
-    line-numbers = true
-    syntax-theme = $T_DELTA_THEME
-    file-style = bold yellow ul
-    file-decoration-style = none
-    hunk-header-style = file line-number syntax
-    hunk-header-decoration-style = blue box
-
-[merge]
-    conflictstyle = diff3
-
-[diff]
-    colorMoved = default
-
-[alias]
-    st = status -sb
-    co = checkout
-    br = branch
-    ci = commit
-    lg = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
-    last = log -1 HEAD --stat
-    unstage = reset HEAD --
-GIT_EOF
+    git_config_set_if_missing "core.pager" "delta"
+    git_config_set_if_missing "interactive.diffFilter" "delta --color-only"
+    git_config_set_if_missing "delta.navigate" "true"
+    git_config_set_if_missing "delta.dark" "$dark_mode"
+    git_config_set_if_missing "delta.side-by-side" "true"
+    git_config_set_if_missing "delta.line-numbers" "true"
+    git_config_set_if_missing "delta.syntax-theme" "$T_DELTA_THEME"
+    git_config_set_if_missing "delta.file-style" "bold yellow ul"
+    git_config_set_if_missing "delta.file-decoration-style" "none"
+    git_config_set_if_missing "delta.hunk-header-style" "file line-number syntax"
+    git_config_set_if_missing "delta.hunk-header-decoration-style" "blue box"
+    git_config_set_if_missing "merge.conflictstyle" "diff3"
+    git_config_set_if_missing "diff.colorMoved" "default"
+    git_config_set_if_missing "alias.st" "status -sb"
+    git_config_set_if_missing "alias.co" "checkout"
+    git_config_set_if_missing "alias.br" "branch"
+    git_config_set_if_missing "alias.ci" "commit"
+    git_config_set_if_missing "alias.lg" "log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit"
+    git_config_set_if_missing "alias.last" "log -1 HEAD --stat"
+    git_config_set_if_missing "alias.unstage" "reset HEAD --"
 
     print_warning "Remember to set your git user.name and user.email!"
     print_success "Git configured ($THEME theme)"
@@ -2654,7 +2649,7 @@ interactive_select_theme() {
     local i=1
     for theme in "${themes[@]}"; do
         printf "  %2d) %s\n" "$i" "$theme"
-        ((i++))
+        i=$((i + 1))
     done
     echo ""
 
@@ -3302,7 +3297,7 @@ list_backups() {
             # on one line and swallow the exit status so `set -e` stays happy.
             local files; files=$(grep -c "|yes" "$manifest" 2>/dev/null || true); files=${files:-0}
             echo -e "  ${CYAN}$name${NC} - $files files backed up"
-            ((count++))
+            count=$((count + 1))
         fi
     done
 
@@ -3377,7 +3372,7 @@ restore_backup() {
         # Refuse to rm/cp paths that escape $HOME (corrupted/tampered manifest).
         if ! is_safe_restore_path "$original"; then
             echo -e "${YELLOW}⚠${NC} Skipping unsafe restore path: $original"
-            ((errors++))
+            errors=$((errors + 1))
             continue
         fi
 
@@ -3403,9 +3398,9 @@ restore_backup() {
             fi
         else
             if [[ "$type" == "directory" ]]; then
-                [[ -d "$original" ]] && rm -rf "$original" && ((removed++))
+                [[ -d "$original" ]] && rm -rf "$original" && removed=$((removed + 1))
             else
-                [[ -f "$original" ]] && rm -f "$original" && ((removed++))
+                [[ -f "$original" ]] && rm -f "$original" && removed=$((removed + 1))
             fi
         fi
     done < "$manifest"
