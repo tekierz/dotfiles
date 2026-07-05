@@ -69,6 +69,9 @@ func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // tools, and the files that will be modified.
 func (s *fileTreeScreen) View(width, height int) string {
 	a := s.App()
+	if a.installCacheLoading {
+		return installStatusLoadingView(a, width, height)
+	}
 
 	title := TitleStyle.Render("Installation Summary")
 

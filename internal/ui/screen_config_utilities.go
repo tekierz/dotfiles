@@ -46,14 +46,6 @@ func NewConfigUtilitiesScreen(ctx *ScreenContext) *configUtilitiesScreen {
 	return s
 }
 
-// Init triggers the async install-cache load on entry (idempotent).
-func (s *configUtilitiesScreen) Init() tea.Cmd {
-	if a := s.App(); a != nil {
-		return a.startInstallCacheLoad()
-	}
-	return nil
-}
-
 // Update delegates to the shared list-navigation handler.
 func (s *configUtilitiesScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	return s, s.handleMsg(msg)
@@ -62,6 +54,9 @@ func (s *configUtilitiesScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // View renders the utilities selection screen.
 func (s *configUtilitiesScreen) View(width, height int) string {
 	a := s.App()
+	if a.installCacheLoading {
+		return installStatusLoadingView(a, width, height)
+	}
 
 	title := renderConfigTitle("", "Utilities", "Helper tools from tekierz/homebrew-tap")
 

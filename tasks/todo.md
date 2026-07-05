@@ -106,6 +106,15 @@ Bash installer (still the documented fallback path):
 
 ## P3 — Cleanups (post-release acceptable; tracked so they don't rot)
 
+- [ ] Extract shared per-theme palette: internal/tools/yazi_theme.go re-declares 16-theme
+      hex colors that overlap ~9 fields with internal/ui/styles.go ThemePalettes; move the
+      shared table to a low-level package both can import (ui imports tools, so the
+      palette must live below both to avoid a cycle).
+- [ ] caff `is_caffeine` uses `ps -p PID -o comm=` with no fallback — not portable to
+      busybox ps (narrow: busybox systems rarely run systemd-inhibit; macOS uses real ps).
+- [ ] Micro-perf (flagged in review, low): matchesToken re-normalizes the wanted name per
+      directory entry; sanitizeLogLine allocates twice per line; installOutput appends
+      sanitize inline at two sites instead of a funnel helper like appendInstallLog.
 - [ ] Dedupe: ensureInstallCache vs loadInstallCacheCmd (~55 dup lines); favorites-filter
       block ×5; dual-pane layout engine ×3; styles defined twice (var block vs
       updateStyles — GradientCyber already drifted); backup/restore/cache flow triplets;
@@ -123,8 +132,9 @@ Bash installer (still the documented fallback path):
 - [ ] golangci-lint clean with the repaired config; CI fully blocking
 - [ ] `govulncheck ./...` re-run clean
 - [ ] Run the `pre-pr-tests` skill checklist (manual TUI pass on macOS + one Linux)
-- [ ] On macOS, confirm glow reads its config from the new `os.UserConfigDir()` path
-      (`glow config` should show/edit `~/Library/Application Support/glow/glow.yml`)
+- [ ] On macOS, confirm glow reads its config where we write it
+      (`glow config` should show/edit `~/Library/Preferences/glow/glow.yml`,
+      per go-app-paths User scope)
 - [ ] Fresh-machine install test: brew tap path AND bash-script path; then uninstall and
       verify configs restored byte-identical (this exercises the P0 backup fixes)
 - [ ] Tag release; verify `dotfiles --version` matches the tag; update homebrew-tap

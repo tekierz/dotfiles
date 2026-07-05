@@ -2512,7 +2512,7 @@ HK_EMACS_EOF
 # world-writable /tmp. This avoids the predictable-path / stale-PID hazard
 # where another user (or a reused PID after a reboot) could cause us to kill
 # an arbitrary process.
-RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/caff"
 mkdir -p "$RUNTIME_DIR" 2>/dev/null
 chmod 700 "$RUNTIME_DIR" 2>/dev/null
 PIDFILE="$RUNTIME_DIR/caffeine.pid"

@@ -21,6 +21,10 @@ type UserHotkeys struct {
 }
 
 // LoadHotkeysConfig loads hotkeys config from ConfigDir()/hotkeys.json.
+// Earlier releases wrote hotkeys.json to a literal ~/.config/dotfiles path
+// even when XDG_CONFIG_HOME pointed elsewhere; if the file is missing at the
+// ConfigDir() location, fall back to that legacy path so saved favorites and
+// aliases survive the upgrade (the next save writes the new location).
 func LoadHotkeysConfig() (*HotkeysConfig, error) {
 	dir := ConfigDir()
 	if dir == "" {
@@ -29,6 +33,13 @@ func LoadHotkeysConfig() (*HotkeysConfig, error) {
 	path := filepath.Join(dir, "hotkeys.json")
 
 	data, err := os.ReadFile(path)
+	if err != nil && os.IsNotExist(err) {
+		if legacy := legacyHotkeysPath(); legacy != "" && legacy != path {
+			if legacyData, legacyErr := os.ReadFile(legacy); legacyErr == nil {
+				data, err = legacyData, nil
+			}
+		}
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &HotkeysConfig{Users: make(map[string]*UserHotkeys)}, nil
@@ -44,6 +55,16 @@ func LoadHotkeysConfig() (*HotkeysConfig, error) {
 		cfg.Users = make(map[string]*UserHotkeys)
 	}
 	return &cfg, nil
+}
+
+// legacyHotkeysPath returns the pre-XDG location hotkeys.json was written to,
+// or "" when the home directory cannot be determined.
+func legacyHotkeysPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".config", "dotfiles", "hotkeys.json")
 }
 
 // SaveHotkeysConfig saves hotkeys config

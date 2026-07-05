@@ -430,14 +430,13 @@ func hasDesktopEntryInDirs(searchPaths []string, names ...string) bool {
 				}
 			}
 
-			// Second check: read Exec= field for AppImage entries
-			// AppImage desktop entries often have names like "appimagekit_xxx-Cursor.desktop"
-			// but the Exec= field contains the actual AppImage path
-			if strings.Contains(strings.ToLower(entryName), "appimage") {
-				desktopPath := filepath.Join(searchPath, entry.Name())
-				if hasDesktopEntryExec(desktopPath, names...) {
-					return true
-				}
+			// Second check: match the Exec= binary. Covers AppImage entries
+			// ("appimagekit_xxx-Cursor.desktop") and reverse-DNS ids whose
+			// filename tokens hide the app name (com.obsproject.Studio.desktop
+			// has Exec=obs).
+			desktopPath := filepath.Join(searchPath, entry.Name())
+			if hasDesktopEntryExec(desktopPath, names...) {
+				return true
 			}
 		}
 	}
@@ -594,6 +593,10 @@ func hasMacOSApp(names ...string) bool {
 		filepath.Join(home, "Applications"),
 	}
 
+	return hasMacOSAppInDirs(searchPaths, names...)
+}
+
+func hasMacOSAppInDirs(searchPaths []string, names ...string) bool {
 	for _, searchPath := range searchPaths {
 		entries, err := os.ReadDir(searchPath)
 		if err != nil {
@@ -601,9 +604,8 @@ func hasMacOSApp(names ...string) bool {
 		}
 		for _, entry := range entries {
 			if entry.IsDir() && strings.HasSuffix(entry.Name(), ".app") {
-				entryLower := strings.ToLower(entry.Name())
 				for _, name := range names {
-					if strings.Contains(entryLower, strings.ToLower(name)) {
+					if matchesToken(entry.Name(), name) {
 						return true
 					}
 				}

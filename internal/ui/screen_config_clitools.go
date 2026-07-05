@@ -60,14 +60,6 @@ func NewConfigCLIToolsScreen(ctx *ScreenContext) *configCLIToolsScreen {
 	return s
 }
 
-// Init triggers the async install-cache load on entry (idempotent).
-func (s *configCLIToolsScreen) Init() tea.Cmd {
-	if a := s.App(); a != nil {
-		return a.startInstallCacheLoad()
-	}
-	return nil
-}
-
 // Update delegates to the shared list-navigation handler.
 func (s *configCLIToolsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	return s, s.handleMsg(msg)
@@ -76,6 +68,9 @@ func (s *configCLIToolsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // View renders the CLI tools selection screen.
 func (s *configCLIToolsScreen) View(width, height int) string {
 	a := s.App()
+	if a.installCacheLoading {
+		return installStatusLoadingView(a, width, height)
+	}
 
 	title := renderConfigTitle("", "CLI Tools", "Terminal-based productivity tools")
 

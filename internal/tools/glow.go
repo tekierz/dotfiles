@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
@@ -95,7 +96,17 @@ func WriteGlowConfig(cfg GlowConfig, theme string) error {
 	return writeToolConfig(configPath, []byte(content))
 }
 
+// glowConfigPath returns the config file glow itself loads. Glow resolves its
+// config through go-app-paths' User scope: ~/Library/Preferences on macOS
+// (NOT os.UserConfigDir's ~/Library/Application Support), XDG everywhere else.
 func glowConfigPath() (string, error) {
+	if runtime.GOOS == "darwin" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to get home directory: %w", err)
+		}
+		return filepath.Join(home, "Library", "Preferences", "glow", "glow.yml"), nil
+	}
 	userConfigDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get user config directory: %w", err)

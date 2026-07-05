@@ -177,6 +177,11 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			if len(packagesToUpdate) > 0 {
 				a.clearInstallLogs()
 				a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
+				// pacman/paru run -Syu: targeted updates ride a full system
+				// upgrade (partial upgrades break Arch). Say so.
+				if mgr := pkg.DetectManager(); mgr != nil && (mgr.Name() == "pacman" || mgr.Name() == "paru") {
+					a.updateStatus = fmt.Sprintf("Updating %d package(s) + full system upgrade (-Syu)...", len(packagesToUpdate))
+				}
 				return checkSudoAndUpdateCmd(packagesToUpdate, false)
 			}
 		}
@@ -278,8 +283,9 @@ func (s *updateScreen) View(width, height int) string {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Top, content)
 	}
 
-	// Check for errors
-	if a.updateError != nil {
+	// A check error with no results is fatal; with partial results (one of
+	// several managers failed) the list still renders, plus a warning line.
+	if a.updateError != nil && len(a.updateResults) == 0 {
 		body := lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("Error: %v", a.updateError))
 		help := HelpStyle.Render("r refresh • 1-4 switch tabs • esc menu • q quit")
 		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, "", help)
@@ -380,6 +386,11 @@ func (s *updateScreen) View(width, height int) string {
 	// Build content with optional status line
 	var contentParts []string
 	contentParts = append(contentParts, tabBar, "", title, subtitle)
+	if a.updateError != nil {
+		warn := lipgloss.NewStyle().Foreground(ColorYellow).Render(
+			truncateVisible(fmt.Sprintf("⚠ some checks failed: %v", a.updateError), innerTextW))
+		contentParts = append(contentParts, warn)
+	}
 	if statusLine != "" {
 		contentParts = append(contentParts, statusLine)
 	}

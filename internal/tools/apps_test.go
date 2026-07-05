@@ -62,6 +62,16 @@ func TestHasDesktopEntryTokenMatching(t *testing.T) {
 			names: []string{"zen"},
 			want:  false,
 		},
+		{
+			// Reverse-DNS id hides the app name inside a longer token
+			// ("obsproject"); the Exec= binary must rescue the match.
+			name: "obs reverse dns exec rescue",
+			files: map[string]string{
+				"com.obsproject.Studio.desktop": "[Desktop Entry]\nExec=obs\n",
+			},
+			names: []string{"obs", "obs-studio", "OBS"},
+			want:  true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -133,6 +143,56 @@ func TestHasAppImageTokenMatching(t *testing.T) {
 			got := hasAppImageInDirs([]string{appDir}, tt.patterns...)
 			if got != tt.want {
 				t.Fatalf("hasAppImageInDirs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasMacOSAppTokenMatching(t *testing.T) {
+	tests := []struct {
+		name    string
+		bundles []string
+		names   []string
+		want    bool
+	}{
+		{
+			name:    "zen browser bundle",
+			bundles: []string{"Zen Browser.app"},
+			names:   []string{"Zen Browser", "Zen"},
+			want:    true,
+		},
+		{
+			name:    "zen does not match zenmap",
+			bundles: []string{"Zenmap.app"},
+			names:   []string{"Zen Browser", "Zen"},
+			want:    false,
+		},
+		{
+			name:    "obs bundle",
+			bundles: []string{"OBS.app"},
+			names:   []string{"OBS", "OBS Studio"},
+			want:    true,
+		},
+		{
+			name:    "lm studio bundle",
+			bundles: []string{"LM Studio.app"},
+			names:   []string{"LM Studio", "LMStudio"},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			appsDir := t.TempDir()
+			for _, bundle := range tt.bundles {
+				if err := os.MkdirAll(filepath.Join(appsDir, bundle), 0700); err != nil {
+					t.Fatalf("MkdirAll returned error: %v", err)
+				}
+			}
+
+			got := hasMacOSAppInDirs([]string{appsDir}, tt.names...)
+			if got != tt.want {
+				t.Fatalf("hasMacOSAppInDirs() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -458,8 +459,24 @@ type configListNav struct {
 // ID returns the screen identifier.
 func (s *configListNav) ID() Screen { return s.id }
 
-// Init returns any initial commands (none on entry).
-func (s *configListNav) Init() tea.Cmd { return nil }
+// Init triggers the async install-cache load on entry (idempotent). Every
+// list-nav screen renders install-state color coding, so the base owns the
+// trigger; a future embedder that doesn't need it can override with nil.
+func (s *configListNav) Init() tea.Cmd {
+	if a := s.App(); a != nil {
+		return a.startInstallCacheLoad()
+	}
+	return nil
+}
+
+// installStatusLoadingView is the shared loading frame shown while the async
+// install-status query is in flight (mirrors the manage screen's treatment).
+func installStatusLoadingView(a *App, width, height int) string {
+	spinner := AnimatedSpinnerDots(a.uiFrame)
+	style := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	return PlaceWithBackground(width, height,
+		style.Render(fmt.Sprintf("%s Loading installation status...", spinner)))
+}
 
 // footer returns the pre-rendered help line for list-nav screens.
 // Accurate to handleMsg: up/down move, space toggles, enter/esc back.

@@ -531,8 +531,12 @@ func checkUpdates() {
 
 	updates, err := pkg.CheckDotfilesUpdates()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error checking updates: %v\n", err)
-		return
+		// Partial results (one of several managers failed) still print.
+		if len(updates) == 0 {
+			fmt.Fprintf(os.Stderr, "Error checking updates: %v\n", err)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Warning: some update checks failed: %v\n\n", err)
 	}
 
 	if len(updates) == 0 {
