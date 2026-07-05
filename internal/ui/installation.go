@@ -45,16 +45,10 @@ func (a *App) startInstallation() tea.Cmd {
 
 	// Save theme and nav style before installation. A failure here means the
 	// user's theme / nav-style / animation choices will not persist across runs.
-	// Surface it in the live install log (this runs on the Update goroutine, so
-	// writing installOutput directly is safe), but the live log is capped to the
-	// last few lines and scrolls this warning away on any real install. So ALSO
-	// hand the error to the worker (savePrefsErr) which folds it into the final
-	// failure aggregation, making it appear on the PERSISTENT post-install
-	// summary (Error screen's failed-steps list) where the user actually sees it.
+	// Hand any preferences-save failure to the worker (savePrefsErr); it emits a
+	// single non-fatal warning line into the install log without failing the
+	// install. Don't also append here — that would double-log the same warning.
 	savePrefsErr := a.saveInstallerConfig()
-	if savePrefsErr != nil {
-		a.installOutput = append(a.installOutput, fmt.Sprintf("⚠ Failed to save preferences: %v", savePrefsErr))
-	}
 
 	// Collect all selected tools from deep dive config
 	selectedTools := a.collectSelectedTools()
@@ -152,9 +146,10 @@ func (a *App) listenInstallEventsCmd() tea.Cmd {
 // App field. It closes the channel when finished.
 // savePrefsErr, when a non-nil error is supplied, is the failure from saving the
 // user's theme/nav-style/animation preferences (captured on the main goroutine
-// before the worker started). It is folded into the failure aggregation below so
-// it is reported on the persistent post-install summary rather than only in the
-// capped live log where it scrolls away. It is variadic (optional) so callers
+// before the worker started). It is emitted as a NON-FATAL warning line (the
+// same treatment as a backup-cleanup error): it is never added to the failures
+// slice, so a preferences-record-save failure alone does not flip an otherwise
+// successful install to the error screen. It is variadic (optional) so callers
 // that do not track a preferences save — e.g. tests exercising the config-apply
 // path — can omit it entirely.
 func runInstallWorker(ctx context.Context, events chan<- installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string, savePrefsErr ...error) {
@@ -228,12 +223,12 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	var failures []error
 	noteFailure := func(err error) { failures = append(failures, err) }
 
-	// Fold the pre-install preferences-save failure (if any) into the aggregated
-	// failures so it surfaces on the persistent post-install summary (Error
-	// screen's failed-steps list), not just the capped live log. Recorded first
-	// because it happened before any phase below.
+	// Surface the pre-install preferences-save failure (if any) as a non-fatal
+	// warning line in the install log (same treatment as a backup-cleanup error),
+	// so it is visible but does not fail the install. Recorded first because it
+	// happened before any phase below.
 	if len(savePrefsErr) > 0 && savePrefsErr[0] != nil {
-		noteFailure(fmt.Errorf("Failed to save preferences (theme/nav-style/animations will not persist): %w", savePrefsErr[0]))
+		emitLine(fmt.Sprintf("⚠ Failed to save preferences (theme/nav-style/animations will not persist): %v", savePrefsErr[0]))
 	}
 
 	// Package installation is skipped when no NEW packages are selected (e.g. a
