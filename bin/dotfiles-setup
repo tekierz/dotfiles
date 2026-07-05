@@ -29,6 +29,9 @@ SUPPORTED_THEMES="catppuccin-mocha catppuccin-latte catppuccin-frappe catppuccin
 DOTFILES_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
 DOTFILES_BACKUP_DIR="$DOTFILES_CONFIG_DIR/backups"
 BACKUP_MANIFEST=""
+FAILED_CRITICAL=()
+FAILED_OPTIONAL=()
+INSTALL_HAD_CRITICAL_FAILURE=0
 
 # Load theme colors based on selected theme
 load_theme_colors() {
@@ -691,6 +694,104 @@ print_error() {
     echo -e "${RED}✗${NC} $1"
 }
 
+add_failed_optional() {
+    local pkg existing
+    for pkg in "$@"; do
+        [[ -n "$pkg" ]] || continue
+        # Length guard: expanding an empty array under set -u aborts on bash 3.2 (macOS).
+        if [[ ${#FAILED_OPTIONAL[@]} -gt 0 ]]; then
+            for existing in "${FAILED_OPTIONAL[@]}"; do
+                [[ "$existing" == "$pkg" ]] && continue 2
+            done
+        fi
+        FAILED_OPTIONAL+=("$pkg")
+    done
+}
+
+add_failed_critical() {
+    local pkg existing
+    for pkg in "$@"; do
+        [[ -n "$pkg" ]] || continue
+        # Length guard: expanding an empty array under set -u aborts on bash 3.2 (macOS).
+        if [[ ${#FAILED_CRITICAL[@]} -gt 0 ]]; then
+            for existing in "${FAILED_CRITICAL[@]}"; do
+                [[ "$existing" == "$pkg" ]] && continue 2
+            done
+        fi
+        FAILED_CRITICAL+=("$pkg")
+    done
+}
+
+run_pkg_cmd() {
+    local label="$1"
+    shift
+
+    local log
+    log=$(mktemp 2>/dev/null || echo "")
+    if [[ -n "$log" ]]; then
+        if "$@" >"$log" 2>&1; then
+            rm -f "$log"
+            return 0
+        fi
+        print_warning "'$label' failed to install:"
+        tail -n 20 "$log" >&2 || true
+        rm -f "$log"
+    else
+        if "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        print_warning "'$label' failed to install"
+    fi
+
+    return 1
+}
+
+# run_pkg <label> [package...] -- <install command prefix...>
+# Runs batch installs without aborting under set -e. If a batch fails, retries
+# per package so the final summary names the package installs that failed.
+run_pkg() {
+    local label="$1"
+    shift
+
+    local packages=()
+    while [[ $# -gt 0 && "${1:-}" != "--" ]]; do
+        packages+=("$1")
+        shift
+    done
+    [[ "${1:-}" == "--" ]] && shift
+
+    local cmd=("$@")
+    if [[ ${#cmd[@]} -eq 0 ]]; then
+        print_warning "No install command provided for '$label'"
+        add_failed_optional "$label"
+        return 0
+    fi
+
+    if [[ ${#packages[@]} -gt 0 ]]; then
+        if run_pkg_cmd "$label" "${cmd[@]}" "${packages[@]}"; then
+            return 0
+        fi
+
+        if [[ ${#packages[@]} -gt 1 ]]; then
+            print_warning "Retrying '$label' one package at a time..."
+            local pkg
+            for pkg in "${packages[@]}"; do
+                if ! run_pkg_cmd "$pkg" "${cmd[@]}" "$pkg"; then
+                    add_failed_optional "$pkg"
+                fi
+            done
+        else
+            add_failed_optional "${packages[@]}"
+        fi
+    else
+        if ! run_pkg_cmd "$label" "${cmd[@]}"; then
+            add_failed_optional "$label"
+        fi
+    fi
+
+    return 0
+}
+
 # Cross-platform sed in-place (macOS requires -i '', Linux uses -i)
 sed_i() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -1042,7 +1143,7 @@ install_packages() {
         fi
 
         print_step "Installing packages via Homebrew..."
-        brew install \
+        run_pkg "Homebrew core packages" \
             zsh \
             zsh-syntax-highlighting \
             zsh-autosuggestions \
@@ -1067,35 +1168,35 @@ install_packages() {
             gping \
             doggo \
             trippy \
-            2>/dev/null || true
+            -- brew install
 
         # Install fonts
         print_step "Installing Nerd Fonts..."
-        brew tap homebrew/cask-fonts 2>/dev/null || true
-        brew install --cask font-jetbrains-mono-nerd-font font-iosevka-nerd-font 2>/dev/null || true
+        run_pkg "Homebrew cask fonts tap" homebrew/cask-fonts -- brew tap
+        run_pkg "Nerd Fonts" font-jetbrains-mono-nerd-font font-iosevka-nerd-font -- brew install --cask
 
         # Install Ghostty if available
         print_step "Installing Ghostty..."
-        brew install --cask ghostty 2>/dev/null || print_warning "Ghostty not available via brew, install manually"
+        run_pkg "Ghostty" ghostty -- brew install --cask
 
         # macOS system monitor (macmon)
         print_step "Installing macmon..."
-        brew install macmon 2>/dev/null || print_warning "macmon not available"
+        run_pkg "macmon" macmon -- brew install
 
         # Optional macOS Quality of Life Apps
         if [[ "$INSTALL_MACOS_APPS" == "true" ]] || ask_user "Install optional macOS quality-of-life apps? (Rectangle, Raycast, Stats, etc.)"; then
             print_step "Installing macOS quality-of-life apps..."
 
             # Essential (always install)
-            brew install --cask \
+            run_pkg "macOS essential apps" \
                 rectangle \
                 raycast \
                 stats \
-                2>/dev/null || true
+                -- brew install --cask
 
             # Optional (prompt individually if not using --macos-apps flag)
             if [[ "$INSTALL_MACOS_APPS" == "true" ]] || [[ "$SKIP_PROMPTS" == "true" ]]; then
-                brew install --cask \
+                run_pkg "macOS optional app casks" \
                     alt-tab \
                     monitorcontrol \
                     mos \
@@ -1103,24 +1204,42 @@ install_packages() {
                     iina \
                     the-unarchiver \
                     appcleaner \
-                    2>/dev/null || true
+                    -- brew install --cask
 
-                brew install \
+                run_pkg "macOS optional app formulae" \
                     mas \
                     trash \
                     switchaudio-osx \
-                    2>/dev/null || true
+                    -- brew install
             else
                 # Ask for each optional app
-                ask_user "Install AltTab (Windows-style alt-tab)?" && brew install --cask alt-tab 2>/dev/null || true
-                ask_user "Install MonitorControl (external monitor brightness)?" && brew install --cask monitorcontrol 2>/dev/null || true
-                ask_user "Install Mos (smooth scrolling for mouse)?" && brew install --cask mos 2>/dev/null || true
-                ask_user "Install Karabiner-Elements (keyboard customization)?" && brew install --cask karabiner-elements 2>/dev/null || true
-                ask_user "Install IINA (modern video player)?" && brew install --cask iina 2>/dev/null || true
-                ask_user "Install The Unarchiver?" && brew install --cask the-unarchiver 2>/dev/null || true
-                ask_user "Install AppCleaner?" && brew install --cask appcleaner 2>/dev/null || true
-                ask_user "Install mas (Mac App Store CLI)?" && brew install mas 2>/dev/null || true
-                ask_user "Install trash (CLI trash command)?" && brew install trash 2>/dev/null || true
+                if ask_user "Install AltTab (Windows-style alt-tab)?"; then
+                    run_pkg "AltTab" alt-tab -- brew install --cask
+                fi
+                if ask_user "Install MonitorControl (external monitor brightness)?"; then
+                    run_pkg "MonitorControl" monitorcontrol -- brew install --cask
+                fi
+                if ask_user "Install Mos (smooth scrolling for mouse)?"; then
+                    run_pkg "Mos" mos -- brew install --cask
+                fi
+                if ask_user "Install Karabiner-Elements (keyboard customization)?"; then
+                    run_pkg "Karabiner-Elements" karabiner-elements -- brew install --cask
+                fi
+                if ask_user "Install IINA (modern video player)?"; then
+                    run_pkg "IINA" iina -- brew install --cask
+                fi
+                if ask_user "Install The Unarchiver?"; then
+                    run_pkg "The Unarchiver" the-unarchiver -- brew install --cask
+                fi
+                if ask_user "Install AppCleaner?"; then
+                    run_pkg "AppCleaner" appcleaner -- brew install --cask
+                fi
+                if ask_user "Install mas (Mac App Store CLI)?"; then
+                    run_pkg "mas" mas -- brew install
+                fi
+                if ask_user "Install trash (CLI trash command)?"; then
+                    run_pkg "trash" trash -- brew install
+                fi
             fi
 
             print_success "macOS apps installed"
@@ -1133,7 +1252,7 @@ install_packages() {
 
         # Base packages for all Pi models
         sudo apt update
-        sudo apt install -y \
+        run_pkg "Raspberry Pi base packages" \
             zsh \
             tmux \
             neovim \
@@ -1146,7 +1265,7 @@ install_packages() {
             wget \
             htop \
             xclip \
-            2>/dev/null || true
+            -- sudo apt install -y
 
         # Model-specific optimizations
         if [[ "$RASPI_MODEL" == "zero2" ]]; then
@@ -1156,9 +1275,7 @@ install_packages() {
         else
             # Pi 4/5 can handle more
             print_step "Installing additional tools for Pi ${RASPI_MODEL}..."
-            sudo apt install -y \
-                btop \
-                2>/dev/null || true
+            run_pkg "Raspberry Pi additional tools" btop -- sudo apt install -y
         fi
 
         # Install from source/binary for tools not in apt
@@ -1170,29 +1287,38 @@ install_packages() {
                 print_step "Installing eza..."
                 sudo apt install -y eza 2>/dev/null || \
                     cargo install eza 2>/dev/null || \
-                    print_warning "Could not install eza"
+                    {
+                        print_warning "Could not install eza"
+                        add_failed_optional "eza"
+                    }
             fi
         fi
 
         # zoxide
         if ! command -v zoxide &> /dev/null; then
             print_step "Installing zoxide..."
-            curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash 2>/dev/null || \
+            curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash 2>/dev/null || {
                 print_warning "Could not install zoxide"
+                add_failed_optional "zoxide"
+            }
         fi
 
         # yazi (skip on Zero 2)
         if [[ "$RASPI_MODEL" != "zero2" ]] && ! command -v yazi &> /dev/null; then
             print_step "Installing yazi..."
-            cargo install --locked yazi-fm 2>/dev/null || \
+            cargo install --locked yazi-fm 2>/dev/null || {
                 print_warning "Could not install yazi (requires cargo)"
+                add_failed_optional "yazi"
+            }
         fi
 
         # delta
         if ! command -v delta &> /dev/null; then
             print_step "Installing delta..."
-            cargo install git-delta 2>/dev/null || \
+            cargo install git-delta 2>/dev/null || {
                 print_warning "Could not install delta"
+                add_failed_optional "delta"
+            }
         fi
 
         # Pi-specific: install zsh plugins manually
@@ -1201,17 +1327,17 @@ install_packages() {
         mkdir -p "$ZSH_PLUGINS_DIR"
 
         if [[ ! -d "$ZSH_PLUGINS_DIR/zsh-syntax-highlighting" ]]; then
-            git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_PLUGINS_DIR/zsh-syntax-highlighting" 2>/dev/null || true
+            run_pkg "zsh-syntax-highlighting plugin" -- git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_PLUGINS_DIR/zsh-syntax-highlighting"
         fi
         if [[ ! -d "$ZSH_PLUGINS_DIR/zsh-autosuggestions" ]]; then
-            git clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_PLUGINS_DIR/zsh-autosuggestions" 2>/dev/null || true
+            run_pkg "zsh-autosuggestions plugin" -- git clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_PLUGINS_DIR/zsh-autosuggestions"
         fi
 
         print_success "Raspberry Pi packages installed"
 
     elif [[ "$OS" == "arch" ]]; then
         print_step "Installing packages via pacman..."
-        sudo pacman -S --needed --noconfirm \
+        run_pkg "Arch core packages" \
             zsh \
             zsh-syntax-highlighting \
             zsh-autosuggestions \
@@ -1235,7 +1361,7 @@ install_packages() {
             duf \
             bandwhich \
             gping \
-            2>/dev/null || true
+            -- sudo pacman -S --needed --noconfirm
 
         # Enable paccache timer
         sudo systemctl enable --now paccache.timer 2>/dev/null || true
@@ -1243,18 +1369,18 @@ install_packages() {
         # Install paru packages
         if command -v paru &> /dev/null; then
             print_step "Installing AUR packages..."
-            paru -S --needed --noconfirm \
+            run_pkg "Arch AUR packages" \
                 ghostty \
                 dust \
                 dog \
                 trippy \
-                2>/dev/null || true
+                -- paru -S --needed --noconfirm
         fi
 
     elif [[ "$OS" == "debian" ]]; then
         print_step "Installing packages via apt..."
         sudo apt update
-        sudo apt install -y \
+        run_pkg "Debian core packages" \
             zsh \
             tmux \
             neovim \
@@ -1266,17 +1392,50 @@ install_packages() {
             xclip \
             wl-clipboard \
             ncdu \
-            2>/dev/null || true
+            -- sudo apt install -y
 
         # Install duf if available (Ubuntu 22.04+)
-        sudo apt install -y duf 2>/dev/null || true
+        run_pkg "Debian duf" duf -- sudo apt install -y
 
         print_warning "Some packages may need manual installation on Debian/Ubuntu"
         print_warning "Consider using Homebrew for: eza, yazi, zoxide, delta, fastfetch"
         print_warning "Network tools (bandwhich, gping, doggo, trippy) require cargo or Homebrew"
     fi
 
-    print_success "Package installation complete"
+    if ! command -v zsh >/dev/null 2>&1; then
+        add_failed_critical "zsh"
+    fi
+    if ! command -v tmux >/dev/null 2>&1; then
+        add_failed_critical "tmux"
+    fi
+    if ! command -v nvim >/dev/null 2>&1; then
+        add_failed_critical "nvim"
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        add_failed_critical "fzf"
+    fi
+
+    if [[ ${#FAILED_CRITICAL[@]} -gt 0 ]]; then
+        print_error "Critical tools failed to install:"
+        local pkg
+        for pkg in "${FAILED_CRITICAL[@]}"; do
+            echo -e "  ${RED}-${NC} $pkg"
+        done
+        print_warning "Configuration will still be written, but these tools are required."
+        INSTALL_HAD_CRITICAL_FAILURE=1
+    fi
+    if [[ ${#FAILED_OPTIONAL[@]} -gt 0 ]]; then
+        print_warning "Package installs with failures:"
+        local pkg
+        for pkg in "${FAILED_OPTIONAL[@]}"; do
+            echo -e "  ${YELLOW}-${NC} $pkg"
+        done
+    fi
+    if [[ ${#FAILED_CRITICAL[@]} -eq 0 && ${#FAILED_OPTIONAL[@]} -eq 0 ]]; then
+        print_success "Package installation complete"
+    else
+        print_warning "Package installation finished with issues (see above)"
+    fi
 }
 
 # ============================================================================
@@ -2349,11 +2508,39 @@ HK_EMACS_EOF
     cat > ~/.local/bin/caff << 'CAFF_EOF'
 #!/usr/bin/env bash
 
-PIDFILE="/tmp/caffeine-$USER.pid"
+# Store the PID in a per-user runtime directory rather than the shared,
+# world-writable /tmp. This avoids the predictable-path / stale-PID hazard
+# where another user (or a reused PID after a reboot) could cause us to kill
+# an arbitrary process.
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}"
+mkdir -p "$RUNTIME_DIR" 2>/dev/null
+chmod 700 "$RUNTIME_DIR" 2>/dev/null
+PIDFILE="$RUNTIME_DIR/caffeine.pid"
+
+# read_pid prints the stored PID only if it is a plausible numeric value.
+read_pid() {
+    local pid
+    pid=$(cat "$PIDFILE" 2>/dev/null)
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    echo "$pid"
+}
+
+# is_caffeine verifies the given PID belongs to a caffeinate/systemd-inhibit
+# process before we act on it, so we never signal an unrelated reused PID.
+is_caffeine() {
+    local pid="$1"
+    local comm
+    comm=$(ps -p "$pid" -o comm= 2>/dev/null) || return 1
+    case "$comm" in
+        *caffeinate*|*systemd-inhibit*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 status() {
-    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-        echo "☕ Caffeine: ON (PID $(cat "$PIDFILE"))"
+    local pid
+    if pid=$(read_pid) && kill -0 "$pid" 2>/dev/null && is_caffeine "$pid"; then
+        echo "☕ Caffeine: ON (PID $pid)"
         return 0
     else
         echo "😴 Caffeine: OFF"
@@ -2378,13 +2565,13 @@ start() {
             sleep infinity &
     fi
 
-    echo $! > "$PIDFILE"
+    (umask 077; echo $! > "$PIDFILE")
     echo "☕ Caffeine: ON - system will stay awake"
 }
 
 stop() {
-    if [[ -f "$PIDFILE" ]]; then
-        pid=$(cat "$PIDFILE")
+    local pid
+    if pid=$(read_pid) && is_caffeine "$pid"; then
         if kill "$pid" 2>/dev/null; then
             rm -f "$PIDFILE"
             echo "😴 Caffeine: OFF - sleep enabled"
@@ -2419,7 +2606,7 @@ CAFF_EOF
     # SSH Quick Connect - install from Homebrew tap on macOS
     if [[ "$OS" == "macos" ]]; then
         if ! command -v sshh &>/dev/null; then
-            brew install tekierz/tap/sshh 2>/dev/null || print_warning "Could not install sshh from tap"
+            run_pkg "sshh" tekierz/tap/sshh -- brew install
         fi
     fi
 
@@ -3781,7 +3968,11 @@ main() {
     # Save current settings
     save_settings
 
-    print_header "Setup Complete!"
+    if [[ "${INSTALL_HAD_CRITICAL_FAILURE:-0}" == "1" ]]; then
+        print_header "Setup Finished With Critical Package Failures"
+    else
+        print_header "Setup Complete!"
+    fi
     echo -e "Theme: ${PURPLE}$THEME${NC}"
     echo -e "Navigation: ${CYAN}$NAV_STYLE${NC}\n"
     echo -e "Next steps:"
@@ -3793,8 +3984,16 @@ main() {
     echo -e "\nTo change theme/navigation anytime:"
     echo -e "  ${CYAN}dotfiles-setup-cli theme <name>${NC}  - Switch theme"
     echo -e "  ${CYAN}dotfiles-setup-cli list-themes${NC}   - Show available themes"
-    echo -e "\n${GREEN}Enjoy your new terminal!${NC}\n"
+    if [[ "${INSTALL_HAD_CRITICAL_FAILURE:-0}" == "1" ]]; then
+        echo -e "\n${YELLOW}Install finished with critical package failures; review the package summary above.${NC}\n"
+    else
+        echo -e "\n${GREEN}Enjoy your new terminal!${NC}\n"
+    fi
 }
 
 # Run main
 main "$@"
+
+if [[ "${INSTALL_HAD_CRITICAL_FAILURE:-0}" == "1" ]]; then
+    exit 1
+fi
