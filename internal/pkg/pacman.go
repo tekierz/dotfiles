@@ -198,8 +198,7 @@ func (p *PacmanManager) Update(packages ...string) error {
 		return nil
 	}
 
-	args := []string{"-S", "--noconfirm"}
-	args = append(args, packages...)
+	args := pacmanUpdateArgs(nil, packages)
 
 	var cmd *exec.Cmd
 	if p.useParu {
@@ -209,6 +208,14 @@ func (p *PacmanManager) Update(packages ...string) error {
 	}
 
 	return cmd.Run()
+}
+
+func pacmanUpdateArgs(extraFlags []string, packages []string) []string {
+	// Use -Syu for selected updates: checkupdates reads a private fresh DB, while
+	// -S would use stale sync DBs and bare -Sy risks a partial upgrade.
+	args := []string{"-Syu", "--noconfirm"}
+	args = append(args, extraFlags...)
+	return append(args, packages...)
 }
 
 func (p *PacmanManager) UpdateAll() error {
@@ -349,14 +356,12 @@ func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string)
 
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally
-		args := []string{"-S", "--noconfirm", "--skipreview", "--noprovides"}
-		args = append(args, packages...)
+		args := pacmanUpdateArgs([]string{"--skipreview", "--noprovides"}, packages)
 		return runner.RunStreaming(ctx, p.pacmanPath, args...)
 	}
 
 	// pacman needs sudo
-	args := []string{"-S", "--noconfirm"}
-	args = append(args, packages...)
+	args := pacmanUpdateArgs(nil, packages)
 	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
 }
 

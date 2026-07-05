@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -141,9 +142,16 @@ func (a *AptManager) Update(packages ...string) error {
 		return nil
 	}
 
-	// Update package lists first (best-effort: install proceeds even if this fails)
-	updateCmd := exec.Command("sudo", "apt", "update")
-	_ = updateCmd.Run()
+	// Update package lists first. Use sudo -n so this best-effort refresh never
+	// blocks on an invisible password prompt; install below may still prompt.
+	updateCmd := exec.Command("sudo", "-n", "apt", "update")
+	if out, err := updateCmd.CombinedOutput(); err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			fmt.Fprintf(os.Stderr, "warning: apt update refresh failed, continuing with current package lists: %v: %s\n", err, msg)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: apt update refresh failed, continuing with current package lists: %v\n", err)
+		}
+	}
 
 	// Install specific packages (will upgrade if already installed)
 	args := []string{"apt", "install", "-y"}

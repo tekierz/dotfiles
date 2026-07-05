@@ -1,9 +1,12 @@
 package pkg
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 )
+
+var allManagers = AllManagers
 
 // UpdateResult represents the result of an update operation
 type UpdateResult struct {
@@ -15,8 +18,9 @@ type UpdateResult struct {
 // CheckAllUpdates checks for updates across all available package managers
 func CheckAllUpdates() ([]Package, error) {
 	var allPackages []Package
+	var managerErrs []error
 
-	managers := AllManagers()
+	managers := allManagers()
 	if len(managers) == 0 {
 		return nil, fmt.Errorf("no package managers available")
 	}
@@ -24,7 +28,8 @@ func CheckAllUpdates() ([]Package, error) {
 	for _, mgr := range managers {
 		packages, err := mgr.CheckOutdated()
 		if err != nil {
-			// Log error but continue with other managers
+			// Keep checking other managers, but surface this failure to callers.
+			managerErrs = append(managerErrs, fmt.Errorf("%s: %w", mgr.Name(), err))
 			continue
 		}
 		allPackages = append(allPackages, packages...)
@@ -51,7 +56,7 @@ func CheckAllUpdates() ([]Package, error) {
 		return allPackages[i].Name < allPackages[j].Name
 	})
 
-	return allPackages, nil
+	return allPackages, errors.Join(managerErrs...)
 }
 
 // DotfilesPackages is the canonical dotfiles package allow-list using macOS/Arch
@@ -133,9 +138,6 @@ var DotfilesDebianPackages = []string{
 // are used for filtering so renamed packages are not silently dropped.
 func CheckDotfilesUpdates() ([]Package, error) {
 	allUpdates, err := CheckAllUpdates()
-	if err != nil {
-		return nil, err
-	}
 
 	// Pick the allow-list appropriate for the current platform so that
 	// Debian-renamed packages (fd-find etc.) are recognised correctly.
@@ -159,5 +161,5 @@ func CheckDotfilesUpdates() ([]Package, error) {
 		}
 	}
 
-	return filtered, nil
+	return filtered, err
 }

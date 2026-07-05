@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -76,5 +77,19 @@ func TestParsePacmanSearch_Empty(t *testing.T) {
 	pkgs := parsePacmanSearch("")
 	if len(pkgs) != 0 {
 		t.Errorf("expected 0 packages, got %d: %+v", len(pkgs), pkgs)
+	}
+}
+
+func TestPacmanUpdateArgsUseFullSyncUpgrade(t *testing.T) {
+	args := pacmanUpdateArgs(nil, []string{"vim"})
+	want := []string{"-Syu", "--noconfirm", "vim"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("pacmanUpdateArgs() = %v, want %v", args, want)
+	}
+
+	paruArgs := pacmanUpdateArgs([]string{"--skipreview", "--noprovides"}, []string{"paru"})
+	paruWant := []string{"-Syu", "--noconfirm", "--skipreview", "--noprovides", "paru"}
+	if !reflect.DeepEqual(paruArgs, paruWant) {
+		t.Fatalf("pacmanUpdateArgs() with paru flags = %v, want %v", paruArgs, paruWant)
 	}
 }
