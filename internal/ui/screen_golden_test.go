@@ -258,8 +258,8 @@ func TestNavPickerScreenGolden(t *testing.T) {
 func TestFileTreeScreenGolden(t *testing.T) {
 	ctx := newGoldenContext(t)
 
-	// Pre-populate the install cache so ensureInstallCache() returns early and
-	// the output is deterministic regardless of the host environment.
+	// Pre-populate the install cache so the pure View reads deterministic state
+	// regardless of the host environment.
 	ctx.app.manageInstalled = map[string]bool{}
 	ctx.app.manageInstalledReady = true
 

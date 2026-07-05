@@ -128,7 +128,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 	// --- Streaming install output ---
 	case installOutputMsg:
-		a.installOutput = append(a.installOutput, msg.line.Text)
+		a.installOutput = append(a.installOutput, sanitizeLogLine(msg.line.Text))
 		s.capOutput()
 		if msg.line.Type == runner.OutputStep {
 			a.installStep++
@@ -139,7 +139,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		// Streamed progress from the install worker goroutine, applied here on the
 		// main loop so the worker never touches shared App state.
 		if msg.line != "" {
-			a.installOutput = append(a.installOutput, msg.line)
+			a.installOutput = append(a.installOutput, sanitizeLogLine(msg.line))
 			s.capOutput()
 		}
 		if msg.stepInc {

@@ -34,8 +34,13 @@ func NewFileTreeScreen(ctx *ScreenContext) *fileTreeScreen {
 // ID returns the screen identifier.
 func (s *fileTreeScreen) ID() Screen { return ScreenFileTree }
 
-// Init returns any initial commands (none on entry).
-func (s *fileTreeScreen) Init() tea.Cmd { return nil }
+// Init triggers the async install-cache load on entry (idempotent).
+func (s *fileTreeScreen) Init() tea.Cmd {
+	if a := s.App(); a != nil {
+		return a.startInstallCacheLoad()
+	}
+	return nil
+}
 
 // Update handles keyboard input for the file tree screen. (Mouse is a no-op,
 // matching the legacy handleSummaryMouse for ScreenFileTree.)
@@ -75,9 +80,6 @@ func (s *fileTreeScreen) View(width, height int) string {
 	pkgStyle := lipgloss.NewStyle().Foreground(ColorCyan)
 
 	var lines []string
-
-	// Ensure install cache is populated
-	a.ensureInstallCache()
 
 	// Collect selected and already installed tools
 	var toInstall []string

@@ -47,6 +47,14 @@ func NewConfigMacAppsScreen(ctx *ScreenContext) *configMacAppsScreen {
 	return s
 }
 
+// Init triggers the async install-cache load on entry (idempotent).
+func (s *configMacAppsScreen) Init() tea.Cmd {
+	if a := s.App(); a != nil {
+		return a.startInstallCacheLoad()
+	}
+	return nil
+}
+
 // Update delegates to the shared list-navigation handler.
 func (s *configMacAppsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	return s, s.handleMsg(msg)
@@ -55,9 +63,6 @@ func (s *configMacAppsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // View renders the macOS apps selection screen.
 func (s *configMacAppsScreen) View(width, height int) string {
 	a := s.App()
-
-	// Ensure install status is cached.
-	a.ensureInstallCache()
 
 	title := renderConfigTitle("", "macOS Apps", "Optional productivity applications")
 

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -334,5 +335,89 @@ func TestNavBlockedWhileStreaming(t *testing.T) {
 		if _, cmd := s.Update(click); cmd != nil {
 			t.Error("update tab-click while running returned a command; want nil (no navigation)")
 		}
+	})
+}
+
+const hostilePackageOutput = "pwned \x1b]0;title\x07\x1b[2Jrm -rf\x1b]52;c;BASE64\x07"
+
+func assertNoControlChars(t *testing.T, got string) {
+	t.Helper()
+
+	if strings.ContainsRune(got, '\x1b') {
+		t.Fatalf("stored log contains ESC byte: %q", got)
+	}
+	for _, r := range got {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			t.Fatalf("stored log contains control character %U: %q", r, got)
+		}
+	}
+}
+
+func assertVisibleLogTextSurvives(t *testing.T, got string) {
+	t.Helper()
+
+	for _, want := range []string{"pwned", "rm -rf"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sanitized log missing visible text %q: %q", want, got)
+		}
+	}
+}
+
+func TestAppendInstallLogSanitizesAtIngestion(t *testing.T) {
+	ctx := newGoldenContext(t)
+
+	ctx.app.appendInstallLog(hostilePackageOutput)
+
+	if len(ctx.app.installLogs) != 1 {
+		t.Fatalf("installLogs length = %d, want 1", len(ctx.app.installLogs))
+	}
+	got := ctx.app.installLogs[0]
+	assertNoControlChars(t, got)
+	assertVisibleLogTextSurvives(t, got)
+}
+
+func TestUpdateScreenLogRenderUsesSanitizedInstallLogs(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.appendInstallLog(hostilePackageOutput)
+
+	out := NewUpdateScreen(ctx).View(100, 30)
+
+	assertVisibleLogTextSurvives(t, out)
+	for _, bad := range []string{"\x1b]0;", "\x1b[2J", "\x1b]52;"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("update log render leaked injected escape sequence %q in output: %q", bad, out)
+		}
+	}
+}
+
+func TestProgressInstallOutputSanitizesAtIngestion(t *testing.T) {
+	t.Run("installOutputMsg", func(t *testing.T) {
+		ctx := newGoldenContext(t)
+		screen := NewProgressScreen(ctx)
+
+		screen.Update(installOutputMsg{
+			line: runner.OutputLine{Text: hostilePackageOutput, Type: runner.OutputStep},
+		})
+
+		if len(ctx.app.installOutput) != 1 {
+			t.Fatalf("installOutput length = %d, want 1", len(ctx.app.installOutput))
+		}
+		got := ctx.app.installOutput[0]
+		assertNoControlChars(t, got)
+		assertVisibleLogTextSurvives(t, got)
+	})
+
+	t.Run("installEventMsg", func(t *testing.T) {
+		ctx := newGoldenContext(t)
+		screen := NewProgressScreen(ctx)
+
+		screen.Update(installEventMsg{line: hostilePackageOutput})
+
+		if len(ctx.app.installOutput) != 1 {
+			t.Fatalf("installOutput length = %d, want 1", len(ctx.app.installOutput))
+		}
+		got := ctx.app.installOutput[0]
+		assertNoControlChars(t, got)
+		assertVisibleLogTextSurvives(t, got)
 	})
 }

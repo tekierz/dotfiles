@@ -93,8 +93,11 @@ type manageInstallDoneMsg struct {
 }
 
 func (a *App) saveManageConfigCmd() tea.Cmd {
-	// Capture by value (pointer is stable) and run file I/O in a command.
-	cfg := a.manageConfig
+	// Capture a value snapshot before returning the async command. ManageConfig is
+	// a flat value struct; the UI goroutine may keep mutating a.manageConfig via
+	// manageField pointers while this command saves on a worker goroutine.
+	snapshot := *a.manageConfig
+	cfg := &snapshot
 	theme := a.theme
 	nav := a.navStyle
 	animationsEnabled := a.animationsEnabled
@@ -1091,6 +1094,27 @@ func truncateVisible(s string, width int) string {
 	}
 	// ANSI-safe truncation (won't break escape sequences).
 	return ansi.Truncate(s, width, "…")
+}
+
+func sanitizeLogLine(s string) string {
+	stripped := ansi.Strip(s)
+	var b strings.Builder
+	b.Grow(len(stripped))
+	for _, r := range stripped {
+		switch {
+		case r == '\t':
+			b.WriteRune(' ')
+		case r < 0x20:
+			continue
+		case r == 0x7f:
+			continue
+		case r >= 0x80 && r <= 0x9f:
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func truncatePlain(s string, width int) string {

@@ -129,7 +129,7 @@ func loadInstallCacheCmd() tea.Cmd {
 // appendInstallLog adds a line to the install log buffer (max 500 lines)
 func (a *App) appendInstallLog(line string) {
 	const maxLogLines = 500
-	a.installLogs = append(a.installLogs, line)
+	a.installLogs = append(a.installLogs, sanitizeLogLine(line))
 	// Use copy to avoid memory leak from reslicing
 	if len(a.installLogs) > maxLogLines {
 		copy(a.installLogs, a.installLogs[len(a.installLogs)-maxLogLines:])
