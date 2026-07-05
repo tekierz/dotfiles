@@ -208,6 +208,7 @@ start() {
         kill -0 "$newpid" 2>/dev/null || break
         i=$((i + 1))
         [ "$i" -ge 100 ] && break
+        sleep 0.02
     done
 
     (umask 077; echo "$newpid" > "$PIDFILE")

@@ -111,6 +111,28 @@ func (b *BrewManager) CheckOutdated() ([]Package, error) {
 	return parseBrewOutdated(out.Bytes())
 }
 
+// CheckOutdatedNonGreedy reports outdated packages WITHOUT `--greedy`, so
+// auto-updating and `version :latest` casks are excluded. Those casks always
+// appear under `brew outdated --greedy` because brew cannot track their version,
+// which makes the greedy list useless as a "did this upgrade actually fail?"
+// oracle: they would be reported outdated forever, regardless of upgrade state.
+// The non-greedy list contains only packages whose version brew can verify, so a
+// package that REMAINS in it after an upgrade genuinely failed. recheckOutdatedNames
+// uses this after a partial-batch failure to keep formulae (and version-tracked
+// casks) honest while not falsely marking the auto-updaters brew cannot judge.
+// Parsing/filtering is shared with CheckOutdated via parseBrewOutdated.
+func (b *BrewManager) CheckOutdatedNonGreedy() ([]Package, error) {
+	cmd := exec.Command(b.brewPath, "outdated", "--json=v2")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	return parseBrewOutdated(out.Bytes())
+}
+
 // parseBrewOutdated parses the JSON emitted by `brew outdated --json=v2
 // --greedy` into Package records. It is extracted from CheckOutdated so that
 // unit tests can exercise the real parsing and filtering logic without

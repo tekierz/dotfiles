@@ -983,6 +983,14 @@ is_safe_restore_path() {
         *..*) return 1 ;;
     esac
 
+    # Reject a symlink as the FINAL path component. The ancestor resolution below
+    # only canonicalizes the deepest existing *directory*, so a final-component
+    # file symlink (e.g. ~/.gitconfig -> /etc/target) slips through: its parent
+    # resolves inside $HOME and the check passes, then the cp/rm acts THROUGH the
+    # link and writes outside $HOME. dotfiles copies configs and never symlinks
+    # these destinations, so any symlink here is anomalous — refuse it outright.
+    [[ -L "$target" ]] && return 1
+
     # Canonicalize $HOME so a symlinked home does not cause false rejections.
     # $HOME itself must resolve; if it cannot, refuse rather than guess.
     local canon_home
@@ -1448,6 +1456,7 @@ install_packages() {
             bat \
             ripgrep \
             fd-find \
+            git \
             btop \
             xclip \
             wl-clipboard \
@@ -1462,6 +1471,25 @@ install_packages() {
         print_warning "Network tools (bandwhich, gping, doggo, trippy) require cargo or Homebrew"
     fi
 
+    # Debian and Raspberry Pi ship bat and fd under renamed binaries (batcat and
+    # fdfind) to avoid a naming clash with other packages. Nothing else links
+    # them, so 'command -v bat' / 'command -v fd' fail at shell startup and the
+    # generated ~/.zshrc silently drops the bat config, the fzf bat preview, and
+    # the fzf fd integration. Symlink the real binaries into ~/.local/bin (which
+    # the generated ~/.zshrc prepends to PATH) so those guards pass and the
+    # features work.
+    mkdir -p "$HOME/.local/bin"
+    if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
+        if ln -sf "$(command -v batcat)" "$HOME/.local/bin/bat"; then
+            print_success "Linked batcat -> ~/.local/bin/bat"
+        fi
+    fi
+    if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
+        if ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd"; then
+            print_success "Linked fdfind -> ~/.local/bin/fd"
+        fi
+    fi
+
     # Powerlevel10k + zsh plugins for Linux (macOS gets these from Homebrew).
     # Arch installs the zsh plugins via pacman (sourced from /usr/share/zsh/
     # plugins), so only clone the plugins on Debian/Raspberry Pi. Powerlevel10k
@@ -1470,21 +1498,32 @@ install_packages() {
     if [[ "$OS" != "macos" && "$OS" != "unknown" ]]; then
         ZSH_CUSTOM_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
 
-        if [[ "$OS" == "debian" || "$OS" == "raspi" ]]; then
-            print_step "Installing zsh plugins..."
-            mkdir -p "$ZSH_CUSTOM_DIR/plugins"
-            if [[ ! -d "$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting" ]]; then
-                run_pkg "zsh-syntax-highlighting plugin" -- git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting"
+        # These installs are `git clone`s with no package operand, so run_pkg would
+        # record a failure under the cosmetic label ("...plugin") in the OPTIONAL
+        # bucket. git is a genuine core prerequisite here: without it, none of the
+        # plugin or Powerlevel10k clones can run. Guard on it explicitly so a
+        # missing git is reported as a CRITICAL failure and the clones are skipped
+        # cleanly instead of each failing and being downgraded to "optional".
+        if ! command -v git >/dev/null 2>&1; then
+            print_error "git not found; cannot install zsh plugins or Powerlevel10k"
+            add_failed_critical "git"
+        else
+            if [[ "$OS" == "debian" || "$OS" == "raspi" ]]; then
+                print_step "Installing zsh plugins..."
+                mkdir -p "$ZSH_CUSTOM_DIR/plugins"
+                if [[ ! -d "$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting" ]]; then
+                    run_pkg "zsh-syntax-highlighting plugin" -- git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting"
+                fi
+                if [[ ! -d "$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions" ]]; then
+                    run_pkg "zsh-autosuggestions plugin" -- git clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions"
+                fi
             fi
-            if [[ ! -d "$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions" ]]; then
-                run_pkg "zsh-autosuggestions plugin" -- git clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions"
-            fi
-        fi
 
-        print_step "Installing Powerlevel10k theme..."
-        mkdir -p "$ZSH_CUSTOM_DIR/themes"
-        if [[ ! -d "$ZSH_CUSTOM_DIR/themes/powerlevel10k" ]]; then
-            run_pkg "Powerlevel10k theme" -- git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$ZSH_CUSTOM_DIR/themes/powerlevel10k"
+            print_step "Installing Powerlevel10k theme..."
+            mkdir -p "$ZSH_CUSTOM_DIR/themes"
+            if [[ ! -d "$ZSH_CUSTOM_DIR/themes/powerlevel10k" ]]; then
+                run_pkg "Powerlevel10k theme" -- git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$ZSH_CUSTOM_DIR/themes/powerlevel10k"
+            fi
         fi
     fi
 
@@ -3714,6 +3753,14 @@ is_safe_restore_path() {
     case "$target" in
         *..*) return 1 ;;
     esac
+
+    # Reject a symlink as the FINAL path component. The ancestor resolution below
+    # only canonicalizes the deepest existing *directory*, so a final-component
+    # file symlink (e.g. ~/.gitconfig -> /etc/target) slips through: its parent
+    # resolves inside $HOME and the check passes, then the cp/rm acts THROUGH the
+    # link and writes outside $HOME. dotfiles copies configs and never symlinks
+    # these destinations, so any symlink here is anomalous — refuse it outright.
+    [[ -L "$target" ]] && return 1
 
     # Canonicalize $HOME so a symlinked home does not cause false rejections.
     # $HOME itself must resolve; if it cannot, refuse rather than guess.

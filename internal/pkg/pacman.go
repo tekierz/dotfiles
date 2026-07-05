@@ -149,20 +149,21 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 	}
 
 	// Fallback: `pacman -Qu` reads the local sync DB and works without the
-	// pacman-contrib package. It exits 1 with empty stdout AND empty stderr when
-	// nothing is outdated, but other failures (DB lock, corrupt sync DB) also
-	// exit non-zero — those write a diagnostic to stderr and/or use a different
-	// exit code. Distinguish the genuine no-updates case from a real error so
-	// failures aren't silently reported as "up to date".
+	// pacman-contrib package. It exits 1 with empty stdout when nothing is
+	// outdated, and may still print benign local-newer-than-repo warnings to
+	// stderr. Other failures (DB lock, corrupt sync DB) also exit non-zero and
+	// write diagnostics to stderr and/or use a different exit code. Distinguish
+	// the genuine no-updates case from a real error so failures aren't silently
+	// reported as "up to date".
 	cmd := exec.Command(p.pacmanPath, "-Qu")
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		stderrText := strings.TrimSpace(errBuf.String())
+		stderrText := filterPacmanLocalNewerWarnings(errBuf.String())
 		exitErr, ok := err.(*exec.ExitError)
 		if ok && exitErr.ExitCode() == 1 && strings.TrimSpace(out.String()) == "" && stderrText == "" {
-			// Genuine "no updates": exit 1, no output, no diagnostics.
+			// Genuine "no updates": exit 1, no stdout, no non-benign diagnostics.
 			return "", nil
 		}
 		if stderrText != "" {
@@ -171,6 +172,33 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 		return "", fmt.Errorf("pacman -Qu failed: %w", err)
 	}
 	return out.String(), nil
+}
+
+func filterPacmanLocalNewerWarnings(stderr string) string {
+	var remaining []string
+	for _, line := range strings.Split(stderr, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || isPacmanLocalNewerWarning(trimmed) {
+			continue
+		}
+		remaining = append(remaining, trimmed)
+	}
+	return strings.Join(remaining, "\n")
+}
+
+func isPacmanLocalNewerWarning(line string) bool {
+	if !strings.HasPrefix(line, "warning: ") {
+		return false
+	}
+
+	message := strings.TrimPrefix(line, "warning: ")
+	localMarker := ": local ("
+	localIndex := strings.Index(message, localMarker)
+	if localIndex <= 0 {
+		return false
+	}
+
+	return strings.Contains(message[localIndex+len(localMarker):], ") is newer than ")
 }
 
 // parsePacmanUpdates parses "name oldver -> newver" lines (as produced by

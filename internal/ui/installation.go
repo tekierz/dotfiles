@@ -770,12 +770,20 @@ func (a *App) listenUpdateStreamCmd() tea.Cmd {
 	}
 }
 
-// streamingUpdateCmd starts a streaming update of the given packages. The
-// streaming command's output is drained on a detached worker goroutine that
-// writes each line to a.updateStream (so lines render LIVE) and emits a final
-// `done` event with the results/error before closing the channel. The worker
-// MUST NOT touch any App field; all App mutation happens in Update on the main
-// loop. The returned Cmd listens for the first event (re-armed from Update).
+// streamingUpdateCmd starts a streaming update of the given packages. A detached
+// worker goroutine BUILDS the streaming command and drains its output, writing
+// each line to a.updateStream (so lines render LIVE) and emitting a final `done`
+// event with the results/error before closing the channel. The worker MUST NOT
+// touch any App field; all App mutation happens in Update on the main loop.
+//
+// Constructing the manager command is done INSIDE the worker, not here, because
+// mgr.UpdateStreaming can do blocking pre-work (e.g. apt's `apt update` index
+// refresh) that would otherwise freeze the Bubble Tea event loop for seconds.
+// Only the cancelable context (a.streamCancel) and the stream channel are set on
+// the main loop. We do NOT set a.streamCmd: cancelling the parent context
+// propagates into the RunStreaming-derived context and kills the subprocess, so
+// teardownStream()'s a.streamCancel() call is sufficient (same contract as
+// streamingInstallToolCmd). The returned Cmd listens for the first event.
 func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 	mgr := pkg.DetectManager()
 	if mgr == nil {
@@ -789,21 +797,11 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 		pkgNames = append(pkgNames, p.Name)
 	}
 
-	// Cancelable context (derived from a cancelable parent stored on App) so
-	// navigate-away / Ctrl+C / teardownStream() stops the subprocess and unblocks
-	// the worker's bounded-channel sends instead of leaking them.
+	// Cancelable context stored on App so navigate-away / Ctrl+C / teardownStream()
+	// cancels it, which (via exec.CommandContext inside RunStreaming) stops the
+	// subprocess and unblocks the worker's bounded-channel sends instead of leaking
+	// them. Set on the main loop; the worker only reads ctx.
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd, err := mgr.UpdateStreaming(ctx, pkgNames...)
-	if err != nil {
-		cancel()
-		return func() tea.Msg { return updateStreamMsg{done: true, err: err} }
-	}
-	if cmd == nil {
-		cancel()
-		return func() tea.Msg { return updateStreamMsg{done: true} }
-	}
-	// Retained on App (set here on the main loop) so teardownStream() can cancel.
-	a.streamCmd = cmd
 	a.streamCancel = cancel
 
 	// Buffered so the worker can make progress without blocking on a slow
@@ -813,6 +811,26 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 
 	go func() {
 		defer close(stream)
+
+		// Build the streaming command off the UI goroutine: UpdateStreaming may run
+		// blocking pre-work (apt index refresh) that must not stall the event loop.
+		cmd, err := mgr.UpdateStreaming(ctx, pkgNames...)
+		if err != nil {
+			select {
+			case stream <- updateStreamMsg{done: true, err: err}:
+			case <-ctx.Done():
+			}
+			return
+		}
+		if cmd == nil {
+			// Nothing to upgrade (no-op): clean completion.
+			select {
+			case stream <- updateStreamMsg{done: true}:
+			case <-ctx.Done():
+			}
+			return
+		}
+
 		for line := range cmd.Output {
 			select {
 			case stream <- updateStreamMsg{line: line}:
@@ -820,7 +838,7 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 				return
 			}
 		}
-		err := cmd.Wait()
+		err = cmd.Wait()
 
 		// A batch `brew/apt/pacman upgrade a b c` that exits non-zero has NOT
 		// necessarily failed every package: the manager upgrades the packages it
@@ -866,14 +884,31 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 	return a.listenUpdateStreamCmd()
 }
 
+// reliableOutdated returns the outdated set to use as a post-upgrade failure
+// oracle. For Homebrew it uses a NON-greedy `brew outdated`: the default
+// CheckOutdated is `--greedy`, which perpetually lists auto-updating and :latest
+// casks as outdated no matter whether an upgrade succeeded. Counting those as
+// "still outdated" would falsely mark them failed after any partial-batch failure.
+// The non-greedy list only contains packages whose version brew can verify, so a
+// package that remains in it genuinely failed to upgrade — keeping formulae (and
+// version-tracked casks) honest while excluding the auto-updaters brew cannot
+// judge. Every other manager's CheckOutdated is already a reliable oracle.
+func reliableOutdated(mgr pkg.PackageManager) ([]pkg.Package, error) {
+	if bm, ok := mgr.(*pkg.BrewManager); ok {
+		return bm.CheckOutdatedNonGreedy()
+	}
+	return mgr.CheckOutdated()
+}
+
 // recheckOutdatedNames re-queries the package manager for still-outdated packages
 // after a batch update and returns, for each package in `packages`, whether it
 // remains outdated. ok is false if the re-check itself failed (the manager query
 // errored), in which case the caller keeps its conservative report rather than
 // guessing. Keyed by package name, which matches how UpdateStreaming was invoked
-// (a list of names).
+// (a list of names). The oracle comes from reliableOutdated so greedy/auto-update
+// casks are not falsely counted as failed (see reliableOutdated).
 func recheckOutdatedNames(mgr pkg.PackageManager, packages []pkg.Package) (stillOutdated map[string]bool, ok bool) {
-	outdated, err := mgr.CheckOutdated()
+	outdated, err := reliableOutdated(mgr)
 	if err != nil {
 		return nil, false
 	}
@@ -889,7 +924,12 @@ func recheckOutdatedNames(mgr pkg.PackageManager, packages []pkg.Package) (still
 }
 
 // streamingUpdateAllCmd starts a streaming update of all packages, using the
-// same live-streaming worker pattern as streamingUpdateCmd.
+// same live-streaming worker pattern as streamingUpdateCmd. The manager command
+// is built INSIDE the worker goroutine because UpdateAllStreaming can do blocking
+// pre-work (brew's `brew outdated --greedy` pre-check, apt's index refresh) that
+// must not freeze the Bubble Tea event loop. Only a.streamCancel and the stream
+// channel are set on the main loop; a.streamCmd is deliberately not set (context
+// cancellation is sufficient for teardown — see streamingUpdateCmd).
 func (a *App) streamingUpdateAllCmd() tea.Cmd {
 	mgr := pkg.DetectManager()
 	if mgr == nil {
@@ -899,18 +939,8 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 	}
 
 	// Cancelable context (see streamingUpdateCmd) so teardown stops the subprocess
-	// and unblocks the worker's bounded-channel sends.
+	// and unblocks the worker's bounded-channel sends. Set on the main loop.
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd, err := mgr.UpdateAllStreaming(ctx)
-	if err != nil {
-		cancel()
-		return func() tea.Msg { return updateStreamMsg{done: true, err: err} }
-	}
-	if cmd == nil {
-		cancel()
-		return func() tea.Msg { return updateStreamMsg{done: true} }
-	}
-	a.streamCmd = cmd
 	a.streamCancel = cancel
 
 	stream := make(chan updateStreamMsg, 64)
@@ -918,6 +948,27 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 
 	go func() {
 		defer close(stream)
+
+		// Build the streaming command off the UI goroutine: UpdateAllStreaming may
+		// run blocking pre-work (greedy outdated pre-check / apt index refresh) that
+		// must not stall the event loop.
+		cmd, err := mgr.UpdateAllStreaming(ctx)
+		if err != nil {
+			select {
+			case stream <- updateStreamMsg{done: true, err: err}:
+			case <-ctx.Done():
+			}
+			return
+		}
+		if cmd == nil {
+			// Nothing outdated (no-op): clean completion.
+			select {
+			case stream <- updateStreamMsg{done: true}:
+			case <-ctx.Done():
+			}
+			return
+		}
+
 		for line := range cmd.Output {
 			select {
 			case stream <- updateStreamMsg{line: line}:
@@ -925,7 +976,7 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 				return
 			}
 		}
-		err := cmd.Wait()
+		err = cmd.Wait()
 		select {
 		case stream <- updateStreamMsg{done: true, err: err}:
 		case <-ctx.Done():

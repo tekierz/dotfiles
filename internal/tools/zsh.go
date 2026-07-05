@@ -158,8 +158,8 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 		sb.WriteString("alias gc='git commit'\n")
 	}
 	if cfg.Aliases["docker"] {
-		sb.WriteString("alias d='docker'\n")
-		sb.WriteString("alias dc='docker compose'\n")
+		sb.WriteString("command -v docker &>/dev/null && alias d='docker'\n")
+		sb.WriteString("command -v docker &>/dev/null && alias dc='docker compose'\n")
 	}
 	writeSavedAliases(&sb, loadSavedHotkeyAliases())
 	sb.WriteString("\n")

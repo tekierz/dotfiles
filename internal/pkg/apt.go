@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -147,16 +146,13 @@ func (a *AptManager) Update(packages ...string) error {
 		return nil
 	}
 
-	// Update package lists first. Use sudo -n so this best-effort refresh never
-	// blocks on an invisible password prompt; install below may still prompt.
-	updateCmd := exec.Command("sudo", "-n", "apt", "update")
-	if out, err := updateCmd.CombinedOutput(); err != nil {
-		if msg := strings.TrimSpace(string(out)); msg != "" {
-			fmt.Fprintf(os.Stderr, "warning: apt update refresh failed, continuing with current package lists: %v: %s\n", err, msg)
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: apt update refresh failed, continuing with current package lists: %v\n", err)
-		}
-	}
+	// Best-effort index refresh so a targeted upgrade can't 404 on a stale index.
+	// sudo -n never blocks on an invisible password prompt (the install below may
+	// still prompt). Output and errors are intentionally discarded to the null
+	// device: this can run while the TUI owns the terminal, so writing to
+	// os.Stderr would splatter the alt-screen, and any genuine failure surfaces
+	// through the install below.
+	_ = exec.Command("sudo", "-n", "apt", "update").Run()
 
 	// Install specific packages (will upgrade if already installed)
 	args := []string{"apt", "install", "-y"}
@@ -299,19 +295,16 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 	}
 
 	// Refresh the package index before the targeted upgrade so it can't 404 on a
-	// stale index (every other apt write path does an `apt update` first). Use
-	// sudo -n so this best-effort refresh never blocks on an invisible password
-	// prompt; warn and continue against the current lists on failure, matching
-	// Update()'s non-blocking pattern. The streaming install below owns the
-	// upgrade and may still prompt for sudo.
-	updateCmd := exec.Command("sudo", "-n", "apt", "update")
-	if out, err := updateCmd.CombinedOutput(); err != nil {
-		if msg := strings.TrimSpace(string(out)); msg != "" {
-			fmt.Fprintf(os.Stderr, "warning: apt update refresh failed, continuing with current package lists: %v: %s\n", err, msg)
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: apt update refresh failed, continuing with current package lists: %v\n", err)
-		}
-	}
+	// stale index (every other apt write path does an `apt update` first). sudo -n
+	// keeps this best-effort refresh from ever blocking on an invisible password
+	// prompt, and deriving it from ctx lets teardown cancel it. Output and errors
+	// are intentionally discarded to the null device: this MUST be invoked off the
+	// Bubble Tea UI goroutine (streamingUpdateCmd builds it inside its worker) so
+	// the refresh never blocks the event loop, and while the TUI owns the terminal
+	// writing to os.Stderr would splatter the alt-screen. Any genuine failure
+	// surfaces through the streamed install below, which owns the upgrade and may
+	// still prompt for sudo.
+	_ = exec.CommandContext(ctx, "sudo", "-n", "apt", "update").Run()
 
 	args := []string{"install", "-y"}
 	args = append(args, packages...)

@@ -184,7 +184,5 @@ func WriteGhosttyConfig(cfg GhosttyConfig, themeName string) error {
 		return err
 	}
 
-	themePath := filepath.Join(home, ".config", "ghostty", "themes", "dotfiles-theme")
-	themeContent := GenerateGhosttyTheme(themeName)
-	return writeToolConfig(themePath, []byte(themeContent))
+	return nil
 }

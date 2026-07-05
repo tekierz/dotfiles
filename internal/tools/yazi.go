@@ -170,8 +170,8 @@ func GenerateYaziKeymap(cfg YaziConfig, theme string) string {
 		sb.WriteString("  { on = \"<C-n>\", run = \"arrow 1\", desc = \"Move down\" },\n")
 		sb.WriteString("  { on = \"<C-b>\", run = \"leave\", desc = \"Go to parent\" },\n")
 		sb.WriteString("  { on = \"<C-f>\", run = \"enter\", desc = \"Enter directory\" },\n")
-		sb.WriteString("  { on = \"<M-<>\", run = \"arrow -99999999\", desc = \"Go to top\" },\n")
-		sb.WriteString("  { on = \"<M->>\", run = \"arrow 99999999\", desc = \"Go to bottom\" },\n")
+		sb.WriteString("  { on = \"g\", run = \"arrow -99999999\", desc = \"Go to top\" },\n")
+		sb.WriteString("  { on = \"G\", run = \"arrow 99999999\", desc = \"Go to bottom\" },\n")
 	}
 
 	// Common keys

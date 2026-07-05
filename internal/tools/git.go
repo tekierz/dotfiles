@@ -180,12 +180,12 @@ func GenerateGitConfig(cfg GitConfig, theme string) string {
 			sb.WriteString("\tside-by-side = true\n")
 		}
 		sb.WriteString("\tline-numbers = true\n")
-		sb.WriteString(fmt.Sprintf("\tminus-style = normal %s\n", p.Error))
-		sb.WriteString(fmt.Sprintf("\tplus-style = normal %s\n", p.Success))
-		sb.WriteString(fmt.Sprintf("\tminus-emph-style = normal %s bold\n", p.Error))
-		sb.WriteString(fmt.Sprintf("\tplus-emph-style = normal %s bold\n", p.Success))
-		sb.WriteString(fmt.Sprintf("\tfile-style = %s bold\n", p.Accent))
-		sb.WriteString(fmt.Sprintf("\thunk-header-style = %s bold\n", p.AccentAlt))
+		sb.WriteString(fmt.Sprintf("\tminus-style = \"normal %s\"\n", p.Error))
+		sb.WriteString(fmt.Sprintf("\tplus-style = \"normal %s\"\n", p.Success))
+		sb.WriteString(fmt.Sprintf("\tminus-emph-style = \"normal %s bold\"\n", p.Error))
+		sb.WriteString(fmt.Sprintf("\tplus-emph-style = \"normal %s bold\"\n", p.Success))
+		sb.WriteString(fmt.Sprintf("\tfile-style = \"%s bold\"\n", p.Accent))
+		sb.WriteString(fmt.Sprintf("\thunk-header-style = \"%s bold\"\n", p.AccentAlt))
 		sb.WriteString(fmt.Sprintf("\tsyntax-theme = %s\n\n", gitDeltaSyntaxTheme(theme)))
 
 		sb.WriteString("[merge]\n")
