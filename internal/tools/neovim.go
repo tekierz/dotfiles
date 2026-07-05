@@ -227,10 +227,11 @@ func GenerateNeovimConfig(cfg NeovimConfig, themeName string) string {
 
 	// Theme
 	sb.WriteString("-- Theme\n")
-	sb.WriteString(fmt.Sprintf("local ok = pcall(vim.cmd.colorscheme, %q)\n", colorscheme))
-	sb.WriteString("if not ok then\n")
-	sb.WriteString("  vim.cmd.colorscheme(\"habamax\")\n")
-	sb.WriteString("end\n")
+	if colorscheme != "" {
+		sb.WriteString(fmt.Sprintf("pcall(vim.cmd.colorscheme, %q)\n", colorscheme))
+	} else {
+		sb.WriteString("-- Keep the preset's active colorscheme when no bundled match is available.\n")
+	}
 	sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"Normal\", { fg = %q, bg = %q })\n", p.Text, p.Bg))
 	sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"NormalFloat\", { fg = %q, bg = %q })\n", p.Text, p.Surface))
 	sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"FloatBorder\", { fg = %q, bg = %q })\n", p.Border, p.Surface))
@@ -287,30 +288,10 @@ func GenerateNeovimConfig(cfg NeovimConfig, themeName string) string {
 
 func neovimColorschemeForTheme(themeName string) string {
 	switch themeName {
-	case "catppuccin-mocha", "catppuccin-latte", "catppuccin-frappe", "catppuccin-macchiato":
-		return "catppuccin"
-	case "dracula":
-		return "dracula"
-	case "gruvbox-dark", "gruvbox-light":
-		return "gruvbox"
-	case "nord":
-		return "nord"
 	case "tokyo-night":
 		return "tokyonight"
-	case "solarized-dark", "solarized-light":
-		return "habamax"
-	case "monokai":
-		return "sorbet"
-	case "rose-pine":
-		return "rose-pine"
-	case "everforest":
-		return "everforest"
-	case "one-dark":
-		return "onedark"
-	case "neon-seapunk":
-		return "slate"
 	default:
-		return "habamax"
+		return ""
 	}
 }
 

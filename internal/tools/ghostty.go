@@ -151,23 +151,34 @@ func writeGhosttyThemeDirectives(sb *strings.Builder, p theme.Palette) {
 }
 
 func ghosttyANSIPalette(p theme.Palette) []string {
+	black := p.Bg
+	white := p.Text
+	brightBlack := p.Surface
+	brightWhite := p.TextBright
+	if !isDarkHexColor(p.Bg) {
+		black = p.Text
+		white = p.Surface
+		brightBlack = p.TextMuted
+		brightWhite = p.Bg
+	}
+
 	return []string{
-		p.Bg,
+		black,
 		p.Error,
 		p.Success,
 		p.Warning,
 		p.Info,
 		p.AccentAlt,
 		p.Accent,
-		p.Text,
-		p.Surface,
+		white,
+		brightBlack,
 		p.Error,
 		p.Success,
 		p.Warning,
 		p.Info,
 		p.AccentAlt,
 		p.Accent,
-		p.TextBright,
+		brightWhite,
 	}
 }
 

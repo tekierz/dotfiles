@@ -1016,6 +1016,53 @@ is_safe_restore_path() {
     [[ "$resolved" == "$canon_home" || "$resolved" == "$canon_home"/* ]]
 }
 
+# Validate that a manifest SOURCE path is safe to copy FROM during restore.
+# The lexical "$backup" == "$backup_dir"/* test alone is not enough: a source that
+# lexically lives inside the backup dir can still BE, or traverse, a symlink whose
+# target is OUTSIDE it, and cp -p/-rp would follow the link and read that target
+# (e.g. a planted "$backup_dir/.gitconfig" -> /etc/shadow). Mirror is_safe_restore_path:
+# reject a final-component symlink and require the deepest EXISTING ancestor to
+# canonicalize within the backup session directory. Args: <source> <backup_dir>.
+# NOTE: kept identical to the same function in the embedded CLI heredoc; long-term
+# both copies should be generated from one source.
+is_safe_backup_source() {
+    local src="$1" root="$2"
+    # Reject empty, relative, or traversal-bearing paths outright.
+    [[ -z "$src" ]] && return 1
+    [[ "$src" != /* ]] && return 1
+    case "$src" in
+        *..*) return 1 ;;
+    esac
+    # Must lexically live inside this session's backup directory.
+    [[ "$src" == "$root"/* ]] || return 1
+
+    # Reject a symlink as the FINAL component: the ancestor resolution below only
+    # canonicalizes the deepest existing *directory*, so a final-component symlink
+    # (e.g. a planted "$root/.gitconfig" -> /etc/shadow) would otherwise be read
+    # THROUGH the link by cp. A clean backup stores plain files and never symlinks.
+    [[ -L "$src" ]] && return 1
+
+    # Canonicalize the backup dir; it must resolve or we refuse rather than guess.
+    local canon_root
+    canon_root=$(cd "$root" 2>/dev/null && pwd -P) || return 1
+
+    # Resolve the realpath of the deepest EXISTING ancestor (portable cd+pwd -P;
+    # macOS lacks `readlink -f`) so an intermediate symlink component that escapes
+    # the backup dir is caught. Non-existent components cannot be symlinks.
+    local probe="$src" resolved=""
+    while [[ -n "$probe" && "$probe" != "/" ]]; do
+        if [[ -d "$probe" ]]; then
+            resolved=$(cd "$probe" 2>/dev/null && pwd -P) || return 1
+            break
+        fi
+        probe=$(dirname "$probe")
+    done
+    [[ -z "$resolved" ]] && return 1
+
+    # The resolved ancestor must be the canonical backup dir itself or beneath it.
+    [[ "$resolved" == "$canon_root" || "$resolved" == "$canon_root"/* ]]
+}
+
 # Restore from a backup session
 # Usage: restore_backup [session_name]
 restore_backup() {
@@ -1069,10 +1116,11 @@ restore_backup() {
             continue
         fi
 
-        # The backup SOURCE must live inside this session's backup dir; a tampered
-        # manifest must not be able to copy arbitrary files into an otherwise-safe
-        # destination under $HOME.
-        if [[ "$existed" == "yes" && ( "$backup" != "$backup_dir"/* || "$backup" == *..* ) ]]; then
+        # The backup SOURCE must live inside this session's backup dir AND must not
+        # be (or traverse) a symlink escaping it. A purely lexical prefix test would
+        # pass an in-tree symlink like "$backup_dir/.gitconfig" -> /etc/shadow, which
+        # the cp -p/-rp below would then follow and read from OUTSIDE the backup tree.
+        if [[ "$existed" == "yes" ]] && ! is_safe_backup_source "$backup" "$backup_dir"; then
             print_warning "Skipping manifest entry with out-of-tree source: $backup"
             errors=$((errors + 1))
             continue
@@ -3787,6 +3835,53 @@ is_safe_restore_path() {
     [[ "$resolved" == "$canon_home" || "$resolved" == "$canon_home"/* ]]
 }
 
+# Validate that a manifest SOURCE path is safe to copy FROM during restore.
+# The lexical "$backup" == "$backup_dir"/* test alone is not enough: a source that
+# lexically lives inside the backup dir can still BE, or traverse, a symlink whose
+# target is OUTSIDE it, and cp -p/-rp would follow the link and read that target
+# (e.g. a planted "$backup_dir/.gitconfig" -> /etc/shadow). Mirror is_safe_restore_path:
+# reject a final-component symlink and require the deepest EXISTING ancestor to
+# canonicalize within the backup session directory. Args: <source> <backup_dir>.
+# NOTE: kept identical to the same function in dotfiles-setup; long-term both
+# copies should be generated from one source.
+is_safe_backup_source() {
+    local src="$1" root="$2"
+    # Reject empty, relative, or traversal-bearing paths outright.
+    [[ -z "$src" ]] && return 1
+    [[ "$src" != /* ]] && return 1
+    case "$src" in
+        *..*) return 1 ;;
+    esac
+    # Must lexically live inside this session's backup directory.
+    [[ "$src" == "$root"/* ]] || return 1
+
+    # Reject a symlink as the FINAL component: the ancestor resolution below only
+    # canonicalizes the deepest existing *directory*, so a final-component symlink
+    # (e.g. a planted "$root/.gitconfig" -> /etc/shadow) would otherwise be read
+    # THROUGH the link by cp. A clean backup stores plain files and never symlinks.
+    [[ -L "$src" ]] && return 1
+
+    # Canonicalize the backup dir; it must resolve or we refuse rather than guess.
+    local canon_root
+    canon_root=$(cd "$root" 2>/dev/null && pwd -P) || return 1
+
+    # Resolve the realpath of the deepest EXISTING ancestor (portable cd+pwd -P;
+    # macOS lacks `readlink -f`) so an intermediate symlink component that escapes
+    # the backup dir is caught. Non-existent components cannot be symlinks.
+    local probe="$src" resolved=""
+    while [[ -n "$probe" && "$probe" != "/" ]]; do
+        if [[ -d "$probe" ]]; then
+            resolved=$(cd "$probe" 2>/dev/null && pwd -P) || return 1
+            break
+        fi
+        probe=$(dirname "$probe")
+    done
+    [[ -z "$resolved" ]] && return 1
+
+    # The resolved ancestor must be the canonical backup dir itself or beneath it.
+    [[ "$resolved" == "$canon_root" || "$resolved" == "$canon_root"/* ]]
+}
+
 # Restore from a backup session
 restore_backup() {
     local session="${1:-}"
@@ -3837,10 +3932,11 @@ restore_backup() {
             continue
         fi
 
-        # The backup SOURCE must live inside this session's backup dir; a tampered
-        # manifest must not be able to copy arbitrary files into an otherwise-safe
-        # destination under $HOME.
-        if [[ "$existed" == "yes" && ( "$backup" != "$backup_dir"/* || "$backup" == *..* ) ]]; then
+        # The backup SOURCE must live inside this session's backup dir AND must not
+        # be (or traverse) a symlink escaping it. A purely lexical prefix test would
+        # pass an in-tree symlink like "$backup_dir/.gitconfig" -> /etc/shadow, which
+        # the cp -p/-rp below would then follow and read from OUTSIDE the backup tree.
+        if [[ "$existed" == "yes" ]] && ! is_safe_backup_source "$backup" "$backup_dir"; then
             echo -e "${YELLOW}⚠${NC} Skipping manifest entry with out-of-tree source: $backup"
             errors=$((errors + 1))
             continue

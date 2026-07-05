@@ -64,7 +64,17 @@ func (a *App) startInstallation() tea.Cmd {
 	// Always-core config phases: utilities + tmux + ghostty + zsh + neovim + git + yazi + fzf
 	const alwaysCoreSteps = 8
 	plannedSteps += alwaysCoreSteps
-	cfg := *a.deepDiveConfig // snapshot for planned-steps computation
+	// Deep-snapshot deepDiveConfig on the Update goroutine BEFORE it is handed to the
+	// worker below. A plain *a.deepDiveConfig is only a SHALLOW copy: its map/slice
+	// fields (Utilities, CLITools, ClaudeCodeMCPs, ZshAliases, …) keep ALIASING the
+	// live maps owned by a.deepDiveConfig, and the worker ranges over them (e.g.
+	// ApplyConfigWithMCPs over cfg.ClaudeCodeMCPs). If a config screen mutated those
+	// maps concurrently that range would be a fatal concurrent map read/write — the
+	// exact aliasing the standalone path eliminated with this same helper. It is
+	// currently mitigated only because progressScreen blocks navigation during
+	// install; snapshotDeepDiveConfig clones every reference field so the worker owns
+	// its data regardless. This snapshot also drives the planned-steps reads below.
+	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
 	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
 		plannedSteps++ // claude-code step
 	}
@@ -102,10 +112,11 @@ func (a *App) startInstallation() tea.Cmd {
 		a.sudoKeepAliveStop = startSudoKeepAlive(refreshSudo)
 	}
 
-	// cfg is already a snapshot of deepDiveConfig (taken above for planned-steps
-	// computation); theme is snapshotted here. Both are passed to the worker so
-	// it never reads App fields after this point (they may be mutated by the
-	// Update loop concurrently).
+	// cfg is a DEEP snapshot of deepDiveConfig (taken above via
+	// snapshotDeepDiveConfig, whose clones the planned-steps computation reused);
+	// theme is snapshotted here. Both are passed by value to the worker so it never
+	// reads App fields — nor the live config maps they used to alias — after this
+	// point, even if the Update loop mutates them concurrently.
 	theme := a.theme
 
 	go runInstallWorker(ctx, events, selectedTools, cfg, theme)

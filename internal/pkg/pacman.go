@@ -150,28 +150,54 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 
 	// Fallback: `pacman -Qu` reads the local sync DB and works without the
 	// pacman-contrib package. It exits 1 with empty stdout when nothing is
-	// outdated, and may still print benign local-newer-than-repo warnings to
-	// stderr. Other failures (DB lock, corrupt sync DB) also exit non-zero and
-	// write diagnostics to stderr and/or use a different exit code. Distinguish
-	// the genuine no-updates case from a real error so failures aren't silently
+	// outdated, and may still print benign diagnostics to stderr. Other
+	// failures (DB lock, corrupt sync DB) also exit non-zero and write
+	// diagnostics to stderr and/or use a different exit code. Distinguish the
+	// genuine no-updates case from a real error so failures aren't silently
 	// reported as "up to date".
 	cmd := exec.Command(p.pacmanPath, "-Qu")
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		stderrText := filterPacmanLocalNewerWarnings(errBuf.String())
+		exitCode := -1
 		exitErr, ok := err.(*exec.ExitError)
-		if ok && exitErr.ExitCode() == 1 && strings.TrimSpace(out.String()) == "" && stderrText == "" {
-			// Genuine "no updates": exit 1, no stdout, no non-benign diagnostics.
-			return "", nil
+		if ok {
+			exitCode = exitErr.ExitCode()
 		}
-		if stderrText != "" {
-			return "", fmt.Errorf("pacman -Qu failed: %w: %s", err, stderrText)
-		}
-		return "", fmt.Errorf("pacman -Qu failed: %w", err)
+		return classifyPacmanQuResult(exitCode, out.String(), errBuf.String(), err)
 	}
 	return out.String(), nil
+}
+
+func classifyPacmanQuResult(exitCode int, stdout, stderr string, runErr error) (string, error) {
+	if runErr == nil {
+		return stdout, nil
+	}
+
+	stderrText := filterPacmanLocalNewerWarnings(stderr)
+	if hasPacmanDatabaseFailure(stderrText) {
+		return "", pacmanQuFailure(runErr, stderrText)
+	}
+
+	if exitCode == 1 {
+		if strings.TrimSpace(stdout) == "" {
+			return "", nil
+		}
+		if hasPacmanErrorMarker(stderrText) {
+			return "", pacmanQuFailure(runErr, stderrText)
+		}
+		return stdout, nil
+	}
+
+	return "", pacmanQuFailure(runErr, stderrText)
+}
+
+func pacmanQuFailure(err error, stderr string) error {
+	if stderr != "" {
+		return fmt.Errorf("pacman -Qu failed: %w: %s", err, stderr)
+	}
+	return fmt.Errorf("pacman -Qu failed: %w", err)
 }
 
 func filterPacmanLocalNewerWarnings(stderr string) string {
@@ -184,6 +210,39 @@ func filterPacmanLocalNewerWarnings(stderr string) string {
 		remaining = append(remaining, trimmed)
 	}
 	return strings.Join(remaining, "\n")
+}
+
+func hasPacmanDatabaseFailure(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	markers := []string{
+		"could not lock database",
+		"unable to lock database",
+		"/var/lib/pacman/db.lck",
+		"failed to synchronize all databases",
+		"invalid or corrupted database",
+		"invalid or corrupt database",
+		"corrupted database",
+		"corrupt database",
+		"database is incorrect version",
+		"could not parse package description file",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+
+	return (strings.Contains(lower, "database file") && strings.Contains(lower, "does not exist")) ||
+		(strings.Contains(lower, "could not open file") && strings.Contains(lower, "/var/lib/pacman/sync/"))
+}
+
+func hasPacmanErrorMarker(stderr string) bool {
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "error:") {
+			return true
+		}
+	}
+	return false
 }
 
 func isPacmanLocalNewerWarning(line string) bool {

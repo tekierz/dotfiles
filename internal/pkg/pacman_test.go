@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -91,5 +92,52 @@ func TestPacmanUpdateArgsUseFullSyncUpgrade(t *testing.T) {
 	paruWant := []string{"-Syu", "--noconfirm", "--skipreview", "--noprovides", "paru"}
 	if !reflect.DeepEqual(paruArgs, paruWant) {
 		t.Fatalf("pacmanUpdateArgs() with paru flags = %v, want %v", paruArgs, paruWant)
+	}
+}
+
+func TestClassifyPacmanQuResult_NoUpdatesIgnoresBenignStderr(t *testing.T) {
+	stderr := `warning: config file /etc/pacman.conf, line 42: directive 'UseSyslog' in section 'options' not recognized.
+warning: ignoring package upgrade (linux: 6.9.1.arch1-1 => 6.9.2.arch1-1)
+warning: foo: local (1.0-2) is newer than core (1.0-1)
+`
+
+	out, err := classifyPacmanQuResult(1, "", stderr, errors.New("exit status 1"))
+	if err != nil {
+		t.Fatalf("classifyPacmanQuResult returned error for no-updates stderr: %v", err)
+	}
+	if out != "" {
+		t.Fatalf("classifyPacmanQuResult output = %q, want empty", out)
+	}
+}
+
+func TestClassifyPacmanQuResult_DatabaseErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		exitCode int
+		stdout   string
+		stderr   string
+	}{
+		{
+			name:     "db lock on non one exit",
+			exitCode: 2,
+			stderr: `error: failed to init transaction (unable to lock database)
+error: could not lock database: File exists
+`,
+		},
+		{
+			name:     "sync db error with stdout",
+			exitCode: 1,
+			stdout:   "linux 6.9.1.arch1-1 -> 6.9.2.arch1-1\n",
+			stderr:   "error: failed to synchronize all databases (invalid or corrupted database (PGP signature))\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := classifyPacmanQuResult(tt.exitCode, tt.stdout, tt.stderr, errors.New("exit status"))
+			if err == nil {
+				t.Fatalf("classifyPacmanQuResult returned nil error with output %q", out)
+			}
+		})
 	}
 }

@@ -181,8 +181,7 @@ func (s *fileTreeScreen) View(width, height int) string {
 
 	// Ghostty
 	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("ghostty/"))
-	lines = append(lines, textStyle.Render("  │   ├── config"))
-	lines = append(lines, textStyle.Render("  │   └── themes/dotfiles-theme"))
+	lines = append(lines, textStyle.Render("  │   └── config"))
 
 	// Yazi
 	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("yazi/"))
