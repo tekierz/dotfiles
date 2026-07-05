@@ -793,7 +793,7 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
 			"dotfiles-setup",
 			"hk",
 			"caff",
-			"y",
+			"sshh",
 		}
 
 		// Locations to check

@@ -92,7 +92,6 @@ func Categories(navStyle string) []Category {
 		tmuxNav = "Alt-Arrow"
 		zshTitle = "Zsh (emacs/Mac-style)"
 		yaziNav = "Arrow keys"
-		yaziHidden = "Ctrl-h"
 		nvimNav = "Arrow keys"
 	}
 
@@ -143,7 +142,6 @@ func Categories(navStyle string) []Category {
 				mk("zsh", "Ctrl-r", "Search command history"),
 				mk("zsh", "Ctrl-t", "Fuzzy find files (fzf)"),
 				mk("zsh", "Alt-c", "Fuzzy cd to directory"),
-				mk("zsh", "Ctrl-g", "Fuzzy find git files"),
 				mk("zsh", "Tab", "Autocomplete"),
 				mk("zsh", "Ctrl-w", "Delete word backwards"),
 			},

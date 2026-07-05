@@ -28,6 +28,7 @@ var cliUtilityItems = []struct {
 	{"fd", "fd", "Fast find replacement"},
 	{"delta", "delta", "Beautiful git diffs"},
 	{"fswatch", "fswatch", "File system watcher"},
+	{"tailscale", "tailscale", "Mesh VPN for secure networking"},
 }
 
 // NewConfigCLIUtilitiesScreen creates a new CLI utilities config screen handler.

@@ -88,6 +88,55 @@ var ValidNeovimPresets = func() map[string]struct{} {
 	return m
 }()
 
+// neovimMasonPackages maps the LSP identifiers exposed by the config screen to
+// their canonical Mason package names. Mason is what actually downloads a
+// language-server binary, and every cloneable preset (kickstart, LazyVim,
+// NvChad) ships it, so these are the names GenerateNeovimConfig hands to it.
+// Ids not present here are skipped rather than guessed.
+var neovimMasonPackages = map[string]string{
+	"lua_ls":        "lua-language-server",
+	"pyright":       "pyright",
+	"tsserver":      "typescript-language-server",
+	"gopls":         "gopls",
+	"rust_analyzer": "rust-analyzer",
+	"clangd":        "clangd",
+}
+
+// neovimLSPInstallLua installs the servers named in the file-local
+// `dotfiles_lsp_servers` table through Mason. It is deliberately narrow: it only
+// ensures the binaries are present and never calls lspconfig/setup, so it cannot
+// perturb the cloned preset's own LSP pipeline (which owns attachment/config).
+// Every step is pcall-guarded, the mason-registry require is deferred to VimEnter
+// (so a config without Mason is a silent no-op and Mason is not force-loaded
+// mid-startup), and `:is_installed()` makes re-runs idempotent.
+const neovimLSPInstallLua = `pcall(function()
+  vim.api.nvim_create_autocmd("VimEnter", {
+    once = true,
+    callback = function()
+      local ok, registry = pcall(require, "mason-registry")
+      if not ok then
+        return
+      end
+      local function ensure()
+        for _, name in ipairs(dotfiles_lsp_servers) do
+          local ok_pkg, pkg = pcall(registry.get_package, name)
+          if ok_pkg and pkg and not pkg:is_installed() then
+            pcall(function()
+              pkg:install()
+            end)
+          end
+        end
+      end
+      if type(registry.refresh) == "function" then
+        registry.refresh(ensure)
+      else
+        ensure()
+      end
+    end,
+  })
+end)
+`
+
 // GenerateNeovimConfig builds basic neovim settings as a Lua string.
 // For preset configs (kickstart, lazyvim), this generates a user preferences file.
 func GenerateNeovimConfig(cfg NeovimConfig, themeName string) string {
@@ -154,6 +203,31 @@ func GenerateNeovimConfig(cfg NeovimConfig, themeName string) string {
 	sb.WriteString("-- Leader\n")
 	sb.WriteString("vim.g.mapleader = \" \"\n")
 	sb.WriteString("vim.g.maplocalleader = \" \"\n")
+
+	// LSP servers.
+	// The config screen's "LSP Servers" checkboxes are wired here: each selected
+	// server is mapped to its Mason package and installed via neovimLSPInstallLua.
+	// This makes the selection real — ticking Go installs gopls, Rust installs
+	// rust_analyzer — while leaving the preset's own LSP setup untouched, so it
+	// cannot break the cloned config.
+	var masonPkgs []string
+	for _, id := range cfg.LSPs {
+		if pkgName, ok := neovimMasonPackages[id]; ok {
+			masonPkgs = append(masonPkgs, pkgName)
+		}
+	}
+	if len(masonPkgs) > 0 {
+		sb.WriteString("\n-- LSP servers (installed via Mason)\n")
+		sb.WriteString("local dotfiles_lsp_servers = {")
+		for i, pkgName := range masonPkgs {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%q", pkgName))
+		}
+		sb.WriteString("}\n")
+		sb.WriteString(neovimLSPInstallLua)
+	}
 
 	return sb.String()
 }

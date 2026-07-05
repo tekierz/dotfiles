@@ -96,6 +96,7 @@ var DotfilesPackages = []string{
 	"duf",
 	"dust",
 	"fswatch",
+	"dotfiles",
 }
 
 // DotfilesDebianPackages is the Debian/Pi variant of the allow-list, using the

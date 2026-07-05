@@ -202,6 +202,20 @@ func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
 	sb.WriteString("bind -n M-Up select-pane -U\n")
 	sb.WriteString("bind -n M-Down select-pane -D\n\n")
 
+	// Pane navigation (Alt + vim keys) — mirrors Alt-Arrow for vim-style nav
+	sb.WriteString("# Pane navigation (Alt + h/j/k/l)\n")
+	sb.WriteString("bind -n M-h select-pane -L\n")
+	sb.WriteString("bind -n M-j select-pane -D\n")
+	sb.WriteString("bind -n M-k select-pane -U\n")
+	sb.WriteString("bind -n M-l select-pane -R\n\n")
+
+	// Pane resizing (Prefix + H/J/K/L, repeatable)
+	sb.WriteString("# Pane resizing (Prefix + H/J/K/L)\n")
+	sb.WriteString("bind -r H resize-pane -L 5\n")
+	sb.WriteString("bind -r J resize-pane -D 5\n")
+	sb.WriteString("bind -r K resize-pane -U 5\n")
+	sb.WriteString("bind -r L resize-pane -R 5\n\n")
+
 	// TPM configuration
 	if cfg.TPMEnabled {
 		sb.WriteString("# TPM (Tmux Plugin Manager)\n")

@@ -110,7 +110,6 @@ func TestCategoriesNavStyleBindingsFlip(t *testing.T) {
 	}{
 		{"tmux", "Navigate panes", "Alt-h/j/k/l", "Alt-Arrow"},
 		{"yazi", "Navigate", "h/j/k/l", "Arrow keys"},
-		{"yazi", "Toggle hidden files", ".", "Ctrl-h"},
 		{"neovim", "Navigate", "h/j/k/l", "Arrow keys"},
 	}
 

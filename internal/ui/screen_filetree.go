@@ -190,12 +190,6 @@ func (s *fileTreeScreen) View(width, height int) string {
 	lines = append(lines, textStyle.Render("  │   ├── keymap.toml"))
 	lines = append(lines, textStyle.Render("  │   └── theme.toml"))
 
-	// Bat (if CLI utilities include bat)
-	if cfg.CLIUtilities["bat"] {
-		lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("bat/"))
-		lines = append(lines, textStyle.Render("  │   └── config"))
-	}
-
 	// Neovim with config type
 	nvimNote := ""
 	switch cfg.NeovimConfig {

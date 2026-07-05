@@ -160,7 +160,6 @@ Themes apply consistently across:
 - fzf fuzzy finder
 - Yazi file manager
 - Git diffs (delta)
-- Bat syntax highlighting
 
 ### Navigation Styles
 
@@ -216,7 +215,7 @@ Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
 | `caff` | Toggle system sleep (like Caffeine) |
 | `y` | Yazi file manager (cd on exit) |
 
-`sshh` (Quick SSH connection manager) is installed from its own Homebrew tap ([github.com/tekierz/sshh](https://github.com/tekierz/sshh)), not bundled or managed by dotfiles.
+`sshh` (Quick SSH connection manager) is bundled with dotfiles and installed to `~/.local/bin/sshh` by default; it is tracked by `dotfiles manage` and removed on `dotfiles uninstall`.
 
 ### Shell Aliases
 
@@ -252,7 +251,6 @@ After running, configs are placed in:
 | `~/.tmux.conf` | Tmux configuration |
 | `~/.config/ghostty/config` | Ghostty terminal |
 | `~/.config/yazi/` | Yazi file manager |
-| `~/.config/bat/config` | Bat configuration |
 | `~/.gitconfig` | Git with delta |
 | `~/.config/dotfiles/settings` | Theme, navigation, and active user |
 | `~/.config/dotfiles/users/` | User profile settings |

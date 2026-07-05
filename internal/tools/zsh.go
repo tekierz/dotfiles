@@ -164,11 +164,28 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	writeSavedAliases(&sb, loadSavedHotkeyAliases())
 	sb.WriteString("\n")
 
-	// Modern tool aliases (if available)
+	// Modern tool aliases (if available). Each alias is guarded by a
+	// command-exists check so it never shadows the real command when the
+	// modern replacement is not installed. Matches the documented set
+	// (docs/tools.md) and the legacy bash script.
 	sb.WriteString("# Modern tool aliases (if installed)\n")
 	sb.WriteString("command -v eza &>/dev/null && alias ls='eza --icons'\n")
+	sb.WriteString("command -v eza &>/dev/null && alias lt='eza --tree --level=2 --icons'\n")
 	sb.WriteString("command -v bat &>/dev/null && alias cat='bat --paging=never'\n")
-	sb.WriteString("command -v zoxide &>/dev/null && eval \"$(zoxide init zsh)\"\n\n")
+	// Disk usage tools
+	sb.WriteString("command -v duf &>/dev/null && alias df='duf'\n")
+	sb.WriteString("command -v dust &>/dev/null && alias du='dust'\n")
+	sb.WriteString("command -v ncdu &>/dev/null && alias diskuse='ncdu'\n")
+	// Network tools
+	sb.WriteString("command -v bandwhich &>/dev/null && alias bandwidth='bandwhich'\n")
+	sb.WriteString("command -v gping &>/dev/null && alias ping='gping'\n")
+	sb.WriteString("command -v doggo &>/dev/null && alias dig='doggo'\n")
+	sb.WriteString("command -v trip &>/dev/null && alias trace='trip'\n")
+	// zoxide (smarter cd)
+	sb.WriteString("if command -v zoxide &>/dev/null; then\n")
+	sb.WriteString("  eval \"$(zoxide init zsh)\"\n")
+	sb.WriteString("  alias cd='z'\n")
+	sb.WriteString("fi\n\n")
 
 	// fzf configuration written by WriteFzfConfig.
 	sb.WriteString("# fzf\n")
@@ -178,7 +195,14 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	sb.WriteString("# Prompt\n")
 	switch cfg.PromptStyle {
 	case "starship":
-		sb.WriteString("command -v starship &>/dev/null && eval \"$(starship init zsh)\"\n")
+		// Starship is not installed by the tool registry, so fall back to a
+		// working minimal prompt when it is absent instead of leaving a bare
+		// shell prompt.
+		sb.WriteString("if command -v starship &>/dev/null; then\n")
+		sb.WriteString("  eval \"$(starship init zsh)\"\n")
+		sb.WriteString("else\n")
+		sb.WriteString("  PROMPT='%~ > '\n")
+		sb.WriteString("fi\n")
 	case "p10k":
 		sb.WriteString("# Powerlevel10k instant prompt\n")
 		sb.WriteString("if [[ -r \"${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh\" ]]; then\n")

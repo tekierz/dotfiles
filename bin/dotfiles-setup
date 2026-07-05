@@ -1165,8 +1165,14 @@ install_packages() {
             print_step "Installing Homebrew..."
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-            # Add to path for this session
-            eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null || eval "$(/usr/local/bin/brew shellenv)"
+            # Add to path for this session. `eval "$(... shellenv)"` always
+            # succeeds (eval of empty string returns 0), so a `||` fallback never
+            # fires; pick the prefix that actually has a brew binary instead.
+            if [[ -x /opt/homebrew/bin/brew ]]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [[ -x /usr/local/bin/brew ]]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+            fi
             print_success "Homebrew installed"
         else
             print_success "Homebrew already installed"
@@ -1200,9 +1206,9 @@ install_packages() {
             trippy \
             -- brew install
 
-        # Install fonts
+        # Install fonts. Nerd Font casks now live in homebrew/cask directly; the
+        # old homebrew/cask-fonts tap was removed and `brew tap`-ing it errors.
         print_step "Installing Nerd Fonts..."
-        run_pkg "Homebrew cask fonts tap" homebrew/cask-fonts -- brew tap
         run_pkg "Nerd Fonts" font-jetbrains-mono-nerd-font font-iosevka-nerd-font -- brew install --cask
 
         # Install Ghostty if available
@@ -1351,18 +1357,6 @@ install_packages() {
             }
         fi
 
-        # Pi-specific: install zsh plugins manually
-        print_step "Installing zsh plugins..."
-        ZSH_PLUGINS_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins"
-        mkdir -p "$ZSH_PLUGINS_DIR"
-
-        if [[ ! -d "$ZSH_PLUGINS_DIR/zsh-syntax-highlighting" ]]; then
-            run_pkg "zsh-syntax-highlighting plugin" -- git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_PLUGINS_DIR/zsh-syntax-highlighting"
-        fi
-        if [[ ! -d "$ZSH_PLUGINS_DIR/zsh-autosuggestions" ]]; then
-            run_pkg "zsh-autosuggestions plugin" -- git clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_PLUGINS_DIR/zsh-autosuggestions"
-        fi
-
         print_success "Raspberry Pi packages installed"
 
     elif [[ "$OS" == "arch" ]]; then
@@ -1430,6 +1424,32 @@ install_packages() {
         print_warning "Some packages may need manual installation on Debian/Ubuntu"
         print_warning "Consider using Homebrew for: eza, yazi, zoxide, delta, fastfetch"
         print_warning "Network tools (bandwhich, gping, doggo, trippy) require cargo or Homebrew"
+    fi
+
+    # Powerlevel10k + zsh plugins for Linux (macOS gets these from Homebrew).
+    # Arch installs the zsh plugins via pacman (sourced from /usr/share/zsh/
+    # plugins), so only clone the plugins on Debian/Raspberry Pi. Powerlevel10k
+    # has no repo package on any Linux target here, so clone it for all of them.
+    # The generated zshrc sources these exact paths.
+    if [[ "$OS" != "macos" && "$OS" != "unknown" ]]; then
+        ZSH_CUSTOM_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+
+        if [[ "$OS" == "debian" || "$OS" == "raspi" ]]; then
+            print_step "Installing zsh plugins..."
+            mkdir -p "$ZSH_CUSTOM_DIR/plugins"
+            if [[ ! -d "$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting" ]]; then
+                run_pkg "zsh-syntax-highlighting plugin" -- git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting"
+            fi
+            if [[ ! -d "$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions" ]]; then
+                run_pkg "zsh-autosuggestions plugin" -- git clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions"
+            fi
+        fi
+
+        print_step "Installing Powerlevel10k theme..."
+        mkdir -p "$ZSH_CUSTOM_DIR/themes"
+        if [[ ! -d "$ZSH_CUSTOM_DIR/themes/powerlevel10k" ]]; then
+            run_pkg "Powerlevel10k theme" -- git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$ZSH_CUSTOM_DIR/themes/powerlevel10k"
+        fi
     fi
 
     if ! command -v zsh >/dev/null 2>&1; then
@@ -1527,11 +1547,14 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
-# Powerlevel10k theme (macOS)
+# Powerlevel10k theme (macOS Homebrew)
 [[ -f /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme ]] && \
   source /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme
 [[ -f /usr/local/share/powerlevel10k/powerlevel10k.zsh-theme ]] && \
   source /usr/local/share/powerlevel10k/powerlevel10k.zsh-theme
+# Powerlevel10k theme (Linux: cloned into the oh-my-zsh custom themes dir)
+[[ -f "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k/powerlevel10k.zsh-theme" ]] && \
+  source "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k/powerlevel10k.zsh-theme"
 
 # CachyOS config (Linux)
 [[ -f /usr/share/cachyos-zsh-config/cachyos-config.zsh ]] && \
@@ -1630,6 +1653,11 @@ export LESS_TERMCAP_us=$'\e[1;4;31m'
   source /usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 [[ -f /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
   source /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+# Plugins cloned into the oh-my-zsh custom dir (Debian / Raspberry Pi)
+[[ -f "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && \
+  source "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+[[ -f "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] && \
+  source "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
 
 # Autosuggestion style
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=244'
