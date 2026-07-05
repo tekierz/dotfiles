@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -297,6 +298,11 @@ type App struct {
 	themeStatus          string
 	hotkeysFavorites     *config.HotkeysConfig // User hotkey favorites config
 	hotkeysFavoritesOnly bool                  // Filter to show only favorites
+	// hotkeysStatus holds a transient error message from the last favorite
+	// toggle / alias save (empty on success). The hotkeys footer surfaces it so a
+	// persistence failure is not silently swallowed (the star/alias would appear
+	// set but never reach disk).
+	hotkeysStatus string
 	// Per-App active-username cache for the hotkeys screen. Refreshed once per
 	// event/frame via refreshHotkeysCurrentUser so that per-row lookups within
 	// a single frame don't re-read global.json from disk.
@@ -713,8 +719,14 @@ func createBackupCmd() tea.Cmd {
 			return backupCreateDoneMsg{err: err}
 		}
 
-		// Run backup cleanup based on settings
-		cleanupBackups()
+		// Run backup cleanup based on settings. The backup itself succeeded, so a
+		// retention-cleanup failure must not be reported as a create failure (that
+		// would falsely claim no rollback point exists and skip the list refresh).
+		// Surface it as a note appended to the success status instead, so the
+		// stalled retention policy is visible rather than silently swallowed.
+		if cerr := cleanupBackups(); cerr != nil {
+			backupName = fmt.Sprintf("%s (retention cleanup failed: %v)", backupName, cerr)
+		}
 
 		return backupCreateDoneMsg{name: backupName, err: nil}
 	}
@@ -732,17 +744,26 @@ var defaultBackupFiles = []string{
 	".gitconfig",
 }
 
-// cleanupBackups removes old backups based on global config settings
-func cleanupBackups() {
+// cleanupBackups removes old backups based on global config settings. It returns
+// an aggregated error naming every backup it failed to remove: ignoring those
+// os.RemoveAll failures let the max-count / max-age retention policy silently
+// never take effect (the over-limit/expired directories piled up unremoved). The
+// loop keeps going past a failure so one un-removable directory does not block
+// pruning the rest, and callers surface the returned error.
+func cleanupBackups() error {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
-		return
+		return err
 	}
 
 	backupsDir := filepath.Join(config.ConfigDir(), "backups")
 	entries, err := os.ReadDir(backupsDir)
 	if err != nil {
-		return
+		// A missing backups dir is not an error: there is simply nothing to prune.
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 
 	type backupInfo struct {
@@ -771,6 +792,7 @@ func cleanupBackups() {
 	})
 
 	now := time.Now()
+	var removeErrs []error
 	for i, bk := range backups {
 		shouldDelete := false
 
@@ -789,17 +811,25 @@ func cleanupBackups() {
 
 		if shouldDelete {
 			backupPath := filepath.Join(backupsDir, bk.name)
-			os.RemoveAll(backupPath)
+			if err := os.RemoveAll(backupPath); err != nil {
+				removeErrs = append(removeErrs, fmt.Errorf("%s: %w", bk.name, err))
+			}
 		}
 	}
+
+	if len(removeErrs) > 0 {
+		return fmt.Errorf("failed to prune %d old backup(s): %w", len(removeErrs), errors.Join(removeErrs...))
+	}
+	return nil
 }
 
 // autoBackupResult reports what the pre-install auto-backup actually did so the
 // install worker can be honest with the user (C5). enabled is false when
 // auto-backup is turned off (no backup attempted, no warning).
 type autoBackupResult struct {
-	enabled bool // auto-backup is on in settings
-	count   int  // number of files actually captured
+	enabled    bool  // auto-backup is on in settings
+	count      int   // number of files actually captured
+	cleanupErr error // non-fatal: retention cleanup after the backup failed
 }
 
 // autoBackupIfEnabled creates a backup if auto-backup is enabled in settings.
@@ -839,10 +869,12 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 		return autoBackupResult{enabled: true, count: count}, err
 	}
 
-	// Run cleanup after creating backup
-	cleanupBackups()
+	// Run cleanup after creating backup. A cleanup failure does not invalidate the
+	// backup we just captured, so it is recorded (not returned as a fatal error)
+	// and surfaced by the install worker as a warning line instead of being dropped.
+	cleanupErr := cleanupBackups()
 
-	return autoBackupResult{enabled: true, count: count}, nil
+	return autoBackupResult{enabled: true, count: count, cleanupErr: cleanupErr}, nil
 }
 
 // Update handles messages

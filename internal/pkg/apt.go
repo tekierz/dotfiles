@@ -67,7 +67,12 @@ func (a *AptManager) IsInstalled(pkg string) bool {
 }
 
 func (a *AptManager) GetVersion(pkg string) (string, error) {
-	cmd := exec.Command("dpkg", "-s", pkg)
+	// `dpkg -s` exits 0 and reports a Version for a removed-but-not-purged
+	// package (status "deinstall ok config-files"), which contradicts
+	// IsInstalled. Query Status and Version together and only report a version
+	// when the package is actually installed ("install ok installed"), matching
+	// IsInstalled's filter exactly.
+	cmd := exec.Command("dpkg-query", "-W", "-f=${Status}\t${Version}", pkg)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -75,15 +80,15 @@ func (a *AptManager) GetVersion(pkg string) (string, error) {
 		return "", fmt.Errorf("package %s not installed", pkg)
 	}
 
-	// Parse dpkg output for Version line
-	lines := strings.Split(out.String(), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "Version:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "Version:")), nil
-		}
+	parts := strings.SplitN(strings.TrimSpace(out.String()), "\t", 2)
+	if strings.TrimSpace(parts[0]) != "install ok installed" {
+		return "", fmt.Errorf("package %s not installed", pkg)
+	}
+	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+		return "", fmt.Errorf("could not find version for %s", pkg)
 	}
 
-	return "", fmt.Errorf("could not find version for %s", pkg)
+	return strings.TrimSpace(parts[1]), nil
 }
 
 func (a *AptManager) CheckOutdated() ([]Package, error) {
@@ -291,6 +296,21 @@ func (a *AptManager) InstallStreaming(ctx context.Context, packages ...string) (
 func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
+	}
+
+	// Refresh the package index before the targeted upgrade so it can't 404 on a
+	// stale index (every other apt write path does an `apt update` first). Use
+	// sudo -n so this best-effort refresh never blocks on an invisible password
+	// prompt; warn and continue against the current lists on failure, matching
+	// Update()'s non-blocking pattern. The streaming install below owns the
+	// upgrade and may still prompt for sudo.
+	updateCmd := exec.Command("sudo", "-n", "apt", "update")
+	if out, err := updateCmd.CombinedOutput(); err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			fmt.Fprintf(os.Stderr, "warning: apt update refresh failed, continuing with current package lists: %v: %s\n", err, msg)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: apt update refresh failed, continuing with current package lists: %v\n", err)
+		}
 	}
 
 	args := []string{"install", "-y"}

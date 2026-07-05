@@ -737,8 +737,14 @@ func (a *App) toggleHotkeyFavorite(categoryID, itemKey string) {
 	userHotkeys := a.getCurrentUserHotkeys()
 	userHotkeys.ToggleFavorite(categoryID, itemKey)
 	a.hotkeysFavorites.SetUserHotkeys(username, userHotkeys)
-	// Save to disk
-	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
+	// Save to disk. A failure here would otherwise be silent: the star renders as
+	// set from the in-memory toggle but never persists, so surface it in the
+	// footer status instead of discarding the error.
+	if err := config.SaveHotkeysConfig(a.hotkeysFavorites); err != nil {
+		a.hotkeysStatus = "Failed to save favorite: " + err.Error()
+	} else {
+		a.hotkeysStatus = ""
+	}
 }
 
 // hotkeysAliasCurrentFieldLen returns the rune count of the current alias field
@@ -821,7 +827,13 @@ func (a *App) hotkeysSaveAlias() {
 	userHotkeys.Aliases[a.hotkeysAliasName] = a.hotkeysAliasCommand
 	username := a.getCurrentUsername()
 	a.hotkeysFavorites.SetUserHotkeys(username, userHotkeys)
-	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
+	// Surface a persistence failure in the footer status instead of silently
+	// dropping it: the alias would appear accepted but never reach disk.
+	if err := config.SaveHotkeysConfig(a.hotkeysFavorites); err != nil {
+		a.hotkeysStatus = "Failed to save alias: " + err.Error()
+	} else {
+		a.hotkeysStatus = ""
+	}
 }
 
 // hotkeysCancelAlias cancels alias editing and resets state
@@ -871,6 +883,12 @@ func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 	}
 	if statusText == "" {
 		statusText = " "
+	}
+	// A persistence error from the last favorite toggle / alias save takes over the
+	// status line (in red) so it is not lost behind the category summary.
+	if a.hotkeysStatus != "" {
+		errStatus := lipgloss.NewStyle().Foreground(ColorRed).Render(truncateVisible(a.hotkeysStatus, width))
+		return lipgloss.JoinVertical(lipgloss.Left, hints, errStatus)
 	}
 	status := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(statusText, width))
 	return lipgloss.JoinVertical(lipgloss.Left, hints, status)

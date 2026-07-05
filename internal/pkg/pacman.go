@@ -149,16 +149,24 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 	}
 
 	// Fallback: `pacman -Qu` reads the local sync DB and works without the
-	// pacman-contrib package. It exits non-zero when there are no updates, so
-	// distinguish that (empty output) from a real failure.
+	// pacman-contrib package. It exits 1 with empty stdout AND empty stderr when
+	// nothing is outdated, but other failures (DB lock, corrupt sync DB) also
+	// exit non-zero — those write a diagnostic to stderr and/or use a different
+	// exit code. Distinguish the genuine no-updates case from a real error so
+	// failures aren't silently reported as "up to date".
 	cmd := exec.Command(p.pacmanPath, "-Qu")
-	var out bytes.Buffer
+	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		// `pacman -Qu` returns exit code 1 with empty output when nothing is
-		// outdated; treat empty output as "no updates" rather than an error.
-		if strings.TrimSpace(out.String()) == "" {
+		stderrText := strings.TrimSpace(errBuf.String())
+		exitErr, ok := err.(*exec.ExitError)
+		if ok && exitErr.ExitCode() == 1 && strings.TrimSpace(out.String()) == "" && stderrText == "" {
+			// Genuine "no updates": exit 1, no output, no diagnostics.
 			return "", nil
+		}
+		if stderrText != "" {
+			return "", fmt.Errorf("pacman -Qu failed: %w: %s", err, stderrText)
 		}
 		return "", fmt.Errorf("pacman -Qu failed: %w", err)
 	}

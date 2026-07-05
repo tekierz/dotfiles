@@ -115,6 +115,7 @@ RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/caff"
 mkdir -p "$RUNTIME_DIR" 2>/dev/null
 chmod 700 "$RUNTIME_DIR" 2>/dev/null
 PIDFILE="$RUNTIME_DIR/caffeine.pid"
+LOCKFILE="$RUNTIME_DIR/caffeine.lock"
 
 # read_pid prints the stored PID only if it is a plausible numeric value.
 read_pid() {
@@ -154,6 +155,37 @@ start() {
         return 0
     fi
 
+    # Atomically claim a start lock so concurrent 'caff on' invocations cannot
+    # each pass the status check above and spawn their own inhibitor (only the
+    # last PID would be recorded, orphaning the rest). 'set -o noclobber' makes
+    # '>' an atomic O_EXCL create, so exactly one caller wins the race; losers
+    # must not spawn a second inhibitor and simply exit here.
+    if ! (set -o noclobber; umask 077; echo $$ > "$LOCKFILE") 2>/dev/null; then
+        # Lock already exists. Reclaim it only if the previous holder died
+        # mid-start without releasing; otherwise another starter is active.
+        local holder
+        holder=$(cat "$LOCKFILE" 2>/dev/null)
+        if [[ "$holder" =~ ^[0-9]+$ ]] && kill -0 "$holder" 2>/dev/null; then
+            echo "☕ Caffeine is already running"
+            return 0
+        fi
+        rm -f "$LOCKFILE" 2>/dev/null
+        if ! (set -o noclobber; umask 077; echo $$ > "$LOCKFILE") 2>/dev/null; then
+            echo "☕ Caffeine is already running"
+            return 0
+        fi
+    fi
+    # Release the start lock on exit; it only guards the brief critical section
+    # below, not the lifetime of the inhibitor.
+    trap 'rm -f "$LOCKFILE" 2>/dev/null' EXIT
+
+    # Re-check under the lock in case a starter finished between the initial
+    # status check and acquiring the lock.
+    if status > /dev/null 2>&1; then
+        echo "☕ Caffeine is already running"
+        return 0
+    fi
+
     if [[ "$OSTYPE" == "darwin"* ]]; then
         caffeinate -di &
     else
@@ -163,8 +195,22 @@ start() {
             --mode=block \
             sleep infinity &
     fi
+    local newpid=$!
 
-    (umask 077; echo $! > "$PIDFILE")
+    # Wait for the child to finish exec-ing into caffeinate/systemd-inhibit
+    # before publishing its PID. If we wrote the pidfile during the brief
+    # fork/exec window, a concurrent 'caff status' could see a not-yet-
+    # recognizable process, judge the pidfile stale, delete it, and reopen the
+    # race the lock just closed. We still hold the start lock here, so no other
+    # 'caff on' can spawn while we wait.
+    local i=0
+    while ! is_caffeine "$newpid"; do
+        kill -0 "$newpid" 2>/dev/null || break
+        i=$((i + 1))
+        [ "$i" -ge 100 ] && break
+    done
+
+    (umask 077; echo "$newpid" > "$PIDFILE")
     echo "☕ Caffeine: ON - system will stay awake"
 }
 
@@ -281,8 +327,22 @@ if [[ -n "$1" ]]; then
     elif [[ "$1" == "add" ]]; then
         shift
         if [[ $# -ge 2 ]]; then
-            echo "$1 | $2 | ${3:-22}" >> "$CONFIG_FILE"
-            echo -e "${GREEN}✓${NC} Added: ${CYAN}$1${NC} → ${GREEN}$2${NC}"
+            name="$1"
+            host="$2"
+            port="${3:-22}"
+            # Records are one-per-line and '|'-delimited, so a name/host/port
+            # containing '|' would corrupt neighbouring fields and an embedded
+            # newline could forge additional host entries. Reject both.
+            for field in "$name" "$host" "$port"; do
+                case "$field" in
+                    *'|'*|*$'\n'*|*$'\r'*)
+                        echo -e "${RED}✗${NC} Name, host and port may not contain '|' or newline characters" >&2
+                        exit 1
+                        ;;
+                esac
+            done
+            echo "$name | $host | $port" >> "$CONFIG_FILE"
+            echo -e "${GREEN}✓${NC} Added: ${CYAN}$name${NC} → ${GREEN}$host${NC}"
             exit 0
         fi
         echo "Usage: sshh add \"Name\" \"user@host\" [port]" && exit 1

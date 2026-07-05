@@ -43,8 +43,13 @@ func (a *App) startInstallation() tea.Cmd {
 	a.installStep = 0
 	a.installOutput = []string{}
 
-	// Save theme and nav style before installation
-	a.saveInstallerConfig()
+	// Save theme and nav style before installation. A failure here means the
+	// user's theme / nav-style / animation choices will not persist across runs,
+	// so surface it in the install log (this runs on the Update goroutine, so
+	// writing installOutput directly is safe) instead of discarding the error.
+	if err := a.saveInstallerConfig(); err != nil {
+		a.installOutput = append(a.installOutput, fmt.Sprintf("⚠ Failed to save preferences: %v", err))
+	}
 
 	// Collect all selected tools from deep dive config
 	selectedTools := a.collectSelectedTools()
@@ -187,6 +192,11 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 			emitLine(fmt.Sprintf("✓ Auto-backup created before installation (%d file(s))", backupRes.count))
 		} else {
 			emitLine("⚠ Auto-backup captured 0 files (nothing to roll back)")
+		}
+		// The backup succeeded but pruning old backups did not; surface it so the
+		// stalled retention policy is visible rather than silently swallowed.
+		if backupRes.cleanupErr != nil {
+			emitLine(fmt.Sprintf("⚠ Backup retention cleanup failed: %v", backupRes.cleanupErr))
 		}
 	}
 
@@ -506,12 +516,55 @@ func installUtilities(utilities map[string]bool) error {
 			continue
 		}
 		scriptPath := filepath.Join(binDir, name)
-		// Private per-user executables: owner-only (rwx) per the project's
-		// documented permission policy (config dirs 700, settings 600).
-		if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil {
+		// Write atomically via temp+rename (installScriptFile) rather than
+		// os.WriteFile: WriteFile opens the destination path directly, so a
+		// pre-existing ~/.local/bin/{hk,caff,sshh} SYMLINK would be followed and
+		// its target overwritten. Renaming a fresh temp file over the path replaces
+		// the symlink itself — the same O_NOFOLLOW-safe pattern used for the binary.
+		if err := installScriptFile(scriptPath, []byte(script)); err != nil {
 			return fmt.Errorf("cannot write %s: %w", name, err)
 		}
 	}
+
+	return nil
+}
+
+// installScriptFile writes script content to destPath atomically, mirroring the
+// temp+rename pattern installBinary uses for the main binary. It writes the bytes
+// to a fresh temp file in the destination directory, chmods it owner-only (0700,
+// matching the per-user executable policy), then renames it over destPath. Because
+// the rename replaces the destination NAME (never opening destPath for writing),
+// a pre-existing destPath SYMLINK is replaced by the real file instead of being
+// followed and having its target overwritten — the O_NOFOLLOW-safe behavior.
+func installScriptFile(destPath string, content []byte) error {
+	tempFile, err := os.CreateTemp(filepath.Dir(destPath), ".dotfiles-script-*")
+	if err != nil {
+		return fmt.Errorf("cannot create temporary script: %w", err)
+	}
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if _, err := tempFile.Write(content); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("cannot write temporary script: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("cannot close temporary script: %w", err)
+	}
+	// Owner-only (0700): private per-user executable, matching installBinary and
+	// the bin directory. CreateTemp makes the file 0600, so this is the final mode.
+	if err := os.Chmod(tempPath, 0o700); err != nil {
+		return fmt.Errorf("cannot set permissions: %w", err)
+	}
+	if err := os.Rename(tempPath, destPath); err != nil {
+		return fmt.Errorf("cannot replace script: %w", err)
+	}
+	cleanupTemp = false
 
 	return nil
 }
@@ -768,21 +821,71 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 			}
 		}
 		err := cmd.Wait()
+
+		// A batch `brew/apt/pacman upgrade a b c` that exits non-zero has NOT
+		// necessarily failed every package: the manager upgrades the packages it
+		// can and fails the rest. Marking the whole batch failed (Success = err==nil
+		// for every package) mis-reported the ones that actually upgraded AND made
+		// finishUpdate short-circuit to a blanket "Update failed". So on a batch
+		// error (when not cancelled) re-check which of our packages are STILL
+		// outdated: a package no longer outdated did upgrade.
+		var stillOutdated map[string]bool
+		recheckOK := false
+		if err != nil && ctx.Err() == nil {
+			stillOutdated, recheckOK = recheckOutdatedNames(mgr, packages)
+		}
+
 		results := make([]pkg.UpdateResult, 0, len(packages))
 		for _, p := range packages {
-			results = append(results, pkg.UpdateResult{
-				Package: p,
-				Success: err == nil,
-				Error:   err,
-			})
+			switch {
+			case err == nil:
+				results = append(results, pkg.UpdateResult{Package: p, Success: true})
+			case recheckOK && !stillOutdated[p.Name]:
+				results = append(results, pkg.UpdateResult{Package: p, Success: true})
+			default:
+				results = append(results, pkg.UpdateResult{Package: p, Success: false, Error: err})
+			}
 		}
+
+		// When per-package results are authoritative (the recheck succeeded), drop
+		// the top-level error so finishUpdate counts the results ("Updated N,
+		// failed M") instead of short-circuiting on a batch error. If the recheck
+		// failed we could not verify, so keep the conservative all-failed report
+		// with the original error.
+		doneErr := err
+		if err != nil && recheckOK {
+			doneErr = nil
+		}
+
 		select {
-		case stream <- updateStreamMsg{done: true, results: results, err: err}:
+		case stream <- updateStreamMsg{done: true, results: results, err: doneErr}:
 		case <-ctx.Done():
 		}
 	}()
 
 	return a.listenUpdateStreamCmd()
+}
+
+// recheckOutdatedNames re-queries the package manager for still-outdated packages
+// after a batch update and returns, for each package in `packages`, whether it
+// remains outdated. ok is false if the re-check itself failed (the manager query
+// errored), in which case the caller keeps its conservative report rather than
+// guessing. Keyed by package name, which matches how UpdateStreaming was invoked
+// (a list of names).
+func recheckOutdatedNames(mgr pkg.PackageManager, packages []pkg.Package) (stillOutdated map[string]bool, ok bool) {
+	outdated, err := mgr.CheckOutdated()
+	if err != nil {
+		return nil, false
+	}
+	outdatedSet := make(map[string]bool, len(outdated))
+	for _, p := range outdated {
+		outdatedSet[p.Name] = true
+	}
+	stillOutdated = make(map[string]bool, len(packages))
+	for _, p := range packages {
+		stillOutdated[p.Name] = outdatedSet[p.Name]
+	}
+	return stillOutdated, true
 }
 
 // streamingUpdateAllCmd starts a streaming update of all packages, using the
@@ -832,8 +935,11 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 	return a.listenUpdateStreamCmd()
 }
 
-// saveInstallerConfig saves theme and nav style during installer flow
-func (a *App) saveInstallerConfig() {
+// saveInstallerConfig saves theme and nav style during installer flow. It
+// returns any save error so the caller can surface it: silently dropping it left
+// the user's theme / nav-style / animation preferences unpersisted with no
+// indication anything went wrong.
+func (a *App) saveInstallerConfig() error {
 	g, err := config.LoadGlobalConfig()
 	if err != nil {
 		g = config.DefaultGlobalConfig()
@@ -843,5 +949,5 @@ func (a *App) saveInstallerConfig() {
 	g.DisableAnimations = !a.animationsEnabled
 
 	// Save synchronously since we're about to start installation
-	_ = config.SaveGlobalConfig(g)
+	return config.SaveGlobalConfig(g)
 }

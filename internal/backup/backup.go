@@ -5,10 +5,12 @@ package backup
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // ManifestName is the file inside each backup directory that records the
@@ -137,14 +139,26 @@ func IsRestorePathSafe(home, relPath string) bool {
 	return ok
 }
 
-// noFollowWrite writes data to dstPath without following an existing symlink
-// at dstPath. If dstPath is currently a symlink the write is refused, so a
-// pre-existing symlink cannot redirect the write to a target outside home.
+// noFollowWrite writes data to dstPath without following a symlink at the final
+// path component. The open is made atomic with respect to symlinks via
+// syscall.O_NOFOLLOW: the kernel refuses (ELOOP) to follow a final-component
+// symlink at open time. This closes the TOCTOU window that an Lstat-then-write
+// approach left open, where a symlink swapped in between the check and the write
+// could redirect the write to a target outside home. It mirrors os.WriteFile's
+// O_WRONLY|O_CREATE|O_TRUNC semantics for the normal (non-symlink) path.
 func noFollowWrite(dstPath string, data []byte, mode os.FileMode) error {
-	if fi, err := os.Lstat(dstPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to write through symlink: %s", dstPath)
+	f, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, mode)
+	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return fmt.Errorf("refusing to write through symlink: %s", dstPath)
+		}
+		return err
 	}
-	return os.WriteFile(dstPath, data, mode)
+	_, err = f.Write(data)
+	if cerr := f.Close(); cerr != nil && err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // resolvedParentWithinHome verifies that the real (symlink-resolved) parent

@@ -403,7 +403,9 @@ func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 		if !strings.Contains(string(initContent), requireLine) {
 			// Append at the end
 			newContent := string(initContent) + "\n\n-- User options from dotfiles\n" + requireLine + "\n"
-			_ = os.WriteFile(initPath, []byte(newContent), 0600)
+			if err := os.WriteFile(initPath, []byte(newContent), 0600); err != nil {
+				return fmt.Errorf("failed to update neovim init.lua: %w", err)
+			}
 		}
 	}
 

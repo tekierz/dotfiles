@@ -722,6 +722,29 @@ add_failed_critical() {
     done
 }
 
+# Core network prerequisites that later setup steps depend on (cloning repos,
+# downloading installers). A failure here means the install is broken, not merely
+# missing an optional tool, so these must be recorded as critical.
+is_core_prerequisite() {
+    case "$1" in
+        git|curl|wget) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Record a failed package install, routing core prerequisites to the critical
+# bucket and everything else to the optional bucket.
+record_pkg_failure() {
+    local pkg
+    for pkg in "$@"; do
+        if is_core_prerequisite "$pkg"; then
+            add_failed_critical "$pkg"
+        else
+            add_failed_optional "$pkg"
+        fi
+    done
+}
+
 run_pkg_cmd() {
     local label="$1"
     shift
@@ -777,15 +800,15 @@ run_pkg() {
             local pkg
             for pkg in "${packages[@]}"; do
                 if ! run_pkg_cmd "$pkg" "${cmd[@]}" "$pkg"; then
-                    add_failed_optional "$pkg"
+                    record_pkg_failure "$pkg"
                 fi
             done
         else
-            add_failed_optional "${packages[@]}"
+            record_pkg_failure "${packages[@]}"
         fi
     else
         if ! run_pkg_cmd "$label" "${cmd[@]}"; then
-            add_failed_optional "$label"
+            record_pkg_failure "$label"
         fi
     fi
 
@@ -1163,7 +1186,11 @@ install_packages() {
         # Install Homebrew if not present
         if ! command -v brew &> /dev/null; then
             print_step "Installing Homebrew..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            # The official installer can fail silently here: a curl failure makes
+            # this `bash -c ""` which returns 0, and a non-zero installer exit would
+            # otherwise abort the whole script under set -e. Swallow the status and
+            # verify brew for real below instead of trusting this command.
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
 
             # Add to path for this session. `eval "$(... shellenv)"` always
             # succeeds (eval of empty string returns 0), so a `||` fallback never
@@ -1172,6 +1199,15 @@ install_packages() {
                 eval "$(/opt/homebrew/bin/brew shellenv)"
             elif [[ -x /usr/local/bin/brew ]]; then
                 eval "$(/usr/local/bin/brew shellenv)"
+            fi
+
+            # Confirm the install actually produced a working brew before claiming
+            # success. Every macOS package step below depends on brew, so a missing
+            # binary is fatal rather than a false "installed" message.
+            if ! command -v brew &> /dev/null; then
+                print_error "Homebrew installation failed (brew not found on PATH)"
+                print_error "Install Homebrew manually from https://brew.sh and re-run this setup."
+                exit 1
             fi
             print_success "Homebrew installed"
         else

@@ -192,8 +192,37 @@ func (b *BrewManager) Update(packages ...string) error {
 	return cmd.Run()
 }
 
+// outdatedPackageNames returns the names of the outdated packages dotfiles
+// tracks and displays (formulae + casks from CheckOutdated, with pinned formulae
+// and empty-version casks already filtered out). "Update all" upgrades exactly
+// this set by name instead of running a bare `brew upgrade`, which would sweep in
+// every outdated formula and cask on the machine — a surprise full-system upgrade
+// from the Updates screen's "update all". Naming the packages explicitly also
+// forces the greedy auto-updating casks CheckOutdated surfaces (bare `brew
+// upgrade` skips them), so the action matches the list on screen.
+func (b *BrewManager) outdatedPackageNames() ([]string, error) {
+	outdated, err := b.CheckOutdated()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(outdated))
+	for _, p := range outdated {
+		names = append(names, p.Name)
+	}
+	return names, nil
+}
+
 func (b *BrewManager) UpdateAll() error {
-	cmd := exec.Command(b.brewPath, "upgrade")
+	names, err := b.outdatedPackageNames()
+	if err != nil {
+		return fmt.Errorf("failed to determine outdated packages: %w", err)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	args := append([]string{"upgrade"}, names...)
+	cmd := exec.Command(b.brewPath, args...)
 	return cmd.Run()
 }
 
@@ -294,7 +323,22 @@ func (b *BrewManager) UpdateStreaming(ctx context.Context, packages ...string) (
 	return runner.RunStreaming(ctx, b.brewPath, args...)
 }
 
-// UpdateAllStreaming updates all packages with real-time output streaming
+// UpdateAllStreaming upgrades only the outdated packages dotfiles tracks/displays
+// (see outdatedPackageNames), streaming output live. It deliberately does NOT run
+// a bare `brew upgrade`, which would upgrade every outdated formula and cask on
+// the system — the user must not get a surprise full-system upgrade from the
+// Updates screen's "update all".
 func (b *BrewManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
-	return runner.RunStreaming(ctx, b.brewPath, "upgrade")
+	names, err := b.outdatedPackageNames()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine outdated packages: %w", err)
+	}
+	if len(names) == 0 {
+		// Nothing outdated: return a no-op rather than falling through to a bare
+		// `brew upgrade`. The caller treats a nil command as a clean completion.
+		return nil, nil
+	}
+
+	args := append([]string{"upgrade"}, names...)
+	return runner.RunStreaming(ctx, b.brewPath, args...)
 }

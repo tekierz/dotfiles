@@ -73,10 +73,14 @@ type userSavedMsg struct {
 	err  error
 }
 
-// userDeletedMsg is sent after deleting a user profile
+// userDeletedMsg is sent after deleting a user profile. warn carries a non-fatal
+// warning (e.g. the active-user marker could not be cleared) so the deletion is
+// still reported as succeeded while the secondary failure is surfaced rather than
+// swallowed.
 type userDeletedMsg struct {
 	name string
 	err  error
+	warn string
 }
 
 // userSwitchedMsg is sent after switching to a user
@@ -152,10 +156,16 @@ func deleteUserCmd(name string) tea.Cmd {
 		// hotkeys/favorites system (keyed by global config's ActiveUser) is not
 		// left pointing at a now-nonexistent profile, orphaning its data.
 		if cfg, err := config.LoadGlobalConfig(); err == nil && cfg != nil && cfg.ActiveUser == name {
-			// Best effort: a failure here leaves the profile deleted but the
-			// active marker stale; surface nothing further since the deletion
-			// itself succeeded.
-			_ = config.ClearActiveUser()
+			// The deletion itself succeeded, so this is a non-fatal warning rather
+			// than a delete failure: if clearing fails, the stale active marker
+			// orphans the deleted user's hotkeys/favorites, so surface it (instead
+			// of swallowing it) while still reporting the delete as done.
+			if cerr := config.ClearActiveUser(); cerr != nil {
+				return userDeletedMsg{
+					name: name,
+					warn: fmt.Sprintf("active-user marker not cleared: %v", cerr),
+				}
+			}
 		}
 
 		return userDeletedMsg{name: name}
@@ -280,7 +290,11 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		if msg.err != nil {
 			a.usersStatus = fmt.Sprintf("Delete failed: %v", msg.err)
 		} else {
-			a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
+			if msg.warn != "" {
+				a.usersStatus = fmt.Sprintf("Deleted %s (warning: %s)", msg.name, msg.warn)
+			} else {
+				a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
+			}
 			// Reload user list and adjust index.
 			if a.usersIndex > 0 {
 				a.usersIndex--
