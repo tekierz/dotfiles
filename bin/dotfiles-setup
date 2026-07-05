@@ -983,18 +983,54 @@ is_safe_restore_path() {
         *..*) return 1 ;;
     esac
 
-    # Reject a symlink as the FINAL path component. The ancestor resolution below
-    # only canonicalizes the deepest existing *directory*, so a final-component
-    # file symlink (e.g. ~/.gitconfig -> /etc/target) slips through: its parent
-    # resolves inside $HOME and the check passes, then the cp/rm acts THROUGH the
-    # link and writes outside $HOME. dotfiles copies configs and never symlinks
-    # these destinations, so any symlink here is anomalous — refuse it outright.
-    [[ -L "$target" ]] && return 1
-
     # Canonicalize $HOME so a symlinked home does not cause false rejections.
     # $HOME itself must resolve; if it cannot, refuse rather than guess.
     local canon_home
     canon_home=$(cd "$HOME" 2>/dev/null && pwd -P) || return 1
+
+    # A symlink as the FINAL path component needs care: the cp/rm during restore
+    # acts THROUGH the link. A link whose target escapes $HOME (e.g.
+    # ~/.gitconfig -> /etc/shadow) would let the restore write outside $HOME and
+    # must be refused. But legitimate dotfile managers (GNU stow, chezmoi) DO point
+    # these destinations back INTO $HOME (e.g. ~/.gitconfig -> ~/dotfiles/gitconfig)
+    # and those setups must stay restorable. So resolve the link target (portable:
+    # readlink + cd/pwd -P, since macOS lacks `readlink -f`) and require its
+    # canonical location to live within canonical $HOME. The ancestor check below
+    # still runs, so an intermediate symlink escaping $HOME is caught independently.
+    if [[ -L "$target" ]]; then
+        local link_target canon_target
+        link_target=$(readlink "$target") || return 1
+        # Resolve a relative link target against the link's own directory.
+        case "$link_target" in
+            /*) : ;;
+            *)  link_target="$(dirname "$target")/$link_target" ;;
+        esac
+        # Fully dereference a chain of symlinks (bounded) BEFORE canonicalizing.
+        # Otherwise a multi-hop chain (~/.a -> ~/.b -> /etc/shadow) would slip an
+        # escaping final target past the parent-only canonicalization below, which
+        # re-appends the basename literally without resolving it.
+        local hops=0 next
+        while [[ -L "$link_target" ]]; do
+            hops=$((hops + 1))
+            [ "$hops" -gt 40 ] && return 1
+            next=$(readlink "$link_target") || return 1
+            case "$next" in
+                /*) link_target="$next" ;;
+                *)  link_target="$(dirname "$link_target")/$next" ;;
+            esac
+        done
+        # Canonicalize the target's true on-disk location; cd+pwd -P resolves every
+        # intermediate symlink and any '..'. cd into it directly when it is a
+        # directory, else canonicalize its parent and re-append the (now non-symlink) basename.
+        if [[ -d "$link_target" ]]; then
+            canon_target=$(cd "$link_target" 2>/dev/null && pwd -P) || return 1
+        else
+            canon_target=$(cd "$(dirname "$link_target")" 2>/dev/null && pwd -P) || return 1
+            canon_target="$canon_target/$(basename "$link_target")"
+        fi
+        # Refuse links whose target escapes $HOME; accept in-$HOME targets.
+        [[ "$canon_target" == "$canon_home" || "$canon_target" == "$canon_home"/* ]] || return 1
+    fi
 
     # The target file may not exist yet during a restore, and any component of
     # its path could be a symlink that escapes $HOME. A lexical HasPrefix is not
@@ -3803,18 +3839,54 @@ is_safe_restore_path() {
         *..*) return 1 ;;
     esac
 
-    # Reject a symlink as the FINAL path component. The ancestor resolution below
-    # only canonicalizes the deepest existing *directory*, so a final-component
-    # file symlink (e.g. ~/.gitconfig -> /etc/target) slips through: its parent
-    # resolves inside $HOME and the check passes, then the cp/rm acts THROUGH the
-    # link and writes outside $HOME. dotfiles copies configs and never symlinks
-    # these destinations, so any symlink here is anomalous — refuse it outright.
-    [[ -L "$target" ]] && return 1
-
     # Canonicalize $HOME so a symlinked home does not cause false rejections.
     # $HOME itself must resolve; if it cannot, refuse rather than guess.
     local canon_home
     canon_home=$(cd "$HOME" 2>/dev/null && pwd -P) || return 1
+
+    # A symlink as the FINAL path component needs care: the cp/rm during restore
+    # acts THROUGH the link. A link whose target escapes $HOME (e.g.
+    # ~/.gitconfig -> /etc/shadow) would let the restore write outside $HOME and
+    # must be refused. But legitimate dotfile managers (GNU stow, chezmoi) DO point
+    # these destinations back INTO $HOME (e.g. ~/.gitconfig -> ~/dotfiles/gitconfig)
+    # and those setups must stay restorable. So resolve the link target (portable:
+    # readlink + cd/pwd -P, since macOS lacks `readlink -f`) and require its
+    # canonical location to live within canonical $HOME. The ancestor check below
+    # still runs, so an intermediate symlink escaping $HOME is caught independently.
+    if [[ -L "$target" ]]; then
+        local link_target canon_target
+        link_target=$(readlink "$target") || return 1
+        # Resolve a relative link target against the link's own directory.
+        case "$link_target" in
+            /*) : ;;
+            *)  link_target="$(dirname "$target")/$link_target" ;;
+        esac
+        # Fully dereference a chain of symlinks (bounded) BEFORE canonicalizing.
+        # Otherwise a multi-hop chain (~/.a -> ~/.b -> /etc/shadow) would slip an
+        # escaping final target past the parent-only canonicalization below, which
+        # re-appends the basename literally without resolving it.
+        local hops=0 next
+        while [[ -L "$link_target" ]]; do
+            hops=$((hops + 1))
+            [ "$hops" -gt 40 ] && return 1
+            next=$(readlink "$link_target") || return 1
+            case "$next" in
+                /*) link_target="$next" ;;
+                *)  link_target="$(dirname "$link_target")/$next" ;;
+            esac
+        done
+        # Canonicalize the target's true on-disk location; cd+pwd -P resolves every
+        # intermediate symlink and any '..'. cd into it directly when it is a
+        # directory, else canonicalize its parent and re-append the (now non-symlink) basename.
+        if [[ -d "$link_target" ]]; then
+            canon_target=$(cd "$link_target" 2>/dev/null && pwd -P) || return 1
+        else
+            canon_target=$(cd "$(dirname "$link_target")" 2>/dev/null && pwd -P) || return 1
+            canon_target="$canon_target/$(basename "$link_target")"
+        fi
+        # Refuse links whose target escapes $HOME; accept in-$HOME targets.
+        [[ "$canon_target" == "$canon_home" || "$canon_target" == "$canon_home"/* ]] || return 1
+    fi
 
     # The target file may not exist yet during a restore, and any component of
     # its path could be a symlink that escapes $HOME. A lexical HasPrefix is not

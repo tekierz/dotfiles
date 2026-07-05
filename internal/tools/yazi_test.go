@@ -81,3 +81,10 @@ func TestGenerateYaziConfigPreviewModeAffectsOutput(t *testing.T) {
 	assertContainsText(t, never, "[plugin]")
 	assertContainsText(t, never, "previewers = []")
 }
+
+func TestGenerateYaziConfigDefaultsEmptyLineMode(t *testing.T) {
+	out := GenerateYaziConfig(YaziConfig{}, "catppuccin-mocha")
+
+	assertContainsText(t, out, `linemode = "size"`)
+	assertNotContainsText(t, out, `linemode = ""`)
+}

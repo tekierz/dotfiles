@@ -69,7 +69,7 @@ func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 	sb.WriteString("sort_sensitive = false\n")
 	sb.WriteString(fmt.Sprintf("sort_reverse = %t\n", cfg.SortReverse))
 	sb.WriteString("sort_dir_first = true\n")
-	sb.WriteString(fmt.Sprintf("linemode = \"%s\"\n", cfg.LineMode))
+	sb.WriteString(fmt.Sprintf("linemode = \"%s\"\n", yaziLineMode(cfg.LineMode)))
 	sb.WriteString(fmt.Sprintf("scrolloff = %d\n", cfg.ScrollOff))
 	sb.WriteString(fmt.Sprintf("show_hidden = %t\n", cfg.ShowHidden))
 	sb.WriteString("show_symlink = true\n\n")
@@ -140,6 +140,18 @@ func yaziSortBy(sortBy string) string {
 		return sortBy
 	default:
 		return "natural"
+	}
+}
+
+// yaziLineMode validates the value written to [mgr] linemode. yazi accepts
+// none/size/btime/ctime/mtime/permissions/owner; unrecognized values fall back
+// to "size" so the written file is always a value yazi accepts.
+func yaziLineMode(lineMode string) string {
+	switch lineMode {
+	case "none", "size", "btime", "ctime", "mtime", "permissions", "owner":
+		return lineMode
+	default:
+		return "size"
 	}
 }
 

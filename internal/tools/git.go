@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
@@ -94,6 +95,25 @@ func gitDeltaSyntaxTheme(themeName string) string {
 	}
 }
 
+func brightenDeltaEmphBackground(hex string) string {
+	if len(hex) != 7 || hex[0] != '#' {
+		return hex
+	}
+
+	r, errR := strconv.ParseUint(hex[1:3], 16, 8)
+	g, errG := strconv.ParseUint(hex[3:5], 16, 8)
+	b, errB := strconv.ParseUint(hex[5:7], 16, 8)
+	if errR != nil || errG != nil || errB != nil {
+		return hex
+	}
+
+	brighten := func(v uint64) uint64 {
+		return v + ((255 - v) * 30 / 100)
+	}
+
+	return fmt.Sprintf("#%02X%02X%02X", brighten(r), brighten(g), brighten(b))
+}
+
 // GenerateGitConfig builds the .gitconfig content
 func GenerateGitConfig(cfg GitConfig, theme string) string {
 	var sb strings.Builder
@@ -182,8 +202,8 @@ func GenerateGitConfig(cfg GitConfig, theme string) string {
 		sb.WriteString("\tline-numbers = true\n")
 		sb.WriteString(fmt.Sprintf("\tminus-style = \"normal %s\"\n", p.Error))
 		sb.WriteString(fmt.Sprintf("\tplus-style = \"normal %s\"\n", p.Success))
-		sb.WriteString(fmt.Sprintf("\tminus-emph-style = \"normal %s bold\"\n", p.Error))
-		sb.WriteString(fmt.Sprintf("\tplus-emph-style = \"normal %s bold\"\n", p.Success))
+		sb.WriteString(fmt.Sprintf("\tminus-emph-style = \"normal %s bold\"\n", brightenDeltaEmphBackground(p.Error)))
+		sb.WriteString(fmt.Sprintf("\tplus-emph-style = \"normal %s bold\"\n", brightenDeltaEmphBackground(p.Success)))
 		sb.WriteString(fmt.Sprintf("\tfile-style = \"%s bold\"\n", p.Accent))
 		sb.WriteString(fmt.Sprintf("\thunk-header-style = \"%s bold\"\n", p.AccentAlt))
 		sb.WriteString(fmt.Sprintf("\tsyntax-theme = %s\n\n", gitDeltaSyntaxTheme(theme)))
