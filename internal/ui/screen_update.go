@@ -185,11 +185,21 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				return checkSudoAndUpdateCmd(packagesToUpdate, false)
 			}
 		}
-	case "a": // Update all packages
+	case "a": // Update all *displayed* packages
 		if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
 			a.clearInstallLogs()
-			a.updateStatus = "Updating all packages..."
-			return checkSudoAndUpdateCmd(nil, true)
+			// Upgrade exactly the dotfiles-tracked packages shown on screen,
+			// not every outdated system package. Route through the per-package
+			// path (the same one 'enter' uses) so "update all" matches the list
+			// the user sees; on pacman this still rides a -Syu full upgrade
+			// (partial upgrades break Arch), which the status text discloses.
+			packagesToUpdate := make([]pkg.Package, len(a.updateResults))
+			copy(packagesToUpdate, a.updateResults)
+			a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
+			if mgr := pkg.DetectManager(); mgr != nil && (mgr.Name() == "pacman" || mgr.Name() == "paru") {
+				a.updateStatus = fmt.Sprintf("Updating %d package(s) + full system upgrade (-Syu)...", len(packagesToUpdate))
+			}
+			return checkSudoAndUpdateCmd(packagesToUpdate, false)
 		}
 	case "r": // Refresh updates
 		a.updateCheckDone = false
