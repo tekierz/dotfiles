@@ -169,7 +169,16 @@ start() {
             echo "☕ Caffeine is already running"
             return 0
         fi
-        rm -f "$LOCKFILE" 2>/dev/null
+        # Reclaim a stale lock without a rm-then-recreate race: a blind
+        # 'rm -f' could delete a FRESH lock that a concurrent starter created
+        # between our read and the removal, letting both starters proceed and
+        # spawn duplicate inhibitors. Remove the lock only if it STILL holds the
+        # exact dead PID we observed; then re-create atomically. If it changed
+        # (another starter won), skip the remove so the noclobber create below
+        # fails and we back off.
+        if [[ "$(cat "$LOCKFILE" 2>/dev/null)" == "$holder" ]]; then
+            rm -f "$LOCKFILE" 2>/dev/null
+        fi
         if ! (set -o noclobber; umask 077; echo $$ > "$LOCKFILE") 2>/dev/null; then
             echo "☕ Caffeine is already running"
             return 0

@@ -98,8 +98,6 @@ func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 		opts = append(opts, strings.TrimSpace(cfg.DefaultOpts))
 	}
 
-	opts = append(opts, buildFzfColorOption(theme))
-
 	// Write export
 	if len(opts) > 0 {
 		sb.WriteString("export FZF_DEFAULT_OPTS=\"\\\n")
@@ -111,6 +109,8 @@ func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 			}
 		}
 	}
+	sb.WriteString("\n")
+	sb.WriteString(buildFzfColorGuard(theme))
 	sb.WriteString("\n")
 
 	// FZF_DEFAULT_COMMAND (use fd if available)
@@ -136,15 +136,45 @@ func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 	return sb.String()
 }
 
-func buildFzfColorOption(themeName string) string {
+func buildFzfColorGuard(themeName string) string {
+	baseColor := buildFzfBaseColorOption(themeName)
+	hexColor := buildFzfColorOption(themeName)
+
+	var sb strings.Builder
+	sb.WriteString("# Apply hex fzf colors only when the installed fzf supports them.\n")
+	sb.WriteString("if command -v fzf &>/dev/null; then\n")
+	sb.WriteString("  __dotfiles_fzf_version=\"$(fzf --version 2>/dev/null)\"\n")
+	sb.WriteString("  __dotfiles_fzf_version=\"${__dotfiles_fzf_version%% *}\"\n")
+	sb.WriteString("  __dotfiles_fzf_major=\"${__dotfiles_fzf_version%%.*}\"\n")
+	sb.WriteString("  __dotfiles_fzf_minor=\"${__dotfiles_fzf_version#*.}\"\n")
+	sb.WriteString("  __dotfiles_fzf_minor=\"${__dotfiles_fzf_minor%%.*}\"\n")
+	sb.WriteString(fmt.Sprintf("  __dotfiles_fzf_color_opt=\"%s\"\n", baseColor))
+	sb.WriteString("  if [[ \"$__dotfiles_fzf_major\" == <-> && \"$__dotfiles_fzf_minor\" == <-> ]] && (( 10#$__dotfiles_fzf_major > 0 || 10#$__dotfiles_fzf_minor >= 35 )); then\n")
+	sb.WriteString(fmt.Sprintf("    __dotfiles_fzf_color_opt=\"%s\"\n", hexColor))
+	sb.WriteString("  fi\n")
+	sb.WriteString("  export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS $__dotfiles_fzf_color_opt\"\n")
+	sb.WriteString("  unset __dotfiles_fzf_version __dotfiles_fzf_major __dotfiles_fzf_minor __dotfiles_fzf_color_opt\n")
+	sb.WriteString("else\n")
+	sb.WriteString(fmt.Sprintf("  export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS %s\"\n", baseColor))
+	sb.WriteString("fi\n")
+	return sb.String()
+}
+
+func buildFzfBaseColorOption(themeName string) string {
 	p := theme.GetOrDefault(themeName)
 	base := "light"
 	if isDarkHexColor(p.Bg) {
 		base = "dark"
 	}
 
-	return fmt.Sprintf("--color=%s,fg:%s,bg:%s,hl:%s,fg+:%s,bg+:%s,hl+:%s,info:%s,prompt:%s,pointer:%s,marker:%s,spinner:%s,header:%s,border:%s",
-		base,
+	return fmt.Sprintf("--color=%s", base)
+}
+
+func buildFzfColorOption(themeName string) string {
+	p := theme.GetOrDefault(themeName)
+
+	return fmt.Sprintf("%s,fg:%s,bg:%s,hl:%s,fg+:%s,bg+:%s,hl+:%s,info:%s,prompt:%s,pointer:%s,marker:%s,spinner:%s,header:%s,border:%s",
+		buildFzfBaseColorOption(themeName),
 		p.Text,
 		p.Bg,
 		p.Accent,

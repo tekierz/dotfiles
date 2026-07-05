@@ -1,6 +1,9 @@
 package pkg
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -109,5 +112,102 @@ func TestParseBrewOutdated_InvalidJSON(t *testing.T) {
 	_, err := parseBrewOutdated([]byte(`not json`))
 	if err == nil {
 		t.Error("parseBrewOutdated should return an error for invalid JSON")
+	}
+}
+
+// TestCheckOutdatedNonGreedy_ReliableOracleExcludesGreedyLatestCasks verifies
+// the package-level contract used by reliableOutdated/recheckOutdatedNames:
+// the post-batch failure oracle must query brew without --greedy so auto-update
+// / :latest casks that only appear in greedy output are not counted as failures.
+func TestCheckOutdatedNonGreedy_ReliableOracleExcludesGreedyLatestCasks(t *testing.T) {
+	tempDir := t.TempDir()
+	argsPath := filepath.Join(tempDir, "brew-args")
+	fakeBrewPath := filepath.Join(tempDir, "brew")
+
+	script := `#!/bin/sh
+if [ "$1" != "outdated" ]; then
+	printf 'unexpected brew command: %s\n' "$1" >&2
+	exit 64
+fi
+
+printf '%s\n' "$*" > "$BREW_ARGS_FILE"
+
+for arg in "$@"; do
+	if [ "$arg" = "--greedy" ]; then
+		printf '%s' "$BREW_GREEDY_JSON"
+		exit 0
+	fi
+done
+
+printf '%s' "$BREW_NONGREEDY_JSON"
+`
+	if err := os.WriteFile(fakeBrewPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake brew: %v", err)
+	}
+
+	normalFormula := `{
+		"name": "ripgrep",
+		"installed_versions": ["14.0.0"],
+		"current_version": "14.1.0",
+		"pinned": false
+	}`
+	normalCask := `{
+		"name": "tracked-app",
+		"installed_version": "2.0.0",
+		"current_version": "2.1.0"
+	}`
+	latestOnlyGreedyCask := `{
+		"name": "auto-updater-latest",
+		"installed_version": "latest",
+		"current_version": ":latest"
+	}`
+
+	t.Setenv("BREW_ARGS_FILE", argsPath)
+	t.Setenv("BREW_NONGREEDY_JSON", `{
+		"formulae": [`+normalFormula+`],
+		"casks": [`+normalCask+`]
+	}`)
+	t.Setenv("BREW_GREEDY_JSON", `{
+		"formulae": [`+normalFormula+`],
+		"casks": [`+normalCask+`, `+latestOnlyGreedyCask+`]
+	}`)
+
+	mgr := &BrewManager{brewPath: fakeBrewPath}
+	packages, err := mgr.CheckOutdatedNonGreedy()
+	if err != nil {
+		t.Fatalf("CheckOutdatedNonGreedy returned error: %v", err)
+	}
+
+	argsBytes, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake brew args: %v", err)
+	}
+	if args := strings.TrimSpace(string(argsBytes)); args != "outdated --json=v2" {
+		t.Fatalf("brew args = %q, want %q", args, "outdated --json=v2")
+	}
+
+	byName := make(map[string]Package, len(packages))
+	for _, p := range packages {
+		byName[p.Name] = p
+	}
+
+	if _, ok := byName["auto-updater-latest"]; ok {
+		t.Fatalf(":latest cask from greedy-only output must be excluded from non-greedy oracle: %+v", packages)
+	}
+
+	rg, ok := byName["ripgrep"]
+	if !ok {
+		t.Fatalf("normal formula ripgrep must be included: %+v", packages)
+	}
+	if rg.InstalledBy != "brew" || rg.CurrentVersion != "14.0.0" || rg.LatestVersion != "14.1.0" || !rg.Outdated {
+		t.Errorf("ripgrep package = %+v, want brew 14.0.0 -> 14.1.0 and Outdated=true", rg)
+	}
+
+	tracked, ok := byName["tracked-app"]
+	if !ok {
+		t.Fatalf("normal cask tracked-app must be included: %+v", packages)
+	}
+	if tracked.InstalledBy != "brew-cask" || tracked.CurrentVersion != "2.0.0" || tracked.LatestVersion != "2.1.0" || !tracked.Outdated {
+		t.Errorf("tracked-app package = %+v, want brew-cask 2.0.0 -> 2.1.0 and Outdated=true", tracked)
 	}
 }
