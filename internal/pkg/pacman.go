@@ -181,11 +181,11 @@ func classifyPacmanQuResult(exitCode int, stdout, stderr string, runErr error) (
 	}
 
 	if exitCode == 1 {
-		if strings.TrimSpace(stdout) == "" {
-			return "", nil
-		}
 		if hasPacmanErrorMarker(stderrText) {
 			return "", pacmanQuFailure(runErr, stderrText)
+		}
+		if strings.TrimSpace(stdout) == "" {
+			return "", nil
 		}
 		return stdout, nil
 	}

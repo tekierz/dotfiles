@@ -232,10 +232,17 @@ func GenerateNeovimConfig(cfg NeovimConfig, themeName string) string {
 	} else {
 		sb.WriteString("-- Keep the preset's active colorscheme when no bundled match is available.\n")
 	}
-	sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"Normal\", { fg = %q, bg = %q })\n", p.Text, p.Bg))
-	sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"NormalFloat\", { fg = %q, bg = %q })\n", p.Text, p.Surface))
-	sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"FloatBorder\", { fg = %q, bg = %q })\n", p.Border, p.Surface))
-	sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"Visual\", { fg = %q, bg = %q })\n\n", p.TextBright, p.Overlay))
+	// Full per-theme Neovim theming would require installing the matching
+	// colorscheme plugin, which is out of scope; this only keeps dark themes
+	// aligned without creating a light-background/dark-syntax clash.
+	if isDarkHexColor(p.Bg) {
+		sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"Normal\", { fg = %q, bg = %q })\n", p.Text, p.Bg))
+		sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"NormalFloat\", { fg = %q, bg = %q })\n", p.Text, p.Surface))
+		sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"FloatBorder\", { fg = %q, bg = %q })\n", p.Border, p.Surface))
+		sb.WriteString(fmt.Sprintf("vim.api.nvim_set_hl(0, \"Visual\", { fg = %q, bg = %q })\n\n", p.TextBright, p.Overlay))
+	} else {
+		sb.WriteString("\n")
+	}
 
 	// Performance
 	sb.WriteString("-- Performance\n")
