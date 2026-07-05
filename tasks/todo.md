@@ -84,25 +84,25 @@ Bash installer (still the documented fallback path):
 
 ## P2 — Should fix before release (correctness/security, non-data-loss)
 
-- [ ] `sudo apt update` runs synchronously inside CheckOutdated — TUI hangs on the sudo
+- [x] `sudo apt update` runs synchronously inside CheckOutdated — TUI hangs on the sudo
       password prompt (internal/pkg/apt.go; partial mitigation exists).
-- [ ] pacman `Update()` installs from a stale sync DB — reported updates don't apply
+- [x] pacman `Update()` installs from a stale sync DB — reported updates don't apply
       (internal/pkg/pacman.go; use the checkupdates-db pattern or a full -Sy transaction guard).
-- [ ] `CheckAllUpdates` swallows all per-manager errors — total failure renders as
+- [x] `CheckAllUpdates` swallows all per-manager errors — total failure renders as
       "everything up to date" (internal/pkg/update.go).
-- [ ] ManageConfig saved from a worker goroutine while the UI goroutine can still write
+- [x] ManageConfig saved from a worker goroutine while the UI goroutine can still write
       through field pointers — data race / torn JSON (internal/ui/manage_dualpane.go:95-113).
-- [ ] Raw package-manager output rendered to the terminal without stripping ANSI/control
+- [x] Raw package-manager output rendered to the terminal without stripping ANSI/control
       sequences (update results path) — escape-sequence injection surface.
-- [ ] caff pidfile in world-writable /tmp is predictable — cross-user process-kill;
+- [x] caff pidfile in world-writable /tmp is predictable — cross-user process-kill;
       Go copy partially fixed, generated-script copy (bin/dotfiles-setup) unchanged.
-- [ ] App-detection substring matching produces false "installed" (internal/tools/apps.go).
-- [ ] Hotkeys config path ignores `XDG_CONFIG_HOME`, diverging from ConfigDir().
-- [ ] Blocking package-manager subprocess calls inside `View()` via ensureInstallCache
+- [x] App-detection substring matching produces false "installed" (internal/tools/apps.go).
+- [x] Hotkeys config path ignores `XDG_CONFIG_HOME`, diverging from ConfigDir().
+- [x] Blocking package-manager subprocess calls inside `View()` via ensureInstallCache
       (six screen_config_*.go call sites) — move to async Cmd like the rest of the app.
-- [ ] yazi theme.toml declared-but-never-written; PreviewMode ignored. glow config written
+- [x] yazi theme.toml declared-but-never-written; PreviewMode ignored. glow config written
       to a path glow doesn't read on macOS.
-- [ ] bash: package install failures silenced then "installation complete" reported.
+- [x] bash: package install failures silenced then "installation complete" reported.
 
 ## P3 — Cleanups (post-release acceptable; tracked so they don't rot)
 
@@ -123,6 +123,8 @@ Bash installer (still the documented fallback path):
 - [ ] golangci-lint clean with the repaired config; CI fully blocking
 - [ ] `govulncheck ./...` re-run clean
 - [ ] Run the `pre-pr-tests` skill checklist (manual TUI pass on macOS + one Linux)
+- [ ] On macOS, confirm glow reads its config from the new `os.UserConfigDir()` path
+      (`glow config` should show/edit `~/Library/Application Support/glow/glow.yml`)
 - [ ] Fresh-machine install test: brew tap path AND bash-script path; then uninstall and
       verify configs restored byte-identical (this exercises the P0 backup fixes)
 - [ ] Tag release; verify `dotfiles --version` matches the tag; update homebrew-tap
