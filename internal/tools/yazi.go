@@ -63,7 +63,7 @@ func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("# Theme: %s\n\n", theme))
 
 	// Manager settings
-	sb.WriteString("[manager]\n")
+	sb.WriteString("[mgr]\n")
 	sb.WriteString("ratio = [1, 4, 3]\n")
 	sb.WriteString(fmt.Sprintf("sort_by = \"%s\"\n", yaziSortBy(cfg.SortBy)))
 	sb.WriteString("sort_sensitive = false\n")
@@ -129,7 +129,7 @@ func yaziPreviewImageDelay(mode string) int {
 }
 
 // yaziSortBy maps the Manage UI's sort vocabulary onto the values yazi's
-// [manager] sort_by accepts. yazi understands alphabetical/natural/size/mtime
+// [mgr] sort_by accepts. yazi understands alphabetical/natural/size/mtime
 // (among others); the UI's "modified" is yazi's "mtime". Unrecognized values fall
 // back to "natural" so the written file is always a value yazi accepts.
 func yaziSortBy(sortBy string) string {
@@ -152,7 +152,7 @@ func GenerateYaziKeymap(cfg YaziConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("# Keymap style: %s\n\n", cfg.Keymap))
 
 	// Manager keymaps (common)
-	sb.WriteString("[manager]\n")
+	sb.WriteString("[mgr]\n")
 	sb.WriteString("keymap = [\n")
 
 	// Navigation keys depend on keymap style

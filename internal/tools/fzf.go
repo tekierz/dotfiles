@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/theme"
 )
 
 // FzfConfig holds FZF configuration settings
@@ -96,6 +98,8 @@ func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 		opts = append(opts, strings.TrimSpace(cfg.DefaultOpts))
 	}
 
+	opts = append(opts, buildFzfColorOption(theme))
+
 	// Write export
 	if len(opts) > 0 {
 		sb.WriteString("export FZF_DEFAULT_OPTS=\"\\\n")
@@ -130,6 +134,48 @@ func GenerateFzfConfig(cfg FzfConfig, theme string) string {
 	sb.WriteString("fi\n")
 
 	return sb.String()
+}
+
+func buildFzfColorOption(themeName string) string {
+	p := theme.GetOrDefault(themeName)
+	base := "light"
+	if isDarkHexColor(p.Bg) {
+		base = "dark"
+	}
+
+	return fmt.Sprintf("--color=%s,fg:%s,bg:%s,hl:%s,fg+:%s,bg+:%s,hl+:%s,info:%s,prompt:%s,pointer:%s,marker:%s,spinner:%s,header:%s,border:%s",
+		base,
+		p.Text,
+		p.Bg,
+		p.Accent,
+		p.TextBright,
+		p.Surface,
+		p.AccentAlt,
+		p.Info,
+		p.Accent,
+		p.AccentAlt,
+		p.Success,
+		p.AccentAlt,
+		p.Info,
+		p.Border,
+	)
+}
+
+func isDarkHexColor(hex string) bool {
+	hex = strings.TrimPrefix(strings.TrimSpace(hex), "#")
+	if len(hex) != 6 {
+		return true
+	}
+
+	r, errR := strconv.ParseUint(hex[0:2], 16, 8)
+	g, errG := strconv.ParseUint(hex[2:4], 16, 8)
+	b, errB := strconv.ParseUint(hex[4:6], 16, 8)
+	if errR != nil || errG != nil || errB != nil {
+		return true
+	}
+
+	luminance := 0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)
+	return luminance < 128
 }
 
 // WriteFzfConfig writes the fzf configuration to a sourceable file

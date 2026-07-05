@@ -34,11 +34,14 @@ func TestGenerateYaziTheme(t *testing.T) {
 	out := GenerateYaziTheme("dracula")
 
 	assertContainsText(t, out, "#ff79c6")
+	// yazi 26.x renamed [manager]->[mgr] and [select]->[pick]; the old names are
+	// silently ignored, so the generator (and this test) must use the new schema.
 	for _, header := range []string{
-		"[manager]",
+		"[mgr]",
+		"[tabs]",
 		"[status]",
 		"[input]",
-		"[select]",
+		"[pick]",
 		"[tasks]",
 		"[which]",
 		"[help]",
@@ -46,6 +49,8 @@ func TestGenerateYaziTheme(t *testing.T) {
 	} {
 		assertContainsText(t, out, header)
 	}
+	assertNotContainsText(t, out, "[manager]")
+	assertNotContainsText(t, out, "[select]")
 }
 
 func TestGenerateYaziThemeUnknownFallsBackToMocha(t *testing.T) {

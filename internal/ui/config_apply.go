@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -20,28 +22,87 @@ import (
 // screen left to render the error to.
 func (a *App) applyStandaloneConfigCmd() tea.Cmd {
 	return tea.Sequence(
-		func() tea.Msg {
-			if errs := a.applyStandaloneConfig(); len(errs) > 0 {
-				fmt.Fprintf(os.Stderr, "dotfiles: failed to apply config: %v\n", errs[0])
-			}
-			return nil
-		},
+		a.applyStandaloneConfigWorker(),
 		tea.Quit,
 	)
 }
 
+// applyStandaloneConfigWorker builds the tea.Cmd that performs the standalone
+// scoped write. The config data is DEEP-SNAPSHOTTED here — on the UI goroutine,
+// before the Cmd is returned — so the closure the tea runtime later runs on a
+// worker goroutine reads only fully-owned data and never touches a.deepDiveConfig.
+//
+// This is the crash fix: the screen that dispatched this Cmd (e.g. `dotfiles
+// config claude-code`) stays active until tea.Quit lands and keeps toggling
+// a.deepDiveConfig's maps (ClaudeCodeMCPs, CLITools) on the UI goroutine. Handing
+// the worker a shallow `*a.deepDiveConfig` — whose map/slice fields alias those
+// live maps — makes the worker read a map the UI goroutine is writing: a fatal
+// concurrent map read/write. snapshotDeepDiveConfig clones every reference field
+// so there is no shared mutable state. Mirrors saveManageConfigCmd's pre-return
+// snapshot in manage_dualpane.go.
+func (a *App) applyStandaloneConfigWorker() tea.Cmd {
+	startScreen := a.startScreen
+	snapshot := snapshotDeepDiveConfig(a.deepDiveConfig)
+	theme := a.theme
+	return func() tea.Msg {
+		if errs := applyStandaloneSnapshot(startScreen, snapshot, theme); len(errs) > 0 {
+			fmt.Fprintf(os.Stderr, "dotfiles: failed to apply config: %v\n", errs[0])
+		}
+		return nil
+	}
+}
+
 // applyStandaloneConfig writes ONLY the config file for the tool whose screen was
-// opened standalone (a.startScreen), using the current in-memory deepDiveConfig.
-// It returns any generator error(s). Splitting this out from the Cmd keeps it
-// directly testable (no tea.Quit) and is the single scoped-write entry point for
-// the standalone path.
+// opened standalone (a.startScreen), using a deep snapshot of the current
+// in-memory deepDiveConfig. It returns any generator error(s). Splitting this out
+// from the Cmd keeps it directly testable (no tea.Quit).
 func (a *App) applyStandaloneConfig() []error {
-	toolID, ok := toolIDForScreen(a.startScreen)
+	return applyStandaloneSnapshot(a.startScreen, snapshotDeepDiveConfig(a.deepDiveConfig), a.theme)
+}
+
+// applyStandaloneSnapshot writes ONLY the opened tool's config file from an
+// already-owned DeepDiveConfig snapshot. It is pure (no App or goroutine-shared
+// state), so it is safe to call on any goroutine and both standalone paths — the
+// synchronous applyStandaloneConfig and the async applyStandaloneConfigWorker —
+// funnel through it so they cannot drift. An unknown/non-config startScreen is a
+// no-op returning nil.
+func applyStandaloneSnapshot(startScreen Screen, cfg DeepDiveConfig, theme string) []error {
+	toolID, ok := toolIDForScreen(startScreen)
 	if !ok {
 		// Not a per-tool config screen; nothing scoped to write.
 		return nil
 	}
-	return applyOneToolConfig(toolID, *a.deepDiveConfig, a.theme)
+	return applyOneToolConfig(toolID, cfg, theme)
+}
+
+// snapshotDeepDiveConfig returns a value copy of *cfg whose every map and slice
+// field is freshly allocated (a deep copy). A plain `*cfg` is only a SHALLOW copy:
+// its reference-type fields (ClaudeCodeMCPs, CLITools, ZshAliases, …) keep ALIASING
+// the live maps that the still-open `dotfiles config <tool>` screen mutates on the
+// UI goroutine. Passing that shallow copy to a worker goroutine makes the worker
+// read a map the UI goroutine is concurrently writing — a fatal concurrent map
+// read/write. Deep-copying here, on the UI goroutine before the worker starts,
+// hands the worker fully-owned data.
+//
+// This is the DeepDiveConfig analogue of the value snapshot saveManageConfigCmd
+// takes: ManageConfig is flat so a shallow copy suffices there, whereas
+// DeepDiveConfig owns reference types and needs the per-field clone below. maps/
+// slices.Clone preserve nil, so gating checks like applyClaudeCodeConfig's
+// len(ClaudeCodeMCPs) == 0 behave identically on the snapshot.
+func snapshotDeepDiveConfig(cfg *DeepDiveConfig) DeepDiveConfig {
+	snap := *cfg
+	snap.ZshPlugins = slices.Clone(cfg.ZshPlugins)
+	snap.NeovimLSPs = slices.Clone(cfg.NeovimLSPs)
+	snap.NeovimPlugins = slices.Clone(cfg.NeovimPlugins)
+	snap.GitAliases = slices.Clone(cfg.GitAliases)
+	snap.ZshAliases = maps.Clone(cfg.ZshAliases)
+	snap.MacApps = maps.Clone(cfg.MacApps)
+	snap.Utilities = maps.Clone(cfg.Utilities)
+	snap.CLITools = maps.Clone(cfg.CLITools)
+	snap.GUIApps = maps.Clone(cfg.GUIApps)
+	snap.CLIUtilities = maps.Clone(cfg.CLIUtilities)
+	snap.ClaudeCodeMCPs = maps.Clone(cfg.ClaudeCodeMCPs)
+	return snap
 }
 
 // config_apply.go is the SINGLE place that turns the TUI's in-memory config into
