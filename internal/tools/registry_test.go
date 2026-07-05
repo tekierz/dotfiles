@@ -106,7 +106,7 @@ var expectedTools = map[string]toolSpec{
 	"glow": {
 		name: "Glow", description: "Render markdown on the CLI", category: CategoryUtility, icon: "\U000f0219",
 		uiGroup: UIGroupCLITools, configScreen: 31, isHeavy: false, defaultEnabled: true, platformFilter: "",
-		hasConfig: false, configPaths: 0,
+		hasConfig: true, configPaths: 1,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"glow"}, pkg.PlatformMacOS: {"glow"}},
 	},
 	"iina": {

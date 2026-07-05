@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
@@ -406,6 +407,10 @@ func hasDesktopEntry(names ...string) bool {
 		"/var/lib/flatpak/exports/share/applications",
 	}
 
+	return hasDesktopEntryInDirs(searchPaths, names...)
+}
+
+func hasDesktopEntryInDirs(searchPaths []string, names ...string) bool {
 	for _, searchPath := range searchPaths {
 		entries, err := os.ReadDir(searchPath)
 		if err != nil {
@@ -416,11 +421,11 @@ func hasDesktopEntry(names ...string) bool {
 				continue
 			}
 
-			entryLower := strings.ToLower(entry.Name())
+			entryName := strings.TrimSuffix(entry.Name(), ".desktop")
 
 			// First check: filename match (e.g., "cursor.desktop", "zen-browser.desktop")
 			for _, name := range names {
-				if strings.Contains(entryLower, strings.ToLower(name)) {
+				if matchesToken(entryName, name) {
 					return true
 				}
 			}
@@ -428,7 +433,7 @@ func hasDesktopEntry(names ...string) bool {
 			// Second check: read Exec= field for AppImage entries
 			// AppImage desktop entries often have names like "appimagekit_xxx-Cursor.desktop"
 			// but the Exec= field contains the actual AppImage path
-			if strings.Contains(entryLower, "appimage") {
+			if strings.Contains(strings.ToLower(entryName), "appimage") {
 				desktopPath := filepath.Join(searchPath, entry.Name())
 				if hasDesktopEntryExec(desktopPath, names...) {
 					return true
@@ -452,9 +457,9 @@ func hasDesktopEntryExec(path string, names ...string) bool {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "Exec=") {
-			execValue := strings.ToLower(line[5:])
+			execName := execBasename(line[5:])
 			for _, name := range names {
-				if strings.Contains(execValue, strings.ToLower(name)) {
+				if matchesToken(execName, name) {
 					return true
 				}
 			}
@@ -480,6 +485,10 @@ func hasAppImage(patterns ...string) bool {
 		"/usr/local/bin",
 	}
 
+	return hasAppImageInDirs(searchPaths, patterns...)
+}
+
+func hasAppImageInDirs(searchPaths []string, patterns ...string) bool {
 	for _, searchPath := range searchPaths {
 		entries, err := os.ReadDir(searchPath)
 		if err != nil {
@@ -490,21 +499,86 @@ func hasAppImage(patterns ...string) bool {
 				continue
 			}
 
-			entryLower := strings.ToLower(entry.Name())
+			entryName := entry.Name()
+			entryLower := strings.ToLower(entryName)
 
 			// Check if it's an AppImage file matching any pattern
 			for _, pattern := range patterns {
-				patternLower := strings.ToLower(pattern)
 				// Match AppImage files (e.g., "Cursor-0.45.11-x86_64.AppImage")
-				if strings.Contains(entryLower, patternLower) &&
-					(strings.HasSuffix(entryLower, ".appimage") ||
-						strings.Contains(entryLower, "appimage")) {
+				if (strings.HasSuffix(entryLower, ".appimage") ||
+					strings.Contains(entryLower, "appimage")) &&
+					matchesToken(entryName, pattern) {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+func matchesToken(fieldName, wanted string) bool {
+	fieldName = normalizeAppTokenField(fieldName)
+	wanted = normalizeAppTokenField(wanted)
+	if fieldName == "" || wanted == "" {
+		return false
+	}
+	if fieldName == wanted {
+		return true
+	}
+	fieldTokens := splitAppTokens(fieldName)
+	wantedTokens := splitAppTokens(wanted)
+	if len(wantedTokens) == 0 {
+		return false
+	}
+	for i := 0; i <= len(fieldTokens)-len(wantedTokens); i++ {
+		matched := true
+		for j, token := range wantedTokens {
+			if fieldTokens[i+j] != token {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAppTokenField(value string) string {
+	value = strings.TrimSpace(strings.Trim(value, `"'`))
+	value = filepath.Base(value)
+	lower := strings.ToLower(value)
+	for _, suffix := range []string{".desktop", ".appimage", ".app"} {
+		lower = strings.TrimSuffix(lower, suffix)
+	}
+	return lower
+}
+
+func splitAppTokens(value string) []string {
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func execBasename(execValue string) string {
+	execValue = strings.TrimSpace(execValue)
+	if execValue == "" {
+		return ""
+	}
+
+	if execValue[0] == '"' || execValue[0] == '\'' {
+		quote := execValue[0]
+		if end := strings.IndexByte(execValue[1:], quote); end >= 0 {
+			return execValue[1 : end+1]
+		}
+	}
+
+	fields := strings.Fields(execValue)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 // hasMacOSApp checks if a .app bundle exists in /Applications (macOS only)

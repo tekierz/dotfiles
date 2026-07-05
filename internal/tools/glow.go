@@ -24,6 +24,11 @@ type GlowTool struct {
 
 // NewGlowTool creates a new glow tool
 func NewGlowTool() *GlowTool {
+	configPath, err := glowConfigPath()
+	if err != nil {
+		configPath = fallbackGlowConfigPath()
+	}
+
 	return &GlowTool{
 		BaseTool: BaseTool{
 			id:          "glow",
@@ -37,7 +42,7 @@ func NewGlowTool() *GlowTool {
 				// glow is not in stock Debian/Ubuntu repos (requires Charm keyring);
 				// omitting Debian entry prevents a guaranteed-failing apt install.
 			},
-			configPaths: []string{},
+			configPaths: []string{configPath},
 			// UI metadata
 			uiGroup:        UIGroupCLITools,
 			configScreen:   31, // ScreenConfigGlow - has dedicated config screen
@@ -62,13 +67,7 @@ func GenerateGlowConfig(cfg GlowConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("style: \"%s\"\n", glowStyle))
 
 	// Pager
-	if cfg.Pager == "never" {
-		sb.WriteString("pager: false\n")
-	} else if cfg.Pager == "less" {
-		sb.WriteString("pager: true\n")
-	} else {
-		sb.WriteString("pager: true\n")
-	}
+	sb.WriteString(fmt.Sprintf("pager: %t\n", cfg.Pager != "never"))
 
 	// Width
 	if cfg.Width > 0 {
@@ -87,12 +86,27 @@ func GenerateGlowConfig(cfg GlowConfig, theme string) string {
 
 // WriteGlowConfig writes the glow config to disk
 func WriteGlowConfig(cfg GlowConfig, theme string) error {
-	home, err := os.UserHomeDir()
+	configPath, err := glowConfigPath()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return err
 	}
 
-	configPath := filepath.Join(home, ".config", "glow", "glow.yml")
 	content := GenerateGlowConfig(cfg, theme)
 	return writeToolConfig(configPath, []byte(content))
+}
+
+func glowConfigPath() (string, error) {
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user config directory: %w", err)
+	}
+	return filepath.Join(userConfigDir, "glow", "glow.yml"), nil
+}
+
+func fallbackGlowConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(".config", "glow", "glow.yml")
+	}
+	return filepath.Join(home, ".config", "glow", "glow.yml")
 }

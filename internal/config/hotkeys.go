@@ -20,13 +20,13 @@ type UserHotkeys struct {
 	Aliases   map[string]string   `json:"aliases"`   // alias -> actual_command
 }
 
-// LoadHotkeysConfig loads hotkeys config from ~/.config/dotfiles/hotkeys.json
+// LoadHotkeysConfig loads hotkeys config from ConfigDir()/hotkeys.json.
 func LoadHotkeysConfig() (*HotkeysConfig, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
+	dir := ConfigDir()
+	if dir == "" {
+		return nil, ErrNoConfigDir
 	}
-	path := filepath.Join(home, ".config", "dotfiles", "hotkeys.json")
+	path := filepath.Join(dir, "hotkeys.json")
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -48,11 +48,10 @@ func LoadHotkeysConfig() (*HotkeysConfig, error) {
 
 // SaveHotkeysConfig saves hotkeys config
 func SaveHotkeysConfig(cfg *HotkeysConfig) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
+	dir := ConfigDir()
+	if dir == "" {
+		return ErrNoConfigDir
 	}
-	dir := filepath.Join(home, ".config", "dotfiles")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}

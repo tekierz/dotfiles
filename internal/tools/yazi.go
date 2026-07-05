@@ -76,13 +76,16 @@ func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 
 	// Preview settings
 	sb.WriteString("[preview]\n")
+	sb.WriteString(fmt.Sprintf("# Preview mode: %s\n", yaziPreviewMode(cfg.PreviewMode)))
+	sb.WriteString("# yazi has no single preview toggle; image_delay controls eager image rendering,\n")
+	sb.WriteString("# and PreviewMode=never disables previewer plugins in the [plugin] section below.\n")
+	sb.WriteString(fmt.Sprintf("image_delay = %d\n", yaziPreviewImageDelay(cfg.PreviewMode)))
 	sb.WriteString("tab_size = 2\n")
 	sb.WriteString("max_width = 600\n")
 	sb.WriteString("max_height = 900\n")
 	sb.WriteString("cache_dir = \"\"\n")
 	sb.WriteString("image_filter = \"triangle\"\n")
 	sb.WriteString("image_quality = 75\n")
-	sb.WriteString("sixel_fraction = 15\n")
 	sb.WriteString("ueberzug_scale = 1\n")
 	sb.WriteString("ueberzug_offset = [0, 0, 0, 0]\n\n")
 
@@ -100,7 +103,29 @@ func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 	sb.WriteString("[log]\n")
 	sb.WriteString("enabled = false\n")
 
+	if yaziPreviewMode(cfg.PreviewMode) == "never" {
+		sb.WriteString("\n[plugin]\n")
+		sb.WriteString("# PreviewMode=never disables yazi's previewer plugins with a schema-valid override.\n")
+		sb.WriteString("previewers = []\n")
+	}
+
 	return sb.String()
+}
+
+func yaziPreviewMode(mode string) string {
+	switch mode {
+	case "always", "never":
+		return mode
+	default:
+		return "auto"
+	}
+}
+
+func yaziPreviewImageDelay(mode string) int {
+	if yaziPreviewMode(mode) == "always" {
+		return 0
+	}
+	return 30
 }
 
 // yaziSortBy maps the Manage UI's sort vocabulary onto the values yazi's
@@ -188,6 +213,12 @@ func WriteYaziConfig(cfg YaziConfig, theme string) error {
 	// Write keymap.toml
 	keymapContent := GenerateYaziKeymap(cfg, theme)
 	if err := writeToolConfig(filepath.Join(configDir, "keymap.toml"), []byte(keymapContent)); err != nil {
+		return err
+	}
+
+	// Write theme.toml
+	themeContent := GenerateYaziTheme(theme)
+	if err := writeToolConfig(filepath.Join(configDir, "theme.toml"), []byte(themeContent)); err != nil {
 		return err
 	}
 
