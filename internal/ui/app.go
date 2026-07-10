@@ -665,7 +665,7 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 		// refusal, read/mkdir errors) instead of discarding them. A restore where
 		// every file is skipped must NOT report green success (C3); mirrors the
 		// CLI, which prints each skipped reason.
-		details := make([]string, 0, len(result.Restored)+len(result.Removed)+len(result.Skipped))
+		details := make([]string, 0, len(result.Restored)+len(result.Removed)+len(result.Skipped)+len(result.Warnings))
 		for _, relPath := range result.Restored {
 			details = append(details, "restored "+relPath)
 		}
@@ -675,15 +675,19 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 		for item, reason := range result.Skipped {
 			details = append(details, fmt.Sprintf("skipped %s: %s", item, reason))
 		}
+		for item, warning := range result.Warnings {
+			details = append(details, fmt.Sprintf("warning %s: %s", item, warning))
+		}
 		sort.Strings(details)
 
 		return backupRestoreDoneMsg{
-			name:    b.Name,
-			count:   result.Count(),
-			removed: len(result.Removed),
-			skipped: len(result.Skipped),
-			details: details,
-			err:     nil,
+			name:     b.Name,
+			count:    result.Count(),
+			removed:  len(result.Removed),
+			skipped:  len(result.Skipped),
+			warnings: len(result.Warnings),
+			details:  details,
+			err:      nil,
 		}
 	}
 }

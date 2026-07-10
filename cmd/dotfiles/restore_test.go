@@ -245,3 +245,25 @@ func TestUninstallPreservesBackupWhenRestoreIsPartial(t *testing.T) {
 		t.Fatalf("restored valid file = %q, want original zshrc", got)
 	}
 }
+
+func TestRestoreOutcomeErrorIncludesSkippedAndCommittedWarnings(t *testing.T) {
+	result := backup.RestoreResult{
+		Skipped: map[string]string{
+			".tmux.conf": "source missing",
+			".gitconfig": "invalid mode",
+		},
+		Warnings: map[string]string{
+			".zshrc": "committed but parent fsync failed",
+		},
+	}
+
+	err := restoreOutcomeError(result)
+	if err == nil {
+		t.Fatal("combined partial restore returned no outcome error")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "2 backup entries could not be restored") ||
+		!strings.Contains(message, "1 restored backup entries have durability/verification warnings") {
+		t.Fatalf("combined outcome error omitted a category: %q", message)
+	}
+}

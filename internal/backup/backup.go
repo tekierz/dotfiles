@@ -5,12 +5,15 @@ package backup
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"syscall"
+
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // ManifestName is the file inside each backup directory that records the
@@ -54,21 +57,21 @@ func ManifestLine(relPath string, mode os.FileMode) string {
 // home-relative paths for existed=yes entries. A missing manifest returns
 // (nil, nil) so callers can decide how to handle pre-manifest backups.
 func ReadManifest(backupDir string) ([]Entry, error) {
-	f, err := os.Open(filepath.Join(backupDir, ManifestName))
+	data, revision, err := readBackupDescendant(backupDir, ManifestName)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	defer f.Close()
+	if !revision.Exists() {
+		return nil, nil
+	}
 
 	var entries []Entry
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	home, _ := os.UserHomeDir()
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		if strings.Contains(line, "|") {
@@ -86,9 +89,11 @@ func ReadManifest(backupDir string) ([]Entry, error) {
 		mode := defaultFileMode
 		if tab := strings.LastIndexByte(line, '\t'); tab >= 0 {
 			relPath = line[:tab]
-			if parsed, perr := parseOctalMode(line[tab+1:]); perr == nil {
-				mode = parsed
+			parsed, perr := parseOctalMode(line[tab+1:])
+			if perr != nil {
+				return nil, fmt.Errorf("invalid explicit mode for %q: %w", relPath, perr)
 			}
+			mode = parsed
 		}
 		entries = append(entries, Entry{RelPath: relPath, Mode: mode})
 	}
@@ -98,13 +103,49 @@ func ReadManifest(backupDir string) ([]Entry, error) {
 	return entries, nil
 }
 
+// readBackupDescendant treats both the backup-root basename and the selected
+// backup basename as untrusted descendants of their shared parent anchor. This
+// refuses a symlinked `backups` directory, a symlinked selected backup, and
+// every symlink/non-directory below it. Trusting either of those two directory
+// names as the safefile root would intentionally allow that root to be a
+// symlink. Restore callers always pass an absolute <root>/<selected> layout;
+// degenerate paths without both components are rejected.
+func readBackupDescendant(backupDir, rel string) ([]byte, safefile.Revision, error) {
+	cleanBackupDir := filepath.Clean(backupDir)
+	if !filepath.IsAbs(cleanBackupDir) {
+		return nil, safefile.Revision{}, fmt.Errorf("invalid backup directory %q: path must be absolute", backupDir)
+	}
+	backupName := filepath.Base(cleanBackupDir)
+	backupRoot := filepath.Dir(cleanBackupDir)
+	backupRootName := filepath.Base(backupRoot)
+	anchor := filepath.Dir(backupRoot)
+	if backupName == "." || backupName == string(os.PathSeparator) ||
+		backupRootName == "." || backupRootName == string(os.PathSeparator) ||
+		backupRoot == anchor {
+		return nil, safefile.Revision{}, fmt.Errorf("invalid backup directory %q", backupDir)
+	}
+	anchoredRel := filepath.ToSlash(filepath.Join(backupRootName, backupName, rel))
+	return safefile.ReadWithin(anchor, anchoredRel)
+}
+
 // parseOctalMode parses an octal permission string (e.g. "600") into a mode.
 func parseOctalMode(s string) (os.FileMode, error) {
-	var mode os.FileMode
-	if _, err := fmt.Sscanf(s, "%o", &mode); err != nil {
-		return 0, err
+	if s == "" {
+		return 0, fmt.Errorf("mode is empty")
 	}
-	return mode.Perm(), nil
+	for _, digit := range s {
+		if digit < '0' || digit > '7' {
+			return 0, fmt.Errorf("mode %q is not a full octal permission string", s)
+		}
+	}
+	parsed, err := strconv.ParseUint(s, 8, 32)
+	if err != nil {
+		return 0, fmt.Errorf("parse mode %q: %w", s, err)
+	}
+	if parsed > 0o777 {
+		return 0, fmt.Errorf("mode %q exceeds 0777", s)
+	}
+	return os.FileMode(parsed), nil
 }
 
 // safeJoin resolves relPath against home and verifies the result stays inside
@@ -139,67 +180,6 @@ func IsRestorePathSafe(home, relPath string) bool {
 	return ok
 }
 
-// noFollowWrite writes data to dstPath without following a symlink at the final
-// path component. The open is made atomic with respect to symlinks via
-// syscall.O_NOFOLLOW: the kernel refuses (ELOOP) to follow a final-component
-// symlink at open time. This closes the TOCTOU window that an Lstat-then-write
-// approach left open, where a symlink swapped in between the check and the write
-// could redirect the write to a target outside home. It mirrors os.WriteFile's
-// O_WRONLY|O_CREATE|O_TRUNC semantics for the normal (non-symlink) path.
-func noFollowWrite(dstPath string, data []byte, mode os.FileMode) error {
-	f, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, mode)
-	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
-			return fmt.Errorf("refusing to write through symlink: %s", dstPath)
-		}
-		return err
-	}
-	_, err = f.Write(data)
-	if cerr := f.Close(); cerr != nil && err == nil {
-		err = cerr
-	}
-	return err
-}
-
-// resolvedParentWithinHome verifies that the real (symlink-resolved) parent
-// directory of dstPath still lives inside home. safeJoin's lexical check and
-// noFollowWrite's final-component check do not catch a symlinked INTERMEDIATE
-// directory (e.g. ~/.config/evil -> /outside): the leaf does not exist yet, so
-// only resolving the deepest existing ancestor reveals the escape.
-//
-// EvalSymlinks is applied to the deepest EXISTING ancestor of dstPath (the leaf
-// and freshly-created directories normally do not exist yet at restore time, so
-// resolving the literal parent would fail and wrongly reject legitimate
-// restores into new directories under the real home). The resolved ancestor
-// must equal home or sit beneath it.
-func resolvedParentWithinHome(dstPath, home string) (bool, error) {
-	realHome, err := filepath.EvalSymlinks(home)
-	if err != nil {
-		return false, err
-	}
-
-	// Walk up from the parent until we hit a directory that exists, then resolve
-	// its symlinks. Everything below it does not exist yet, so it cannot itself
-	// be a symlink redirecting the write.
-	ancestor := filepath.Dir(dstPath)
-	for {
-		resolved, err := filepath.EvalSymlinks(ancestor)
-		if err == nil {
-			clean := filepath.Clean(resolved)
-			return clean == realHome || strings.HasPrefix(clean, realHome+string(os.PathSeparator)), nil
-		}
-		if !os.IsNotExist(err) {
-			return false, err
-		}
-		parent := filepath.Dir(ancestor)
-		if parent == ancestor {
-			// Reached the filesystem root without finding an existing ancestor.
-			return false, nil
-		}
-		ancestor = parent
-	}
-}
-
 // RestoreResult reports the outcome of a restore for a single backup.
 type RestoreResult struct {
 	// Restored is the relative path of each file successfully restored.
@@ -210,23 +190,37 @@ type RestoreResult struct {
 	// Skipped maps a backup item (relative path or filename) to the reason it
 	// was not restored (path traversal, read/write error, etc.).
 	Skipped map[string]string
+	// Warnings maps a restored item to a post-commit durability/verification
+	// warning. These entries ARE counted as restored because the replacement was
+	// committed, but callers must surface the warning rather than claiming a
+	// clean restore.
+	Warnings map[string]string
 }
 
 // Count returns the number of files successfully restored.
 func (r RestoreResult) Count() int { return len(r.Restored) }
 
-// Restore restores every file recorded in backupDir into the user's home
+// Restore restores ordinary files recorded in backupDir into the user's home
 // directory. It drives the path mapping from the manifest when present
-// (authoritative, lossless), falling back to filename decoding for legacy
-// backups that have no manifest. Each file is restored with its recorded mode
-// (or 0600 by default), parent directories are created, path traversal is
-// rejected, and writes never follow a pre-existing symlink.
+// (authoritative, lossless) and refuses lossy manifestless decoding. Each file
+// is restored with its recorded mode (or 0600 by default), path traversal is
+// rejected, and neither source nor destination descendants may be symlinks.
+// Directory restore and removal of paths recorded as not previously existing
+// are deliberately fail-closed until transactional descriptor-anchored
+// recursive primitives exist; those entries are reported in Skipped and the
+// live paths remain untouched.
 //
 // It returns a RestoreResult plus a fatal error only for failures that prevent
 // any restore (e.g. unreadable backup dir / unknown home). Per-file failures
 // are recorded in Skipped and do not abort the whole restore.
 func Restore(backupDir, home string) (RestoreResult, error) {
-	result := RestoreResult{Skipped: map[string]string{}}
+	return restoreWithReplace(backupDir, home, safefile.ReplaceWithin)
+}
+
+type restoreReplaceFunc func(root, rel string, data []byte, mode os.FileMode) error
+
+func restoreWithReplace(backupDir, home string, replace restoreReplaceFunc) (RestoreResult, error) {
+	result := RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}
 
 	items, err := restoreItems(backupDir, home)
 	if err != nil {
@@ -255,66 +249,44 @@ func Restore(backupDir, home string) (RestoreResult, error) {
 			continue
 		}
 
-		// Lexical safety (safeJoin) does not cover symlinked INTERMEDIATE
-		// directories. Resolve the deepest existing ancestor and confirm it is
-		// still inside home before creating directories or writing, so a
-		// symlinked parent cannot redirect the write outside home.
-		withinHome, perr := resolvedParentWithinHome(dstPath, home)
-		if perr != nil {
-			result.Skipped[it.key()] = fmt.Sprintf("resolve parent: %v", perr)
-			continue
-		}
-		if !withinHome {
-			result.Skipped[it.key()] = "refusing to write through symlinked parent outside home"
-			continue
-		}
-
 		if !it.existed {
-			removed, err := removeIfPresent(dstPath, it.isDir)
-			if err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("remove created path: %v", err)
-				continue
-			}
-			if removed {
-				result.Removed = append(result.Removed, it.relPath)
-			}
-			continue
-		}
-
-		if it.srcPath == "" || !pathWithinBase(backupDir, it.srcPath) {
-			result.Skipped[it.key()] = "backup source is outside the selected backup directory"
+			result.Skipped[it.key()] = "safe rollback removal is unavailable; the created path was left untouched for manual review"
 			continue
 		}
 
 		if it.isDir {
-			if err := verifyReadableDir(it.srcPath); err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("read backup directory: %v", err)
-				continue
-			}
-			if err := os.RemoveAll(dstPath); err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("replace directory: %v", err)
-				continue
-			}
-			if err := copyTree(it.srcPath, dstPath); err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("restore directory: %v", err)
-				continue
-			}
-		} else {
-			if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("create directory: %v", err)
-				continue
-			}
+			result.Skipped[it.key()] = "transactional directory restore is unavailable; the live directory was left untouched for manual recovery"
+			continue
+		}
 
-			data, err := os.ReadFile(it.srcPath)
-			if err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("read backup file: %v", err)
-				continue
-			}
+		if it.srcRel == "" {
+			result.Skipped[it.key()] = "backup source is outside the selected backup directory"
+			continue
+		}
+		data, revision, err := readBackupDescendant(backupDir, it.srcRel)
+		if err != nil {
+			result.Skipped[it.key()] = fmt.Sprintf("read backup file: %v", err)
+			continue
+		}
+		if !revision.Exists() {
+			result.Skipped[it.key()] = "read backup file: source does not exist"
+			continue
+		}
 
-			if err := noFollowWrite(dstPath, data, it.mode); err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("write: %v", err)
+		// Restore ordinary files through the same descriptor-anchored atomic
+		// replacement kernel used by generated configs. Every descendant below
+		// the trusted HOME anchor is traversed with O_NOFOLLOW, missing parents
+		// are created owner-only, the recorded mode is set before commit, and a
+		// failed precommit write leaves the old destination intact.
+		if err := replace(home, filepath.ToSlash(it.relPath), data, it.mode.Perm()); err != nil {
+			var committed *safefile.CommittedError
+			if errors.As(err, &committed) {
+				result.Restored = append(result.Restored, it.relPath)
+				result.Warnings[it.key()] = fmt.Sprintf("restore committed with a durability/verification warning: %v", err)
 				continue
 			}
+			result.Skipped[it.key()] = fmt.Sprintf("write: %v", err)
+			continue
 		}
 
 		result.Restored = append(result.Restored, it.relPath)
@@ -325,6 +297,7 @@ func Restore(backupDir, home string) (RestoreResult, error) {
 
 type restoreItem struct {
 	srcPath    string
+	srcRel     string
 	dstPath    string
 	relPath    string
 	mode       os.FileMode
@@ -344,21 +317,20 @@ func (it restoreItem) key() string {
 }
 
 func restoreItems(backupDir, home string) ([]restoreItem, error) {
-	manifestPath := filepath.Join(backupDir, ManifestName)
-	f, err := os.Open(manifestPath)
+	data, revision, err := readBackupDescendant(backupDir, ManifestName)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return manifestlessItems(backupDir)
-		}
 		return nil, err
 	}
-	defer f.Close()
+	if !revision.Exists() {
+		return nil, fmt.Errorf("backup has no %s; refusing lossy underscore path decode", ManifestName)
+	}
 
 	var items []restoreItem
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
@@ -381,12 +353,19 @@ func restoreItems(backupDir, home string) ([]restoreItem, error) {
 		mode := defaultFileMode
 		if tab := strings.LastIndexByte(line, '\t'); tab >= 0 {
 			relPath = line[:tab]
-			if parsed, perr := parseOctalMode(line[tab+1:]); perr == nil {
-				mode = parsed
+			parsed, perr := parseOctalMode(line[tab+1:])
+			if perr != nil {
+				items = append(items, restoreItem{
+					relPath:    relPath,
+					skipReason: fmt.Sprintf("invalid explicit mode: %v", perr),
+				})
+				continue
 			}
+			mode = parsed
 		}
 		items = append(items, restoreItem{
 			srcPath: filepath.Join(backupDir, EncodeName(relPath)),
+			srcRel:  EncodeName(relPath),
 			relPath: relPath,
 			mode:    mode,
 			existed: true,
@@ -398,33 +377,10 @@ func restoreItems(backupDir, home string) ([]restoreItem, error) {
 	return items, nil
 }
 
-func manifestlessItems(backupDir string) ([]restoreItem, error) {
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, entry := range entries {
-		if entry.Name() == ManifestName {
-			continue
-		}
-		if entry.IsDir() {
-			return nil, fmt.Errorf("backup contains directory %q but no %s manifest; refusing lossy restore", entry.Name(), ManifestName)
-		}
-		return nil, fmt.Errorf("backup contains file %q but no %s manifest; refusing lossy underscore path decode", entry.Name(), ManifestName)
-	}
-	return nil, nil
-}
-
 func readBashManifestEntry(line, home string) (Entry, bool, error) {
-	parts := strings.Split(line, "|")
-	if len(parts) < 3 {
-		return Entry{}, false, fmt.Errorf("invalid bash backup manifest line %q: expected original|backup|existed", line)
-	}
-	original := parts[0]
-	existed := parts[2]
-	if existed != "yes" && existed != "no" {
-		return Entry{}, false, fmt.Errorf("invalid bash backup manifest line %q: existed field must be yes or no", line)
+	original, _, existed, _, err := parseBashManifestFields(line)
+	if err != nil {
+		return Entry{}, false, err
 	}
 	if existed == "no" {
 		return Entry{}, false, nil
@@ -437,21 +393,9 @@ func readBashManifestEntry(line, home string) (Entry, bool, error) {
 }
 
 func parseBashManifestLine(line, backupDir, home string) (restoreItem, bool, error) {
-	parts := strings.Split(line, "|")
-	if len(parts) < 3 {
-		return restoreItem{}, false, fmt.Errorf("invalid bash backup manifest line %q: expected original|backup|existed", line)
-	}
-
-	original := parts[0]
-	backupPath := parts[1]
-	existed := parts[2]
-	itemType := ""
-	if len(parts) >= 4 {
-		itemType = parts[3]
-	}
-
-	if existed != "yes" && existed != "no" {
-		return restoreItem{}, false, fmt.Errorf("invalid bash backup manifest line %q: existed field must be yes or no", line)
+	original, backupPath, existed, itemType, err := parseBashManifestFields(line)
+	if err != nil {
+		return restoreItem{}, false, err
 	}
 
 	relPath, ok := relPathFromAbsHome(home, original)
@@ -476,104 +420,29 @@ func parseBashManifestLine(line, backupDir, home string) (restoreItem, bool, err
 			return restoreItem{}, false, fmt.Errorf("invalid bash backup manifest line for %q: missing backup path", original)
 		}
 		item.srcPath = filepath.Clean(filepath.Join(backupDir, relPath))
+		item.srcRel = relPath
 	}
 	return item, true, nil
 }
 
-func verifyReadableDir(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
+func parseBashManifestFields(line string) (original, backupPath, existed, itemType string, err error) {
+	parts := strings.Split(line, "|")
+	switch len(parts) {
+	case 3:
+		itemType = "file"
+	case 4:
+		itemType = parts[3]
+		if itemType != "file" && itemType != "directory" {
+			return "", "", "", "", fmt.Errorf("invalid bash backup manifest line %q: type must be file or directory", line)
+		}
+	default:
+		return "", "", "", "", fmt.Errorf("invalid bash backup manifest line %q: expected exactly original|backup|existed or original|backup|existed|type", line)
 	}
-	if !info.IsDir() {
-		return fmt.Errorf("not a directory")
+	original, backupPath, existed = parts[0], parts[1], parts[2]
+	if existed != "yes" && existed != "no" {
+		return "", "", "", "", fmt.Errorf("invalid bash backup manifest line %q: existed field must be yes or no", line)
 	}
-
-	return filepath.WalkDir(path, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		switch {
-		case d.Type()&os.ModeSymlink != 0:
-			_, err := os.Readlink(path)
-			return err
-		case d.Type().IsRegular():
-			f, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			return f.Close()
-		default:
-			return nil
-		}
-	})
-}
-
-func removeIfPresent(path string, isDir bool) (bool, error) {
-	if isDir {
-		if _, err := os.Lstat(path); os.IsNotExist(err) {
-			return false, nil
-		}
-		return true, os.RemoveAll(path)
-	}
-	info, statErr := os.Lstat(path)
-	if os.IsNotExist(statErr) {
-		return false, nil
-	}
-	if statErr != nil {
-		return false, statErr
-	}
-	if info.IsDir() {
-		return false, nil
-	}
-	err := os.Remove(path)
-	return err == nil, err
-}
-
-func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-
-		switch {
-		case d.Type()&os.ModeSymlink != 0:
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		case d.IsDir():
-			if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
-				return err
-			}
-			return os.Chmod(target, info.Mode().Perm())
-		case d.Type().IsRegular():
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return err
-			}
-			return noFollowWrite(target, data, info.Mode().Perm())
-		default:
-			return nil
-		}
-	})
+	return original, backupPath, existed, itemType, nil
 }
 
 func relPathFromAbsHome(home, path string) (string, bool) {
@@ -600,15 +469,6 @@ func relPathFromAbsHome(home, path string) (string, bool) {
 func absPathWithinHome(home, path string) bool {
 	_, ok := relPathFromAbsHome(home, path)
 	return ok
-}
-
-func pathWithinBase(base, path string) bool {
-	if path == "" || !filepath.IsAbs(path) {
-		return false
-	}
-	cleanBase := filepath.Clean(base)
-	cleanPath := filepath.Clean(path)
-	return cleanPath == cleanBase || strings.HasPrefix(cleanPath, cleanBase+string(os.PathSeparator))
 }
 
 func hasParentTraversal(path string) bool {

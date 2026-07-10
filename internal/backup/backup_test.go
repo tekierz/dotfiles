@@ -1,11 +1,110 @@
 package backup
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
+
+func TestRestoreAppliesRecordedModeWhenOverwritingExistingFile(t *testing.T) {
+	home := t.TempDir()
+	relPath := filepath.Join(".config", "tool", "settings.json")
+	dstPath := filepath.Join(home, relPath)
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
+		t.Fatalf("mkdir destination: %v", err)
+	}
+	if err := os.WriteFile(dstPath, []byte("current"), 0o644); err != nil {
+		t.Fatalf("write existing destination: %v", err)
+	}
+	if err := os.Chmod(dstPath, 0o644); err != nil {
+		t.Fatalf("chmod existing destination: %v", err)
+	}
+
+	backupDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(backupDir, EncodeName(relPath)), []byte("restored"), 0o600); err != nil {
+		t.Fatalf("write backup file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(ManifestLine(relPath, 0o600)), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore returned fatal error: %v", err)
+	}
+	if result.Count() != 1 || len(result.Skipped) != 0 {
+		t.Fatalf("Restore result = restored %v skipped %v, want one restored and none skipped", result.Restored, result.Skipped)
+	}
+	info, err := os.Stat(dstPath)
+	if err != nil {
+		t.Fatalf("stat restored destination: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("restored destination mode = %o, want 600", got)
+	}
+	if content, err := os.ReadFile(dstPath); err != nil || string(content) != "restored" {
+		t.Errorf("restored content = %q, err %v, want restored", content, err)
+	}
+}
+
+func TestRestoreSkipsFinalComponentSymlinkWithoutChangingTarget(t *testing.T) {
+	home := t.TempDir()
+	relPath := filepath.Join(".config", "tool", "settings.json")
+	dstPath := filepath.Join(home, relPath)
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
+		t.Fatalf("mkdir destination: %v", err)
+	}
+
+	outside := t.TempDir()
+	target := filepath.Join(outside, "settings.json")
+	if err := os.WriteFile(target, []byte("protected"), 0o644); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	if err := os.Chmod(target, 0o644); err != nil {
+		t.Fatalf("chmod symlink target: %v", err)
+	}
+	if err := os.Symlink(target, dstPath); err != nil {
+		t.Fatalf("create destination symlink: %v", err)
+	}
+
+	backupDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(backupDir, EncodeName(relPath)), []byte("restored"), 0o600); err != nil {
+		t.Fatalf("write backup file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(ManifestLine(relPath, 0o600)), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore returned fatal error: %v", err)
+	}
+	if result.Count() != 0 {
+		t.Fatalf("restored through final symlink: %v", result.Restored)
+	}
+	if _, ok := result.Skipped[relPath]; !ok {
+		t.Fatalf("final symlink not recorded as skipped: %v", result.Skipped)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read protected target: %v", err)
+	}
+	if string(content) != "protected" {
+		t.Errorf("protected target content = %q, want protected", content)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat protected target: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Errorf("protected target mode = %o, want 644", got)
+	}
+}
 
 // TestRestoreSkipsSymlinkedParent verifies the restore write path refuses to
 // write through a symlinked PARENT directory that resolves outside home. The
@@ -55,6 +154,40 @@ func TestRestoreSkipsSymlinkedParent(t *testing.T) {
 	}
 }
 
+func TestRestoreRegularFileRefusesIntermediateSymlinkInsideHome(t *testing.T) {
+	home := t.TempDir()
+	outside := filepath.Join(home, "outside")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatalf("mkdir outside sentinel dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o700); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".config", "linked")); err != nil {
+		t.Fatalf("create intermediate symlink: %v", err)
+	}
+
+	relPath := filepath.Join(".config", "linked", "settings.json")
+	backupDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(backupDir, EncodeName(relPath)), []byte("restored"), 0o600); err != nil {
+		t.Fatalf("write backup file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(ManifestLine(relPath, 0o600)), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore returned fatal error: %v", err)
+	}
+	if result.Count() != 0 || result.Skipped[relPath] == "" {
+		t.Fatalf("intermediate symlink restore result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("restore wrote through intermediate symlink, stat err=%v", err)
+	}
+}
+
 // TestRestoreAllowsNewDirsUnderHome verifies the symlinked-parent guard does NOT
 // reject legitimate restores into directories that do not exist yet under the
 // real home. EvalSymlinks must resolve the deepest existing ancestor, not the
@@ -89,7 +222,7 @@ func TestRestoreAllowsNewDirsUnderHome(t *testing.T) {
 	}
 }
 
-func TestRestoreBashDirectoryFormatBackup(t *testing.T) {
+func TestRestoreBashDirectoryEntriesFailClosedWithoutTouchingLivePaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	backupRoot := t.TempDir()
@@ -134,8 +267,8 @@ func TestRestoreBashDirectoryFormatBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore returned fatal error: %v", err)
 	}
-	if result.Count() != 1 || len(result.Removed) != 1 || len(result.Skipped) != 0 {
-		t.Fatalf("Restore result = restored %v removed %v skipped %v, want 1 restored dir, 1 removed dir, 0 skipped",
+	if result.Count() != 0 || len(result.Removed) != 0 || len(result.Skipped) != 2 {
+		t.Fatalf("Restore result = restored %v removed %v skipped %v, want both directory operations skipped",
 			result.Restored, result.Removed, result.Skipped)
 	}
 
@@ -143,25 +276,19 @@ func TestRestoreBashDirectoryFormatBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read restored init: %v", err)
 	}
-	if string(gotInit) != "original init\n" {
-		t.Errorf("restored init = %q, want original backup content", gotInit)
+	if string(gotInit) != "modified\n" {
+		t.Errorf("live init = %q, want untouched modified content", gotInit)
 	}
-	gotNested, err := os.ReadFile(filepath.Join(originalDir, "lua", "plugin.lua"))
-	if err != nil {
-		t.Fatalf("read restored nested file: %v", err)
+	if _, err := os.Stat(filepath.Join(originalDir, "lua", "plugin.lua")); !os.IsNotExist(err) {
+		t.Fatalf("disabled directory restore copied a nested file: %v", err)
 	}
-	if string(gotNested) != "original plugin\n" {
-		t.Errorf("restored nested file = %q, want original backup content", gotNested)
+	if info, err := os.Stat(createdDir); err != nil || !info.IsDir() {
+		t.Errorf("created directory was removed despite fail-closed gate: info=%v err=%v", info, err)
 	}
-	if _, err := os.Stat(createdDir); !os.IsNotExist(err) {
-		t.Errorf("generated dir still exists after restore, stat err=%v", err)
-	}
-	info, err := os.Stat(filepath.Join(originalDir, "lua", "plugin.lua"))
-	if err != nil {
-		t.Fatalf("stat restored nested file: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o640 {
-		t.Errorf("restored nested file mode = %o, want 0640", got)
+	for _, rel := range []string{filepath.Join(".config", "nvim"), filepath.Join(".config", "generated")} {
+		if !strings.Contains(result.Skipped[rel], "unavailable") {
+			t.Errorf("skip reason for %s is not actionable: %q", rel, result.Skipped[rel])
+		}
 	}
 
 	entries, err := ReadManifest(backupDir)
@@ -253,7 +380,7 @@ func TestRestoreSkipsMalformedBashManifestLineAndContinues(t *testing.T) {
 	}
 }
 
-func TestRestoreBashManifestRelocatedBackupDirectory(t *testing.T) {
+func TestRestoreBashManifestRelocatedDirectoryAlsoFailsClosed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	oldBackupDir := filepath.Join(t.TempDir(), "old-backup")
@@ -280,15 +407,355 @@ func TestRestoreBashManifestRelocatedBackupDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore returned fatal error: %v", err)
 	}
-	if result.Count() != 1 || len(result.Skipped) != 0 {
-		t.Fatalf("Restore result = restored %v skipped %v, want one restored and no skipped", result.Restored, result.Skipped)
+	if result.Count() != 0 || len(result.Skipped) != 1 {
+		t.Fatalf("Restore result = restored %v skipped %v, want directory skipped", result.Restored, result.Skipped)
 	}
-	got, err := os.ReadFile(filepath.Join(home, relFile))
+	if _, err := os.Stat(filepath.Join(home, relFile)); !os.IsNotExist(err) {
+		t.Fatalf("disabled directory restore created live content: %v", err)
+	}
+}
+
+func TestRestoreNotExistedFileFailsClosedWithoutRemoval(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	backupDir := t.TempDir()
+	relPath := filepath.Join(".config", "generated.conf")
+	livePath := filepath.Join(home, relPath)
+	if err := os.MkdirAll(filepath.Dir(livePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(livePath, []byte("created after backup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := livePath + "||no|file\n"
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Restore(backupDir, home)
 	if err != nil {
-		t.Fatalf("read restored relocated file: %v", err)
+		t.Fatalf("Restore: %v", err)
 	}
-	if string(got) != "relocated backup\n" {
-		t.Fatalf("restored relocated file content = %q, want backup content", got)
+	if result.Count() != 0 || len(result.Removed) != 0 || !strings.Contains(result.Skipped[relPath], "manual review") {
+		t.Fatalf("fail-closed removal result = %+v", result)
+	}
+	content, err := os.ReadFile(livePath)
+	if err != nil || string(content) != "created after backup\n" {
+		t.Fatalf("created file changed: content=%q err=%v", content, err)
+	}
+}
+
+func TestRestoreRefusesSymlinkedBackupFileSource(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	relPath := ".zshrc"
+	outside := filepath.Join(t.TempDir(), "outside-source")
+	if err := os.WriteFile(outside, []byte("outside secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(backupDir, EncodeName(relPath))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(ManifestLine(relPath, 0o600)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if result.Count() != 0 || result.Skipped[relPath] == "" {
+		t.Fatalf("symlink source result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(home, relPath)); !os.IsNotExist(err) {
+		t.Fatalf("outside source was restored: %v", err)
+	}
+}
+
+func TestRestoreRefusesIntermediateSymlinkInBackupSource(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	relPath := filepath.Join(".config", "tool", "settings.json")
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(backupDir, ".config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(outside, "tool"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "tool", "settings.json"), []byte("outside secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(backupDir, ".config", "tool")); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(home, relPath)
+	manifest := original + "|ignored-original-backup-path|yes|file\n"
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if result.Count() != 0 || result.Skipped[relPath] == "" {
+		t.Fatalf("intermediate source symlink result = %+v", result)
+	}
+	if _, err := os.Stat(original); !os.IsNotExist(err) {
+		t.Fatalf("outside source was restored: %v", err)
+	}
+}
+
+func TestRestoreRefusesSymlinkedManifest(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	outsideManifest := filepath.Join(t.TempDir(), "manifest")
+	if err := os.WriteFile(outsideManifest, []byte(ManifestLine(".zshrc", 0o600)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideManifest, filepath.Join(backupDir, ManifestName)); err != nil {
+		t.Fatal(err)
+	}
+
+	if result, err := Restore(backupDir, home); err == nil || result.Count() != 0 {
+		t.Fatalf("symlinked manifest was accepted: result=%+v err=%v", result, err)
+	}
+}
+
+func TestRestoreRefusesSymlinkedBackupDirectory(t *testing.T) {
+	home := t.TempDir()
+	realBackup := filepath.Join(t.TempDir(), "real-backup")
+	if err := os.MkdirAll(realBackup, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realBackup, ".zshrc"), []byte("outside backup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realBackup, ManifestName), []byte(ManifestLine(".zshrc", 0o600)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkParent := t.TempDir()
+	backupLink := filepath.Join(linkParent, "selected-backup")
+	if err := os.Symlink(realBackup, backupLink); err != nil {
+		t.Fatal(err)
+	}
+
+	if result, err := Restore(backupLink, home); err == nil || result.Count() != 0 {
+		t.Fatalf("symlinked backup directory was trusted: result=%+v err=%v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".zshrc")); !os.IsNotExist(err) {
+		t.Fatalf("symlinked backup directory restored data: %v", err)
+	}
+}
+
+func TestRestoreRefusesSymlinkedBackupRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	realBackupRoot := t.TempDir()
+	selected := filepath.Join(realBackupRoot, "selected")
+	if err := os.MkdirAll(selected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(selected, ".zshrc"), []byte("outside backup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(selected, ManifestName), []byte(ManifestLine(".zshrc", 0o600)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backupRootLink := filepath.Join(workspace, "backups")
+	if err := os.Symlink(realBackupRoot, backupRootLink); err != nil {
+		t.Fatal(err)
+	}
+
+	if result, err := Restore(filepath.Join(backupRootLink, "selected"), home); err == nil || result.Count() != 0 {
+		t.Fatalf("symlinked backup root was trusted: result=%+v err=%v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".zshrc")); !os.IsNotExist(err) {
+		t.Fatalf("symlinked backup root restored data: %v", err)
+	}
+}
+
+func TestReadBackupDescendantRejectsDegenerateLayouts(t *testing.T) {
+	for _, backupDir := range []string{"relative/selected", filepath.Join(string(os.PathSeparator), "selected")} {
+		if _, _, err := readBackupDescendant(backupDir, ManifestName); err == nil {
+			t.Errorf("readBackupDescendant(%q) accepted a degenerate layout", backupDir)
+		}
+	}
+}
+
+func TestRestoreCommittedErrorIsRestoredWithWarning(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	relPath := ".zshrc"
+	if err := os.WriteFile(filepath.Join(backupDir, EncodeName(relPath)), []byte("restored\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(ManifestLine(relPath, 0o600)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := restoreWithReplace(backupDir, home, func(root, rel string, data []byte, mode os.FileMode) error {
+		if err := safefile.ReplaceWithin(root, rel, data, mode); err != nil {
+			return err
+		}
+		return &safefile.CommittedError{Operation: "injected parent fsync", Err: errors.New("injected durability failure")}
+	})
+	if err != nil {
+		t.Fatalf("restoreWithReplace: %v", err)
+	}
+	if result.Count() != 1 || len(result.Skipped) != 0 || len(result.Warnings) != 1 {
+		t.Fatalf("committed result was not reported truthfully: %+v", result)
+	}
+	if content, err := os.ReadFile(filepath.Join(home, relPath)); err != nil || string(content) != "restored\n" {
+		t.Fatalf("committed destination content=%q err=%v", content, err)
+	}
+}
+
+func TestRestorePrecommitFailurePreservesExistingDestination(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	relPath := ".zshrc"
+	destination := filepath.Join(home, relPath)
+	if err := os.WriteFile(destination, []byte("live content\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, EncodeName(relPath)), []byte("backup content\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(ManifestLine(relPath, 0o600)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := restoreWithReplace(backupDir, home, func(string, string, []byte, os.FileMode) error {
+		return errors.New("injected precommit failure")
+	})
+	if err != nil {
+		t.Fatalf("restoreWithReplace: %v", err)
+	}
+	if result.Count() != 0 || len(result.Warnings) != 0 || result.Skipped[relPath] == "" {
+		t.Fatalf("precommit failure result = %+v", result)
+	}
+	if content, err := os.ReadFile(destination); err != nil || string(content) != "live content\n" {
+		t.Fatalf("precommit failure changed destination: content=%q err=%v", content, err)
+	}
+}
+
+func TestExplicitManifestModesAreStrictAndSkippedByRestore(t *testing.T) {
+	invalidModes := []string{"", "600junk", "1000", "888", "-1", " 600", "600 "}
+	for _, invalidMode := range invalidModes {
+		t.Run(fmt.Sprintf("mode_%q", invalidMode), func(t *testing.T) {
+			home := t.TempDir()
+			backupDir := t.TempDir()
+			relPath := ".zshrc"
+			destination := filepath.Join(home, relPath)
+			if err := os.WriteFile(destination, []byte("live\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(backupDir, EncodeName(relPath)), []byte("backup\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			manifest := relPath + "\t" + invalidMode
+			if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if entries, err := ReadManifest(backupDir); err == nil {
+				t.Fatalf("ReadManifest accepted mode %q: entries=%+v", invalidMode, entries)
+			}
+			result, err := Restore(backupDir, home)
+			if err != nil {
+				t.Fatalf("Restore: %v", err)
+			}
+			if result.Count() != 0 || result.Skipped[relPath] == "" {
+				t.Fatalf("Restore accepted mode %q: %+v", invalidMode, result)
+			}
+			if content, err := os.ReadFile(destination); err != nil || string(content) != "live\n" {
+				t.Fatalf("invalid mode %q changed destination: content=%q err=%v", invalidMode, content, err)
+			}
+		})
+	}
+}
+
+func TestLegacyManifestWithoutModeUses0600(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	relPath := ".zshrc"
+	if err := os.WriteFile(filepath.Join(backupDir, EncodeName(relPath)), []byte("legacy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(relPath), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := ReadManifest(backupDir)
+	if err != nil || len(entries) != 1 || entries[0].Mode.Perm() != 0o600 {
+		t.Fatalf("legacy ReadManifest entries=%+v err=%v", entries, err)
+	}
+	result, err := Restore(backupDir, home)
+	if err != nil || result.Count() != 1 {
+		t.Fatalf("legacy Restore result=%+v err=%v", result, err)
+	}
+	if info, err := os.Stat(filepath.Join(home, relPath)); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("legacy restored mode info=%v err=%v", info, err)
+	}
+}
+
+func TestBashManifestGrammarRejectsUnknownAndExcessFields(t *testing.T) {
+	home := t.TempDir()
+	relPath := ".zshrc"
+	original := filepath.Join(home, relPath)
+	invalidLines := []string{
+		original + "|backup|yes|socket",
+		original + "|backup|yes|file|extra",
+		original + "|backup",
+	}
+	for _, line := range invalidLines {
+		t.Run(strings.ReplaceAll(line, string(os.PathSeparator), "_"), func(t *testing.T) {
+			backupDir := t.TempDir()
+			if err := os.WriteFile(original, []byte("live\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(line), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if entries, err := ReadManifest(backupDir); err == nil {
+				t.Fatalf("ReadManifest accepted malformed Bash line: entries=%+v", entries)
+			}
+			result, err := Restore(backupDir, home)
+			if err != nil {
+				t.Fatalf("Restore: %v", err)
+			}
+			if result.Count() != 0 || len(result.Skipped) != 1 {
+				t.Fatalf("Restore accepted malformed Bash line: %+v", result)
+			}
+			if content, err := os.ReadFile(original); err != nil || string(content) != "live\n" {
+				t.Fatalf("malformed Bash line mutated destination: content=%q err=%v", content, err)
+			}
+		})
+	}
+}
+
+func TestBashManifestExactThreeFieldFileRemainsCompatible(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	relPath := ".zshrc"
+	original := filepath.Join(home, relPath)
+	backupPath := filepath.Join(backupDir, relPath)
+	if err := os.WriteFile(backupPath, []byte("legacy bash\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(original+"|"+backupPath+"|yes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil || result.Count() != 1 || len(result.Skipped) != 0 {
+		t.Fatalf("three-field Bash compatibility result=%+v err=%v", result, err)
+	}
+	if content, err := os.ReadFile(original); err != nil || string(content) != "legacy bash\n" {
+		t.Fatalf("three-field Bash restore content=%q err=%v", content, err)
 	}
 }
 

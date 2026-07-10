@@ -89,11 +89,21 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		switch {
 		case msg.err != nil:
 			a.backupStatus = fmt.Sprintf("Restore failed: %v", msg.err)
+		case msg.skipped > 0 && msg.warnings > 0:
+			a.backupStatus = fmt.Sprintf("Restored %d files from %s, %d skipped, %d warning(s)", msg.count, msg.name, msg.skipped, msg.warnings)
+			if len(msg.details) > 0 {
+				a.backupStatus += ": " + strings.Join(firstStrings(msg.details, 3), "; ")
+			}
 		case msg.skipped > 0:
 			// Some (or all) files could not be restored. Report it as a warning,
 			// never as green success (C3). The "skipped" keyword drives the
 			// yellow style in the renderer below.
 			a.backupStatus = fmt.Sprintf("Restored %d files from %s, %d skipped", msg.count, msg.name, msg.skipped)
+			if len(msg.details) > 0 {
+				a.backupStatus += ": " + strings.Join(firstStrings(msg.details, 3), "; ")
+			}
+		case msg.warnings > 0:
+			a.backupStatus = fmt.Sprintf("Restored %d files from %s with %d warning(s)", msg.count, msg.name, msg.warnings)
 			if len(msg.details) > 0 {
 				a.backupStatus += ": " + strings.Join(firstStrings(msg.details, 3), "; ")
 			}
@@ -331,7 +341,7 @@ func (s *backupsScreen) View(width, height int) string {
 	var statusLine string
 	if a.backupStatus != "" {
 		statusStyle := lipgloss.NewStyle().Foreground(ColorYellow)
-		if strings.Contains(a.backupStatus, "skipped") {
+		if strings.Contains(a.backupStatus, "skipped") || strings.Contains(a.backupStatus, "warning") {
 			// Partial/failed restore: keep the warning (yellow) style even though
 			// the message contains "Restored" (C3).
 			statusStyle = lipgloss.NewStyle().Foreground(ColorYellow)

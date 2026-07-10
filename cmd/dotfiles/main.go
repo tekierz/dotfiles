@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -687,15 +688,32 @@ func restoreBackup(name string) (int, int, error) {
 	for item, reason := range result.Skipped {
 		fmt.Fprintf(os.Stderr, "  Warning: Skipping %s - %s\n", item, reason)
 	}
+	for item, warning := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "  Warning: Restored %s - %s\n", item, warning)
+	}
 
 	fmt.Printf("\nRestored %d files from backup.\n", result.Count())
 	if len(result.Removed) > 0 {
 		fmt.Printf("Removed %d files/directories created after the backup.\n", len(result.Removed))
 	}
-	if len(result.Skipped) > 0 {
-		return result.Count(), len(result.Skipped), fmt.Errorf("%d backup entries could not be restored", len(result.Skipped))
+	if outcomeErr := restoreOutcomeError(result); outcomeErr != nil {
+		return result.Count(), len(result.Skipped), outcomeErr
 	}
 	return result.Count(), 0, nil
+}
+
+func restoreOutcomeError(result backup.RestoreResult) error {
+	var problems []string
+	if len(result.Skipped) > 0 {
+		problems = append(problems, fmt.Sprintf("%d backup entries could not be restored", len(result.Skipped)))
+	}
+	if len(result.Warnings) > 0 {
+		problems = append(problems, fmt.Sprintf("%d restored backup entries have durability/verification warnings", len(result.Warnings)))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(problems, "; "))
 }
 
 // runUninstall removes dotfiles and optionally restores original configuration
