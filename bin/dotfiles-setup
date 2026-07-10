@@ -363,7 +363,6 @@ load_settings() {
     local settings_file="$DOTFILES_CONFIG_DIR/settings"
     THEME=$(safe_read_setting "$settings_file" "THEME" "catppuccin-mocha")
     NAV_STYLE=$(safe_read_setting "$settings_file" "NAV_STYLE" "emacs")
-    ACTIVE_USER=$(safe_read_setting "$settings_file" "ACTIVE_USER" "")
 }
 
 # Generate Ghostty theme file
@@ -641,7 +640,7 @@ EOF
             if [[ -n "${2:-}" && ! "${2:-}" =~ ^- ]]; then
                 THEME="$2"
                 # Validate theme
-                if [[ ! " $SUPPORTED_THEMES " =~ " $THEME " ]]; then
+                if [[ " $SUPPORTED_THEMES " != *" $THEME "* ]]; then
                     echo "Error: Unknown theme '$THEME'"
                     echo "Supported themes: $SUPPORTED_THEMES"
                     exit 1
@@ -888,7 +887,7 @@ EOF
 # Returns: 0 if file existed and was backed up, 1 if file didn't exist
 backup_file() {
     local original="$1"
-    local relative_path="${original#$HOME/}"
+    local relative_path="${original#"$HOME"/}"
     local backup_path="$BACKUP_SESSION_DIR/$relative_path"
 
     if [[ -f "$original" ]]; then
@@ -908,7 +907,7 @@ backup_file() {
 # Usage: backup_directory "/path/to/dir"
 backup_directory() {
     local original="$1"
-    local relative_path="${original#$HOME/}"
+    local relative_path="${original#"$HOME"/}"
     local backup_path="$BACKUP_SESSION_DIR/$relative_path"
 
     if [[ -d "$original" ]]; then
@@ -951,7 +950,8 @@ list_backups() {
     local count=0
     for backup in "$DOTFILES_BACKUP_DIR"/*/; do
         [[ -d "$backup" ]] || continue
-        local name=$(basename "$backup")
+        local name
+        name=$(basename "$backup")
         local manifest="$backup/manifest.txt"
         if [[ -f "$manifest" ]]; then
             # grep -c already prints 0 (and exits 1) on no match; keep the count
@@ -1106,7 +1106,17 @@ restore_backup() {
 
     if [[ -z "$session" ]]; then
         # Find most recent backup
-        session=$(ls -1t "$DOTFILES_BACKUP_DIR" 2>/dev/null | head -1)
+        local latest_backup="" backup
+        for backup in "$DOTFILES_BACKUP_DIR"/*/; do
+            [[ -d "$backup" ]] || continue
+            if [[ -z "$latest_backup" || "$backup" -nt "$latest_backup" ]]; then
+                latest_backup="$backup"
+            fi
+        done
+        if [[ -n "$latest_backup" ]]; then
+            session="${latest_backup%/}"
+            session="${session##*/}"
+        fi
         if [[ -z "$session" ]]; then
             print_error "No backups found"
             return 1
@@ -1674,30 +1684,6 @@ setup_zsh() {
     # Backup existing zshrc
     [[ -n "${BACKUP_SESSION_DIR:-}" ]] && backup_file "$HOME/.zshrc"
 
-    # Determine plugin paths based on OS
-    if [[ "$OS" == "macos" ]]; then
-        SYNTAX_HL_PATH="/opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
-        AUTOSUGG_PATH="/opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
-        FZF_KEYBIND_PATH="/opt/homebrew/opt/fzf/shell/key-bindings.zsh"
-        FZF_COMPLETION_PATH="/opt/homebrew/opt/fzf/shell/completion.zsh"
-        P10K_PATH="/opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme"
-
-        # Intel Mac fallback
-        if [[ ! -f "$SYNTAX_HL_PATH" ]]; then
-            SYNTAX_HL_PATH="/usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
-            AUTOSUGG_PATH="/usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
-            FZF_KEYBIND_PATH="/usr/local/opt/fzf/shell/key-bindings.zsh"
-            FZF_COMPLETION_PATH="/usr/local/opt/fzf/shell/completion.zsh"
-            P10K_PATH="/usr/local/share/powerlevel10k/powerlevel10k.zsh-theme"
-        fi
-    else
-        SYNTAX_HL_PATH="/usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
-        AUTOSUGG_PATH="/usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
-        FZF_KEYBIND_PATH="/usr/share/fzf/key-bindings.zsh"
-        FZF_COMPLETION_PATH="/usr/share/fzf/completion.zsh"
-        P10K_PATH=""
-    fi
-
     cat > ~/.zshrc << 'ZSHRC_EOF'
 # System info on new shell
 command -v fastfetch &> /dev/null && fastfetch
@@ -2171,7 +2157,7 @@ setup_gnome_shortcuts() {
 
     # Disable Super+number workspace switching if set
     for i in {1..9}; do
-        gsettings set org.gnome.shell.keybindings switch-to-application-$i "[]" 2>/dev/null || true
+        gsettings set org.gnome.shell.keybindings switch-to-application-"$i" "[]" 2>/dev/null || true
     done
 
     # Disable Super+V if it's bound to something
@@ -2831,9 +2817,8 @@ CAFF_EOF
     # Create legacy dotfiles setup management CLI without conflicting with the Go binary.
     legacy_cli_home="$(mktemp -d)"
     mkdir -p "$legacy_cli_home/.local/bin"
-    (
-        HOME="$legacy_cli_home"
-        cat > ~/.local/bin/dotfiles << 'DOTFILES_CLI_EOF'
+    local HOME="$legacy_cli_home"
+    cat > ~/.local/bin/dotfiles << 'DOTFILES_CLI_EOF'
 #!/usr/bin/env bash
 #
 # dotfiles-setup-cli - Legacy terminal environment management CLI
@@ -4199,7 +4184,6 @@ case "${1:-}" in
         ;;
 esac
 DOTFILES_CLI_EOF
-    )
     mv "$legacy_cli_home/.local/bin/dotfiles" "$legacy_cli"
     rm -rf "$legacy_cli_home"
     chmod +x "$legacy_cli"
