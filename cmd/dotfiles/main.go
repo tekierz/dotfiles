@@ -312,6 +312,7 @@ func init() {
 	rootCmd.AddCommand(backupsCmd)
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(userCmd)
 	rootCmd.AddCommand(usersCmd)
