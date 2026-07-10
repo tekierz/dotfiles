@@ -579,7 +579,7 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 
 	case "fzf":
 		return []manageField{
-			{key: "opts", label: "Default Opts", description: "Extra CLI options passed to fzf", kind: manageFieldText, str: &cfg.FzfDefaultOpts},
+			{key: "opts", label: "Additional fzf Flags", description: "Literal fzf flags stored as data; shell code is never evaluated", kind: manageFieldText, str: &cfg.FzfDefaultOpts},
 			{key: "height", label: "Height", description: "Height percentage for fzf UI", kind: manageFieldNumber, n: &cfg.FzfHeight, min: 20, max: 100, step: 5, unit: "%"},
 			{key: "layout", label: "Layout", description: "Layout mode", kind: manageFieldOption, str: &cfg.FzfLayout, options: []string{"reverse", "default", "reverse-list"}},
 			{key: "border", label: "Border Style", description: "Border style for fzf window", kind: manageFieldOption, str: &cfg.FzfBorderStyle, options: []string{"rounded", "sharp", "bold", "none"}},

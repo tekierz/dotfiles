@@ -66,7 +66,7 @@ type ManageConfig struct {
 	YaziScrollOff   int
 
 	// FZF detailed settings
-	FzfDefaultOpts   string
+	FzfDefaultOpts   string // additional fzf flags stored as inert data
 	FzfHeight        int
 	FzfLayout        string
 	FzfBorderStyle   string

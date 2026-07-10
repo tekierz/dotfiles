@@ -110,7 +110,7 @@ type DeepDiveConfig struct {
 	FzfPreview       bool
 	FzfHeight        int
 	FzfLayout        string
-	FzfDefaultOpts   string // extra opts
+	FzfDefaultOpts   string // additional fzf flags stored as inert data
 	FzfBorderStyle   string // border style
 	FzfPreviewWindow string // preview placement
 
