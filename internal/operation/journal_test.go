@@ -70,6 +70,25 @@ func TestJournalWritesAndUpdatesAtomicPrivateRecord(t *testing.T) {
 	assertJournalMode(t, path, 0o600)
 }
 
+func TestJournalPersistsSanitizedRollbackOutcome(t *testing.T) {
+	now := time.Now()
+	record, err := StartRecord(testPlan(t, now), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := record.SetRollback(RollbackResult{Status: RollbackIncomplete, Restored: 2, Removed: 1, Skipped: 1, Warnings: 1, Summary: "manual\nreview\x1b[31m"}); err != nil {
+		t.Fatal(err)
+	}
+	if record.Rollback == nil || record.Rollback.Summary != "manual review[31m" {
+		t.Fatalf("rollback outcome = %+v", record.Rollback)
+	}
+	bad := *record.Rollback
+	bad.Status = "unknown"
+	if err := record.SetRollback(bad); !errors.Is(err, ErrInvalidRecord) {
+		t.Fatalf("invalid rollback status error = %v", err)
+	}
+}
+
 func TestJournalRefusesSymlinkedStateDescendant(t *testing.T) {
 	home := t.TempDir()
 	outside := t.TempDir()
@@ -102,6 +121,22 @@ func TestJournalRefusesSymlinkedStateDescendant(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("journal wrote outside trusted HOME: %v", entries)
+	}
+}
+
+func TestJournalRefusesSymlinkedMissingXDGAncestor(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(base, "redirect")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "redirect", "state"))
+	_, err := DefaultJournal()
+	if err == nil || !strings.Contains(err.Error(), "real directory") {
+		t.Fatalf("DefaultJournal error = %v, want symlinked ancestor refusal", err)
+	}
+	if entries, readErr := os.ReadDir(outside); readErr != nil || len(entries) != 0 {
+		t.Fatalf("symlink target changed: entries=%v err=%v", entries, readErr)
 	}
 }
 

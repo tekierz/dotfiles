@@ -46,16 +46,47 @@ type ActionResult struct {
 	Summary  string       `json:"summary,omitempty"`
 }
 
+type RollbackStatus string
+
+const (
+	RollbackSucceeded  RollbackStatus = "succeeded"
+	RollbackIncomplete RollbackStatus = "incomplete"
+	RollbackFailed     RollbackStatus = "failed"
+)
+
+// RollbackResult records the outcome without persisting config paths or data.
+// Counts make a failed operation auditable while Summary remains sanitized.
+type RollbackResult struct {
+	Status   RollbackStatus `json:"status"`
+	Restored int            `json:"restored"`
+	Removed  int            `json:"removed"`
+	Skipped  int            `json:"skipped"`
+	Warnings int            `json:"warnings"`
+	Summary  string         `json:"summary,omitempty"`
+}
+
 type Record struct {
-	SchemaVersion int            `json:"schema_version"`
-	OperationID   string         `json:"operation_id"`
-	PlanHash      string         `json:"plan_hash"`
-	StartedAt     time.Time      `json:"started_at"`
-	FinishedAt    *time.Time     `json:"finished_at,omitempty"`
-	Status        Status         `json:"status"`
-	Backup        string         `json:"backup,omitempty"`
-	Actions       []ActionResult `json:"actions"`
-	Warnings      []string       `json:"warnings,omitempty"`
+	SchemaVersion int             `json:"schema_version"`
+	OperationID   string          `json:"operation_id"`
+	PlanHash      string          `json:"plan_hash"`
+	StartedAt     time.Time       `json:"started_at"`
+	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
+	Status        Status          `json:"status"`
+	Backup        string          `json:"backup,omitempty"`
+	Rollback      *RollbackResult `json:"rollback,omitempty"`
+	Actions       []ActionResult  `json:"actions"`
+	Warnings      []string        `json:"warnings,omitempty"`
+}
+
+func (r *Record) SetRollback(result RollbackResult) error {
+	result.Summary = sanitizeSummary(result.Summary)
+	candidate := *r
+	candidate.Rollback = &result
+	if err := validateRecord(candidate); err != nil {
+		return err
+	}
+	r.Rollback = &result
+	return nil
 }
 
 func StartRecord(plan Plan, now time.Time) (Record, error) {
@@ -144,8 +175,9 @@ func sanitizeSummary(value string) string {
 }
 
 func validateRecord(record Record) error {
+	_, planHashErr := hex.DecodeString(record.PlanHash)
 	if record.SchemaVersion != CurrentJournalSchemaVersion || record.OperationID == "" ||
-		strings.ContainsAny(record.OperationID, "/\\\x00\r\n\t ") || len(record.PlanHash) != 64 || record.StartedAt.IsZero() {
+		strings.ContainsAny(record.OperationID, "/\\\x00\r\n\t ") || len(record.PlanHash) != 64 || planHashErr != nil || record.StartedAt.IsZero() {
 		return fmt.Errorf("%w: missing or malformed record identity", ErrInvalidRecord)
 	}
 	if record.Status != StatusRunning && record.Status != StatusSucceeded && record.Status != StatusFailed && record.Status != StatusCancelled {
@@ -168,6 +200,15 @@ func validateRecord(record Record) error {
 		seen[result.ActionID] = struct{}{}
 		if result.Status != ActionPending && result.Status != ActionSucceeded && result.Status != ActionFailed && result.Status != ActionSkipped {
 			return fmt.Errorf("%w: invalid action status %q", ErrInvalidRecord, result.Status)
+		}
+	}
+	if record.Rollback != nil {
+		rollback := record.Rollback
+		if rollback.Status != RollbackSucceeded && rollback.Status != RollbackIncomplete && rollback.Status != RollbackFailed {
+			return fmt.Errorf("%w: invalid rollback status %q", ErrInvalidRecord, rollback.Status)
+		}
+		if rollback.Restored < 0 || rollback.Removed < 0 || rollback.Skipped < 0 || rollback.Warnings < 0 {
+			return fmt.Errorf("%w: rollback counts must be nonnegative", ErrInvalidRecord)
 		}
 	}
 	return nil
@@ -194,10 +235,38 @@ func stateAnchor() (root, rel string, err error) {
 		if !filepath.IsAbs(xdg) {
 			return "", "", fmt.Errorf("XDG_STATE_HOME must be absolute: %q", xdg)
 		}
-		if err := os.MkdirAll(xdg, 0o700); err != nil {
-			return "", "", fmt.Errorf("create trusted XDG state root: %w", err)
+		xdg = filepath.Clean(xdg)
+		if info, lstatErr := os.Lstat(xdg); lstatErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return "", "", fmt.Errorf("trusted XDG state root must be a real directory: %s", xdg)
+			}
+			return xdg, "dotfiles", nil
+		} else if !errors.Is(lstatErr, os.ErrNotExist) {
+			return "", "", fmt.Errorf("inspect trusted XDG state root: %w", lstatErr)
 		}
-		return filepath.Clean(xdg), "dotfiles", nil
+		anchor := filepath.Dir(xdg)
+		for {
+			info, lstatErr := os.Lstat(anchor)
+			if lstatErr == nil {
+				if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+					return "", "", fmt.Errorf("XDG state ancestor must be a real directory: %s", anchor)
+				}
+				break
+			}
+			if !errors.Is(lstatErr, os.ErrNotExist) {
+				return "", "", fmt.Errorf("inspect XDG state ancestor: %w", lstatErr)
+			}
+			parent := filepath.Dir(anchor)
+			if parent == anchor {
+				return "", "", fmt.Errorf("no existing XDG state ancestor for %s", xdg)
+			}
+			anchor = parent
+		}
+		xdgRel, relErr := filepath.Rel(anchor, xdg)
+		if relErr != nil || filepath.IsAbs(xdgRel) || xdgRel == ".." || strings.HasPrefix(xdgRel, ".."+string(os.PathSeparator)) {
+			return "", "", fmt.Errorf("resolve XDG state root below trusted ancestor")
+		}
+		return anchor, filepath.ToSlash(filepath.Join(xdgRel, "dotfiles")), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" || !filepath.IsAbs(home) {
