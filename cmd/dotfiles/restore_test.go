@@ -193,7 +193,9 @@ func TestUninstallPreservesBackupWhenRestoreIsNotClean(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	runUninstall(false, true, false, true)
+	if err := runUninstall(false, true, false, true); err == nil {
+		t.Fatal("unclean restore returned nil error")
+	}
 
 	if _, err := os.Stat(backupDir); err != nil {
 		t.Fatalf("backup dir was not preserved after failed restore: %v", err)
@@ -229,7 +231,9 @@ func TestUninstallPreservesBackupWhenRestoreIsPartial(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	runUninstall(false, true, false, true)
+	if err := runUninstall(false, true, false, true); err == nil {
+		t.Fatal("partial restore returned nil error")
+	}
 
 	if _, err := os.Stat(backupDir); err != nil {
 		t.Fatalf("backup dir was not preserved after partial restore: %v", err)
