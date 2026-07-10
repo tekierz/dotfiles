@@ -111,9 +111,25 @@ func ReadManifest(backupDir string) ([]Entry, error) {
 // symlink. Restore callers always pass an absolute <root>/<selected> layout;
 // degenerate paths without both components are rejected.
 func readBackupDescendant(backupDir, rel string) ([]byte, safefile.Revision, error) {
+	anchor, anchoredRel, err := backupDescendantAnchor(backupDir, rel)
+	if err != nil {
+		return nil, safefile.Revision{}, err
+	}
+	return safefile.ReadWithin(anchor, anchoredRel)
+}
+
+func backupDescendantAnchor(backupDir, rel string) (string, string, error) {
+	if rel == "" || filepath.IsAbs(rel) {
+		return "", "", fmt.Errorf("invalid backup descendant %q", rel)
+	}
+	for _, component := range strings.Split(filepath.ToSlash(rel), "/") {
+		if component == "" || component == "." || component == ".." {
+			return "", "", fmt.Errorf("invalid backup descendant %q", rel)
+		}
+	}
 	cleanBackupDir := filepath.Clean(backupDir)
 	if !filepath.IsAbs(cleanBackupDir) {
-		return nil, safefile.Revision{}, fmt.Errorf("invalid backup directory %q: path must be absolute", backupDir)
+		return "", "", fmt.Errorf("invalid backup directory %q: path must be absolute", backupDir)
 	}
 	backupName := filepath.Base(cleanBackupDir)
 	backupRoot := filepath.Dir(cleanBackupDir)
@@ -122,10 +138,10 @@ func readBackupDescendant(backupDir, rel string) ([]byte, safefile.Revision, err
 	if backupName == "." || backupName == string(os.PathSeparator) ||
 		backupRootName == "." || backupRootName == string(os.PathSeparator) ||
 		backupRoot == anchor {
-		return nil, safefile.Revision{}, fmt.Errorf("invalid backup directory %q", backupDir)
+		return "", "", fmt.Errorf("invalid backup directory %q", backupDir)
 	}
 	anchoredRel := filepath.ToSlash(filepath.Join(backupRootName, backupName, rel))
-	return safefile.ReadWithin(anchor, anchoredRel)
+	return anchor, anchoredRel, nil
 }
 
 // parseOctalMode parses an octal permission string (e.g. "600") into a mode.
@@ -205,21 +221,49 @@ func (r RestoreResult) Count() int { return len(r.Restored) }
 // (authoritative, lossless) and refuses lossy manifestless decoding. Each file
 // is restored with its recorded mode (or 0600 by default), path traversal is
 // rejected, and neither source nor destination descendants may be symlinks.
-// Directory restore and removal of paths recorded as not previously existing
-// are deliberately fail-closed until transactional descriptor-anchored
-// recursive primitives exist; those entries are reported in Skipped and the
-// live paths remain untouched.
+// Directory restores are recursively snapshotted from the selected backup and
+// transactionally installed through descriptor-anchored no-follow operations.
+// Paths recorded as not previously existing are removed through the matching
+// descriptor-anchored file or recursive-directory transaction.
 //
 // It returns a RestoreResult plus a fatal error only for failures that prevent
 // any restore (e.g. unreadable backup dir / unknown home). Per-file failures
 // are recorded in Skipped and do not abort the whole restore.
 func Restore(backupDir, home string) (RestoreResult, error) {
-	return restoreWithReplace(backupDir, home, safefile.ReplaceWithin)
+	return restoreWithOperations(backupDir, home, defaultRestoreOperations())
+}
+
+func defaultRestoreOperations() restoreOperations {
+	return restoreOperations{
+		replaceFile:       safefile.ReplaceWithin,
+		snapshotDirectory: safefile.SnapshotDirectoryWithin,
+		restoreDirectory:  safefile.RestoreDirectoryWithin,
+		removeFile:        safefile.RemoveWithin,
+		removeDirectory:   safefile.RemoveDirectoryWithin,
+	}
 }
 
 type restoreReplaceFunc func(root, rel string, data []byte, mode os.FileMode) error
 
+type restoreOperations struct {
+	replaceFile       restoreReplaceFunc
+	snapshotDirectory func(root, rel string) (*safefile.DirectorySnapshot, error)
+	restoreDirectory  func(root, rel string, snapshot *safefile.DirectorySnapshot) error
+	removeFile        func(root, rel string) error
+	removeDirectory   func(root, rel string) error
+}
+
 func restoreWithReplace(backupDir, home string, replace restoreReplaceFunc) (RestoreResult, error) {
+	return restoreWithOperations(backupDir, home, restoreOperations{
+		replaceFile:       replace,
+		snapshotDirectory: safefile.SnapshotDirectoryWithin,
+		restoreDirectory:  safefile.RestoreDirectoryWithin,
+		removeFile:        safefile.RemoveWithin,
+		removeDirectory:   safefile.RemoveDirectoryWithin,
+	})
+}
+
+func restoreWithOperations(backupDir, home string, operations restoreOperations) (RestoreResult, error) {
 	result := RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}
 
 	items, err := restoreItems(backupDir, home)
@@ -250,12 +294,51 @@ func restoreWithReplace(backupDir, home string, replace restoreReplaceFunc) (Res
 		}
 
 		if !it.existed {
-			result.Skipped[it.key()] = "safe rollback removal is unavailable; the created path was left untouched for manual review"
+			remove := operations.removeFile
+			if it.isDir {
+				remove = operations.removeDirectory
+			}
+			err := remove(home, filepath.ToSlash(it.relPath))
+			if err == nil || errors.Is(err, os.ErrNotExist) {
+				result.Removed = append(result.Removed, it.relPath)
+				continue
+			}
+			var committed *safefile.CommittedError
+			if errors.As(err, &committed) {
+				result.Removed = append(result.Removed, it.relPath)
+				result.Warnings[it.key()] = fmt.Sprintf("removal committed with a durability/cleanup warning: %v", err)
+				continue
+			}
+			result.Skipped[it.key()] = fmt.Sprintf("remove: %v", err)
 			continue
 		}
 
 		if it.isDir {
-			result.Skipped[it.key()] = "transactional directory restore is unavailable; the live directory was left untouched for manual recovery"
+			if it.srcRel == "" {
+				result.Skipped[it.key()] = "backup source is outside the selected backup directory"
+				continue
+			}
+			anchor, sourceRel, err := backupDescendantAnchor(backupDir, it.srcRel)
+			if err != nil {
+				result.Skipped[it.key()] = fmt.Sprintf("resolve backup directory: %v", err)
+				continue
+			}
+			snapshot, err := operations.snapshotDirectory(anchor, sourceRel)
+			if err != nil {
+				result.Skipped[it.key()] = fmt.Sprintf("snapshot backup directory: %v", err)
+				continue
+			}
+			if err := operations.restoreDirectory(home, filepath.ToSlash(it.relPath), snapshot); err != nil {
+				var committed *safefile.CommittedError
+				if errors.As(err, &committed) {
+					result.Restored = append(result.Restored, it.relPath)
+					result.Warnings[it.key()] = fmt.Sprintf("directory restore committed with a durability/cleanup warning: %v", err)
+					continue
+				}
+				result.Skipped[it.key()] = fmt.Sprintf("restore directory: %v", err)
+				continue
+			}
+			result.Restored = append(result.Restored, it.relPath)
 			continue
 		}
 
@@ -278,7 +361,7 @@ func restoreWithReplace(backupDir, home string, replace restoreReplaceFunc) (Res
 		// the trusted HOME anchor is traversed with O_NOFOLLOW, missing parents
 		// are created owner-only, the recorded mode is set before commit, and a
 		// failed precommit write leaves the old destination intact.
-		if err := replace(home, filepath.ToSlash(it.relPath), data, it.mode.Perm()); err != nil {
+		if err := operations.replaceFile(home, filepath.ToSlash(it.relPath), data, it.mode.Perm()); err != nil {
 			var committed *safefile.CommittedError
 			if errors.As(err, &committed) {
 				result.Restored = append(result.Restored, it.relPath)
@@ -378,7 +461,7 @@ func restoreItems(backupDir, home string) ([]restoreItem, error) {
 }
 
 func readBashManifestEntry(line, home string) (Entry, bool, error) {
-	original, _, existed, _, err := parseBashManifestFields(line)
+	original, _, existed, _, mode, err := parseBashManifestFields(line)
 	if err != nil {
 		return Entry{}, false, err
 	}
@@ -389,11 +472,11 @@ func readBashManifestEntry(line, home string) (Entry, bool, error) {
 	if !ok {
 		return Entry{}, false, fmt.Errorf("bash backup manifest path %q is outside home", original)
 	}
-	return Entry{RelPath: relPath, Mode: defaultFileMode}, true, nil
+	return Entry{RelPath: relPath, Mode: mode}, true, nil
 }
 
 func parseBashManifestLine(line, backupDir, home string) (restoreItem, bool, error) {
-	original, backupPath, existed, itemType, err := parseBashManifestFields(line)
+	original, backupPath, existed, itemType, mode, err := parseBashManifestFields(line)
 	if err != nil {
 		return restoreItem{}, false, err
 	}
@@ -411,7 +494,7 @@ func parseBashManifestLine(line, backupDir, home string) (restoreItem, bool, err
 	item := restoreItem{
 		dstPath: filepath.Clean(original),
 		relPath: relPath,
-		mode:    defaultFileMode,
+		mode:    mode,
 		existed: existed == "yes",
 		isDir:   itemType == "directory",
 	}
@@ -425,24 +508,33 @@ func parseBashManifestLine(line, backupDir, home string) (restoreItem, bool, err
 	return item, true, nil
 }
 
-func parseBashManifestFields(line string) (original, backupPath, existed, itemType string, err error) {
+func parseBashManifestFields(line string) (original, backupPath, existed, itemType string, mode os.FileMode, err error) {
 	parts := strings.Split(line, "|")
+	mode = defaultFileMode
 	switch len(parts) {
 	case 3:
 		itemType = "file"
 	case 4:
 		itemType = parts[3]
-		if itemType != "file" && itemType != "directory" {
-			return "", "", "", "", fmt.Errorf("invalid bash backup manifest line %q: type must be file or directory", line)
+	case 5:
+		itemType = parts[3]
+		mode, err = parseOctalMode(parts[4])
+		if err != nil {
+			return "", "", "", "", 0, fmt.Errorf("invalid bash backup manifest mode: %w", err)
 		}
 	default:
-		return "", "", "", "", fmt.Errorf("invalid bash backup manifest line %q: expected exactly original|backup|existed or original|backup|existed|type", line)
+		return "", "", "", "", 0, fmt.Errorf("invalid bash backup manifest line %q: expected original|backup|existed[|type[|mode]]", line)
+	}
+	if len(parts) >= 4 {
+		if itemType != "file" && itemType != "directory" {
+			return "", "", "", "", 0, fmt.Errorf("invalid bash backup manifest line %q: type must be file or directory", line)
+		}
 	}
 	original, backupPath, existed = parts[0], parts[1], parts[2]
 	if existed != "yes" && existed != "no" {
-		return "", "", "", "", fmt.Errorf("invalid bash backup manifest line %q: existed field must be yes or no", line)
+		return "", "", "", "", 0, fmt.Errorf("invalid bash backup manifest line %q: existed field must be yes or no", line)
 	}
-	return original, backupPath, existed, itemType, nil
+	return original, backupPath, existed, itemType, mode, nil
 }
 
 func relPathFromAbsHome(home, path string) (string, bool) {

@@ -222,7 +222,7 @@ func TestRestoreAllowsNewDirsUnderHome(t *testing.T) {
 	}
 }
 
-func TestRestoreBashDirectoryEntriesFailClosedWithoutTouchingLivePaths(t *testing.T) {
+func TestRestoreBashDirectoryEntriesRestoreAndRemoveTransactionally(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	backupRoot := t.TempDir()
@@ -267,28 +267,32 @@ func TestRestoreBashDirectoryEntriesFailClosedWithoutTouchingLivePaths(t *testin
 	if err != nil {
 		t.Fatalf("Restore returned fatal error: %v", err)
 	}
-	if result.Count() != 0 || len(result.Removed) != 0 || len(result.Skipped) != 2 {
-		t.Fatalf("Restore result = restored %v removed %v skipped %v, want both directory operations skipped",
-			result.Restored, result.Removed, result.Skipped)
+	if result.Count() != 1 || len(result.Removed) != 1 || len(result.Skipped) != 0 || len(result.Warnings) != 0 {
+		t.Fatalf("Restore result = restored %v removed %v skipped %v warnings %v, want one clean restore and removal",
+			result.Restored, result.Removed, result.Skipped, result.Warnings)
 	}
 
 	gotInit, err := os.ReadFile(filepath.Join(originalDir, "init.lua"))
 	if err != nil {
 		t.Fatalf("read restored init: %v", err)
 	}
-	if string(gotInit) != "modified\n" {
-		t.Errorf("live init = %q, want untouched modified content", gotInit)
+	if string(gotInit) != "original init\n" {
+		t.Errorf("live init = %q, want restored original content", gotInit)
 	}
-	if _, err := os.Stat(filepath.Join(originalDir, "lua", "plugin.lua")); !os.IsNotExist(err) {
-		t.Fatalf("disabled directory restore copied a nested file: %v", err)
+	if got, err := os.ReadFile(filepath.Join(originalDir, "lua", "plugin.lua")); err != nil || string(got) != "original plugin\n" {
+		t.Fatalf("nested directory file was not restored: content=%q err=%v", got, err)
 	}
-	if info, err := os.Stat(createdDir); err != nil || !info.IsDir() {
-		t.Errorf("created directory was removed despite fail-closed gate: info=%v err=%v", info, err)
+	if info, err := os.Stat(filepath.Join(originalDir, "lua", "plugin.lua")); err != nil || info.Mode().Perm() != 0o640 {
+		t.Fatalf("nested restored file mode info=%v err=%v, want 0640", info, err)
 	}
-	for _, rel := range []string{filepath.Join(".config", "nvim"), filepath.Join(".config", "generated")} {
-		if !strings.Contains(result.Skipped[rel], "unavailable") {
-			t.Errorf("skip reason for %s is not actionable: %q", rel, result.Skipped[rel])
-		}
+	if info, err := os.Stat(originalDir); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("restored directory mode info=%v err=%v, want 0700", info, err)
+	}
+	if _, err := os.Lstat(createdDir); !os.IsNotExist(err) {
+		t.Errorf("created directory was not removed: %v", err)
+	}
+	if result.Restored[0] != filepath.Join(".config", "nvim") || result.Removed[0] != filepath.Join(".config", "generated") {
+		t.Fatalf("unexpected restore/removal paths: %+v", result)
 	}
 
 	entries, err := ReadManifest(backupDir)
@@ -339,6 +343,90 @@ func TestRestoreBashDirectoryMissingSourceKeepsLiveDirectory(t *testing.T) {
 	}
 }
 
+func TestRestoreBashDirectoryRefusesSymlinkedBackupDescendant(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	backupDir := t.TempDir()
+	relDir := filepath.Join(".config", "nvim")
+	originalDir := filepath.Join(home, relDir)
+	backupNvim := filepath.Join(backupDir, relDir)
+	if err := os.MkdirAll(backupNvim, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.lua")
+	if err := os.WriteFile(outside, []byte("outside\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(backupNvim, "linked.lua")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(originalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	live := filepath.Join(originalDir, "init.lua")
+	if err := os.WriteFile(live, []byte("live\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := originalDir + "|" + backupNvim + "|yes|directory\n"
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if result.Count() != 0 || !strings.Contains(result.Skipped[relDir], "symlink") {
+		t.Fatalf("symlinked backup directory result = %+v", result)
+	}
+	if got, err := os.ReadFile(live); err != nil || string(got) != "live\n" {
+		t.Fatalf("live directory changed: content=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(outside); err != nil || string(got) != "outside\n" {
+		t.Fatalf("outside symlink target changed: content=%q err=%v", got, err)
+	}
+}
+
+func TestRestoreBashDirectoryRefusesSymlinkedLiveDescendant(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	backupDir := t.TempDir()
+	relDir := filepath.Join(".config", "nvim")
+	originalDir := filepath.Join(home, relDir)
+	backupNvim := filepath.Join(backupDir, relDir)
+	if err := os.MkdirAll(backupNvim, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupNvim, "init.lua"), []byte("backup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(originalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.lua")
+	if err := os.WriteFile(outside, []byte("outside\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(originalDir, "linked.lua")); err != nil {
+		t.Fatal(err)
+	}
+	manifest := originalDir + "|" + backupNvim + "|yes|directory\n"
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if result.Count() != 0 || !strings.Contains(result.Skipped[relDir], "symlink") {
+		t.Fatalf("symlinked live directory result = %+v", result)
+	}
+	if got, err := os.ReadFile(outside); err != nil || string(got) != "outside\n" {
+		t.Fatalf("outside symlink target changed: content=%q err=%v", got, err)
+	}
+}
+
 func TestRestoreSkipsMalformedBashManifestLineAndContinues(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -380,7 +468,7 @@ func TestRestoreSkipsMalformedBashManifestLineAndContinues(t *testing.T) {
 	}
 }
 
-func TestRestoreBashManifestRelocatedDirectoryAlsoFailsClosed(t *testing.T) {
+func TestRestoreBashManifestRelocatedDirectoryUsesSelectedBackup(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	oldBackupDir := filepath.Join(t.TempDir(), "old-backup")
@@ -407,15 +495,15 @@ func TestRestoreBashManifestRelocatedDirectoryAlsoFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore returned fatal error: %v", err)
 	}
-	if result.Count() != 0 || len(result.Skipped) != 1 {
-		t.Fatalf("Restore result = restored %v skipped %v, want directory skipped", result.Restored, result.Skipped)
+	if result.Count() != 1 || len(result.Skipped) != 0 {
+		t.Fatalf("Restore result = restored %v skipped %v, want relocated directory restored", result.Restored, result.Skipped)
 	}
-	if _, err := os.Stat(filepath.Join(home, relFile)); !os.IsNotExist(err) {
-		t.Fatalf("disabled directory restore created live content: %v", err)
+	if got, err := os.ReadFile(filepath.Join(home, relFile)); err != nil || string(got) != "relocated backup\n" {
+		t.Fatalf("relocated directory content=%q err=%v", got, err)
 	}
 }
 
-func TestRestoreNotExistedFileFailsClosedWithoutRemoval(t *testing.T) {
+func TestRestoreNotExistedFileIsRemovedTransactionally(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	backupDir := t.TempDir()
@@ -436,12 +524,44 @@ func TestRestoreNotExistedFileFailsClosedWithoutRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
-	if result.Count() != 0 || len(result.Removed) != 0 || !strings.Contains(result.Skipped[relPath], "manual review") {
-		t.Fatalf("fail-closed removal result = %+v", result)
+	if result.Count() != 0 || len(result.Removed) != 1 || len(result.Skipped) != 0 || result.Removed[0] != relPath {
+		t.Fatalf("transactional removal result = %+v", result)
 	}
-	content, err := os.ReadFile(livePath)
-	if err != nil || string(content) != "created after backup\n" {
-		t.Fatalf("created file changed: content=%q err=%v", content, err)
+	if _, err := os.Lstat(livePath); !os.IsNotExist(err) {
+		t.Fatalf("created file was not removed: %v", err)
+	}
+}
+
+func TestRestoreNotExistedDirectoryRefusesFinalSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	backupDir := t.TempDir()
+	relPath := filepath.Join(".config", "generated")
+	livePath := filepath.Join(home, relPath)
+	if err := os.MkdirAll(filepath.Dir(livePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "keep"), []byte("outside\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, livePath); err != nil {
+		t.Fatal(err)
+	}
+	manifest := livePath + "||no|directory\n"
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if len(result.Removed) != 0 || !strings.Contains(result.Skipped[relPath], "symlink") {
+		t.Fatalf("symlink removal result = %+v", result)
+	}
+	if got, err := os.ReadFile(filepath.Join(outside, "keep")); err != nil || string(got) != "outside\n" {
+		t.Fatalf("outside directory changed: content=%q err=%v", got, err)
 	}
 }
 
@@ -584,6 +704,15 @@ func TestReadBackupDescendantRejectsDegenerateLayouts(t *testing.T) {
 	}
 }
 
+func TestBackupDescendantAnchorRejectsTraversal(t *testing.T) {
+	backupDir := filepath.Join(t.TempDir(), "selected")
+	for _, rel := range []string{"../outside", "nested/../outside", "/absolute", "", "nested//file"} {
+		if _, _, err := backupDescendantAnchor(backupDir, rel); err == nil {
+			t.Errorf("backupDescendantAnchor accepted %q", rel)
+		}
+	}
+}
+
 func TestRestoreCommittedErrorIsRestoredWithWarning(t *testing.T) {
 	home := t.TempDir()
 	backupDir := t.TempDir()
@@ -609,6 +738,84 @@ func TestRestoreCommittedErrorIsRestoredWithWarning(t *testing.T) {
 	}
 	if content, err := os.ReadFile(filepath.Join(home, relPath)); err != nil || string(content) != "restored\n" {
 		t.Fatalf("committed destination content=%q err=%v", content, err)
+	}
+}
+
+func TestRestoreCommittedDirectoryErrorIsRestoredWithWarning(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	relDir := filepath.Join(".config", "nvim")
+	originalDir := filepath.Join(home, relDir)
+	backupTree := filepath.Join(backupDir, relDir)
+	if err := os.MkdirAll(backupTree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupTree, "init.lua"), []byte("backup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(originalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(originalDir, "init.lua"), []byte("live\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := originalDir + "|" + backupTree + "|yes|directory\n"
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	operations := defaultRestoreOperations()
+	restoreDirectory := operations.restoreDirectory
+	operations.restoreDirectory = func(root, rel string, snapshot *safefile.DirectorySnapshot) error {
+		if err := restoreDirectory(root, rel, snapshot); err != nil {
+			return err
+		}
+		return &safefile.CommittedError{Operation: "injected directory durability failure", Err: errors.New("injected")}
+	}
+	result, err := restoreWithOperations(backupDir, home, operations)
+	if err != nil {
+		t.Fatalf("restoreWithOperations: %v", err)
+	}
+	if result.Count() != 1 || len(result.Warnings) != 1 || len(result.Skipped) != 0 {
+		t.Fatalf("committed directory result = %+v", result)
+	}
+	if got, err := os.ReadFile(filepath.Join(originalDir, "init.lua")); err != nil || string(got) != "backup\n" {
+		t.Fatalf("committed directory content=%q err=%v", got, err)
+	}
+}
+
+func TestRestoreCommittedDirectoryRemovalIsRemovedWithWarning(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	relDir := filepath.Join(".config", "generated")
+	liveDir := filepath.Join(home, relDir)
+	if err := os.MkdirAll(liveDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(liveDir, "generated"), []byte("remove\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(liveDir+"||no|directory\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	operations := defaultRestoreOperations()
+	removeDirectory := operations.removeDirectory
+	operations.removeDirectory = func(root, rel string) error {
+		if err := removeDirectory(root, rel); err != nil {
+			return err
+		}
+		return &safefile.CommittedError{Operation: "injected removal durability failure", Err: errors.New("injected")}
+	}
+	result, err := restoreWithOperations(backupDir, home, operations)
+	if err != nil {
+		t.Fatalf("restoreWithOperations: %v", err)
+	}
+	if len(result.Removed) != 1 || len(result.Warnings) != 1 || len(result.Skipped) != 0 {
+		t.Fatalf("committed removal result = %+v", result)
+	}
+	if _, err := os.Lstat(liveDir); !os.IsNotExist(err) {
+		t.Fatalf("committed directory removal left target: %v", err)
 	}
 }
 
