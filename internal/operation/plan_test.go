@@ -17,44 +17,61 @@ func validConfigAction() Action {
 		Target:        ".config/ghostty/config",
 		Description:   "merge managed Ghostty settings",
 		Disposition:   DispositionApply,
+		DesiredDigest: strings.Repeat("a", 64),
 		Ownership:     OwnershipManagedFragment,
 		Reversibility: ReversibilityBackup,
 		BackupTarget:  ".config/ghostty/config",
-		Observation:   Observation{Exists: true, Source: ".config/ghostty/config", Managed: true},
+		Observation:   Observation{Exists: true, Source: ".config/ghostty/config", Digest: strings.Repeat("b", 64), Managed: true},
+		Observations:  []Observation{{Exists: true, Source: ".config/ghostty/config", Digest: strings.Repeat("b", 64), Managed: true}},
 	}
 }
 
 func TestPlanIsImmutableAndHashIdentifiesExactDocument(t *testing.T) {
 	created := time.Date(2026, 7, 10, 12, 30, 0, 0, time.FixedZone("offset", -7*60*60))
 	actions := []Action{validConfigAction()}
+	actions[0].BackupTargets = []string{".config/ghostty/config"}
+	actions[0].BackupTarget = ""
 	plan, err := NewPlan(created, actions)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	actions[0].Target = "mutated by caller"
+	actions[0].BackupTargets[0] = "mutated backup"
+	actions[0].Observations[0].Source = "mutated observation"
 	copyOne := plan.Actions()
 	copyOne[0].Target = "mutated copy"
+	copyOne[0].BackupTargets[0] = "mutated copy backup"
+	copyOne[0].Observations[0].Source = "mutated copy observation"
 	if got := plan.Actions()[0].Target; got != ".config/ghostty/config" {
 		t.Fatalf("plan actions were mutable: %q", got)
+	}
+	if got := plan.Actions()[0].BackupTargets[0]; got != ".config/ghostty/config" {
+		t.Fatalf("plan nested backup targets were mutable: %q", got)
+	}
+	if got := plan.Actions()[0].Observations[0].Source; got != ".config/ghostty/config" {
+		t.Fatalf("plan nested observations were mutable: %q", got)
 	}
 	if len(plan.Hash()) != 64 {
 		t.Fatalf("plan hash length = %d, want 64", len(plan.Hash()))
 	}
 
-	same, err := NewPlan(created, []Action{validConfigAction()})
+	sameAction := validConfigAction()
+	sameAction.BackupTargets = []string{".config/ghostty/config"}
+	sameAction.BackupTarget = ""
+	same, err := NewPlan(created, []Action{sameAction})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if same.Hash() != plan.Hash() {
 		t.Fatalf("equal canonical plans have different hashes: %s != %s", same.Hash(), plan.Hash())
 	}
-	later, err := NewPlan(created.Add(time.Second), []Action{validConfigAction()})
+	later, err := NewPlan(created.Add(time.Second), []Action{sameAction})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if later.Hash() == plan.Hash() {
-		t.Fatal("created_at change did not change plan hash")
+	if later.Hash() != plan.Hash() {
+		t.Fatal("created_at metadata changed deterministic plan hash")
 	}
 }
 
@@ -67,6 +84,9 @@ func TestPlanRejectsUnsafeConfigApply(t *testing.T) {
 		{"unknown ownership", func(a *Action) { a.Ownership = OwnershipUnknown }, "managed ownership"},
 		{"user ownership", func(a *Action) { a.Ownership = OwnershipUser }, "managed ownership"},
 		{"missing backup", func(a *Action) { a.BackupTarget = "" }, "backup target"},
+		{"unsafe backup", func(a *Action) { a.BackupTarget = "../escape" }, "unsafe backup target"},
+		{"missing observations", func(a *Action) { a.Observations = nil }, "per-target observations"},
+		{"non-hex desired digest", func(a *Action) { a.DesiredDigest = strings.Repeat("z", 64) }, "desired digest"},
 		{"duplicate id", nil, "duplicate action id"},
 	}
 	for _, tc := range tests {
@@ -108,9 +128,11 @@ func TestBlockedActionIsVisibleButNotAConfigMutation(t *testing.T) {
 func TestBackupTargetsAreApplyOnlyUniqueAndSorted(t *testing.T) {
 	first := validConfigAction()
 	first.BackupTarget = ".config/z-last"
+	first.Observations[0].Source = ".config/z-last"
 	second := first
 	second.ID = "config:second"
 	second.BackupTarget = ".config/a-first"
+	second.Observations = []Observation{{Exists: true, Source: ".config/a-first", Digest: strings.Repeat("b", 64), Managed: true}}
 	third := first
 	third.ID = "config:skip"
 	third.Disposition = DispositionSkip
