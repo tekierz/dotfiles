@@ -3,6 +3,7 @@
 package safefile
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -120,7 +121,7 @@ func TestReplaceWithinRefusesNonRegularLeaves(t *testing.T) {
 		{
 			name: "unix socket",
 			create: func(t *testing.T, path string) func() {
-				listener, err := net.Listen("unix", path)
+				listener, err := new(net.ListenConfig).Listen(context.Background(), "unix", path)
 				if err != nil {
 					if errors.Is(err, os.ErrPermission) || errors.Is(err, unix.EPERM) {
 						t.Skipf("sandbox does not permit Unix socket creation: %v", err)

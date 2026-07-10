@@ -165,7 +165,7 @@ func (m *streamingInstallManager) Install(packages ...string) error {
 		return err
 	}
 
-	cmd, err := m.PackageManager.InstallStreaming(m.ctx, packages...)
+	cmd, err := m.InstallStreaming(m.ctx, packages...)
 	if err != nil {
 		return err
 	}
@@ -799,38 +799,6 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(destFile, sourceFile)
 	return err
-}
-
-// cleanupOldInstallations removes legacy binaries from previous installations.
-// This handles the transition from separate dotfiles-tui/dotfiles-setup to unified dotfiles.
-func cleanupOldInstallations() (removed []string) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home, _ = os.UserHomeDir()
-	}
-	if home == "" {
-		return nil
-	}
-
-	// Locations where old binaries might exist
-	locations := []string{
-		filepath.Join(home, ".local", "bin", "dotfiles-tui"),
-		filepath.Join(home, ".local", "bin", "dotfiles-setup"),
-		"/usr/local/bin/dotfiles-tui",
-		"/usr/local/bin/dotfiles-setup",
-	}
-
-	for _, path := range locations {
-		if _, err := os.Stat(path); err == nil {
-			// Binary exists, try to remove it
-			if err := os.Remove(path); err == nil {
-				removed = append(removed, filepath.Base(path))
-			}
-			// Silently ignore removal errors (permission issues, etc.)
-		}
-	}
-
-	return removed
 }
 
 // alwaysConfiguredToolIDs are configured unconditionally later in the wizard

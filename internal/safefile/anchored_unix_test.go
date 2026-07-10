@@ -783,7 +783,7 @@ func TestRemoveWithinRefusesUnixSocketBeforeRemoval(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	target := filepath.Join(root, "service.sock")
-	listener, err := net.Listen("unix", target)
+	listener, err := new(net.ListenConfig).Listen(context.Background(), "unix", target)
 	if err != nil {
 		if errors.Is(err, fs.ErrPermission) {
 			t.Skipf("sandbox does not permit Unix sockets: %v", err)

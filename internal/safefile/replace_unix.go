@@ -72,7 +72,7 @@ func EnsureDirectoryWithin(root, rel string, mode fs.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("open trusted root: %w", err)
 	}
-	defer unix.Close(rootFD) //nolint:errcheck // closing a read-only directory cannot change the result
+	defer func() { _ = unix.Close(rootFD) }() // Closing a read-only directory cannot change the result.
 
 	directoryFD, err := openParent(rootFD, components, true)
 	if err != nil {
@@ -108,13 +108,13 @@ func ReplaceWithin(root, rel string, data []byte, mode fs.FileMode) (returnErr e
 	if err != nil {
 		return fmt.Errorf("open trusted root: %w", err)
 	}
-	defer unix.Close(rootFD) //nolint:errcheck // closing a read-only directory cannot change the result
+	defer func() { _ = unix.Close(rootFD) }() // Closing a read-only directory cannot change the result.
 
 	parentFD, err := openParent(rootFD, directories, true)
 	if err != nil {
 		return err
 	}
-	defer unix.Close(parentFD) //nolint:errcheck // see root descriptor close above
+	defer func() { _ = unix.Close(parentFD) }() // See root descriptor close above.
 
 	wantedParent, err := identityOf(parentFD)
 	if err != nil {
@@ -241,12 +241,12 @@ func openParent(rootFD int, directories []string, create bool) (int, error) {
 				created = true
 				createdIdentity, _, err = identityAt(current, directory)
 				if err != nil {
-					unix.Close(current) //nolint:errcheck
+					_ = unix.Close(current)
 					return -1, fmt.Errorf("identify created directory %q: %w", directory, err)
 				}
 				if hook := replaceTestHooks.afterMkdir; hook != nil {
 					if err := hook(current, directory); err != nil {
-						unix.Close(current) //nolint:errcheck
+						_ = unix.Close(current)
 						return -1, fmt.Errorf("after creating directory %q: %w", directory, err)
 					}
 				}
@@ -254,50 +254,50 @@ func openParent(rootFD int, directories []string, create bool) (int, error) {
 				// Another actor created the entry; treat it as existing and
 				// never alter its mode.
 			default:
-				unix.Close(current) //nolint:errcheck
+				_ = unix.Close(current)
 				return -1, fmt.Errorf("create directory %q: %w", directory, err)
 			}
 			next, err = openDirectoryAt(current, directory)
 		}
 		if err != nil {
-			unix.Close(current) //nolint:errcheck
+			_ = unix.Close(current)
 			return -1, fmt.Errorf("open directory %q: %w", directory, err)
 		}
 		if created {
 			actual, err := identityOf(next)
 			if err != nil {
-				unix.Close(next)    //nolint:errcheck
-				unix.Close(current) //nolint:errcheck
+				_ = unix.Close(next)
+				_ = unix.Close(current)
 				return -1, fmt.Errorf("identify opened directory %q: %w", directory, err)
 			}
 			if actual != createdIdentity {
-				unix.Close(next)    //nolint:errcheck
-				unix.Close(current) //nolint:errcheck
+				_ = unix.Close(next)
+				_ = unix.Close(current)
 				return -1, fmt.Errorf("%w: created directory %q was replaced before open", ErrParentChanged, directory)
 			}
 			var stat unix.Stat_t
 			if err := unix.Fstat(next, &stat); err != nil {
-				unix.Close(next)    //nolint:errcheck
-				unix.Close(current) //nolint:errcheck
+				_ = unix.Close(next)
+				_ = unix.Close(current)
 				return -1, fmt.Errorf("inspect created directory %q: %w", directory, err)
 			}
 			if stat.Mode&0o7777 != directoryMode {
-				unix.Close(next)    //nolint:errcheck
-				unix.Close(current) //nolint:errcheck
+				_ = unix.Close(next)
+				_ = unix.Close(current)
 				return -1, fmt.Errorf("created directory %q has mode %04o, want %04o", directory, stat.Mode&0o7777, directoryMode)
 			}
 			if err := syncDirectory(next, "created directory"); err != nil {
-				unix.Close(next)    //nolint:errcheck
-				unix.Close(current) //nolint:errcheck
+				_ = unix.Close(next)
+				_ = unix.Close(current)
 				return -1, fmt.Errorf("fsync created directory %q: %w", directory, err)
 			}
 			if err := syncDirectory(current, "created directory parent"); err != nil {
-				unix.Close(next)    //nolint:errcheck
-				unix.Close(current) //nolint:errcheck
+				_ = unix.Close(next)
+				_ = unix.Close(current)
 				return -1, fmt.Errorf("fsync parent of created directory %q: %w", directory, err)
 			}
 		}
-		unix.Close(current) //nolint:errcheck
+		_ = unix.Close(current)
 		current = next
 	}
 	return current, nil
@@ -424,7 +424,7 @@ func identityAt(parentFD int, name string) (fileIdentity, uint32, error) {
 }
 
 func identityFromStat(stat *unix.Stat_t) fileIdentity {
-	return fileIdentity{device: uint64(stat.Dev), inode: uint64(stat.Ino)}
+	return fileIdentity{device: uint64(stat.Dev), inode: stat.Ino}
 }
 
 func verifyStagedEntry(parentFD int, name string, expected fileIdentity) error {
@@ -446,7 +446,7 @@ func verifyParent(rootFD int, directories []string, expected fileIdentity) error
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrParentChanged, err)
 	}
-	defer unix.Close(current) //nolint:errcheck
+	defer func() { _ = unix.Close(current) }()
 	actual, err := identityOf(current)
 	if err != nil {
 		return fmt.Errorf("%w: identify current parent: %v", ErrParentChanged, err)

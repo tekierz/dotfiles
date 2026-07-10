@@ -82,7 +82,7 @@ func (t *ClaudeCodeTool) InstallWithContext(ctx context.Context, mgr pkg.Package
 // Node/npm, while the legacy Install methods above retain their existing API.
 func (t *ClaudeCodeTool) InstallWithContextForPlatform(ctx context.Context, mgr pkg.PackageManager, platform pkg.Platform, emitLine func(string)) error {
 	// Ensure Node/npm is present first.
-	if err := t.BaseTool.InstallForPlatform(mgr, platform); err != nil {
+	if err := t.InstallForPlatform(mgr, platform); err != nil {
 		return fmt.Errorf("failed to install Node.js (required for Claude Code): %w", err)
 	}
 

@@ -134,7 +134,7 @@ func LoadClaudeConfig() (*ClaudeConfig, error) {
 // atomic (temp file + rename) so an interrupted save cannot truncate the file.
 func SaveClaudeConfig(cfg *ClaudeConfig) (returnErr error) {
 	if cfg == nil {
-		return errors.New("Claude config is nil")
+		return errors.New("claude config is nil")
 	}
 	claudeConfigSaveMu.Lock()
 	defer claudeConfigSaveMu.Unlock()

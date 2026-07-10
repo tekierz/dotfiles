@@ -40,7 +40,7 @@ func ReadWithin(root, rel string) ([]byte, Revision, error) {
 	if err != nil {
 		return nil, Revision{}, fmt.Errorf("open trusted root: %w", err)
 	}
-	defer unix.Close(rootFD) //nolint:errcheck
+	defer func() { _ = unix.Close(rootFD) }()
 
 	parentFD, err := openParent(rootFD, directories, false)
 	if errors.Is(err, unix.ENOENT) {
@@ -49,7 +49,7 @@ func ReadWithin(root, rel string) ([]byte, Revision, error) {
 	if err != nil {
 		return nil, Revision{}, err
 	}
-	defer unix.Close(parentFD) //nolint:errcheck
+	defer func() { _ = unix.Close(parentFD) }()
 
 	_, fileType, err := identityAt(parentFD, target)
 	if errors.Is(err, unix.ENOENT) {
@@ -182,13 +182,13 @@ func RemoveWithin(root, rel string) (returnErr error) {
 	if err != nil {
 		return fmt.Errorf("open trusted root: %w", err)
 	}
-	defer unix.Close(rootFD) //nolint:errcheck
+	defer func() { _ = unix.Close(rootFD) }()
 
 	parentFD, err := openParent(rootFD, directories, false)
 	if err != nil {
 		return err
 	}
-	defer unix.Close(parentFD) //nolint:errcheck
+	defer func() { _ = unix.Close(parentFD) }()
 	wantedParent, err := identityOf(parentFD)
 	if err != nil {
 		return fmt.Errorf("identify removal parent: %w", err)
@@ -345,13 +345,13 @@ func AcquireLockWithin(root, rel string, mode fs.FileMode) (func() error, error)
 	if err != nil {
 		return nil, fmt.Errorf("open trusted root: %w", err)
 	}
-	defer unix.Close(rootFD) //nolint:errcheck
+	defer func() { _ = unix.Close(rootFD) }()
 
 	parentFD, err := openParent(rootFD, directories, false)
 	if err != nil {
 		return nil, err
 	}
-	defer unix.Close(parentFD) //nolint:errcheck
+	defer func() { _ = unix.Close(parentFD) }()
 	wantedParent, err := identityOf(parentFD)
 	if err != nil {
 		return nil, fmt.Errorf("identify lock parent: %w", err)
