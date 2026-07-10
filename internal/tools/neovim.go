@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -421,8 +422,15 @@ func WriteNeovimUserPrefs(cfg NeovimConfig, theme string) error {
 
 	// No existing config dir => nothing to overlay. Do NOT create it (that is the
 	// install-time preset clone's job) and do NOT clone here.
-	if _, statErr := os.Stat(nvimDir); statErr != nil {
+	info, statErr := os.Stat(nvimDir)
+	if errors.Is(statErr, os.ErrNotExist) {
 		return nil
+	}
+	if statErr != nil {
+		return fmt.Errorf("failed to inspect neovim config directory: %w", statErr)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("neovim config path is not a directory: %s", nvimDir)
 	}
 
 	return writeNeovimUserPrefs(cfg, theme, nvimDir)
@@ -430,27 +438,42 @@ func WriteNeovimUserPrefs(cfg NeovimConfig, theme string) error {
 
 // writeNeovimUserPrefs writes user preferences to a separate file
 func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
-	prefsPath := filepath.Join(nvimDir, "lua", "custom", "options.lua")
-	content := GenerateNeovimConfig(cfg, theme)
-	if err := writeToolConfig(prefsPath, []byte(content)); err != nil {
-		return err
-	}
-
-	// Add require to init.lua if not already present
 	initPath := filepath.Join(nvimDir, "init.lua")
-	initContent, err := os.ReadFile(initPath)
-	if err == nil {
+	return withToolConfigLock(initPath, func(root, rel string) error {
+		// Confirm that the preset entry point exists and is readable before
+		// writing the overlay it must load. A missing init.lua is a deliberate
+		// no-op; every other descriptor-anchored read error is surfaced. In both
+		// cases options.lua remains untouched.
+		initContent, revision, err := readToolConfig(root, rel)
+		if err != nil {
+			return fmt.Errorf("failed to read neovim init.lua: %w", err)
+		}
+		if !revision.Exists() {
+			return nil
+		}
+		if err := verifyToolConfigRevision(root, rel, revision); err != nil {
+			return fmt.Errorf("failed to verify neovim init.lua: %w", err)
+		}
+
+		prefsPath := filepath.Join(nvimDir, "lua", "custom", "options.lua")
+		content := GenerateNeovimConfig(cfg, theme)
+		if err := writeToolConfig(prefsPath, []byte(content)); err != nil {
+			return err
+		}
+
+		// Add require to init.lua if not already present. The revision check in
+		// replaceToolConfigAtRevision prevents a stale read from erasing edits
+		// made by a non-cooperating process after the preflight above.
 		requireLine := "pcall(require, \"custom.options\")"
 		if !strings.Contains(string(initContent), requireLine) {
-			// Append at the end
 			newContent := string(initContent) + "\n\n-- User options from dotfiles\n" + requireLine + "\n"
-			if err := os.WriteFile(initPath, []byte(newContent), 0600); err != nil {
+			if err := replaceToolConfigAtRevision(root, rel, revision, []byte(newContent)); err != nil {
 				return fmt.Errorf("failed to update neovim init.lua: %w", err)
 			}
 		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 // writeMinimalNeovimConfig writes a minimal standalone neovim config

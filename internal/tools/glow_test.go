@@ -3,20 +3,28 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-func TestGlowConfigPathUsesUserConfigDir(t *testing.T) {
+func TestGlowConfigPathUsesPlatformRuntimeLocation(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	userConfigDir, err := os.UserConfigDir()
-	if err != nil {
-		t.Fatalf("UserConfigDir returned error: %v", err)
+	var expectedPath string
+	if runtime.GOOS == "darwin" {
+		// Glow uses go-app-paths' User scope on macOS, not
+		// os.UserConfigDir (Library/Application Support).
+		expectedPath = filepath.Join(tmpHome, "Library", "Preferences", "glow", "glow.yml")
+	} else {
+		userConfigDir, err := os.UserConfigDir()
+		if err != nil {
+			t.Fatalf("UserConfigDir returned error: %v", err)
+		}
+		expectedPath = filepath.Join(userConfigDir, "glow", "glow.yml")
 	}
-	expectedPath := filepath.Join(userConfigDir, "glow", "glow.yml")
 
 	cfg := GlowConfig{Pager: "auto", Style: "dark", Mouse: true}
 	if err := WriteGlowConfig(cfg, "catppuccin-mocha"); err != nil {

@@ -1,11 +1,14 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // Category represents a tool category
@@ -146,39 +149,211 @@ func allPackagesInstalled(mgr pkg.PackageManager, pkgs []string) bool {
 
 func (t *BaseTool) IsInstalled() bool {
 	mgr := pkg.DetectManager()
+	return t.IsInstalledForPlatform(mgr, pkg.DetectPlatform())
+}
+
+func (t *BaseTool) Install(mgr pkg.PackageManager) error {
+	return t.InstallForPlatform(mgr, pkg.DetectPlatform())
+}
+
+// IsInstalledForPlatform is the environment-explicit form used by planning and
+// tests that model a platform other than the host running the process. Custom
+// tools whose package metadata is only a prerequisite still own IsInstalled;
+// this helper is authoritative only for ordinary BaseTool package installs.
+func (t *BaseTool) IsInstalledForPlatform(mgr pkg.PackageManager, platform pkg.Platform) bool {
 	if mgr == nil {
 		return false
 	}
-
-	pkgs := PackagesForPlatform(t.packages, pkg.DetectPlatform())
-
+	pkgs := PackagesForPlatform(t.packages, platform)
 	// Require ALL platform packages, not just the primary one. A partially
 	// installed multi-package tool must report false (C6).
 	return allPackagesInstalled(mgr, pkgs)
 }
 
-func (t *BaseTool) Install(mgr pkg.PackageManager) error {
-	pkgs := PackagesForPlatform(t.packages, pkg.DetectPlatform())
+// InstallForPlatform resolves packages from the caller's platform snapshot.
+// Install remains the public Tool contract for compatibility, while dashboard
+// execution uses this explicit variant for BaseTool-backed package installs so
+// the planned and executed platform cannot drift.
+func (t *BaseTool) InstallForPlatform(mgr pkg.PackageManager, platform pkg.Platform) error {
+	pkgs := PackagesForPlatform(t.packages, platform)
 	if len(pkgs) == 0 {
 		return nil // No packages to install for this platform
+	}
+	if mgr == nil {
+		return fmt.Errorf("no package manager available for %s", platform)
 	}
 	return mgr.Install(pkgs...)
 }
 
-// writeToolConfig writes a generated tool config file to disk, creating its
-// parent directory if needed. It is the single source of truth for the
-// "create dir 0700, write file 0600" pattern shared by every WriteXConfig
-// function. Permissions are deliberately restrictive: 0700 on the config
-// directory and 0600 on the file (see the security notes in CLAUDE.md). For
-// configs that live directly in $HOME (e.g. ~/.zshrc, ~/.gitconfig) the parent
-// directory already exists, so MkdirAll is a no-op and does not alter $HOME.
+var errGeneratedConfigOutsideTrustedRoots = errors.New("generated config path is outside HOME and XDG_CONFIG_HOME")
+
+type replaceGeneratedConfigFunc func(root, rel string, data []byte, mode os.FileMode) error
+
+// writeToolConfig atomically replaces a generated tool config below a trusted
+// per-user root. HOME (including its resolved location when HOME itself is a
+// symlink) is preferred so symlinked descendants such as ~/.config are refused.
+// An absolute XDG_CONFIG_HOME outside both HOME identities is also an explicit
+// trusted root, which supports applications that honor an external XDG tree.
+// Missing descendant directories are created 0700 by safefile; existing
+// directory modes are preserved. Generated files are always written 0600.
 func writeToolConfig(path string, content []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("failed to create config directory %s: %w", dir, err)
+	return writeGeneratedConfig(path, content, 0600)
+}
+
+func writeGeneratedConfig(path string, content []byte, mode os.FileMode) error {
+	return writeGeneratedConfigWith(path, content, mode, safefile.ReplaceWithin)
+}
+
+func writeGeneratedConfigWith(path string, content []byte, mode os.FileMode, replace replaceGeneratedConfigFunc) error {
+	root, rel, err := prepareGeneratedConfigDestination(path)
+	if err != nil {
+		return err
 	}
-	if err := os.WriteFile(path, content, 0600); err != nil {
-		return fmt.Errorf("failed to write config file %s: %w", path, err)
+	if err := replace(root, rel, content, mode); err != nil {
+		return fmt.Errorf("failed to replace generated config %s: %w", path, err)
 	}
 	return nil
+}
+
+// withToolConfigLock serializes a read-modify-write operation on path with
+// other cooperating dotfiles processes. The lock lives beside the target, so
+// its parent must already exist; both current callers update existing user
+// configuration parents. Descriptor-relative traversal refuses symlinks in the
+// untrusted portion of both the target and lock paths.
+func withToolConfigLock(path string, mutate func(root, rel string) error) (returnErr error) {
+	root, rel, err := prepareGeneratedConfigDestination(path)
+	if err != nil {
+		return err
+	}
+	release, err := safefile.AcquireLockWithin(root, rel+".dotfiles.lock", 0600)
+	if err != nil {
+		return fmt.Errorf("failed to lock generated config %s: %w", path, err)
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("failed to unlock generated config %s: %w", path, releaseErr))
+		}
+	}()
+	return mutate(root, rel)
+}
+
+func readToolConfig(root, rel string) ([]byte, safefile.Revision, error) {
+	content, revision, err := safefile.ReadWithin(root, rel)
+	if err != nil {
+		return nil, safefile.Revision{}, fmt.Errorf("failed to read generated config %s: %w", rel, err)
+	}
+	return content, revision, nil
+}
+
+func verifyToolConfigRevision(root, rel string, expected safefile.Revision) error {
+	_, current, err := readToolConfig(root, rel)
+	if err != nil {
+		return err
+	}
+	if current != expected {
+		return fmt.Errorf("%w: generated config %s changed before replacement", safefile.ErrRevisionChanged, rel)
+	}
+	return nil
+}
+
+func replaceToolConfigAtRevision(root, rel string, expected safefile.Revision, content []byte) error {
+	if err := verifyToolConfigRevision(root, rel, expected); err != nil {
+		return err
+	}
+	if err := safefile.ReplaceWithin(root, rel, content, 0600); err != nil {
+		return fmt.Errorf("failed to replace generated config %s: %w", rel, err)
+	}
+	return nil
+}
+
+func prepareGeneratedConfigDestination(path string) (root, rel string, err error) {
+	root, rel, createRoot, err := generatedConfigDestination(path)
+	if err != nil {
+		return "", "", err
+	}
+	if createRoot {
+		// XDG_CONFIG_HOME is explicitly trusted in its entirety, just as HOME is.
+		// It may not exist yet, so establish that anchor before safefile performs
+		// descriptor-relative traversal of every untrusted descendant.
+		if err := os.MkdirAll(root, 0700); err != nil {
+			return "", "", fmt.Errorf("failed to create trusted XDG config root %s: %w", root, err)
+		}
+	}
+	return root, rel, nil
+}
+
+func generatedConfigDestination(path string) (root, rel string, createRoot bool, err error) {
+	cleanPath := filepath.Clean(path)
+	if !filepath.IsAbs(cleanPath) {
+		return "", "", false, fmt.Errorf("%w: %s", errGeneratedConfigOutsideTrustedRoots, path)
+	}
+
+	if home, homeErr := os.UserHomeDir(); homeErr == nil && filepath.IsAbs(home) {
+		// Check the lexical HOME first so HOME itself may legitimately be a
+		// symlink. Then check its resolved identity before considering XDG as a
+		// separate trusted anchor. Without the second check, an XDG path spelling
+		// the real location of a symlinked HOME could turn ~/.config from an
+		// untrusted descendant into a trusted root and bypass the symlink guard.
+		homeRoots := []string{filepath.Clean(home)}
+		if resolved, resolveErr := filepath.EvalSymlinks(home); resolveErr == nil && filepath.IsAbs(resolved) {
+			resolved = filepath.Clean(resolved)
+			if resolved != homeRoots[0] {
+				homeRoots = append(homeRoots, resolved)
+			}
+		}
+		for _, homeRoot := range homeRoots {
+			if relative, ok := relativePathBelow(homeRoot, cleanPath); ok {
+				return homeRoot, relative, false, nil
+			}
+		}
+		// macOS commonly exposes the same directory through /var and
+		// /private/var. More generally, the destination may spell the resolved
+		// HOME through a filesystem alias that is not lexically comparable. Find
+		// an actual (non-symlink) ancestor with HOME's directory identity and use
+		// that spelling as the trusted root. Descendant symlinks remain below the
+		// anchor and are therefore refused by safefile.
+		if homeRoot, relative, ok := relativePathBelowHomeIdentity(home, cleanPath); ok {
+			return homeRoot, relative, false, nil
+		}
+	}
+
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" && filepath.IsAbs(xdg) {
+		if relative, ok := relativePathBelow(xdg, cleanPath); ok {
+			return filepath.Clean(xdg), relative, true, nil
+		}
+	}
+
+	return "", "", false, fmt.Errorf("%w: %s", errGeneratedConfigOutsideTrustedRoots, path)
+}
+
+func relativePathBelowHomeIdentity(home, path string) (root, rel string, ok bool) {
+	homeInfo, err := os.Stat(home)
+	if err != nil || !homeInfo.IsDir() {
+		return "", "", false
+	}
+	for candidate := filepath.Dir(path); ; candidate = filepath.Dir(candidate) {
+		candidateLstat, lstatErr := os.Lstat(candidate)
+		if lstatErr == nil && candidateLstat.IsDir() && candidateLstat.Mode()&os.ModeSymlink == 0 {
+			candidateInfo, statErr := os.Stat(candidate)
+			if statErr == nil && os.SameFile(homeInfo, candidateInfo) {
+				if relative, below := relativePathBelow(candidate, path); below {
+					return filepath.Clean(candidate), relative, true
+				}
+			}
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			break
+		}
+	}
+	return "", "", false
+}
+
+func relativePathBelow(root, path string) (string, bool) {
+	cleanRoot := filepath.Clean(root)
+	rel, err := filepath.Rel(cleanRoot, path)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }

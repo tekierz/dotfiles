@@ -193,7 +193,13 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 
 	// Prompt configuration
 	sb.WriteString("# Prompt\n")
-	switch cfg.PromptStyle {
+	writeZshPrompt(&sb, cfg.PromptStyle)
+
+	return sb.String()
+}
+
+func writeZshPrompt(sb *strings.Builder, promptStyle string) {
+	switch promptStyle {
 	case "starship":
 		// Starship is not installed by the tool registry, so fall back to a
 		// working minimal prompt when it is absent instead of leaving a bare
@@ -209,7 +215,7 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 		sb.WriteString("  source \"${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh\"\n")
 		sb.WriteString("fi\n")
 		sb.WriteString("if ")
-		writeZshSourceFirstCall(&sb, []string{
+		writeZshSourceFirstCall(sb, []string{
 			"${HOMEBREW_PREFIX:-$(brew --prefix 2>/dev/null)}/share/powerlevel10k/powerlevel10k.zsh-theme",
 			"/opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme",
 			"/usr/local/share/powerlevel10k/powerlevel10k.zsh-theme",
@@ -229,8 +235,6 @@ func GenerateZshConfig(cfg ZshConfig, theme string) string {
 	case "minimal":
 		sb.WriteString("PROMPT='%~ > '\n")
 	}
-
-	return sb.String()
 }
 
 func zshPluginEnabled(cfg ZshConfig, plugin string, fallback bool) bool {
@@ -358,16 +362,21 @@ func WriteZshConfig(cfg ZshConfig, theme string) error {
 	}
 
 	configPath := filepath.Join(home, ".zshrc")
-	content := []byte(wrapZshManagedSection(GenerateZshConfig(cfg, theme)))
-	if existing, err := os.ReadFile(configPath); err == nil {
-		content, err = mergeZshManagedSection(existing, content)
+	managed := []byte(wrapZshManagedSection(GenerateZshConfig(cfg, theme)))
+	return withToolConfigLock(configPath, func(root, rel string) error {
+		existing, revision, err := readToolConfig(root, rel)
 		if err != nil {
 			return err
 		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read existing zsh config %s: %w", configPath, err)
-	}
-	return writeToolConfig(configPath, content)
+		content := managed
+		if revision.Exists() {
+			content, err = mergeZshManagedSection(existing, managed)
+			if err != nil {
+				return err
+			}
+		}
+		return replaceToolConfigAtRevision(root, rel, revision, content)
+	})
 }
 
 func wrapZshManagedSection(content string) string {
@@ -376,22 +385,24 @@ func wrapZshManagedSection(content string) string {
 
 func mergeZshManagedSection(existing, managed []byte) ([]byte, error) {
 	current := string(existing)
-	start := strings.Index(current, zshManagedStart)
-	end := strings.Index(current, zshManagedEnd)
+	starts := exactZshMarkerLines(current, zshManagedStart)
+	ends := exactZshMarkerLines(current, zshManagedEnd)
 
 	switch {
-	case start >= 0 && end >= start:
-		end += len(zshManagedEnd)
-		if end < len(current) && current[end] == '\n' {
-			end++
-		}
-		return []byte(current[:start] + string(managed) + current[end:]), nil
-	case start >= 0 || end >= 0:
-		return nil, fmt.Errorf("refusing to update .zshrc with incomplete dotfiles managed section")
+	case len(starts) == 1 && len(ends) == 1 && starts[0].start < ends[0].start:
+		return []byte(current[:starts[0].start] + string(managed) + current[ends[0].end:]), nil
+	case len(starts) != 0 || len(ends) != 0:
+		return nil, fmt.Errorf("refusing to update .zshrc with ambiguous or incomplete dotfiles managed sections (%d start, %d end)", len(starts), len(ends))
 	}
 
 	if isLegacyGeneratedZshConfig(current) {
-		return managed, nil
+		tail, err := legacyGeneratedZshTail(current)
+		if err != nil {
+			return nil, err
+		}
+		migrated := append([]byte(nil), managed...)
+		migrated = append(migrated, tail...)
+		return migrated, nil
 	}
 
 	if strings.TrimSpace(current) == "" {
@@ -404,6 +415,68 @@ func mergeZshManagedSection(existing, managed []byte) ([]byte, error) {
 		separator = "\n"
 	}
 	return []byte(current + separator + string(managed)), nil
+}
+
+type zshLineSpan struct {
+	start int
+	end   int
+}
+
+// exactZshMarkerLines returns only markers that occupy an entire logical line.
+// Marker text inside a quoted string, comment, or shell command is user content
+// and must never grant ownership of the surrounding bytes. CRLF is accepted so
+// a config copied from another platform can still be migrated safely.
+func exactZshMarkerLines(content, marker string) []zshLineSpan {
+	var spans []zshLineSpan
+	for start := 0; start < len(content); {
+		relativeEnd := strings.IndexByte(content[start:], '\n')
+		end := len(content)
+		contentEnd := end
+		if relativeEnd >= 0 {
+			contentEnd = start + relativeEnd
+			end = contentEnd + 1
+		}
+		logicalEnd := contentEnd
+		if logicalEnd > start && content[logicalEnd-1] == '\r' {
+			logicalEnd--
+		}
+		if content[start:logicalEnd] == marker {
+			spans = append(spans, zshLineSpan{start: start, end: end})
+		}
+		start = end
+	}
+	return spans
+}
+
+// legacyGeneratedZshTail recognizes the exact prompt suffixes emitted by the
+// previous whole-file generator and returns only bytes appended after that
+// generated region. If the legacy shape is unknown, migration fails closed:
+// guessing where generated content ends would risk deleting user additions.
+func legacyGeneratedZshTail(content string) ([]byte, error) {
+	trimmed := strings.TrimLeft(content, "\ufeff \t\r\n")
+	lineEnding := "\n"
+	promptMarker := "# Prompt\n"
+	if strings.HasPrefix(trimmed, "# Generated by dotfiles TUI\r\n") {
+		lineEnding = "\r\n"
+		promptMarker = "# Prompt\r\n"
+	}
+	promptIndex := strings.Index(trimmed, promptMarker)
+	if promptIndex < 0 {
+		return nil, fmt.Errorf("refusing to migrate legacy generated .zshrc with no recognizable prompt section")
+	}
+	remainder := trimmed[promptIndex+len(promptMarker):]
+	for _, style := range []string{"p10k", "starship", "pure", "minimal"} {
+		var prompt strings.Builder
+		writeZshPrompt(&prompt, style)
+		body := prompt.String()
+		if lineEnding == "\r\n" {
+			body = strings.ReplaceAll(body, "\n", "\r\n")
+		}
+		if strings.HasPrefix(remainder, body) {
+			return []byte(remainder[len(body):]), nil
+		}
+	}
+	return nil, fmt.Errorf("refusing to migrate legacy generated .zshrc with an unrecognized prompt section")
 }
 
 func isLegacyGeneratedZshConfig(content string) bool {
