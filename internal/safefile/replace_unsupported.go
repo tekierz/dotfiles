@@ -4,6 +4,24 @@ package safefile
 
 import "io/fs"
 
+// SnapshotDirectoryWithin is unavailable on platforms without the required
+// descriptor-relative directory operations.
+func SnapshotDirectoryWithin(_ string, _ string) (*DirectorySnapshot, error) {
+	return nil, ErrUnsupported
+}
+
+// RestoreDirectoryWithin is unavailable on platforms without the required
+// descriptor-relative directory and durability operations.
+func RestoreDirectoryWithin(_ string, _ string, _ *DirectorySnapshot) error {
+	return ErrUnsupported
+}
+
+// RemoveDirectoryWithin is unavailable on platforms without the required
+// descriptor-relative recursive removal and durability operations.
+func RemoveDirectoryWithin(_ string, _ string) error {
+	return ErrUnsupported
+}
+
 // EnsureDirectoryWithin is unavailable on platforms without the required
 // descriptor-relative directory operations.
 func EnsureDirectoryWithin(_ string, _ string, _ fs.FileMode) error {

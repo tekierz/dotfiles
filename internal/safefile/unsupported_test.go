@@ -8,6 +8,15 @@ import (
 )
 
 func TestDescriptorAnchoredOperationsAreTypedUnsupported(t *testing.T) {
+	if _, err := SnapshotDirectoryWithin(".", "directory"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("SnapshotDirectoryWithin error = %v, want ErrUnsupported", err)
+	}
+	if err := RestoreDirectoryWithin(".", "directory", &DirectorySnapshot{}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("RestoreDirectoryWithin error = %v, want ErrUnsupported", err)
+	}
+	if err := RemoveDirectoryWithin(".", "directory"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("RemoveDirectoryWithin error = %v, want ErrUnsupported", err)
+	}
 	if err := ReplaceWithin(".", "file", nil, 0o600); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("ReplaceWithin error = %v, want ErrUnsupported", err)
 	}

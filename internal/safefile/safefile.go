@@ -1,5 +1,6 @@
-// Package safefile provides descriptor-anchored directory creation, file
-// reads, replacement, removal, and advisory locking below a trusted root.
+// Package safefile provides descriptor-anchored directory snapshot,
+// replacement and removal, plus file reads, replacement, removal, and advisory
+// locking below a trusted root.
 package safefile
 
 import (
@@ -35,12 +36,72 @@ var (
 	// ErrTargetChanged reports that a descriptor-anchored removal target no
 	// longer names the regular file that was opened for deletion.
 	ErrTargetChanged = errors.New("removal target identity changed")
+	// ErrDirectoryChanged reports that a directory tree changed while it was
+	// being captured or while a transactional namespace mutation was prepared.
+	ErrDirectoryChanged = errors.New("directory tree changed during safe operation")
 	// ErrInvalidMode reports a mode containing non-permission bits.
 	ErrInvalidMode = errors.New("invalid permission mode")
 	// ErrUnsupported reports that descriptor-anchored file operations are
 	// unavailable on the current operating system.
 	ErrUnsupported = errors.New("safe file operation is unsupported on this platform")
 )
+
+// DirectorySnapshot is an immutable, opaque recursive capture produced by
+// SnapshotDirectoryWithin. Its unexported representation prevents callers from
+// injecting names, node types, or modes into RestoreDirectoryWithin.
+type DirectorySnapshot struct {
+	tracked bool
+	root    directorySnapshotNode
+	digest  [32]byte
+}
+
+type directorySnapshotNode struct {
+	mode    fs.FileMode
+	entries []directorySnapshotEntry
+}
+
+type directorySnapshotEntry struct {
+	name string
+	mode fs.FileMode
+	data []byte
+	dir  *directorySnapshotNode
+}
+
+// Digest returns a deterministic SHA-256 observation token for the complete
+// recursive snapshot: names, node types, permission modes, and file bytes. It
+// is intended for change detection, not authentication or secret handling. A
+// nil or untracked snapshot returns the zero digest.
+func (s *DirectorySnapshot) Digest() [32]byte {
+	if s == nil || !s.tracked {
+		return [32]byte{}
+	}
+	return s.digest
+}
+
+// Permissions returns the captured root directory permission bits. A nil or
+// untracked snapshot returns zero.
+func (s *DirectorySnapshot) Permissions() fs.FileMode {
+	if s == nil || !s.tracked {
+		return 0
+	}
+	return s.root.mode.Perm()
+}
+
+// RecoveryError reports that a directory transaction could not restore the
+// pre-operation namespace after a failure before the requested replacement or
+// removal committed. It deliberately does not implement Committed(): the
+// requested new state is not known to be applied, and callers must surface the
+// manual-recovery requirement rather than report a successful restore.
+type RecoveryError struct {
+	Operation string
+	Err       error
+}
+
+func (e *RecoveryError) Error() string {
+	return fmt.Sprintf("safe directory transaction recovery failed; %s: %v", e.Operation, e.Err)
+}
+
+func (e *RecoveryError) Unwrap() error { return e.Err }
 
 // Revision is an opaque, comparable description of one ReadWithin result. It
 // contains only value fields: tracked/existence state, file identity, mode,
