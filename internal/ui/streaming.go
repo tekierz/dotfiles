@@ -71,7 +71,7 @@ func (a *App) handleUpdateSudoRequiredMsg(msg updateSudoRequiredMsg) tea.Cmd {
 		if err != nil {
 			return updateRunDoneMsg{err: err}
 		}
-		return updateStartMsg{packages: msg.packages, all: msg.all}
+		return updateStartMsg(msg)
 	})
 }
 
@@ -141,7 +141,7 @@ func (a *App) handleManageSudoRequiredMsg(msg manageSudoRequiredMsg) tea.Cmd {
 		if err != nil {
 			return manageInstallDoneMsg{toolID: msg.toolID, err: err}
 		}
-		return manageStartInstallMsg{toolID: msg.toolID}
+		return manageStartInstallMsg(msg)
 	})
 }
 

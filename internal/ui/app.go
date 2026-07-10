@@ -950,7 +950,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	//
 	// Note: the intro animation (tickMsg / animationDoneMsg),
 	// the install flow (installStartMsg / sudoRequiredMsg / sudoCachedMsg /
-	// installOutputMsg / installEventMsg / installDoneMsg / installLogMsg) and the
+	// installOutputMsg / installEventMsg / installDoneMsg) and the
 	// Users async results (userLoadedMsg / userSavedMsg / userDeletedMsg /
 	// userSwitchedMsg) are all handled by their migrated ScreenHandlers via the
 	// ScreenManager, which delegates every non-navigation message to the active

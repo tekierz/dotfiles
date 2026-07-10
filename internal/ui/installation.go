@@ -467,7 +467,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	// Install dotfiles binary and utilities to ~/.local/bin
 	configPhase("\n▶ Installing dotfiles utilities...", func() error {
 		if err := installUtilities(cfg.Utilities); err != nil {
-			return fmt.Errorf("Failed to install utilities: %w", err)
+			return fmt.Errorf("failed to install utilities: %w", err)
 		}
 		return nil
 	}, "  ✓ Utilities installed to ~/.local/bin")
@@ -478,7 +478,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	tmuxCfg := tmuxConfigFrom(cfg)
 	tmuxConfigured := toolConfigPhase("tmux", "\n▶ Configuring tmux...", func() error {
 		if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
-			return fmt.Errorf("Failed to configure tmux: %w", err)
+			return fmt.Errorf("failed to configure tmux: %w", err)
 		}
 		return nil
 	}, "  ✓ Tmux configured with ~/.tmux.conf")
@@ -503,7 +503,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 		toolConfigPhase("claude-code", "\n▶ Configuring Claude Code MCP servers...", func() error {
 			claudeTool := tools.NewClaudeCodeTool()
 			if err := claudeTool.ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs); err != nil {
-				return fmt.Errorf("Failed to configure Claude MCP: %w", err)
+				return fmt.Errorf("failed to configure Claude MCP: %w", err)
 			}
 			return nil
 		}, fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
@@ -512,7 +512,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	// Configure Ghostty
 	toolConfigPhase("ghostty", "\n▶ Configuring Ghostty...", func() error {
 		if err := tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure Ghostty: %w", err)
+			return fmt.Errorf("failed to configure Ghostty: %w", err)
 		}
 		return nil
 	}, "  ✓ Ghostty configured")
@@ -520,7 +520,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	// Configure Zsh
 	toolConfigPhase("zsh", "\n▶ Configuring Zsh...", func() error {
 		if err := tools.WriteZshConfig(zshConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure Zsh: %w", err)
+			return fmt.Errorf("failed to configure Zsh: %w", err)
 		}
 		return nil
 	}, "  ✓ Zsh configured with ~/.zshrc")
@@ -536,7 +536,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	}
 	toolConfigPhase("neovim", "\n▶ Configuring Neovim...", func() error {
 		if err := tools.WriteNeovimConfig(neovimCfg, theme); err != nil {
-			return fmt.Errorf("Failed to configure Neovim: %w", err)
+			return fmt.Errorf("failed to configure Neovim: %w", err)
 		}
 		return nil
 	}, neovimSuccessMsg)
@@ -544,7 +544,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	// Configure Git
 	toolConfigPhase("git", "\n▶ Configuring Git...", func() error {
 		if err := tools.WriteGitConfig(gitConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure Git: %w", err)
+			return fmt.Errorf("failed to configure Git: %w", err)
 		}
 		return nil
 	}, "  ✓ Git configured with ~/.gitconfig")
@@ -552,7 +552,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	// Configure Yazi
 	toolConfigPhase("yazi", "\n▶ Configuring Yazi...", func() error {
 		if err := tools.WriteYaziConfig(yaziConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure Yazi: %w", err)
+			return fmt.Errorf("failed to configure Yazi: %w", err)
 		}
 		return nil
 	}, "  ✓ Yazi configured")
@@ -560,7 +560,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	// Configure FZF
 	toolConfigPhase("fzf", "\n▶ Configuring FZF...", func() error {
 		if err := tools.WriteFzfConfig(fzfConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("Failed to configure FZF: %w", err)
+			return fmt.Errorf("failed to configure FZF: %w", err)
 		}
 		return nil
 	}, "  ✓ FZF configured")
@@ -571,7 +571,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	if cfg.CLITools["lazygit"] {
 		toolConfigPhase("lazygit", "\n▶ Configuring LazyGit...", func() error {
 			if err := tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("Failed to configure LazyGit: %w", err)
+				return fmt.Errorf("failed to configure LazyGit: %w", err)
 			}
 			return nil
 		}, "  ✓ LazyGit configured")
@@ -582,7 +582,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	if cfg.CLITools["btop"] {
 		toolConfigPhase("btop", "\n▶ Configuring Btop...", func() error {
 			if err := tools.WriteBtopConfig(btopConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("Failed to configure Btop: %w", err)
+				return fmt.Errorf("failed to configure Btop: %w", err)
 			}
 			return nil
 		}, "  ✓ Btop configured")
@@ -593,7 +593,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	if cfg.CLITools["glow"] {
 		toolConfigPhase("glow", "\n▶ Configuring Glow...", func() error {
 			if err := tools.WriteGlowConfig(glowConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("Failed to configure Glow: %w", err)
+				return fmt.Errorf("failed to configure Glow: %w", err)
 			}
 			return nil
 		}, "  ✓ Glow configured")

@@ -38,7 +38,7 @@ import (
 // event on the main loop -- appending the line to installLogs so it renders
 // LIVE -- and RE-ISSUES listenUpdateStreamCmd until the `done` event, which
 // finalizes via a.finishUpdate. The worker never touches shared App state, so
-// there is no data race. The shared installLogMsg stays in App.Update.
+// there is no data race. Shared stream events stay in App.Update.
 type updateScreen struct {
 	BaseScreen
 }

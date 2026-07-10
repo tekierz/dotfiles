@@ -503,7 +503,9 @@ func showStatus() {
 					names = append(names, t.Name())
 				}
 			}
-			fmt.Printf("  %s: %s\n", strings.Title(string(cat)), strings.Join(names, ", "))
+			categoryName := string(cat)
+			categoryName = strings.ToUpper(categoryName[:1]) + categoryName[1:]
+			fmt.Printf("  %s: %s\n", categoryName, strings.Join(names, ", "))
 		}
 	}
 

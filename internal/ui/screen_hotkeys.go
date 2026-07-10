@@ -991,21 +991,14 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 
 	// Filter to favorites only if mode is enabled
 	displayItems := items
-	itemIndices := make([]int, len(items)) // Map display index to original index
-	for i := range items {
-		itemIndices[i] = i
-	}
 	if a.hotkeysFavoritesOnly {
 		var filteredItems []hotkeys.Item
-		var filteredIndices []int
-		for i, it := range items {
+		for _, it := range items {
 			if a.isHotkeyFavorite(cat.ID, it.ID) {
 				filteredItems = append(filteredItems, it)
-				filteredIndices = append(filteredIndices, i)
 			}
 		}
 		displayItems = filteredItems
-		itemIndices = filteredIndices
 	}
 
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("ITEMS")
