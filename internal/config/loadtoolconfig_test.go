@@ -30,8 +30,8 @@ func TestLoadToolConfigKeepsDefaultsForAbsentKeys(t *testing.T) {
 	_, cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
-	if err := EnsureDirs(); err != nil {
-		t.Fatalf("EnsureDirs: %v", err)
+	if err := os.MkdirAll(ToolsDir(), 0o700); err != nil {
+		t.Fatalf("create test tools directory: %v", err)
 	}
 
 	// Write a partial file that only sets FontSize. Theme and Enabled are absent.

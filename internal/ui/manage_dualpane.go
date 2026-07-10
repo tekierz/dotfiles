@@ -113,20 +113,25 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 	changed := changedManageTools(&baseline, cfg, a.manageConfigBaselineTheme, theme)
 
 	return func() tea.Msg {
-		if err := config.SaveToolConfig("manage", cfg); err != nil {
-			return manageSavedMsg{err: err}
+		// Load the global config before making any save-side mutation. A parse or
+		// future-schema error means this binary cannot safely update the file; using
+		// defaults here would silently replace settings it does not understand.
+		g, err := config.LoadGlobalConfig()
+		if err != nil {
+			return manageSavedMsg{err: fmt.Errorf("failed to load global config: %w", err)}
 		}
 
 		// Also persist global theme/nav so installer + CLI stay in sync.
-		g, err := config.LoadGlobalConfig()
-		if err != nil {
-			g = config.DefaultGlobalConfig()
-		}
 		g.Theme = theme
 		g.NavStyle = nav
 		g.DisableAnimations = !animationsEnabled
 
-		if err := config.SaveGlobalConfig(g); err != nil {
+		// Reserve the loaded global revision before mutating manage.json. Without
+		// this ordering, another process can update global.json between our load and
+		// save, leaving manage.json changed even though the global save conflicts.
+		if err := config.SaveGlobalConfigWithReservedRevision(g, func() error {
+			return config.SaveToolConfig("manage", cfg)
+		}); err != nil {
 			return manageSavedMsg{err: err}
 		}
 

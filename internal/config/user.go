@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // UserProfile represents a user configuration profile
@@ -99,11 +101,13 @@ func LoadUserProfile(name string) (*UserProfile, error) {
 
 // SaveUserProfile saves a user profile to disk
 func SaveUserProfile(profile *UserProfile) error {
-	if err := ValidateUsername(profile.Name); err != nil {
-		return err
+	if profile == nil {
+		return fmt.Errorf("user profile is nil")
 	}
-
-	if err := EnsureDirs(); err != nil {
+	if ConfigDir() == "" {
+		return ErrNoConfigDir
+	}
+	if err := ValidateUsername(profile.Name); err != nil {
 		return err
 	}
 
@@ -131,13 +135,19 @@ func DeleteUserProfile(name string) error {
 	if err := ValidateUsername(name); err != nil {
 		return err
 	}
-
-	if !UserExists(name) {
-		return fmt.Errorf("user %q does not exist", name)
+	if ConfigDir() == "" {
+		return ErrNoConfigDir
 	}
 
 	path := filepath.Join(UsersDir(), name+".json")
-	if err := os.Remove(path); err != nil {
+	root, rel, err := anchoredFilePath(path)
+	if err != nil {
+		return fmt.Errorf("resolve user profile path: %w", err)
+	}
+	if err := safefile.RemoveWithin(root, rel); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("user %q does not exist", name)
+		}
 		return fmt.Errorf("failed to delete user profile: %w", err)
 	}
 
@@ -146,12 +156,15 @@ func DeleteUserProfile(name string) error {
 
 // ListUserProfiles returns all user profile names, sorted alphabetically
 func ListUserProfiles() ([]string, error) {
-	if err := EnsureDirs(); err != nil {
-		return nil, err
+	if ConfigDir() == "" {
+		return nil, ErrNoConfigDir
 	}
 
 	entries, err := os.ReadDir(UsersDir())
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
 		return nil, fmt.Errorf("failed to read users directory: %w", err)
 	}
 

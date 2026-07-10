@@ -2,10 +2,13 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // TestSaveClaudeConfigPreservesUnrelatedKeys is the regression test for the
@@ -158,6 +161,92 @@ func TestLoadClaudeConfigMissingFile(t *testing.T) {
 	}
 }
 
+func TestClaudeConfigRejectsAmbiguousOrNonObjectInputWithoutOverwrite(t *testing.T) {
+	_, cleanup := setupTestConfigDir(t)
+	defer cleanup()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".claude.json")
+	tests := map[string]string{
+		"null object":       `null`,
+		"duplicate key":     `{"model":"one","model":"two","mcpServers":{}}`,
+		"null MCP servers":  `{"model":"keep","mcpServers":null}`,
+		"top-level array":   `[{"mcpServers":{}}]`,
+		"trailing document": `{"mcpServers":{}} {}`,
+	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadClaudeConfig(); err == nil {
+				t.Fatalf("LoadClaudeConfig accepted %s", content)
+			}
+			if err := SaveClaudeConfig(&ClaudeConfig{}); err == nil {
+				t.Fatalf("SaveClaudeConfig accepted %s", content)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != content {
+				t.Fatalf("ambiguous Claude config changed to %s, want %s", got, content)
+			}
+			if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+				t.Fatalf("invalid input created backup before validation: %v", err)
+			}
+		})
+	}
+}
+
+func TestSaveClaudeConfigDetectsSourceReplacementAfterBackup(t *testing.T) {
+	_, cleanup := setupTestConfigDir(t)
+	defer cleanup()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".claude.json")
+	original := []byte(`{"model":"keep","mcpServers":{}}`)
+	replacement := []byte(`{"model":"newer","futureOnly":true}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claudeConfigAfterBackupHook = func(path string) error {
+		temporary := path + ".noncooperating"
+		if err := os.WriteFile(temporary, replacement, 0o600); err != nil {
+			return err
+		}
+		return os.Rename(temporary, path)
+	}
+	defer func() { claudeConfigAfterBackupHook = nil }()
+
+	err = SaveClaudeConfig(&ClaudeConfig{MCPServers: AllMCPServers()})
+	if !errors.Is(err, safefile.ErrRevisionChanged) {
+		t.Fatalf("SaveClaudeConfig error = %v, want ErrRevisionChanged", err)
+	}
+	var committed *safefile.CommittedError
+	if !errors.As(err, &committed) {
+		t.Fatalf("SaveClaudeConfig error = %T %v, want partial committed error", err, err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != string(replacement) {
+		t.Fatalf("noncooperating Claude replacement overwritten: got %s, want %s", got, replacement)
+	}
+	backup, readErr := os.ReadFile(path + ".bak")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(backup) != string(original) {
+		t.Fatalf("Claude backup = %s, want %s", backup, original)
+	}
+}
+
 // TestMCPPackageNames guards against shipping known-bad npm package names.
 func TestMCPPackageNames(t *testing.T) {
 	// These npm packages do not exist and must never appear in args.
@@ -200,6 +289,8 @@ func TestMCPPackageNames(t *testing.T) {
 // the expected content with the requested permissions.
 func TestWriteFileAtomic(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	path := filepath.Join(dir, "out.json")
 
 	if err := writeFileAtomic(path, []byte("hello"), 0600); err != nil {
@@ -240,7 +331,83 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 }
 
-// TestConfigDirEmptyGuard verifies Load/Save/EnsureDirs fail loudly (rather
+func TestWriteFileAtomicRejectsIntermediateSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(home, ".config")); err != nil {
+		t.Fatal(err)
+	}
+	// HOME must win even when XDG names the symlink itself; otherwise the
+	// untrusted .config descendant would be promoted into a trusted root.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	target := filepath.Join(home, ".config", "dotfiles", "tools", "test.json")
+
+	err := writeFileAtomic(target, []byte("do not redirect"), 0o600)
+	if !errors.Is(err, safefile.ErrSymlink) {
+		t.Fatalf("writeFileAtomic error = %v, want safefile.ErrSymlink", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "dotfiles", "tools", "test.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("symlink redirected write outside trusted root, stat error = %v", statErr)
+	}
+}
+
+func TestWriteFileAtomicResolvedHomeWinsOverXDGAlias(t *testing.T) {
+	workspace := t.TempDir()
+	realHome := filepath.Join(workspace, "real-home")
+	homeLink := filepath.Join(workspace, "home")
+	outside := filepath.Join(workspace, "outside")
+	for _, dir := range []string{realHome, outside} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(realHome, homeLink); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	xdg := filepath.Join(realHome, ".config")
+	if err := os.Symlink(outside, xdg); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Setenv("HOME", homeLink)
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	err := writeFileAtomic(filepath.Join(xdg, "dotfiles", "tools", "test.json"), []byte("unsafe"), 0o600)
+	if !errors.Is(err, safefile.ErrSymlink) {
+		t.Fatalf("writeFileAtomic error = %v, want safefile.ErrSymlink", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "dotfiles", "tools", "test.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("resolved-HOME XDG alias redirected write, stat error = %v", statErr)
+	}
+}
+
+func TestSaveClaudeConfigRejectsSymlinkTarget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	victim := filepath.Join(t.TempDir(), "victim.json")
+	original := []byte(`{"model":"keep"}`)
+	if err := os.WriteFile(victim, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(home, ".claude.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := SaveClaudeConfig(&ClaudeConfig{MCPServers: map[string]MCPServer{}})
+	if !errors.Is(err, safefile.ErrSymlink) {
+		t.Fatalf("SaveClaudeConfig error = %v, want safefile.ErrSymlink", err)
+	}
+	got, readErr := os.ReadFile(victim)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("Claude symlink victim changed: got %s, want %s", got, original)
+	}
+}
+
+// TestConfigDirEmptyGuard verifies Load/Save fail loudly (rather
 // than silently using relative paths) when no config dir can be determined.
 func TestConfigDirEmptyGuard(t *testing.T) {
 	origXDG := os.Getenv("XDG_CONFIG_HOME")
@@ -268,9 +435,6 @@ func TestConfigDirEmptyGuard(t *testing.T) {
 		t.Skip("ConfigDir resolved despite unset HOME; guard not exercised on this platform")
 	}
 
-	if err := EnsureDirs(); err != ErrNoConfigDir {
-		t.Errorf("EnsureDirs() err = %v, want ErrNoConfigDir", err)
-	}
 	if _, err := LoadGlobalConfig(); err != ErrNoConfigDir {
 		t.Errorf("LoadGlobalConfig() err = %v, want ErrNoConfigDir", err)
 	}

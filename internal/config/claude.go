@@ -1,10 +1,22 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
+
+var claudeConfigSaveMu sync.Mutex
+
+// claudeConfigAfterBackupHook is package-private test instrumentation for a
+// non-cooperating writer that changes ~/.claude.json after the backup commits.
+var claudeConfigAfterBackupHook func(path string) error
 
 // ClaudeConfig represents the subset of Claude Code configuration this tool
 // owns: the user-scope MCP server map. It deliberately models ONLY mcpServers
@@ -81,26 +93,33 @@ func LoadClaudeConfig() (*ClaudeConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	data, err := os.ReadFile(path)
+	root, rel, err := anchoredFilePath(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return &ClaudeConfig{MCPServers: make(map[string]MCPServer)}, nil
-		}
+		return nil, fmt.Errorf("resolve Claude config path: %w", err)
+	}
+
+	data, revision, err := safefile.ReadWithin(root, rel)
+	if err != nil {
 		return nil, err
+	}
+	if !revision.Exists() {
+		return &ClaudeConfig{MCPServers: make(map[string]MCPServer)}, nil
 	}
 
 	// Decode into a generic map so we only read the mcpServers key and ignore
 	// (without discarding) everything else.
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
+	raw, err := decodeJSONObject(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse Claude config: %w", err)
 	}
 
 	cfg := &ClaudeConfig{MCPServers: make(map[string]MCPServer)}
 	if servers, ok := raw["mcpServers"]; ok {
+		if bytes.Equal(bytes.TrimSpace(servers), []byte("null")) {
+			return nil, errors.New("parse Claude config: mcpServers must not be null")
+		}
 		if err := json.Unmarshal(servers, &cfg.MCPServers); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse Claude config mcpServers: %w", err)
 		}
 		if cfg.MCPServers == nil {
 			cfg.MCPServers = make(map[string]MCPServer)
@@ -113,29 +132,66 @@ func LoadClaudeConfig() (*ClaudeConfig, error) {
 // read-modify-write that preserves all other keys in the file. The existing
 // file is backed up to ~/.claude.json.bak before writing, and the write is
 // atomic (temp file + rename) so an interrupted save cannot truncate the file.
-func SaveClaudeConfig(cfg *ClaudeConfig) error {
+func SaveClaudeConfig(cfg *ClaudeConfig) (returnErr error) {
+	if cfg == nil {
+		return errors.New("Claude config is nil")
+	}
+	claudeConfigSaveMu.Lock()
+	defer claudeConfigSaveMu.Unlock()
+
 	path, err := claudeConfigPath()
 	if err != nil {
 		return err
 	}
+	root, rel, err := anchoredFilePath(path)
+	if err != nil {
+		return fmt.Errorf("resolve Claude config path: %w", err)
+	}
+	lockRel := ".dotfiles-claude-config.lock"
+	release, err := safefile.AcquireLockWithin(root, lockRel, 0600)
+	if err != nil {
+		return fmt.Errorf("lock Claude config: %w", err)
+	}
+	anyCommit := false
+	defer func() {
+		if err := release(); err != nil {
+			releaseErr := fmt.Errorf("release Claude config lock: %w", err)
+			if anyCommit {
+				returnErr = &safefile.CommittedError{Operation: "release Claude config lock", Err: errors.Join(returnErr, releaseErr)}
+				return
+			}
+			returnErr = errors.Join(returnErr, releaseErr)
+		}
+	}()
 
 	// Read existing content into a generic map so unrelated keys (model,
 	// permissions, hooks, statusLine, projects, etc.) survive the round-trip.
 	raw := make(map[string]json.RawMessage)
-	existing, readErr := os.ReadFile(path)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return readErr
+	existing, revision, err := safefile.ReadWithin(root, rel)
+	if err != nil {
+		return err
 	}
-	if readErr == nil {
-		if err := json.Unmarshal(existing, &raw); err != nil {
-			return err
+	if revision.Exists() {
+		raw, err = decodeJSONObject(existing)
+		if err != nil {
+			return fmt.Errorf("parse existing Claude config: %w", err)
 		}
-		if raw == nil {
-			raw = make(map[string]json.RawMessage)
+		if servers, ok := raw["mcpServers"]; ok && bytes.Equal(bytes.TrimSpace(servers), []byte("null")) {
+			return errors.New("parse existing Claude config: mcpServers must not be null")
 		}
 		// Back up the existing file before overwriting it.
-		if err := writeFileAtomic(path+".bak", existing, 0600); err != nil {
+		if err := safefile.ReplaceWithin(root, rel+".bak", existing, 0600); err != nil {
+			var committed interface{ Committed() bool }
+			if errors.As(err, &committed) && committed.Committed() {
+				anyCommit = true
+			}
 			return err
+		}
+		anyCommit = true
+		if claudeConfigAfterBackupHook != nil {
+			if err := claudeConfigAfterBackupHook(path); err != nil {
+				return claudeConfigFailure(true, "post-backup test hook", err)
+			}
 		}
 	}
 
@@ -146,13 +202,42 @@ func SaveClaudeConfig(cfg *ClaudeConfig) error {
 	}
 	encoded, err := json.Marshal(servers)
 	if err != nil {
-		return err
+		return claudeConfigFailure(anyCommit, "marshal Claude MCP servers after backup", err)
 	}
 	raw["mcpServers"] = encoded
 
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
+		return claudeConfigFailure(anyCommit, "marshal Claude config after backup", err)
+	}
+	_, currentRevision, err := safefile.ReadWithin(root, rel)
+	if err != nil {
+		return claudeConfigFailure(anyCommit, "verify Claude source revision after backup", err)
+	}
+	if currentRevision != revision {
+		return claudeConfigFailure(anyCommit, "verify Claude source revision after backup", fmt.Errorf("%w: Claude config changed since it was read", safefile.ErrRevisionChanged))
+	}
+	if err := safefile.ReplaceWithin(root, rel, data, 0600); err != nil {
+		var committed interface{ Committed() bool }
+		if errors.As(err, &committed) && committed.Committed() {
+			anyCommit = true
+		}
+		return claudeConfigFailure(anyCommit, "replace Claude config after backup", err)
+	}
+	anyCommit = true
+	committed, finalRevision, err := safefile.ReadWithin(root, rel)
+	if err != nil {
+		return &safefile.CommittedError{Operation: "read committed Claude config", Err: err}
+	}
+	if !finalRevision.Exists() || finalRevision.Permissions() != 0600 || !bytes.Equal(committed, data) {
+		return &safefile.CommittedError{Operation: "verify committed Claude config", Err: safefile.ErrRevisionChanged}
+	}
+	return nil
+}
+
+func claudeConfigFailure(committed bool, operation string, err error) error {
+	if !committed {
 		return err
 	}
-	return writeFileAtomic(path, data, 0600)
+	return &safefile.CommittedError{Operation: operation, Err: err}
 }

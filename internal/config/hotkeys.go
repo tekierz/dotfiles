@@ -73,9 +73,6 @@ func SaveHotkeysConfig(cfg *HotkeysConfig) error {
 	if dir == "" {
 		return ErrNoConfigDir
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
 	path := filepath.Join(dir, "hotkeys.json")
 
 	data, err := json.MarshalIndent(cfg, "", "  ")

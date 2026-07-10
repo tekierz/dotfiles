@@ -1,10 +1,13 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 func TestValidateUsername(t *testing.T) {
@@ -221,6 +224,48 @@ func TestUserProfileCRUD(t *testing.T) {
 	// Delete non-existent should fail
 	if err := DeleteUserProfile("testuser"); err == nil {
 		t.Error("deleting non-existent user should fail")
+	}
+}
+
+func TestDeleteUserProfileRejectsIntermediateSymlink(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "alice.json")
+	if err := os.WriteFile(victim, []byte(`{"sentinel":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, UsersDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	err := DeleteUserProfile("alice")
+	if !errors.Is(err, safefile.ErrSymlink) {
+		t.Fatalf("DeleteUserProfile error = %v, want ErrSymlink", err)
+	}
+	if got, err := os.ReadFile(victim); err != nil || string(got) != `{"sentinel":true}` {
+		t.Fatalf("outside profile changed: data=%s error=%v", got, err)
+	}
+}
+
+func TestListUserProfilesMissingDirectoryIsEmptyAndDoesNotCreate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	users, err := ListUserProfiles()
+	if err != nil {
+		t.Fatalf("ListUserProfiles missing directory: %v", err)
+	}
+	if len(users) != 0 {
+		t.Fatalf("ListUserProfiles missing directory = %v, want empty", users)
+	}
+	if _, err := os.Lstat(UsersDir()); !os.IsNotExist(err) {
+		t.Fatalf("ListUserProfiles created users directory: %v", err)
 	}
 }
 

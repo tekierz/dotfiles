@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -71,6 +72,12 @@ func applyStandaloneSnapshot(startScreen Screen, cfg DeepDiveConfig, theme strin
 	if !ok {
 		// Not a per-tool config screen; nothing scoped to write.
 		return nil
+	}
+	// Every mutating entry point must first prove that global.json is readable by
+	// this binary. Proceeding with a malformed or future-schema global config can
+	// create a partially updated environment whose settings no longer agree.
+	if _, err := config.LoadGlobalConfig(); err != nil {
+		return []error{fmt.Errorf("failed to validate global config before applying %s: %w", toolID, err)}
 	}
 	return applyOneToolConfig(toolID, cfg, theme)
 }
