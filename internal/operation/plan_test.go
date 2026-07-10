@@ -1,0 +1,147 @@
+package operation
+
+import (
+	"encoding/json"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+func validConfigAction() Action {
+	return Action{
+		ID:            "config:ghostty",
+		Kind:          KindWriteConfig,
+		ToolID:        "ghostty",
+		Target:        ".config/ghostty/config",
+		Description:   "merge managed Ghostty settings",
+		Disposition:   DispositionApply,
+		Ownership:     OwnershipManagedFragment,
+		Reversibility: ReversibilityBackup,
+		BackupTarget:  ".config/ghostty/config",
+		Observation:   Observation{Exists: true, Source: ".config/ghostty/config", Managed: true},
+	}
+}
+
+func TestPlanIsImmutableAndHashIdentifiesExactDocument(t *testing.T) {
+	created := time.Date(2026, 7, 10, 12, 30, 0, 0, time.FixedZone("offset", -7*60*60))
+	actions := []Action{validConfigAction()}
+	plan, err := NewPlan(created, actions)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	actions[0].Target = "mutated by caller"
+	copyOne := plan.Actions()
+	copyOne[0].Target = "mutated copy"
+	if got := plan.Actions()[0].Target; got != ".config/ghostty/config" {
+		t.Fatalf("plan actions were mutable: %q", got)
+	}
+	if len(plan.Hash()) != 64 {
+		t.Fatalf("plan hash length = %d, want 64", len(plan.Hash()))
+	}
+
+	same, err := NewPlan(created, []Action{validConfigAction()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.Hash() != plan.Hash() {
+		t.Fatalf("equal canonical plans have different hashes: %s != %s", same.Hash(), plan.Hash())
+	}
+	later, err := NewPlan(created.Add(time.Second), []Action{validConfigAction()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if later.Hash() == plan.Hash() {
+		t.Fatal("created_at change did not change plan hash")
+	}
+}
+
+func TestPlanRejectsUnsafeConfigApply(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Action)
+		want   string
+	}{
+		{"unknown ownership", func(a *Action) { a.Ownership = OwnershipUnknown }, "managed ownership"},
+		{"user ownership", func(a *Action) { a.Ownership = OwnershipUser }, "managed ownership"},
+		{"missing backup", func(a *Action) { a.BackupTarget = "" }, "backup target"},
+		{"duplicate id", nil, "duplicate action id"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			action := validConfigAction()
+			if tc.mutate != nil {
+				tc.mutate(&action)
+			}
+			actions := []Action{action}
+			if tc.name == "duplicate id" {
+				actions = append(actions, action)
+			}
+			_, err := NewPlan(time.Now(), actions)
+			if !errors.Is(err, ErrInvalidPlan) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("NewPlan error = %v, want ErrInvalidPlan containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestBlockedActionIsVisibleButNotAConfigMutation(t *testing.T) {
+	action := validConfigAction()
+	action.Disposition = DispositionBlocked
+	action.Ownership = OwnershipUser
+	action.BackupTarget = ""
+	action.Reason = "existing file is not managed"
+	plan, err := NewPlan(time.Now(), []Action{action})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.HasBlocked() {
+		t.Fatal("blocked action was not reported")
+	}
+	if got := plan.BackupTargets(); len(got) != 0 {
+		t.Fatalf("blocked action leaked into backup targets: %v", got)
+	}
+}
+
+func TestBackupTargetsAreApplyOnlyUniqueAndSorted(t *testing.T) {
+	first := validConfigAction()
+	first.BackupTarget = ".config/z-last"
+	second := first
+	second.ID = "config:second"
+	second.BackupTarget = ".config/a-first"
+	third := first
+	third.ID = "config:skip"
+	third.Disposition = DispositionSkip
+	third.Reason = "unchanged"
+	plan, err := NewPlan(time.Now(), []Action{first, second, third})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{".config/a-first", ".config/z-last"}
+	if got := plan.BackupTargets(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("BackupTargets = %v, want %v", got, want)
+	}
+}
+
+func TestPlanJSONCarriesHashAndNoRawConfig(t *testing.T) {
+	plan, err := NewPlan(time.Now(), []Action{validConfigAction()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["hash"] != plan.Hash() || decoded["schema_version"] != float64(CurrentPlanSchemaVersion) {
+		t.Fatalf("plan JSON missing identity: %s", data)
+	}
+	if strings.Contains(string(data), "secret") {
+		t.Fatalf("plan JSON unexpectedly contains raw secret material: %s", data)
+	}
+}
