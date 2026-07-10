@@ -144,10 +144,10 @@ var manageAppliedRoundTrips = map[string]manageFieldRoundTrip{
 	"btop/boxes": {func(mc *ManageConfig) { mc.BtopShownBoxes = "cpu mem" }, ".config/btop/btop.conf", "shown_boxes = \"cpu mem\""},
 
 	// Glow
-	"glow/style": {func(mc *ManageConfig) { mc.GlowStyle = "light" }, ".config/glow/glow.yml", "style: \"light\""},
-	"glow/pager": {func(mc *ManageConfig) { mc.GlowPager = "never" }, ".config/glow/glow.yml", "pager: false"},
-	"glow/width": {func(mc *ManageConfig) { mc.GlowWidth = 123 }, ".config/glow/glow.yml", "width: 123"},
-	"glow/mouse": {func(mc *ManageConfig) { mc.GlowMouse = false }, ".config/glow/glow.yml", "mouse: false"},
+	"glow/style": {func(mc *ManageConfig) { mc.GlowStyle = "light" }, glowTestRelPath(), "style: \"light\""},
+	"glow/pager": {func(mc *ManageConfig) { mc.GlowPager = "never" }, glowTestRelPath(), "pager: false"},
+	"glow/width": {func(mc *ManageConfig) { mc.GlowWidth = 123 }, glowTestRelPath(), "width: 123"},
+	"glow/mouse": {func(mc *ManageConfig) { mc.GlowMouse = false }, glowTestRelPath(), "mouse: false"},
 }
 
 // TestManageFieldsAllClassified is the completeness half of the guardrail: every

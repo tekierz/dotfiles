@@ -23,6 +23,19 @@ type caskLister interface {
 	ListInstalledCasks() ([]string, error)
 }
 
+// packageMetadataPolicy is an optional capability for tools whose package list
+// contains prerequisites rather than the final product. For those tools a
+// successful batch package match must not replace Tool.IsInstalled, and an
+// empty package list does not make a custom Tool.Install unsupported.
+type packageMetadataPolicy interface {
+	PackageMetadataIsAuthoritative() bool
+}
+
+func packageMetadataIsAuthoritative(t tools.Tool) bool {
+	policy, ok := t.(packageMetadataPolicy)
+	return !ok || policy.PackageMetadataIsAuthoritative()
+}
+
 // batchInstalledPackages returns a lookup set of every installed package name
 // using batched subprocess calls (one for formulae, one for casks on brew). This
 // avoids per-tool shell-outs to IsInstalled() during cache build. Returns nil if
@@ -72,6 +85,20 @@ func allPackagesInBatch(installedPkgs map[string]bool, pkgs []string) bool {
 	return true
 }
 
+// observeToolInstalled resolves one tool from a batch package observation plus
+// its own detector. Package receipts are authoritative only for ordinary
+// package-backed tools. Custom/external tools can opt into their direct probe
+// when their package map merely describes prerequisites.
+func observeToolInstalled(t tools.Tool, installedPkgs map[string]bool, platform pkg.Platform) bool {
+	if installedPkgs != nil && packageMetadataIsAuthoritative(t) {
+		pkgs := tools.PackagesForPlatform(t.Packages(), platform)
+		if len(pkgs) > 0 && allPackagesInBatch(installedPkgs, pkgs) {
+			return true
+		}
+	}
+	return t.IsInstalled()
+}
+
 // loadInstallCacheCmd loads installation status for all tools asynchronously
 // This uses batch checking where supported (brew list --versions) for better performance
 func loadInstallCacheCmd() tea.Cmd {
@@ -88,25 +115,7 @@ func loadInstallCacheCmd() tea.Cmd {
 
 		// Check each tool
 		for _, t := range all {
-			found := false
-			if installedPkgs != nil {
-				// Use batch result - resolve packages via PackagesForPlatform so
-				// that Raspberry Pi (PlatformPi) falls back to Debian package names
-				// and benefits from the single batched dpkg-query rather than
-				// falling through to per-tool shell-outs.
-				pkgs := tools.PackagesForPlatform(t.Packages(), platform)
-				if len(pkgs) > 0 {
-					if allPackagesInBatch(installedPkgs, pkgs) {
-						installed[t.ID()] = true
-						found = true
-					}
-				}
-			}
-			// Fall back to IsInstalled() for tools not found via package manager
-			// (e.g., flatpaks, AppImages, direct binaries)
-			if !found {
-				installed[t.ID()] = t.IsInstalled()
-			}
+			installed[t.ID()] = observeToolInstalled(t, installedPkgs, platform)
 		}
 
 		// Check utility scripts in ~/.local/bin (always fast - just file existence)
@@ -170,23 +179,7 @@ func (a *App) ensureInstallCache() {
 	installedPkgs := batchInstalledPackages(mgr)
 
 	for _, t := range all {
-		found := false
-		if installedPkgs != nil {
-			// Use PackagesForPlatform so Raspberry Pi resolves to the Debian
-			// package set and hits the batched dpkg-query path.
-			pkgs := tools.PackagesForPlatform(t.Packages(), platform)
-			if len(pkgs) > 0 {
-				if allPackagesInBatch(installedPkgs, pkgs) {
-					a.manageInstalled[t.ID()] = true
-					found = true
-				}
-			}
-		}
-		// Fall back to IsInstalled() for tools not found via package manager
-		// (e.g., flatpaks, AppImages, direct binaries)
-		if !found {
-			a.manageInstalled[t.ID()] = t.IsInstalled()
-		}
+		a.manageInstalled[t.ID()] = observeToolInstalled(t, installedPkgs, platform)
 	}
 
 	// Check utility scripts in ~/.local/bin

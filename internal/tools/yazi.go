@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +20,16 @@ type YaziConfig struct {
 	SortReverse bool   // reverse sort direction
 	LineMode    string // "size", "permissions", "mtime", "none"
 	ScrollOff   int    // items kept visible above/below cursor
+}
+
+// IsInstalled recognizes direct/manual Yazi installs as well as package
+// receipts. This keeps unsupported Debian/Pi package planning separate from an
+// external binary that the dashboard may still configure.
+func (t *YaziTool) IsInstalled() bool {
+	if _, err := exec.LookPath("yazi"); err == nil {
+		return true
+	}
+	return t.BaseTool.IsInstalled()
 }
 
 // YaziTool represents the Yazi file manager

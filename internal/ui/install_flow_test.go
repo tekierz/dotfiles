@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 // drainWorker runs runInstallWorker synchronously and returns all events.
@@ -16,7 +18,13 @@ func drainWorker(t *testing.T, selectedTools []string, cfg DeepDiveConfig) []ins
 	t.Helper()
 	events := make(chan installEventMsg, 256)
 	ctx := context.Background()
-	go runInstallWorker(ctx, events, selectedTools, cfg, "catppuccin-mocha")
+	runtime := defaultToolInstallRuntime()
+	// Config-generation tests exercise writer parity/gating, not live install
+	// discovery or backup. Mark registered tools present and disable backup so
+	// the final-identity guards permit only the intended isolated writes.
+	runtime.isToolInstalled = func(tools.Tool) bool { return true }
+	runtime.autoBackup = func() (autoBackupResult, error) { return autoBackupResult{}, nil }
+	go runInstallWorkerWithRuntime(ctx, events, selectedTools, cfg, "catppuccin-mocha", runtime)
 	var out []installEventMsg
 	for ev := range events {
 		out = append(out, ev)
@@ -87,7 +95,7 @@ func TestConfigGating_DeselectedToolSkipsConfig(t *testing.T) {
 	}
 
 	// Glow config SHOULD be written (selected in CLITools).
-	glowPath := filepath.Join(home, ".config", "glow", "glow.yml")
+	glowPath := filepath.Join(home, filepath.FromSlash(glowTestRelPath()))
 	if _, err := os.Stat(glowPath); err != nil {
 		t.Errorf("glow config not written even though glow was selected: %v", err)
 	}

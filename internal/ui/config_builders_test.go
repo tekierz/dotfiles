@@ -297,7 +297,7 @@ func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 		{"btop", ".config/btop/btop.conf", func(th string) error {
 			return tools.WriteBtopConfig(btopConfigFrom(cfg), th)
 		}},
-		{"glow", ".config/glow/glow.yml", func(th string) error {
+		{"glow", glowTestRelPath(), func(th string) error {
 			return tools.WriteGlowConfig(glowConfigFrom(cfg), th)
 		}},
 	}

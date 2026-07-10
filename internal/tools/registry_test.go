@@ -586,6 +586,25 @@ func TestPackagesForPlatform(t *testing.T) {
 	}
 }
 
+func TestBaseToolPlatformExplicitInstallAndObservation(t *testing.T) {
+	mgr := pkg.NewMockPackageManager()
+	zsh := NewZshTool()
+
+	if err := zsh.InstallForPlatform(mgr, pkg.PlatformPi); err != nil {
+		t.Fatalf("InstallForPlatform(Pi): %v", err)
+	}
+	want := PackagesForPlatform(zsh.Packages(), pkg.PlatformPi)
+	if len(mgr.InstallCalls) != 1 || !reflect.DeepEqual(mgr.InstallCalls[0], want) {
+		t.Fatalf("Pi execution installed %v, want Debian fallback %v", mgr.InstallCalls, want)
+	}
+	if !zsh.IsInstalledForPlatform(mgr, pkg.PlatformPi) {
+		t.Fatal("explicit Pi observation did not see its Debian fallback packages")
+	}
+	if zsh.IsInstalledForPlatform(mgr, pkg.PlatformMacOS) {
+		t.Fatal("explicit macOS observation leaked the Pi/Debian package state")
+	}
+}
+
 // TestRegistryToolsResolveOnPi verifies that every registered tool with packages
 // for Debian also resolves a non-empty package list on a Raspberry Pi, so the
 // installer never silently skips every tool on a Pi (regression for tools-1).

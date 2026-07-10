@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -67,5 +68,35 @@ func TestManageInstallCompletionClearsHandles(t *testing.T) {
 	}
 	if a.manageInstalling {
 		t.Error("manageInstalling should be false after completion")
+	}
+}
+
+func TestManagePartialFailureInvalidatesAndReloadsInstallCache(t *testing.T) {
+	ctx := newGoldenContext(t)
+	a := ctx.app
+	a.manageInstalling = true
+	a.manageInstallID = "claude-code"
+	a.manageInstalledReady = true
+	a.installCacheLoading = false
+
+	cmd := a.handleManageInstallWithLogsMsg(manageInstallWithLogsMsg{
+		toolID: "claude-code",
+		err:    errors.New("custom post-step failed after prerequisite install"),
+	})
+	if cmd == nil || a.manageInstalledReady || !a.installCacheLoading {
+		t.Fatalf("partial Manage failure did not reload cache: cmd=%v ready=%v loading=%v", cmd != nil, a.manageInstalledReady, a.installCacheLoading)
+	}
+}
+
+func TestWizardPartialFailureInvalidatesAndReloadsInstallCache(t *testing.T) {
+	ctx := newGoldenContext(t)
+	a := ctx.app
+	a.manageInstalledReady = true
+	a.installCacheLoading = false
+	screen := NewProgressScreen(ctx)
+
+	_, cmd := screen.Update(installDoneMsg{err: errors.New("later tool failed")})
+	if cmd == nil || a.manageInstalledReady || !a.installCacheLoading {
+		t.Fatalf("partial wizard failure did not reload cache: cmd=%v ready=%v loading=%v", cmd != nil, a.manageInstalledReady, a.installCacheLoading)
 	}
 }

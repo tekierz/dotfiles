@@ -2,16 +2,19 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
+	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/scripts"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
@@ -29,6 +32,185 @@ type installEventMsg struct {
 	context string // last few output lines for error context (only when done)
 }
 
+var errInstallStreamClosed = errors.New("installation event stream closed without a terminal result")
+
+const maxCollectedInstallLines = 500
+const maxCollectedInstallLineBytes = 16 * 1024
+
+func boundInstallLine(line string) string {
+	if len(line) > maxCollectedInstallLineBytes {
+		cut := maxCollectedInstallLineBytes
+		for cut > 0 && !utf8.RuneStart(line[cut]) {
+			cut--
+		}
+		line = line[:cut] + " …[truncated]"
+	}
+	return line
+}
+
+func appendBoundedInstallLine(lines []string, line string) []string {
+	line = boundInstallLine(line)
+	if len(lines) < maxCollectedInstallLines {
+		return append(lines, line)
+	}
+	copy(lines, lines[1:])
+	lines[len(lines)-1] = line
+	return lines
+}
+
+func emitInstallEvent(ctx context.Context, events chan<- installEventMsg, line string, step bool) {
+	line = boundInstallLine(line)
+	select {
+	case events <- installEventMsg{line: line, stepInc: step}:
+	case <-ctx.Done():
+	}
+}
+
+// toolInstallRuntime provides the two environment dependencies used by the
+// dashboard's install paths. Keeping these as function values gives focused
+// tests a way to prove that the wizard and Manage both dispatch through a
+// Tool's Install method without replacing the process-wide registry or package
+// manager caches.
+type toolInstallRuntime struct {
+	lookupTool      func(string) (tools.Tool, bool)
+	detectManager   func() pkg.PackageManager
+	detectPlatform  func() pkg.Platform
+	isToolInstalled func(tools.Tool) bool
+	autoBackup      func() (autoBackupResult, error)
+}
+
+func defaultToolInstallRuntime() toolInstallRuntime {
+	reg := tools.GetRegistry()
+	return toolInstallRuntime{
+		lookupTool:     reg.Get,
+		detectManager:  pkg.DetectManager,
+		detectPlatform: pkg.DetectPlatform,
+		isToolInstalled: func(t tools.Tool) bool {
+			return t.IsInstalled()
+		},
+		autoBackup: autoBackupIfEnabled,
+	}
+}
+
+// contextToolInstaller is an optional custom-install contract. Tools with
+// subprocess work outside PackageManager should implement it so the TUI can
+// cancel that work and stream bounded output instead of falling back to the
+// legacy synchronous Install method.
+type contextToolInstaller interface {
+	InstallWithContext(context.Context, pkg.PackageManager, func(string)) error
+}
+
+// platformContextToolInstaller is the fully explicit custom-install contract.
+// It carries the same platform snapshot used by planning into custom tools that
+// also install BaseTool prerequisites. This must be checked before the legacy
+// context interface and before the promoted BaseTool platform method: otherwise
+// Claude Code can either re-detect the host for Node/npm or skip its npm phase.
+type platformContextToolInstaller interface {
+	InstallWithContextForPlatform(context.Context, pkg.PackageManager, pkg.Platform, func(string)) error
+}
+
+// platformToolInstaller lets ordinary BaseTool-backed tools execute against
+// the exact platform snapshot used to build the plan. Custom context installers
+// are dispatched first so a promoted BaseTool method can never bypass their
+// tool-owned install steps.
+type platformToolInstaller interface {
+	InstallForPlatform(pkg.PackageManager, pkg.Platform) error
+}
+
+// packageManagerPolicy is separate from package observation authority. A tool
+// can have non-authoritative/empty package metadata yet still require a package
+// manager for prerequisites. Manager-independent custom installers opt out.
+type packageManagerPolicy interface {
+	RequiresPackageManager() bool
+}
+
+// installerAvailabilityPolicy is independent of package-receipt observation.
+// It answers whether this process knows how to install a tool on a platform;
+// package metadata may still be non-authoritative for final identity.
+type installerAvailabilityPolicy interface {
+	InstallerAvailable(pkg.Platform) bool
+}
+
+func installerAvailable(t tools.Tool, platform pkg.Platform) bool {
+	policy, ok := t.(installerAvailabilityPolicy)
+	if ok {
+		return policy.InstallerAvailable(platform)
+	}
+	return len(tools.PackagesForPlatform(t.Packages(), platform)) > 0
+}
+
+func requiresPackageManager(t tools.Tool) bool {
+	policy, ok := t.(packageManagerPolicy)
+	return !ok || policy.RequiresPackageManager()
+}
+
+// streamingInstallManager adapts the synchronous PackageManager.Install method
+// expected by tools.Tool.Install to the cancelable streaming operation used by
+// the TUI. Calling the Tool method is important: package metadata is only one
+// part of some installers (Claude Code installs Node through the manager and
+// then installs its CLI through npm). The old dashboard called
+// InstallStreaming directly and silently skipped those custom steps.
+//
+// Embedding PackageManager delegates the rest of the interface unchanged. A
+// custom Tool.Install therefore sees a normal package manager, while ordinary
+// BaseTool installs keep their live output and context cancellation.
+type streamingInstallManager struct {
+	pkg.PackageManager
+	ctx      context.Context
+	emitLine func(string)
+}
+
+func (m *streamingInstallManager) Install(packages ...string) error {
+	if err := m.ctx.Err(); err != nil {
+		return err
+	}
+
+	cmd, err := m.PackageManager.InstallStreaming(m.ctx, packages...)
+	if err != nil {
+		return err
+	}
+	// Test managers and adapters with no subprocess may complete the operation
+	// synchronously and return no StreamingCmd.
+	if cmd == nil {
+		return nil
+	}
+
+	for line := range cmd.Output {
+		if m.emitLine != nil {
+			m.emitLine(line)
+		}
+	}
+	return cmd.Wait()
+}
+
+// installTool executes the Tool-owned installation contract while preserving
+// streaming for package-manager work. This is the single dispatch point shared
+// by the wizard and Manage install paths.
+func installTool(ctx context.Context, t tools.Tool, mgr pkg.PackageManager, platform pkg.Platform, emitLine func(string)) error {
+	if mgr == nil && requiresPackageManager(t) {
+		return fmt.Errorf("no package manager detected")
+	}
+
+	var adaptedManager pkg.PackageManager
+	if mgr != nil {
+		adaptedManager = &streamingInstallManager{
+			PackageManager: mgr,
+			ctx:            ctx,
+			emitLine:       emitLine,
+		}
+	}
+	if installer, ok := t.(platformContextToolInstaller); ok {
+		return installer.InstallWithContextForPlatform(ctx, adaptedManager, platform, emitLine)
+	}
+	if installer, ok := t.(contextToolInstaller); ok {
+		return installer.InstallWithContext(ctx, adaptedManager, emitLine)
+	}
+	if installer, ok := t.(platformToolInstaller); ok {
+		return installer.InstallForPlatform(adaptedManager, platform)
+	}
+	return t.Install(adaptedManager)
+}
+
 // startInstallation begins the installation process using the Go-based package
 // manager. State is reset here on the main goroutine (safe: this is called from
 // Update). The actual work runs in a detached worker goroutine that only writes
@@ -41,14 +223,18 @@ func (a *App) startInstallation() tea.Cmd {
 	a.installRunning = true
 	a.installComplete = false // reset so a retry re-renders as "installing", not "complete"
 	a.installStep = 0
+	a.installPlannedSteps = 0
 	a.installOutput = []string{}
 
-	// Save theme and nav style before installation. A failure here means the
-	// user's theme / nav-style / animation choices will not persist across runs.
-	// Hand any preferences-save failure to the worker (savePrefsErr); it emits a
-	// single non-fatal warning line into the install log without failing the
-	// install. Don't also append here — that would double-log the same warning.
-	savePrefsErr := a.saveInstallerConfig()
+	// Validate and persist the global record before observing the machine or
+	// starting any backup/package/config action. Continuing after a malformed,
+	// future-schema, or unwritable global.json would apply compiled defaults to
+	// real application configs while failing to persist the desired state.
+	if err := a.saveInstallerConfig(); err != nil {
+		return func() tea.Msg {
+			return installDoneMsg{err: fmt.Errorf("installation blocked by global config error: %w", err)}
+		}
+	}
 
 	// Collect all selected tools from deep dive config
 	selectedTools := a.collectSelectedTools()
@@ -118,7 +304,7 @@ func (a *App) startInstallation() tea.Cmd {
 	// point, even if the Update loop mutates them concurrently.
 	theme := a.theme
 
-	go runInstallWorker(ctx, events, selectedTools, cfg, theme, savePrefsErr)
+	go runInstallWorker(ctx, events, selectedTools, cfg, theme)
 
 	return a.listenInstallEventsCmd()
 }
@@ -130,12 +316,11 @@ func (a *App) listenInstallEventsCmd() tea.Cmd {
 	ch := a.installEvents
 	return func() tea.Msg {
 		if ch == nil {
-			return installDoneMsg{}
+			return installEventMsg{done: true, err: errInstallStreamClosed}
 		}
 		ev, ok := <-ch
 		if !ok {
-			// Channel closed without a done event; treat as completion.
-			return installDoneMsg{}
+			return installEventMsg{done: true, err: errInstallStreamClosed}
 		}
 		return ev
 	}
@@ -144,42 +329,39 @@ func (a *App) listenInstallEventsCmd() tea.Cmd {
 // runInstallWorker performs the entire install/configure sequence on a detached
 // goroutine, emitting progress as installEventMsg values. It MUST NOT touch any
 // App field. It closes the channel when finished.
-// savePrefsErr, when a non-nil error is supplied, is the failure from saving the
-// user's theme/nav-style/animation preferences (captured on the main goroutine
-// before the worker started). It is emitted as a NON-FATAL warning line (the
-// same treatment as a backup-cleanup error): it is never added to the failures
-// slice, so a preferences-record-save failure alone does not flip an otherwise
-// successful install to the error screen. It is variadic (optional) so callers
-// that do not track a preferences save — e.g. tests exercising the config-apply
-// path — can omit it entirely.
-func runInstallWorker(ctx context.Context, events chan<- installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string, savePrefsErr ...error) {
+// savePrefsErr is retained as an optional test/compatibility guard for callers
+// that captured global-config validation before entering the worker. Any such
+// error is fatal before backup, package, utility, or application-config work.
+func runInstallWorker(ctx context.Context, events chan installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string, savePrefsErr ...error) {
+	runInstallWorkerWithRuntime(ctx, events, selectedTools, cfg, theme, defaultToolInstallRuntime(), savePrefsErr...)
+}
+
+// runInstallWorkerWithRuntime is the dependency-injected worker used by focused
+// install-dispatch tests. Production callers use runInstallWorker above.
+func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string, installRuntime toolInstallRuntime, savePrefsErr ...error) {
 	defer close(events)
 
 	// Sends select on ctx.Done() so a cancelled install (Ctrl+C / teardown)
 	// unblocks the worker instead of parking forever on the bounded channel once
 	// the consumer (the listen Cmd) stops draining it.
 	emit := func(line string) {
-		select {
-		case events <- installEventMsg{line: line}:
-		case <-ctx.Done():
-		}
+		emitInstallEvent(ctx, events, line, false)
 	}
 	step := func(line string) {
-		select {
-		case events <- installEventMsg{line: line, stepInc: true}:
-		case <-ctx.Done():
-		}
+		emitInstallEvent(ctx, events, line, true)
 	}
 
 	// output accumulates every line emitted so we can build error context that
 	// matches the lines the user has seen, without reading App state.
 	var output []string
 	emitLine := func(line string) {
-		output = append(output, line)
+		line = boundInstallLine(line)
+		output = appendBoundedInstallLine(output, line)
 		emit(line)
 	}
 	stepLine := func(line string) {
-		output = append(output, line)
+		line = boundInstallLine(line)
+		output = appendBoundedInstallLine(output, line)
 		step(line)
 	}
 
@@ -192,19 +374,33 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 			}
 			errCtx = strings.Join(output[start:], "\n")
 		}
+		terminal := installEventMsg{done: true, err: err, context: errCtx}
 		select {
-		case events <- installEventMsg{done: true, err: err, context: errCtx}:
-		case <-ctx.Done():
+		case events <- terminal:
+		default:
+			// Preserve the terminal result even when verbose output filled the
+			// bounded channel. Sacrifice one old output event, never completion.
+			select {
+			case <-events:
+			default:
+			}
+			events <- terminal
 		}
+	}
+
+	if len(savePrefsErr) > 0 && savePrefsErr[0] != nil {
+		finish(fmt.Errorf("installation blocked by global config error: %w", savePrefsErr[0]))
+		return
 	}
 
 	// Auto-backup before making changes (if enabled). The result is honest:
 	// it only reports a created backup when at least one file was captured and
 	// the manifest persisted, so we never claim a rollback point exists right
 	// before overwriting the user's dotfiles (C5).
-	backupRes, err := autoBackupIfEnabled()
+	backupRes, err := installRuntime.autoBackup()
 	if err != nil {
-		emitLine(fmt.Sprintf("⚠ Auto-backup failed: %v", err))
+		finish(fmt.Errorf("auto-backup failed; installation stopped before mutation: %w", err))
+		return
 	} else if backupRes.enabled {
 		if backupRes.count > 0 {
 			emitLine(fmt.Sprintf("✓ Auto-backup created before installation (%d file(s))", backupRes.count))
@@ -223,14 +419,6 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	var failures []error
 	noteFailure := func(err error) { failures = append(failures, err) }
 
-	// Surface the pre-install preferences-save failure (if any) as a non-fatal
-	// warning line in the install log (same treatment as a backup-cleanup error),
-	// so it is visible but does not fail the install. Recorded first because it
-	// happened before any phase below.
-	if len(savePrefsErr) > 0 && savePrefsErr[0] != nil {
-		emitLine(fmt.Sprintf("⚠ Failed to save preferences (theme/nav-style/animations will not persist): %v", savePrefsErr[0]))
-	}
-
 	// Package installation is skipped when no NEW packages are selected (e.g. a
 	// fully-installed machine), but the configuration phases below ALWAYS run.
 	// runInstallWorker is the only path that writes deep-dive configs, so a
@@ -238,95 +426,42 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	if len(selectedTools) == 0 {
 		emitLine("No new tools to install; applying configuration...")
 	} else {
-		// Detect package manager (only needed for the package-install loop).
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			finish(fmt.Errorf("no package manager detected"))
+		result := runSelectedToolInstalls(ctx, selectedTools, installRuntime, emitLine, stepLine)
+		for _, installErr := range result.failures {
+			noteFailure(installErr)
+		}
+		if ctx.Err() != nil {
+			finish(ctx.Err())
 			return
 		}
-
-		platform := pkg.DetectPlatform()
-		reg := tools.GetRegistry()
-
-		emitLine(fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
-
-		successCount := 0
-		for _, toolID := range selectedTools {
-			// Stop promptly if the install was cancelled (Ctrl+C / teardown).
-			if ctx.Err() != nil {
-				finish(ctx.Err())
-				return
-			}
-			stepLine(fmt.Sprintf("▶ Installing %s...", toolID))
-
-			t, ok := reg.Get(toolID)
-			if !ok {
-				emitLine(fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
-				continue
-			}
-
-			// Skip if already installed
-			if t.IsInstalled() {
-				emitLine(fmt.Sprintf("  ✓ %s already installed", toolID))
-				successCount++
-				continue
-			}
-
-			// Resolve packages via the single source of truth (which applies the
-			// Raspberry Pi -> Debian fallback). Using the raw map lookup here was a
-			// silent no-op on Pi, where standard tools define only MacOS/Arch/Debian
-			// keys: the loop printed a warning and continued with NO noteFailure, so
-			// selecting standard tools on a Pi installed nothing and never surfaced an
-			// Error screen (FIX 2 — the RC-C silent-failure class re-introduced).
-			pkgs := tools.PackagesForPlatform(t.Packages(), platform)
-			if len(pkgs) == 0 {
-				// A genuinely-unsupported selected tool must surface as a failure
-				// (Error screen), not be silently skipped.
-				emitLine(fmt.Sprintf("  ⚠ No packages for %s on this platform", toolID))
-				noteFailure(fmt.Errorf("%s: no packages for this platform", toolID))
-				continue
-			}
-
-			// Install using streaming command, derived from the cancelable worker
-			// context so Ctrl+C / teardown stops the subprocess.
-			cmd, err := mgr.InstallStreaming(ctx, pkgs...)
-			if err != nil {
-				emitLine(fmt.Sprintf("  ✗ Failed to start install: %v", err))
-				noteFailure(fmt.Errorf("%s: %w", toolID, err))
-				continue
-			}
-
-			// Collect output
-			for line := range cmd.Output {
-				emitLine("  " + line)
-			}
-
-			if err := cmd.Wait(); err != nil {
-				emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
-				noteFailure(fmt.Errorf("%s: %w", toolID, err))
-			} else {
-				emitLine(fmt.Sprintf("  ✓ %s installed successfully", toolID))
-				successCount++
-			}
-		}
-
-		if successCount == len(selectedTools) {
-			emitLine(fmt.Sprintf("\n✓ All %d tools installed successfully!", successCount))
+		if result.successCount == len(selectedTools) {
+			emitLine(fmt.Sprintf("\n✓ All %d tools installed successfully!", result.successCount))
 		} else {
-			emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", successCount, len(selectedTools)))
+			emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", result.successCount, len(selectedTools)))
 		}
 	}
 
 	// configPhase runs a single configuration step, emitting a header line,
 	// advancing the progress step, and recording any failure.
-	configPhase := func(header string, run func() error, okLine string) {
+	configPhase := func(header string, run func() error, okLine string) bool {
 		stepLine(header)
 		if err := run(); err != nil {
 			emitLine(fmt.Sprintf("  ⚠ %v", err))
 			noteFailure(err)
+			return false
 		} else if okLine != "" {
 			emitLine(okLine)
 		}
+		return true
+	}
+	toolConfigPhase := func(toolID, header string, run func() error, okLine string) bool {
+		available, reason := coreToolConfigAvailable(installRuntime, toolID)
+		if !available {
+			stepLine(header)
+			emitLine("  ↷ Skipped configuration: " + reason)
+			return false
+		}
+		return configPhase(header, run, okLine)
 	}
 
 	// Install dotfiles binary and utilities to ~/.local/bin
@@ -341,12 +476,13 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// is shared with config-apply via tmuxConfigFrom; install additionally clones
 	// TPM (SetupTPM), which is an install-only side-effect.
 	tmuxCfg := tmuxConfigFrom(cfg)
-	stepLine("\n▶ Configuring tmux...")
-	if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
-		emitLine(fmt.Sprintf("  ⚠ Failed to configure tmux: %v", err))
-		noteFailure(fmt.Errorf("Failed to configure tmux: %w", err))
-	} else {
-		emitLine("  ✓ Tmux configured with ~/.tmux.conf")
+	tmuxConfigured := toolConfigPhase("tmux", "\n▶ Configuring tmux...", func() error {
+		if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
+			return fmt.Errorf("Failed to configure tmux: %w", err)
+		}
+		return nil
+	}, "  ✓ Tmux configured with ~/.tmux.conf")
+	if tmuxConfigured {
 		if tmuxCfg.TPMEnabled {
 			if tools.IsTPMInstalled() {
 				emitLine("  ✓ TPM plugins ready (run prefix+I in tmux to install)")
@@ -358,26 +494,23 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 
 	// Apply Claude Code MCP configuration if claude-code was selected
 	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
-		stepLine("\n▶ Configuring Claude Code MCP servers...")
-		claudeTool := tools.NewClaudeCodeTool()
-		// Use user's MCP selections from deep dive config
-		if err := claudeTool.ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs); err != nil {
-			emitLine(fmt.Sprintf("  ⚠ Failed to configure Claude MCP: %v", err))
-			noteFailure(fmt.Errorf("Failed to configure Claude MCP: %w", err))
-		} else {
-			// Count enabled MCPs for status message
-			enabledCount := 0
-			for _, enabled := range cfg.ClaudeCodeMCPs {
-				if enabled {
-					enabledCount++
-				}
+		enabledCount := 0
+		for _, enabled := range cfg.ClaudeCodeMCPs {
+			if enabled {
+				enabledCount++
 			}
-			emitLine(fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
 		}
+		toolConfigPhase("claude-code", "\n▶ Configuring Claude Code MCP servers...", func() error {
+			claudeTool := tools.NewClaudeCodeTool()
+			if err := claudeTool.ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs); err != nil {
+				return fmt.Errorf("Failed to configure Claude MCP: %w", err)
+			}
+			return nil
+		}, fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
 	}
 
 	// Configure Ghostty
-	configPhase("\n▶ Configuring Ghostty...", func() error {
+	toolConfigPhase("ghostty", "\n▶ Configuring Ghostty...", func() error {
 		if err := tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure Ghostty: %w", err)
 		}
@@ -385,7 +518,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	}, "  ✓ Ghostty configured")
 
 	// Configure Zsh
-	configPhase("\n▶ Configuring Zsh...", func() error {
+	toolConfigPhase("zsh", "\n▶ Configuring Zsh...", func() error {
 		if err := tools.WriteZshConfig(zshConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure Zsh: %w", err)
 		}
@@ -401,7 +534,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	if neovimCfg.ConfigPreset == "custom" {
 		neovimSuccessMsg = "  ✓ Neovim: using existing config (unchanged)"
 	}
-	configPhase("\n▶ Configuring Neovim...", func() error {
+	toolConfigPhase("neovim", "\n▶ Configuring Neovim...", func() error {
 		if err := tools.WriteNeovimConfig(neovimCfg, theme); err != nil {
 			return fmt.Errorf("Failed to configure Neovim: %w", err)
 		}
@@ -409,7 +542,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	}, neovimSuccessMsg)
 
 	// Configure Git
-	configPhase("\n▶ Configuring Git...", func() error {
+	toolConfigPhase("git", "\n▶ Configuring Git...", func() error {
 		if err := tools.WriteGitConfig(gitConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure Git: %w", err)
 		}
@@ -417,7 +550,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	}, "  ✓ Git configured with ~/.gitconfig")
 
 	// Configure Yazi
-	configPhase("\n▶ Configuring Yazi...", func() error {
+	toolConfigPhase("yazi", "\n▶ Configuring Yazi...", func() error {
 		if err := tools.WriteYaziConfig(yaziConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure Yazi: %w", err)
 		}
@@ -425,7 +558,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	}, "  ✓ Yazi configured")
 
 	// Configure FZF
-	configPhase("\n▶ Configuring FZF...", func() error {
+	toolConfigPhase("fzf", "\n▶ Configuring FZF...", func() error {
 		if err := tools.WriteFzfConfig(fzfConfigFrom(cfg), theme); err != nil {
 			return fmt.Errorf("Failed to configure FZF: %w", err)
 		}
@@ -436,7 +569,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// lazygit is in CLITools (UIGroupCLITools) and therefore has an explicit
 	// selection flag; skipping its config when deselected matches user intent.
 	if cfg.CLITools["lazygit"] {
-		configPhase("\n▶ Configuring LazyGit...", func() error {
+		toolConfigPhase("lazygit", "\n▶ Configuring LazyGit...", func() error {
 			if err := tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), theme); err != nil {
 				return fmt.Errorf("Failed to configure LazyGit: %w", err)
 			}
@@ -447,7 +580,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure Btop — only when the user selected it in the deep-dive.
 	// btop is in CLITools (UIGroupCLITools) and has an explicit selection flag.
 	if cfg.CLITools["btop"] {
-		configPhase("\n▶ Configuring Btop...", func() error {
+		toolConfigPhase("btop", "\n▶ Configuring Btop...", func() error {
 			if err := tools.WriteBtopConfig(btopConfigFrom(cfg), theme); err != nil {
 				return fmt.Errorf("Failed to configure Btop: %w", err)
 			}
@@ -458,7 +591,7 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Configure Glow — only when the user selected it in the deep-dive.
 	// glow is in CLITools (UIGroupCLITools) and has an explicit selection flag.
 	if cfg.CLITools["glow"] {
-		configPhase("\n▶ Configuring Glow...", func() error {
+		toolConfigPhase("glow", "\n▶ Configuring Glow...", func() error {
 			if err := tools.WriteGlowConfig(glowConfigFrom(cfg), theme); err != nil {
 				return fmt.Errorf("Failed to configure Glow: %w", err)
 			}
@@ -469,6 +602,86 @@ func runInstallWorker(ctx context.Context, events chan<- installEventMsg, select
 	// Surface all failures: name each failed step so the Error screen lists
 	// exactly what went wrong, not just a count + first error.
 	finish(aggregateFailures(failures))
+}
+
+type selectedToolInstallResult struct {
+	successCount int
+	installed    map[string]bool
+	failures     []error
+}
+
+// runSelectedToolInstalls is the wizard's package/custom-install phase. It is
+// isolated from backup and configuration mutation so its plan, progress, error,
+// cancellation, and postcondition behavior can be tested without touching the
+// user's filesystem.
+func runSelectedToolInstalls(
+	ctx context.Context,
+	selectedTools []string,
+	installRuntime toolInstallRuntime,
+	emitLine func(string),
+	stepLine func(string),
+) selectedToolInstallResult {
+	result := selectedToolInstallResult{installed: make(map[string]bool, len(selectedTools))}
+	mgr := installRuntime.detectManager()
+	platform := installRuntime.detectPlatform()
+
+	if mgr != nil {
+		emitLine(fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
+	} else {
+		emitLine(fmt.Sprintf("Installing %d tools (no package manager detected; manager-independent installers only)...", len(selectedTools)))
+	}
+
+	for _, toolID := range selectedTools {
+		if err := ctx.Err(); err != nil {
+			result.failures = append(result.failures, err)
+			return result
+		}
+		stepLine(fmt.Sprintf("▶ Installing %s...", toolID))
+
+		t, ok := installRuntime.lookupTool(toolID)
+		if !ok {
+			emitLine(fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
+			result.failures = append(result.failures, fmt.Errorf("%s: unknown tool", toolID))
+			continue
+		}
+
+		if installRuntime.isToolInstalled(t) {
+			emitLine(fmt.Sprintf("  ✓ %s already installed", toolID))
+			result.successCount++
+			result.installed[toolID] = true
+			continue
+		}
+
+		if !installerAvailable(t, platform) {
+			emitLine(fmt.Sprintf("  ⚠ %s is not available through a supported installer on %s", toolID, platform))
+			result.failures = append(result.failures, fmt.Errorf("%s: no supported installer for %s", toolID, platform))
+			continue
+		}
+		if mgr == nil && requiresPackageManager(t) {
+			emitLine(fmt.Sprintf("  ✗ Cannot install %s: no package manager detected", toolID))
+			result.failures = append(result.failures, fmt.Errorf("%s: no package manager detected", toolID))
+			continue
+		}
+
+		if err := installTool(ctx, t, mgr, platform, func(line string) {
+			emitLine("  " + line)
+		}); err != nil {
+			emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
+			result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+			continue
+		}
+		if !installRuntime.isToolInstalled(t) {
+			emitLine(fmt.Sprintf("  ✗ %s installer completed but the tool is still not detected", toolID))
+			result.failures = append(result.failures, fmt.Errorf("%s: install postcondition failed (tool not detected)", toolID))
+			continue
+		}
+
+		emitLine(fmt.Sprintf("  ✓ %s installed successfully", toolID))
+		result.successCount++
+		result.installed[toolID] = true
+	}
+
+	return result
 }
 
 // aggregateFailures builds the final installation error from a slice of per-step
@@ -491,7 +704,10 @@ func aggregateFailures(failures []error) error {
 	}
 }
 
-// installUtilities copies the dotfiles binary and shell utilities to ~/.local/bin
+// installUtilities installs selected helper scripts to ~/.local/bin. The main
+// dotfiles executable remains owned by its package manager/build installation;
+// copying the running executable here created a second, PATH-order-dependent
+// product installation that could shadow Homebrew upgrades.
 func installUtilities(utilities map[string]bool) error {
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -500,36 +716,6 @@ func installUtilities(utilities map[string]bool) error {
 		if err != nil {
 			return fmt.Errorf("cannot determine home directory: %w", err)
 		}
-	}
-
-	binDir := filepath.Join(home, ".local", "bin")
-
-	// Create ~/.local/bin if it doesn't exist. Owner-only (0700) matches the
-	// project's per-user permission policy (config dirs 700) and avoids creating
-	// a world-readable bin directory.
-	if err := os.MkdirAll(binDir, 0o700); err != nil {
-		return fmt.Errorf("cannot create %s: %w", binDir, err)
-	}
-
-	// Clean up legacy binaries from previous installations
-	cleanupOldInstallations()
-
-	// Get the path to the currently running executable
-	execPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("cannot get executable path: %w", err)
-	}
-
-	// Resolve any symlinks to get the real path
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return fmt.Errorf("cannot resolve executable path: %w", err)
-	}
-
-	// Copy the binary to ~/.local/bin/dotfiles
-	destPath := filepath.Join(binDir, "dotfiles")
-	if err := installBinary(execPath, destPath); err != nil {
-		return err
 	}
 
 	// Install selected utility scripts
@@ -541,13 +727,7 @@ func installUtilities(utilities map[string]bool) error {
 		if script == "" {
 			continue
 		}
-		scriptPath := filepath.Join(binDir, name)
-		// Write atomically via temp+rename (installScriptFile) rather than
-		// os.WriteFile: WriteFile opens the destination path directly, so a
-		// pre-existing ~/.local/bin/{hk,caff,sshh} SYMLINK would be followed and
-		// its target overwritten. Renaming a fresh temp file over the path replaces
-		// the symlink itself — the same O_NOFOLLOW-safe pattern used for the binary.
-		if err := installScriptFile(scriptPath, []byte(script)); err != nil {
+		if err := installScriptFile(home, name, []byte(script)); err != nil {
 			return fmt.Errorf("cannot write %s: %w", name, err)
 		}
 	}
@@ -555,44 +735,16 @@ func installUtilities(utilities map[string]bool) error {
 	return nil
 }
 
-// installScriptFile writes script content to destPath atomically, mirroring the
-// temp+rename pattern installBinary uses for the main binary. It writes the bytes
-// to a fresh temp file in the destination directory, chmods it owner-only (0700,
-// matching the per-user executable policy), then renames it over destPath. Because
-// the rename replaces the destination NAME (never opening destPath for writing),
-// a pre-existing destPath SYMLINK is replaced by the real file instead of being
-// followed and having its target overwritten — the O_NOFOLLOW-safe behavior.
-func installScriptFile(destPath string, content []byte) error {
-	tempFile, err := os.CreateTemp(filepath.Dir(destPath), ".dotfiles-script-*")
-	if err != nil {
-		return fmt.Errorf("cannot create temporary script: %w", err)
+// installScriptFile writes one known helper below the trusted HOME descriptor.
+// The shared kernel refuses symlinks/non-regular files in every descendant,
+// creates missing directories 0700, commits atomically, and sets mode 0700
+// before the helper becomes visible.
+func installScriptFile(home, name string, content []byte) error {
+	if name == "" || name == "." || filepath.Base(name) != name {
+		return fmt.Errorf("invalid utility name %q", name)
 	}
-	tempPath := tempFile.Name()
-	cleanupTemp := true
-	defer func() {
-		if cleanupTemp {
-			_ = os.Remove(tempPath)
-		}
-	}()
-
-	if _, err := tempFile.Write(content); err != nil {
-		_ = tempFile.Close()
-		return fmt.Errorf("cannot write temporary script: %w", err)
-	}
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("cannot close temporary script: %w", err)
-	}
-	// Owner-only (0700): private per-user executable, matching installBinary and
-	// the bin directory. CreateTemp makes the file 0600, so this is the final mode.
-	if err := os.Chmod(tempPath, 0o700); err != nil {
-		return fmt.Errorf("cannot set permissions: %w", err)
-	}
-	if err := os.Rename(tempPath, destPath); err != nil {
-		return fmt.Errorf("cannot replace script: %w", err)
-	}
-	cleanupTemp = false
-
-	return nil
+	rel := filepath.ToSlash(filepath.Join(".local", "bin", name))
+	return safefile.ReplaceWithin(home, rel, content, 0o700)
 }
 
 func installBinary(execPath, destPath string) error {
@@ -681,43 +833,91 @@ func cleanupOldInstallations() (removed []string) {
 	return removed
 }
 
-// collectSelectedTools gathers all tool IDs selected in deep dive config
-func (a *App) collectSelectedTools() []string {
-	// Ensure we have install status cached
-	a.ensureInstallCache()
+// alwaysConfiguredToolIDs are configured unconditionally later in the wizard
+// worker, so a clean-machine plan must also install their packages. Previously
+// only tools represented by group-selection maps entered the package plan,
+// allowing a "successful" first run with configuration files but no core
+// executables.
+var alwaysConfiguredToolIDs = []string{
+	"ghostty",
+	"tmux",
+	"zsh",
+	"neovim",
+	"git",
+	"yazi",
+	"fzf",
+}
 
+func coreToolConfigAvailable(installRuntime toolInstallRuntime, toolID string) (bool, string) {
+	t, ok := installRuntime.lookupTool(toolID)
+	if !ok {
+		return false, fmt.Sprintf("%s is missing from the tool registry", toolID)
+	}
+	platform := installRuntime.detectPlatform()
+	if installRuntime.isToolInstalled(t) {
+		return true, ""
+	}
+	if installerAvailable(t, platform) {
+		return false, fmt.Sprintf("%s was not detected after installation; configuration was not written", t.Name())
+	}
+	return false, fmt.Sprintf("%s has no supported installer for %s and no external installation was detected", t.Name(), platform)
+}
+
+// collectSelectedTools gathers all missing tool IDs selected in deep dive config,
+// including supported core tools whose configuration phases always run.
+func (a *App) collectSelectedTools() []string {
+	// Production planning owns cache initialization. The injected helper below
+	// deliberately consumes only supplied App observations/runtime dependencies
+	// so cross-platform tests cannot accidentally probe the host machine.
+	a.ensureInstallCache()
+	return a.collectSelectedToolsWithRuntime(defaultToolInstallRuntime())
+}
+
+func (a *App) collectSelectedToolsWithRuntime(installRuntime toolInstallRuntime) []string {
 	var selected []string
+	selectedSet := make(map[string]bool)
+	addMissing := func(id string, enabled bool) {
+		if enabled && !a.manageInstalled[id] && !selectedSet[id] {
+			selected = append(selected, id)
+			selectedSet[id] = true
+		}
+	}
+
+	// Core tools enter package work only where the registry has a supported
+	// package route. Unsupported-but-external tools stay out of install work and
+	// may still be configured by the worker after direct detection.
+	platform := installRuntime.detectPlatform()
+	for _, id := range alwaysConfiguredToolIDs {
+		t, ok := installRuntime.lookupTool(id)
+		if !ok {
+			continue
+		}
+		supported := installerAvailable(t, platform)
+		addMissing(id, supported)
+	}
 
 	// CLI Tools (lazygit, lazydocker, btop, glow, claude-code)
 	for id, enabled := range a.deepDiveConfig.CLITools {
-		if enabled && !a.manageInstalled[id] {
-			selected = append(selected, id)
-		}
+		addMissing(id, enabled)
 	}
 
 	// GUI Apps (zen-browser, cursor, lm-studio, obs)
 	for id, enabled := range a.deepDiveConfig.GUIApps {
-		if enabled && !a.manageInstalled[id] {
-			selected = append(selected, id)
-		}
+		addMissing(id, enabled)
 	}
 
 	// CLI Utilities (bat, eza, zoxide, ripgrep, fd, delta, fswatch)
 	for id, enabled := range a.deepDiveConfig.CLIUtilities {
-		if enabled && !a.manageInstalled[id] {
-			selected = append(selected, id)
-		}
+		addMissing(id, enabled)
 	}
 
 	// Note: Utilities (hk, caff, sshh) are shell scripts handled by installUtilities()
 	// They don't go through the package manager
 
 	// macOS Apps (rectangle, raycast, iina, etc.) - only on macOS
-	if pkg.DetectPlatform() == pkg.PlatformMacOS {
+	if platform == pkg.PlatformMacOS {
 		for id, enabled := range a.deepDiveConfig.MacApps {
-			if enabled && !a.manageInstalled[id] {
-				selected = append(selected, id)
-			}
+			addMissing(id, enabled)
 		}
 	}
 
@@ -731,16 +931,22 @@ func (a *App) collectSelectedTools() []string {
 // orphaning it (FIX 3). This closure must not touch App state (it runs on a
 // bubbletea worker goroutine), so it relies on the context for cancellation.
 func (a *App) streamingInstallToolCmd(ctx context.Context, toolID string) tea.Cmd {
+	return a.streamingInstallToolCmdWithRuntime(ctx, toolID, defaultToolInstallRuntime())
+}
+
+// streamingInstallToolCmdWithRuntime is the dependency-injected Manage install
+// command. It shares installTool with the wizard so neither dashboard path can
+// accidentally regress to package-metadata-only execution.
+func (a *App) streamingInstallToolCmdWithRuntime(ctx context.Context, toolID string, installRuntime toolInstallRuntime) tea.Cmd {
 	return func() tea.Msg {
-		reg := tools.GetRegistry()
-		t, ok := reg.Get(toolID)
+		t, ok := installRuntime.lookupTool(toolID)
 		if !ok {
 			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("unknown tool: %s", toolID)}
 		}
 
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
+		mgr := installRuntime.detectManager()
+		if installRuntime.isToolInstalled(t) {
+			return manageInstallWithLogsMsg{toolID: toolID, logs: []string{fmt.Sprintf("✓ %s is already installed", t.Name())}}
 		}
 
 		// Resolve packages via the single source of truth (Pi -> Debian fallback),
@@ -748,32 +954,24 @@ func (a *App) streamingInstallToolCmd(ctx context.Context, toolID string) tea.Cm
 		// case is already surfaced (manageInstallWithLogsMsg carries the error), so
 		// this path is not silent — but routing through PackagesForPlatform keeps the
 		// Pi behavior correct here too.
-		platform := pkg.DetectPlatform()
-		pkgs := tools.PackagesForPlatform(t.Packages(), platform)
-		if len(pkgs) == 0 {
-			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no packages defined for %s", toolID)}
+		platform := installRuntime.detectPlatform()
+		if !installerAvailable(t, platform) {
+			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no supported installer for %s on %s", toolID, platform)}
+		}
+		if mgr == nil && requiresPackageManager(t) {
+			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
 		}
 
-		// Start streaming install on the caller-provided cancelable context so
-		// teardownStream stops the subprocess on quit (FIX 3). The cancel handle was
-		// already registered on the main loop (handleManageStartInstallMsg); we do
-		// NOT write a.streamCmd from this worker-goroutine closure, since that would
-		// race teardownStream's main-loop read. Cancelling the context is sufficient:
-		// InstallStreaming runs via exec.CommandContext, so a.streamCancel() kills the
-		// subprocess.
-		cmd, err := mgr.InstallStreaming(ctx, pkgs...)
-		if err != nil {
-			return manageInstallWithLogsMsg{toolID: toolID, err: err}
-		}
-
-		// Collect all output
+		// Dispatch through Tool.Install. streamingInstallManager preserves live
+		// package-manager output/cancellation while allowing custom installers to
+		// run their additional steps.
 		var logs []string
-		for line := range cmd.Output {
-			logs = append(logs, line)
+		err := installTool(ctx, t, mgr, platform, func(line string) {
+			logs = appendBoundedInstallLine(logs, line)
+		})
+		if err == nil && !installRuntime.isToolInstalled(t) {
+			err = fmt.Errorf("install postcondition failed: %s is still not detected", toolID)
 		}
-
-		// Wait for completion
-		err = cmd.Wait()
 		return manageInstallWithLogsMsg{toolID: toolID, logs: logs, err: err}
 	}
 }
@@ -1019,7 +1217,7 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 func (a *App) saveInstallerConfig() error {
 	g, err := config.LoadGlobalConfig()
 	if err != nil {
-		g = config.DefaultGlobalConfig()
+		return fmt.Errorf("failed to load global config: %w", err)
 	}
 	g.Theme = a.theme
 	g.NavStyle = a.navStyle

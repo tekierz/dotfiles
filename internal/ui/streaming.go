@@ -185,7 +185,9 @@ func (a *App) handleManageInstallWithLogsMsg(msg manageInstallWithLogsMsg) tea.C
 	}
 	if msg.err != nil {
 		a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
-		return nil
+		tools.GetRegistry().InvalidateCache()
+		a.manageInstalledReady = false
+		return a.startInstallCacheLoad()
 	}
 	a.manageStatus = "Installed successfully ✓"
 	// Refresh the install-status cache, then reload it so the Manage screen

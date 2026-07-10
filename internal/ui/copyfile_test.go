@@ -120,3 +120,48 @@ func TestInstallBinarySelfReplace(t *testing.T) {
 		t.Fatalf("temp files left behind: %v", matches)
 	}
 }
+
+func TestInstallUtilitiesLeavesPackageManagerAndLegacyBinariesUntouched(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sentinels := map[string]string{
+		"dotfiles":       "package-manager-owned",
+		"dotfiles-tui":   "unverified-legacy-name",
+		"dotfiles-setup": "unverified-legacy-name",
+	}
+	for name, content := range sentinels {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(content), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := installUtilities(map[string]bool{}); err != nil {
+		t.Fatalf("installUtilities: %v", err)
+	}
+	for name, want := range sentinels {
+		got, err := os.ReadFile(filepath.Join(binDir, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s changed: content=%q err=%v", name, got, err)
+		}
+	}
+}
+
+func TestInstallScriptFileRefusesSymlinkedDescendant(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(home, ".local")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := installScriptFile(home, "hk", []byte("#!/bin/sh\n"))
+	if err == nil {
+		t.Fatal("installScriptFile followed symlinked .local directory")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "bin", "hk")); !os.IsNotExist(statErr) {
+		t.Fatalf("helper escaped trusted HOME: %v", statErr)
+	}
+}

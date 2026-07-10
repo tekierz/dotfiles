@@ -9,15 +9,21 @@ import (
 // for the specified UI group. Uses the tool registry as single source of truth.
 // Respects platform filtering - tools with a platformFilter only appear on matching platforms.
 func buildToolGroupDefaults(group tools.UIGroup) map[string]bool {
+	return buildToolGroupDefaultsForPlatform(group, pkg.DetectPlatform())
+}
+
+func buildToolGroupDefaultsForPlatform(group tools.UIGroup, currentPlatform pkg.Platform) map[string]bool {
 	result := make(map[string]bool)
-	currentPlatform := pkg.DetectPlatform()
 	for _, t := range tools.GetRegistry().All() {
 		if t.UIGroup() == group {
 			// Skip tools that are filtered to a different platform
 			if t.PlatformFilter() != "" && t.PlatformFilter() != currentPlatform {
 				continue
 			}
-			result[t.ID()] = t.DefaultEnabled()
+			// Unsupported optional tools remain visible but opt out by default.
+			// This prevents Debian/Pi defaults from scheduling known-impossible
+			// installs such as LazyGit, LazyDocker, and Glow.
+			result[t.ID()] = t.DefaultEnabled() && installerAvailable(t, currentPlatform)
 		}
 	}
 	return result

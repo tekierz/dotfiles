@@ -168,12 +168,18 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.sudoKeepAliveStop = nil
 		}
 		if msg.err != nil {
+			// Some tools may have installed successfully before a later step
+			// failed. Invalidate and reload observations even on the error path so
+			// retry/Manage does not operate from stale pre-install state.
+			tools.GetRegistry().InvalidateCache()
+			a.manageInstalledReady = false
+			reloadCmd := a.startInstallCacheLoad()
 			if msg.context != "" {
 				a.lastError = fmt.Errorf("%v\n\nOutput:\n%s", msg.err, msg.context)
 			} else {
 				a.lastError = msg.err
 			}
-			return s, a.showError(a.lastError)
+			return s, tea.Batch(a.showError(a.lastError), reloadCmd)
 		}
 		// Successful install: the Manage / Deep-Dive install-status caches now
 		// show stale "not installed" for the just-installed tools. Invalidate both

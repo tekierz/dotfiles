@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -22,6 +23,23 @@ type GhosttyConfig struct {
 
 	WindowDecorations bool // Show native window decorations
 	ConfirmClose      bool // Prompt before closing a surface
+}
+
+// IsInstalled recognizes direct/manual Ghostty installs as well as package
+// receipts. This matters on Debian/Pi, where no supported package is declared
+// but an externally installed binary may still be safely configured.
+func (t *GhosttyTool) IsInstalled() bool {
+	if _, err := exec.LookPath("ghostty"); err == nil {
+		return true
+	}
+	if ghosttyAppBundleInstalled() {
+		return true
+	}
+	return t.BaseTool.IsInstalled()
+}
+
+func ghosttyAppBundleInstalled() bool {
+	return hasMacOSApp("Ghostty")
 }
 
 // GhosttyTool represents the Ghostty terminal emulator

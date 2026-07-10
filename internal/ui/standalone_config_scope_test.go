@@ -40,7 +40,7 @@ func TestStandaloneConfigScopedToOpenedTool(t *testing.T) {
 	}
 
 	// Glow's own config MUST have been written.
-	glowPath := filepath.Join(home, ".config", "glow", "glow.yml")
+	glowPath := filepath.Join(home, filepath.FromSlash(glowTestRelPath()))
 	if _, err := os.Stat(glowPath); err != nil {
 		t.Errorf("glow config not written by standalone apply: %v", err)
 	}

@@ -2055,9 +2055,13 @@ func TestProgressScreenInstallDoneError(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("done error event should return a NavigateTo(ScreenError) command")
 	}
-	nav, ok := cmd().(NavigateMsg)
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("done error event should batch navigation with cache reload, got %#v", cmd())
+	}
+	nav, ok := batch[0]().(NavigateMsg)
 	if !ok || nav.To != ScreenError {
-		t.Errorf("done error event should navigate to ScreenError, got %#v", cmd())
+		t.Errorf("done error event should navigate to ScreenError, got %#v", nav)
 	}
 }
 
