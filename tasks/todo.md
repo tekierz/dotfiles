@@ -1,5 +1,123 @@
 # Release-Readiness Plan
 
+## Audit remediation program — 2026-07-10
+
+The 2026-07-09 audit is the source of truth. Remediation is staged so safety and
+observability land before new integrations or broad UI work.
+
+### Batch 1 — reachable safety blockers (complete)
+
+- [x] Replace dashboard package-only execution with a tool-aware install path so core
+      terminal tools and custom installers (currently Claude Code) actually run.
+- [x] Add focused wizard/Manage tests proving core tools enter the plan and custom install
+      behavior cannot be bypassed.
+- [x] Replace truncating/symlink-following tool config writes with one atomic, no-follow,
+      mode-enforcing primitive and migrate every current writer to it.
+- [x] Add failure-injection tests for existing mode, symlink refusal, and old-or-new atomicity.
+- [x] Make global-config loading default-overlay/version-ready so partial older JSON cannot
+      silently disable backup/retention defaults.
+- [x] Enforce recorded file modes when restoring over an existing destination.
+- [x] Keep generated fzf options inert when sourced, including hostile values.
+- [x] Disable basename/path-based uninstall deletion until exact ownership and anchored
+      recursive removal exist; propagate backup inspection and restore failures.
+- [x] Run independent adversarial reviews over all safety patches and resolve every sustained
+      blocker before accepting the batch.
+- [x] Run focused tests, full Go tests/race, vet, formatting, lint/security checks, and
+      documentation diff validation.
+
+### Batch 2 — ownership, plan, and rollback kernel
+
+- [ ] Introduce typed observations and one immutable action plan consumed by confirmation,
+      backup, execution, summary, and rollback.
+- [ ] Import native current values and preserve unknown/unowned settings; move Git to a
+      managed include and define safe ownership for Ghostty/tmux/Yazi/LazyGit/btop/Glow.
+- [ ] Derive backup scope from the action plan, fail closed, and add the same verified
+      backup/preview behavior to Manage and standalone saves.
+- [ ] Stop theme-wide regeneration of absent/unmanaged tools and preserve modeled settings
+      omitted by Manage.
+- [ ] Add schema versions, ordered migrations, ownership revisions, operation IDs, and a
+      durable non-secret journal.
+- [x] Stop self-copying the Homebrew-owned main binary.
+- [ ] Add executable provenance, stale-build detection, and PATH-collision checks/repair.
+
+### Batch 3 — truthful UX, settings platform, and CLI contracts
+
+- [ ] Replace boolean install state with structured package/binary/config/service/auth health.
+- [ ] Add current-source/provenance, Essentials/Advanced/raw layers, diff, and capability badges.
+- [ ] Make 60x18/80x24/120x40 layouts responsive with viewports, compact tabs, glyph/color
+      fallbacks, reduced motion, and explicit Save/Cancel semantics.
+- [ ] Centralize async operations with IDs/single-flight reducers and eliminate synchronous
+      detection from input handlers.
+- [ ] Add `doctor`, `plan --json`, noninteractive apply, deterministic exit codes, and a
+      redacted support bundle.
+- [ ] Generate settings/help/hotkeys/docs/tests from tool manifests where practical.
+
+### Batch 4 — integrations, distribution, and deployment gates
+
+- [ ] Finish current install-only integrations or label them honestly.
+- [ ] Add Codex, Cursor Agent, OpenCode, Pi, T3 Code, and Hermes only after the safety kernel,
+      all opt-in with provenance/auth/permission/egress policy.
+- [ ] Retire the legacy Bash product from active distribution.
+- [ ] Make Linux and macOS tests fully blocking; add reproducible signed artifacts,
+      checksums, SBOM/provenance, and Homebrew upgrade/rollback tests.
+- [ ] Complete owner-hardware, friends/family, and mock-enterprise gates from
+      `tasks/pre-deployment-audit-2026-07-09.md`.
+- [ ] Execute a compatibility-first product rename (difficulty 8/10) before broader beta.
+
+### Batch 1 review
+
+- **Accepted safety changes:** descriptor-anchored filesystem operations; atomic generated
+  config writes; tool-aware install execution; versioned/serialized state; atomic fail-closed
+  file restore; inert fzf shell options; and non-destructive uninstall behavior.
+- **Independent review:** each safety area received adversarial review and re-review after
+  fixes. The final uninstall review exercised compiled CLI exit codes as well as source/tests.
+- **Verification:** `go test ./...`, `go test -race ./...`, `go vet ./...`, formatting and
+  diff checks, golangci-lint (0 issues), Staticcheck (0 issues), ShellCheck, govulncheck
+  (0 reachable vulnerabilities), build/CLI smoke tests, and cross-platform compile/tests.
+- **Deliberate fail-closed limits:** directory restore/removal and automatic uninstall
+  deletion remain disabled until descriptor-anchored recursion and exact ownership records
+  exist. These are unfinished release requirements, not silent feature claims.
+- **Release verdict after Batch 1:** still **No-Go** for owner-hardware Apply/Save testing,
+  friends/family, or mock-enterprise deployment. Batches 2–4 remain active release work.
+
+## Comprehensive pre-deployment audit — 2026-07-09
+
+- [x] Inventory every tracked file and record exact coverage.
+- [x] Review all Go production code and tests for correctness, security, architecture,
+      maintainability, and feature completeness.
+- [x] Review the TUI/CLI promises and every dashboard surface against implemented behavior.
+- [x] Audit aesthetics, responsive terminal UX, navigation, CLI/hotkey ergonomics,
+      discoverability, accessibility, and perceived polish.
+- [x] Build a per-tool matrix of settings supported upstream, modeled internally,
+      exposed in the dashboard, and actually written by generators.
+- [x] Review shell installers, CI, build/release configuration, and cross-platform behavior.
+- [x] Review every tracked document for accuracy, drift, prototype residue, and planned work.
+- [x] Run independent adversarial verification and a completeness pass over all findings.
+- [x] Run automated build, vet, format, race, lint/security, and CLI diagnostics where available.
+- [x] Produce `tasks/pre-deployment-audit-2026-07-09.md` with prioritized findings,
+      deployment readiness, repository strategy, cleanup plan, and rename difficulty score.
+
+### Audit review
+
+- **Verdict:** No-Go for Save/Apply/install on an existing account, friends/family, or
+  mock enterprise. Read-only use and disposable-user/VM engineering tests only.
+- **Coverage:** all 195 tracked baseline paths / 51,980 lines, followed by three
+  independent finding checks and one cross-cutting architecture/strategy review.
+- **Primary blockers:** incomplete and custom-installer-bypassing install plans;
+  non-importing full-file config writers; theme-wide resets; incomplete/fail-open
+  backup; competing binary owners; failing macOS tests; legacy/release drift.
+- **Strategy:** keep and refactor this repo; retire the legacy Bash product; create a
+  separate repository only for a future genuine multi-host enterprise control plane.
+- **Rename:** 8/10 for a compatibility-safe product/data/distribution migration.
+- **Report:** `tasks/pre-deployment-audit-2026-07-09.md`; detailed evidence is under
+  `tasks/audit-work/`.
+- **Audit baseline:** no production changes were made by the audit itself. The remediation
+  commits and current release status are tracked in the program and review above.
+- [x] Local audit-environment cleanup: restored Homebrew developer mode to off.
+
+> The 2026-07-09 audit supersedes the older green-state claim and severity counts below.
+> Completed historical checkboxes are not current release evidence.
+
 **Created:** 2026-07-03 · **Target:** first public release
 **Source:** full-codebase audit re-verified against `main` — details, evidence, and exact
 locations for every item are in `tasks/release-audit-2026-07-03.md`.
