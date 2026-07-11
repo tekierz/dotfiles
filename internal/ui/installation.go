@@ -1268,7 +1268,8 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	if cfg.CLITools["btop"] {
 		toolConfigPhase("btop", "\n▶ Configuring Btop...", func() ([]tools.MutationEvidence, error) {
 			if persistJournal {
-				themeRel := filepath.ToSlash(filepath.Join(".config", "btop", "themes", theme+".theme"))
+				artifactName := tools.BtopThemeArtifactName(btopConfigFrom(cfg), theme)
+				themeRel := filepath.ToSlash(filepath.Join(".config", "btop", "themes", artifactName+".theme"))
 				themeAccepted, err := executionTarget("config:btop", themeRel)
 				if err != nil {
 					return nil, err

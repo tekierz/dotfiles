@@ -69,8 +69,73 @@ func btopColorTheme(cfg BtopConfig, themeName string) string {
 	}
 }
 
+// BtopThemeArtifactName is the exact theme file stem referenced by btop.conf.
+// Planning and writing share it so a per-tool override cannot point at an
+// artifact outside the reviewed backup/mutation set.
+func BtopThemeArtifactName(cfg BtopConfig, themeName string) string {
+	return btopColorTheme(cfg, themeName)
+}
+
+func btopThemePaletteName(name string) string {
+	if name == "gruvbox" {
+		return "gruvbox-dark"
+	}
+	return name
+}
+
+func normalizeBtopConfig(cfg BtopConfig) BtopConfig {
+	if cfg.UpdateMs == 0 {
+		cfg.UpdateMs = 2000
+	}
+	if cfg.GraphType == "" {
+		cfg.GraphType = "braille"
+	}
+	if cfg.TempScale == "" {
+		cfg.TempScale = "celsius"
+	}
+	if cfg.ShownBoxes == "" {
+		cfg.ShownBoxes = "cpu mem net proc"
+	}
+	return cfg
+}
+
+func ValidateBtopConfig(cfg BtopConfig, themeName string) error {
+	cfg = normalizeBtopConfig(cfg)
+	if err := validateConfigToken("global btop theme", themeName); err != nil {
+		return err
+	}
+	if cfg.Theme != "" {
+		switch cfg.Theme {
+		case "auto", "Default", "TTY", "dracula", "gruvbox", "nord", "tokyo-night":
+		default:
+			return fmt.Errorf("unsupported btop theme %q", cfg.Theme)
+		}
+	}
+	if cfg.UpdateMs < 250 || cfg.UpdateMs > 10000 {
+		return fmt.Errorf("btop update interval must be between 250 and 10000 ms")
+	}
+	if cfg.GraphType != "braille" && cfg.GraphType != "block" && cfg.GraphType != "tty" {
+		return fmt.Errorf("unsupported btop graph symbol %q", cfg.GraphType)
+	}
+	if cfg.TempScale != "celsius" && cfg.TempScale != "fahrenheit" {
+		return fmt.Errorf("unsupported btop temperature scale %q", cfg.TempScale)
+	}
+	seen := make(map[string]bool)
+	for _, box := range strings.Fields(cfg.ShownBoxes) {
+		if seen[box] || (box != "cpu" && box != "mem" && box != "net" && box != "proc") {
+			return fmt.Errorf("unsupported or duplicate btop shown box %q", box)
+		}
+		seen[box] = true
+	}
+	if len(seen) == 0 {
+		return fmt.Errorf("btop shown boxes must include at least one of cpu, mem, net, proc")
+	}
+	return nil
+}
+
 // GenerateBtopConfig builds the btop.conf content
 func GenerateBtopConfig(cfg BtopConfig, themeName string) string {
+	cfg = normalizeBtopConfig(cfg)
 	var sb strings.Builder
 
 	// Header
@@ -217,12 +282,17 @@ func WriteBtopConfig(cfg BtopConfig, theme string) error {
 }
 
 func WriteBtopConfigTracked(cfg BtopConfig, theme string) ([]MutationEvidence, error) {
+	if err := ValidateBtopConfig(cfg, theme); err != nil {
+		return nil, err
+	}
+	cfg = normalizeBtopConfig(cfg)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	themePath := filepath.Join(home, ".config", "btop", "themes", theme+".theme")
+	artifactName := BtopThemeArtifactName(cfg, theme)
+	themePath := filepath.Join(home, ".config", "btop", "themes", artifactName+".theme")
 	configPath := filepath.Join(home, ".config", "btop", "btop.conf")
 	for _, target := range []string{themePath, configPath} {
 		if err := preflightWholeFileConfig(target, false); err != nil {
@@ -232,7 +302,7 @@ func WriteBtopConfigTracked(cfg BtopConfig, theme string) ([]MutationEvidence, e
 			return nil, fmt.Errorf("preflight btop config set: %w", err)
 		}
 	}
-	themeContent := GenerateBtopTheme(theme)
+	themeContent := GenerateBtopTheme(btopThemePaletteName(artifactName))
 	var committed []MutationEvidence
 	evidence, err := writeToolConfigTracked(themePath, []byte(themeContent))
 	if err != nil {
@@ -253,11 +323,16 @@ func WriteBtopConfigTracked(cfg BtopConfig, theme string) ([]MutationEvidence, e
 
 // WriteBtopConfigAtRevisionsTracked applies the complete plan-accepted btop set.
 func WriteBtopConfigAtRevisionsTracked(cfg BtopConfig, theme string, themeAccepted, configAccepted safefile.Revision) ([]MutationEvidence, error) {
+	if err := ValidateBtopConfig(cfg, theme); err != nil {
+		return nil, err
+	}
+	cfg = normalizeBtopConfig(cfg)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
-	themeParents, err := compatibilityToolConfigParents(filepath.Join(home, ".config", "btop", "themes", theme+".theme"))
+	artifactName := BtopThemeArtifactName(cfg, theme)
+	themeParents, err := compatibilityToolConfigParents(filepath.Join(home, ".config", "btop", "themes", artifactName+".theme"))
 	if err != nil {
 		return nil, err
 	}
@@ -269,11 +344,16 @@ func WriteBtopConfigAtRevisionsTracked(cfg BtopConfig, theme string, themeAccept
 }
 
 func WriteBtopConfigAtAuthoritiesTracked(cfg BtopConfig, theme string, themeAccepted safefile.Revision, themeParents *safefile.ParentChain, configAccepted safefile.Revision, configParents *safefile.ParentChain, locker operation.Locker) ([]MutationEvidence, error) {
+	if err := ValidateBtopConfig(cfg, theme); err != nil {
+		return nil, err
+	}
+	cfg = normalizeBtopConfig(cfg)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
-	themePath := filepath.Join(home, ".config", "btop", "themes", theme+".theme")
+	artifactName := BtopThemeArtifactName(cfg, theme)
+	themePath := filepath.Join(home, ".config", "btop", "themes", artifactName+".theme")
 	configPath := filepath.Join(home, ".config", "btop", "btop.conf")
 	for _, target := range []struct {
 		path     string
@@ -289,7 +369,7 @@ func WriteBtopConfigAtAuthoritiesTracked(cfg BtopConfig, theme string, themeAcce
 	}
 
 	var results, committed []MutationEvidence
-	evidence, err := writeToolConfigAtAuthorityTracked(themePath, []byte(GenerateBtopTheme(theme)), themeAccepted, themeParents, locker)
+	evidence, err := writeToolConfigAtAuthorityTracked(themePath, []byte(GenerateBtopTheme(btopThemePaletteName(artifactName))), themeAccepted, themeParents, locker)
 	if err != nil {
 		return nil, partialMutationError(err, committed)
 	}

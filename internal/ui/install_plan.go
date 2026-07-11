@@ -717,9 +717,17 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig) ([]configPlanS
 		specs = append(specs, configPlanSpec{"lazygit", []string{".config/lazygit/config.yml"}, operation.OwnershipManagedFile, "write managed LazyGit configuration", true})
 	}
 	if cfg.CLITools["btop"] {
-		specs = append(specs, configPlanSpec{"btop", []string{".config/btop/btop.conf", filepath.ToSlash(filepath.Join(".config", "btop", "themes", theme+".theme"))}, operation.OwnershipManagedFile, "write managed btop configuration", true})
+		btopCfg := btopConfigFrom(cfg)
+		if err := tools.ValidateBtopConfig(btopCfg, theme); err != nil {
+			return nil, fmt.Errorf("validate planned btop configuration: %w", err)
+		}
+		artifactName := tools.BtopThemeArtifactName(btopCfg, theme)
+		specs = append(specs, configPlanSpec{"btop", []string{".config/btop/btop.conf", filepath.ToSlash(filepath.Join(".config", "btop", "themes", artifactName+".theme"))}, operation.OwnershipManagedFile, "write managed btop configuration", true})
 	}
 	if cfg.CLITools["glow"] {
+		if err := tools.ValidateGlowConfig(glowConfigFrom(cfg), theme); err != nil {
+			return nil, fmt.Errorf("validate planned Glow configuration: %w", err)
+		}
 		paths := tools.NewGlowTool().ConfigPaths()
 		if len(paths) != 1 {
 			return nil, fmt.Errorf("glow registry returned %d config paths", len(paths))

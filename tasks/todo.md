@@ -109,6 +109,9 @@ observability land before new integrations or broad UI work.
   every representable generator field. Dynamic/conditional/targeted syntax, conflicting
   composite settings, and malformed markers block installer and direct saves; native files
   without plugin declarations no longer inherit compiled TPM defaults.
+- Btop and Glow now validate persisted values at the writer boundary before any filesystem
+  mutation, blocking directive/YAML injection and invalid ranges/enums. Btop per-tool theme
+  overrides now plan, create, and reference the same exact theme artifact.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 

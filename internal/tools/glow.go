@@ -25,6 +25,35 @@ type GlowTool struct {
 	BaseTool
 }
 
+func normalizeGlowConfig(cfg GlowConfig) GlowConfig {
+	if cfg.Style == "" {
+		cfg.Style = "auto"
+	}
+	if cfg.Pager == "" {
+		cfg.Pager = "auto"
+	}
+	return cfg
+}
+
+func ValidateGlowConfig(cfg GlowConfig, theme string) error {
+	cfg = normalizeGlowConfig(cfg)
+	if err := validateConfigToken("global Glow theme", theme); err != nil {
+		return err
+	}
+	if err := validateConfigToken("Glow style", cfg.Style); err != nil {
+		return err
+	}
+	switch cfg.Pager {
+	case "auto", "less", "more", "none", "never":
+	default:
+		return fmt.Errorf("unsupported Glow pager %q", cfg.Pager)
+	}
+	if cfg.Width < 0 || cfg.Width > 1000 {
+		return fmt.Errorf("glow width must be between 0 and 1000")
+	}
+	return nil
+}
+
 // NewGlowTool creates a new glow tool
 func NewGlowTool() *GlowTool {
 	configPath, err := glowConfigPath()
@@ -56,6 +85,7 @@ func NewGlowTool() *GlowTool {
 
 // GenerateGlowConfig builds the glow.yml content
 func GenerateGlowConfig(cfg GlowConfig, theme string) string {
+	cfg = normalizeGlowConfig(cfg)
 	var sb strings.Builder
 
 	// Header
@@ -70,7 +100,7 @@ func GenerateGlowConfig(cfg GlowConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("style: \"%s\"\n", glowStyle))
 
 	// Pager
-	sb.WriteString(fmt.Sprintf("pager: %t\n", cfg.Pager != "never"))
+	sb.WriteString(fmt.Sprintf("pager: %t\n", cfg.Pager != "never" && cfg.Pager != "none"))
 
 	// Width
 	if cfg.Width > 0 {
@@ -96,6 +126,9 @@ func WriteGlowConfig(cfg GlowConfig, theme string) error {
 // WriteGlowConfigTracked writes the glow config and returns the exact committed
 // revision for rollback evidence.
 func WriteGlowConfigTracked(cfg GlowConfig, theme string) (MutationEvidence, error) {
+	if err := ValidateGlowConfig(cfg, theme); err != nil {
+		return MutationEvidence{}, err
+	}
 	configPath, err := glowConfigPath()
 	if err != nil {
 		return MutationEvidence{}, err
@@ -107,6 +140,9 @@ func WriteGlowConfigTracked(cfg GlowConfig, theme string) (MutationEvidence, err
 
 // WriteGlowConfigAtRevisionTracked applies a plan-accepted Glow revision.
 func WriteGlowConfigAtRevisionTracked(cfg GlowConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
+	if err := ValidateGlowConfig(cfg, theme); err != nil {
+		return MutationEvidence{}, err
+	}
 	configPath, err := glowConfigPath()
 	if err != nil {
 		return MutationEvidence{}, err
@@ -115,6 +151,9 @@ func WriteGlowConfigAtRevisionTracked(cfg GlowConfig, theme string, accepted saf
 }
 
 func WriteGlowConfigAtAuthorityTracked(cfg GlowConfig, theme string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	if err := ValidateGlowConfig(cfg, theme); err != nil {
+		return MutationEvidence{}, err
+	}
 	configPath, err := glowConfigPath()
 	if err != nil {
 		return MutationEvidence{}, err
