@@ -106,9 +106,9 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 	// the live config against the baseline captured at load / last save. Scoping
 	// the apply to only the changed tools is the data-loss fix (P1-A2): a
 	// Ghostty-only edit must not rewrite ~/.tmux.conf, ~/.zshrc, ~/.gitconfig, etc.
-	// from manage.json defaults (overwriting any hand edits). A theme change is
-	// cross-cutting (all generated colors depend on it) and intentionally
-	// re-applies every tool — see changedManageTools.
+	// from manage.json defaults (overwriting any hand edits). A theme-only change
+	// persists desired state but writes no tool config; the reviewed install plan
+	// is the only path that may apply it across explicitly selected tools.
 	baseline := a.manageConfigBaseline
 	changed := changedManageTools(&baseline, cfg, a.manageConfigBaselineTheme, theme)
 

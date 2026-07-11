@@ -118,23 +118,17 @@ func sliceEqual(a, b []any) bool {
 // data-loss fix (P1-A2): a single tool's edit must never rewrite another tool's
 // config file from manage.json defaults.
 //
-// Theme is cross-cutting: every tool's generated colors depend on it, so a theme
-// change legitimately re-applies ALL tools (including claude-code). When the theme
-// is unchanged, only the tools whose own fields changed are returned.
+// Theme is deliberately not part of this diff. A global theme selection is
+// persisted as desired state, but it must not synthesize or rewrite every tool's
+// config from Manage defaults. Theme-dependent artifacts are applied through the
+// reviewed install plan, where selection, ownership, backup scope, and rollback
+// are explicit. Only tools whose own modeled fields changed are returned here.
 //
 // The result is ordered per manageGeneratorToolOrder (claude-code last) so apply
 // and error reporting are deterministic.
-func changedManageTools(baseline, current *ManageConfig, baselineTheme, currentTheme string) []string {
+func changedManageTools(baseline, current *ManageConfig, _, _ string) []string {
 	base := manageConfigToDeepDive(baseline)
 	cur := manageConfigToDeepDive(current)
-
-	// A theme change affects every tool's generated colors → re-apply all.
-	if baselineTheme != currentTheme {
-		changed := make([]string, 0, len(manageGeneratorToolOrder)+1)
-		changed = append(changed, manageGeneratorToolOrder...)
-		changed = append(changed, "claude-code")
-		return changed
-	}
 
 	var changed []string
 	for _, id := range manageGeneratorToolOrder {

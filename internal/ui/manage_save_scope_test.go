@@ -90,17 +90,51 @@ func TestManageSaveNoChangeWritesNothing(t *testing.T) {
 	}
 }
 
-// TestManageSaveThemeChangeReappliesAll verifies the documented cross-cutting
-// rule: a theme change re-applies every tool (generated colors depend on theme),
-// even if no per-tool field changed.
-func TestManageSaveThemeChangeReappliesAll(t *testing.T) {
+// TestManageSaveThemeChangeDoesNotRegenerateTools guards the ownership boundary:
+// selecting a theme records desired state but must not create or rewrite configs
+// for tools the user did not explicitly edit in this Manage transaction.
+func TestManageSaveThemeChangeDoesNotRegenerateTools(t *testing.T) {
 	baseline := NewManageConfig()
 	current := NewManageConfig()
 
 	changed := changedManageTools(baseline, current, "catppuccin-mocha", "nord")
-	// All generator tools (and claude-code) should be in the set on a theme change.
-	if len(changed) < len(manageGeneratorToolOrder) {
-		t.Fatalf("theme change should re-apply all tools; got %v", changed)
+	if len(changed) != 0 {
+		t.Fatalf("theme-only change scheduled tool regeneration: %v", changed)
+	}
+}
+
+func TestManageSaveThemeChangeCreatesNoToolConfigs(t *testing.T) {
+	home := withTempHome(t)
+	app := NewApp(true)
+	app.theme = "nord"
+
+	msg := app.saveManageConfigCmd()()
+	saved, ok := msg.(manageSavedMsg)
+	if !ok || saved.err != nil {
+		t.Fatalf("save result = %#v", msg)
+	}
+
+	for _, rel := range []string{
+		".config/ghostty/config.ghostty",
+		".tmux.conf",
+		".zshrc",
+		".gitconfig",
+		".config/yazi/yazi.toml",
+		".config/fzf/fzf.zsh",
+		".config/lazygit/config.yml",
+		".config/btop/btop.conf",
+	} {
+		if _, err := os.Lstat(filepath.Join(home, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("theme-only save created %s: %v", rel, err)
+		}
+	}
+
+	global, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("load persisted global config: %v", err)
+	}
+	if global.Theme != "nord" {
+		t.Fatalf("persisted theme = %q, want nord", global.Theme)
 	}
 }
 
