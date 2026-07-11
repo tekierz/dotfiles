@@ -102,6 +102,42 @@ type backupDirectoryAuthority struct {
 	parents  *safefile.ParentChain
 }
 
+// joinFailedRootCleanup removes only the root created and owned by this
+// backupLocation. Cleanup first snapshots the live recursive tree, then proves
+// both its original root identity and accepted parent chain before authorizing
+// exact-snapshot removal. A replaced or grafted root is never path-deleted.
+func (location backupLocation) joinFailedRootCleanup(creationErr error) error {
+	cleanupErr := location.removeFailedRoot()
+	if cleanupErr == nil {
+		return creationErr
+	}
+	return errors.Join(creationErr, fmt.Errorf("clean failed backup root: %w", cleanupErr))
+}
+
+func (location backupLocation) removeFailedRoot() error {
+	if location.anchor == "" || location.rel == "" || location.rootSnapshot == nil || !location.rootParents.Tracked() {
+		return fmt.Errorf("%w: failed backup root authority is incomplete", safefile.ErrDirectoryChanged)
+	}
+	current, err := safefile.SnapshotDirectoryWithin(location.anchor, location.rel)
+	if err != nil {
+		return fmt.Errorf("snapshot failed backup root: %w", err)
+	}
+	if !safefile.SameDirectoryRootState(current, location.rootSnapshot) {
+		return fmt.Errorf("%w: failed backup root identity changed", safefile.ErrDirectoryChanged)
+	}
+	bound, err := safefile.BindParentChainWithin(location.anchor, location.rel, location.rootParents, nil)
+	if err != nil {
+		return fmt.Errorf("bind failed backup root parent chain: %w", err)
+	}
+	if !safefile.SameParentChain(bound, location.rootParents) {
+		return fmt.Errorf("%w: failed backup root parent chain changed", safefile.ErrParentChanged)
+	}
+	if err := safefile.RemoveDirectoryWithinSnapshotAuthorized(location.anchor, location.rel, current, location.rootParents); err != nil {
+		return fmt.Errorf("remove exact failed backup root: %w", err)
+	}
+	return nil
+}
+
 var backupCreateTestHooks struct {
 	afterRootPrefix    func(prefix string) error
 	afterManifestWrite func(path string) error
@@ -110,8 +146,11 @@ var backupCreateTestHooks struct {
 // CreatePlan creates a fail-closed rollback point for an exact action-plan
 // scope. Sources are read descriptor-relatively below HOME; files keep their
 // exact modes, directories use opaque recursive snapshots, and absent targets
-// are written to the manifest as existed=no. The manifest is committed last,
-// so an interrupted partial directory is never accepted as restorable.
+// are written to the manifest as existed=no. A persisted manifest becomes an
+// authoritative rollback point only after final manifest/source/root digest
+// validation succeeds. Failed-root cleanup is identity-bound and a failed call
+// never returns PlanResult authority, including when hostile replacement makes
+// cleanup refuse the live name.
 func CreatePlan(home, backupDir string, targets []Target) (int, error) {
 	result, err := CreatePlanTracked(home, backupDir, targets)
 	return result.Count, err
@@ -165,6 +204,9 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 	if err != nil {
 		return fail(0, err)
 	}
+	failPrepared := func(count int, creationErr error) (PlanResult, error) {
+		return PlanResult{Count: count}, location.joinFailedRootCleanup(creationErr)
+	}
 
 	manifest := make([]string, 0, len(targets))
 	persisted := make([]planSourceExpectation, 0, len(targets))
@@ -175,20 +217,20 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 		original := filepath.Join(home, filepath.FromSlash(rel))
 		backupPath := filepath.Join(location.path, filepath.FromSlash(rel))
 		if strings.ContainsRune(original, '|') || strings.ContainsRune(backupPath, '|') {
-			return fail(captured, fmt.Errorf("backup paths containing '|' are unsupported"))
+			return failPrepared(captured, fmt.Errorf("backup paths containing '|' are unsupported"))
 		}
 		switch target.Kind {
 		case TargetFile:
 			data, revision, _, err := safefile.ObserveFileWithin(home, rel)
 			if err != nil {
-				return fail(captured, fmt.Errorf("read plan backup target %s: %w", rel, err))
+				return failPrepared(captured, fmt.Errorf("read plan backup target %s: %w", rel, err))
 			}
 			if !revision.Exists() {
 				manifest = append(manifest, fmt.Sprintf("%s||no|file|600", original))
 				continue
 			}
 			if err := location.writeFile(rel, data, revision.Permissions()); err != nil {
-				return fail(captured, fmt.Errorf("store plan backup file %s: %w", rel, err))
+				return failPrepared(captured, fmt.Errorf("store plan backup file %s: %w", rel, err))
 			}
 			manifest = append(manifest, fmt.Sprintf("%s|%s|yes|file|%o", original, backupPath, revision.Permissions()))
 			persisted = append(persisted, planSourceExpectation{
@@ -204,10 +246,10 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 				continue
 			}
 			if err != nil {
-				return fail(captured, fmt.Errorf("snapshot plan backup directory %s: %w", rel, err))
+				return failPrepared(captured, fmt.Errorf("snapshot plan backup directory %s: %w", rel, err))
 			}
 			if err := location.writeDirectory(rel, snapshot); err != nil {
-				return fail(captured, fmt.Errorf("store plan backup directory %s: %w", rel, err))
+				return failPrepared(captured, fmt.Errorf("store plan backup directory %s: %w", rel, err))
 			}
 			manifest = append(manifest, fmt.Sprintf("%s|%s|yes|directory|%o", original, backupPath, snapshot.Permissions()))
 			persisted = append(persisted, planSourceExpectation{
@@ -221,20 +263,20 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 
 	data := []byte(manifestV2Header + planManifestRecords + strings.Join(manifest, "\n") + "\n")
 	if err := location.writeFile(ManifestName, data, 0o600); err != nil {
-		return fail(captured, fmt.Errorf("commit plan backup manifest: %w", err))
+		return failPrepared(captured, fmt.Errorf("commit plan backup manifest: %w", err))
 	}
 	if hook := backupCreateTestHooks.afterManifestWrite; hook != nil {
 		if err := hook(filepath.Join(location.path, ManifestName)); err != nil {
-			return fail(captured, fmt.Errorf("after plan manifest commit: %w", err))
+			return failPrepared(captured, fmt.Errorf("after plan manifest commit: %w", err))
 		}
 	}
 	final, err := location.finalSnapshot()
 	if err != nil {
-		return fail(captured, fmt.Errorf("capture final plan backup authority: %w", err))
+		return failPrepared(captured, fmt.Errorf("capture final plan backup authority: %w", err))
 	}
 	sources, err := location.capturePlanSources(persisted, data)
 	if err != nil {
-		return fail(captured, fmt.Errorf("capture plan backup source authority: %w", err))
+		return failPrepared(captured, fmt.Errorf("capture plan backup source authority: %w", err))
 	}
 	result := PlanResult{
 		Count:     captured,
@@ -246,7 +288,7 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 		targets:   plannedTargets,
 	}
 	if err := ValidatePlanRoot(result); err != nil {
-		return fail(captured, fmt.Errorf("validate final plan backup authority: %w", err))
+		return failPrepared(captured, fmt.Errorf("validate final plan backup authority: %w", err))
 	}
 	return result, nil
 }
@@ -284,6 +326,9 @@ func Create(home, backupDir string, files []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	failPrepared := func(count int, creationErr error) (int, error) {
+		return count, location.joinFailedRootCleanup(creationErr)
+	}
 
 	var manifest []string
 	count := 0
@@ -293,7 +338,7 @@ func Create(home, backupDir string, files []string) (int, error) {
 
 		data, revision, _, err := safefile.ObserveFileWithin(home, rel)
 		if err != nil {
-			return count, fmt.Errorf("observe backup candidate %s: %w", rel, err)
+			return failPrepared(count, fmt.Errorf("observe backup candidate %s: %w", rel, err))
 		}
 		if !revision.Exists() {
 			continue
@@ -302,7 +347,7 @@ func Create(home, backupDir string, files []string) (int, error) {
 		// Flat storage name (human-readable); the manifest is the
 		// authoritative source for the original path on restore.
 		if err := location.writeFile(stored, data, 0o600); err != nil {
-			return count, fmt.Errorf("store backup candidate %s: %w", rel, err)
+			return failPrepared(count, fmt.Errorf("store backup candidate %s: %w", rel, err))
 		}
 
 		// Record the original path and mode so restore can reconstruct both
@@ -312,12 +357,12 @@ func Create(home, backupDir string, files []string) (int, error) {
 	}
 
 	if count == 0 {
-		return 0, fmt.Errorf("no files were backed up (none of %d candidate files were present)", len(files))
+		return failPrepared(0, fmt.Errorf("no files were backed up (none of %d candidate files were present)", len(files)))
 	}
 
 	data := []byte(manifestV2Header + flatManifestRecords + strings.Join(manifest, "\n") + "\n")
 	if err := location.writeFile(ManifestName, data, 0o600); err != nil {
-		return count, fmt.Errorf("write backup manifest: %w", err)
+		return failPrepared(count, fmt.Errorf("write backup manifest: %w", err))
 	}
 
 	return count, nil
@@ -469,7 +514,11 @@ func prepareBackupDirectory(home, backupDir string) (backupLocation, error) {
 		}
 		if hook := backupCreateTestHooks.afterRootPrefix; hook != nil {
 			if err := hook(prefix); err != nil {
-				return backupLocation{}, fmt.Errorf("after creating backup namespace prefix %s: %w", prefix, err)
+				prepareErr := fmt.Errorf("after creating backup namespace prefix %s: %w", prefix, err)
+				if prefix == location.rel && location.rootSnapshot != nil {
+					prepareErr = location.joinFailedRootCleanup(prepareErr)
+				}
+				return backupLocation{}, prepareErr
 			}
 		}
 	}

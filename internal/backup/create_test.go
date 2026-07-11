@@ -34,6 +34,9 @@ func TestCreateZeroFiles(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(backupDir, ManifestName)); statErr == nil {
 		t.Errorf("manifest was written for an empty backup; want none")
 	}
+	if _, statErr := os.Lstat(backupDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("empty failed backup root survived cleanup: %v", statErr)
+	}
 }
 
 func TestCreatePlanRecordsAbsentTargetsAndRollbackRemovesThem(t *testing.T) {
@@ -200,6 +203,98 @@ func TestCreatePlanTrackedRejectsManifestMutationBeforeAuthorityCapture(t *testi
 	if _, err := CreatePlanTracked(home, backupDir, []Target{{RelPath: ".zshrc", Kind: TargetFile}}); err == nil || !strings.Contains(err.Error(), "manifest differs") {
 		t.Fatalf("manifest mutation error = %v", err)
 	}
+	if _, err := os.Lstat(backupDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed manifest-backed root survived cleanup: %v", err)
+	}
+	entries, err := ListCatalog(filepath.Dir(backupDir))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed manifest-backed root became catalog visible: entries=%+v err=%v", entries, err)
+	}
+}
+
+func TestCreatePlanPostManifestHookFailureCleansCatalogRoot(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalogDir := t.TempDir()
+	backupDir := filepath.Join(catalogDir, "plan")
+	hookErr := errors.New("injected post-manifest hook failure")
+	backupCreateTestHooks.afterManifestWrite = func(string) error { return hookErr }
+	t.Cleanup(func() { backupCreateTestHooks.afterManifestWrite = nil })
+
+	if _, err := CreatePlanTracked(home, backupDir, []Target{{RelPath: ".zshrc", Kind: TargetFile}}); !errors.Is(err, hookErr) {
+		t.Fatalf("post-manifest hook error = %v, want injected error", err)
+	}
+	if _, err := os.Lstat(backupDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("post-manifest failed root survived cleanup: %v", err)
+	}
+	entries, err := ListCatalog(catalogDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("post-manifest failed root became catalog visible: entries=%+v err=%v", entries, err)
+	}
+}
+
+func TestPrepareBackupDirectoryCleansOwnedRootAfterHookFailure(t *testing.T) {
+	home := t.TempDir()
+	backupDir := filepath.Join(t.TempDir(), "backup")
+	hookErr := errors.New("injected root preparation failure")
+	backupCreateTestHooks.afterRootPrefix = func(prefix string) error {
+		if prefix == filepath.Base(backupDir) {
+			return hookErr
+		}
+		return nil
+	}
+	t.Cleanup(func() { backupCreateTestHooks.afterRootPrefix = nil })
+
+	if _, err := prepareBackupDirectory(home, backupDir); !errors.Is(err, hookErr) {
+		t.Fatalf("prepare error = %v, want injected hook error", err)
+	}
+	if _, err := os.Lstat(backupDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("prepare-owned failed root survived cleanup: %v", err)
+	}
+}
+
+func TestCreatePlanFailedRootCleanupRefusesReplacementAndJoinsErrors(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	catalogDir := filepath.Join(root, "backups")
+	if err := os.Mkdir(catalogDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	backupDir := filepath.Join(catalogDir, "plan")
+	moved := filepath.Join(root, "moved-invocation-owned-partial")
+	replacementMarker := []byte("replacement must survive\n")
+	hookErr := errors.New("injected post-manifest failure")
+	backupCreateTestHooks.afterManifestWrite = func(string) error {
+		if err := os.Rename(backupDir, moved); err != nil {
+			return err
+		}
+		if err := os.Mkdir(backupDir, 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(backupDir, "replacement"), replacementMarker, 0o600); err != nil {
+			return err
+		}
+		return hookErr
+	}
+	t.Cleanup(func() { backupCreateTestHooks.afterManifestWrite = nil })
+
+	_, err := CreatePlanTracked(home, backupDir, []Target{{RelPath: ".zshrc", Kind: TargetFile}})
+	if !errors.Is(err, hookErr) || !errors.Is(err, safefile.ErrDirectoryChanged) {
+		t.Fatalf("creation/cleanup joined error = %v, want hook error and ErrDirectoryChanged", err)
+	}
+	got, readErr := os.ReadFile(filepath.Join(backupDir, "replacement"))
+	if readErr != nil || string(got) != string(replacementMarker) {
+		t.Fatalf("cleanup changed hostile replacement: %q err=%v", got, readErr)
+	}
+	entries, catalogErr := ListCatalog(catalogDir)
+	if catalogErr != nil || len(entries) != 0 {
+		t.Fatalf("replacement/failed root became catalog visible: entries=%+v err=%v", entries, catalogErr)
+	}
 }
 
 func TestCreatePlanRefusesSymlinkedSourceAndUnsafeScope(t *testing.T) {
@@ -211,8 +306,12 @@ func TestCreatePlanRefusesSymlinkedSourceAndUnsafeScope(t *testing.T) {
 	if err := os.Symlink(victim, filepath.Join(home, ".toolrc")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if _, err := CreatePlan(home, filepath.Join(t.TempDir(), "symlink"), []Target{{".toolrc", TargetFile}}); !errors.Is(err, safefile.ErrSymlink) {
+	failedBackup := filepath.Join(t.TempDir(), "symlink")
+	if _, err := CreatePlan(home, failedBackup, []Target{{".toolrc", TargetFile}}); !errors.Is(err, safefile.ErrSymlink) {
 		t.Fatalf("symlink CreatePlan error = %v, want ErrSymlink", err)
+	}
+	if _, err := os.Lstat(failedBackup); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pre-manifest failed plan root survived cleanup: %v", err)
 	}
 	traversalBackup := filepath.Join(t.TempDir(), "traversal")
 	if _, err := CreatePlan(home, traversalBackup, []Target{{"../escape", TargetFile}}); err == nil {
@@ -311,6 +410,9 @@ func TestCreateRefusesSymlinkedCandidateInsteadOfClaimingPartialSuccess(t *testi
 	}
 	if _, statErr := os.Lstat(filepath.Join(backupDir, ManifestName)); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("partial backup received an authoritative manifest: %v", statErr)
+	}
+	if _, statErr := os.Lstat(backupDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("partial flat backup root survived cleanup: %v", statErr)
 	}
 }
 

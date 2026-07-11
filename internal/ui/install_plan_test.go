@@ -542,6 +542,72 @@ func TestInstallPlanWorkerJournalsExactReviewedHash(t *testing.T) {
 	}
 }
 
+func TestInstallPlanWorkerStopsOnManifestBackedPartialBackupError(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	for _, tool := range tools.GetRegistry().All() {
+		app.manageInstalled[tool.ID()] = true
+	}
+	app.deepDiveConfig.NeovimConfig = "custom"
+	app.deepDiveConfig.TmuxTPMEnabled = false
+	for id := range app.deepDiveConfig.CLITools {
+		app.deepDiveConfig.CLITools[id] = false
+	}
+	runtime := registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil || plan.hasBlocked() {
+		t.Fatalf("plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+	}
+
+	backupTargets := plan.backupTargets()
+	if len(backupTargets) == 0 {
+		t.Fatal("accepted plan has no exact mutation targets")
+	}
+	productPaths := make([]string, 0, len(backupTargets))
+	for _, rel := range backupTargets {
+		if filepath.IsAbs(rel) || rel == "." || rel == "" {
+			t.Fatalf("accepted plan has non-relative mutation target %q", rel)
+		}
+		productPaths = append(productPaths, filepath.Join(home, filepath.FromSlash(rel)))
+	}
+	for _, path := range productPaths {
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("precondition product path %s unexpectedly exists: %v", path, statErr)
+		}
+	}
+
+	partialRoot := filepath.Join(home, "partial-manifest-backup")
+	backupErr := errors.New("injected failure after partial manifest commit")
+	backupCalled := false
+	runtime.backupTargets = func([]backup.Target) (autoBackupResult, error) {
+		backupCalled = true
+		if err := os.Mkdir(partialRoot, 0o700); err != nil {
+			return autoBackupResult{}, err
+		}
+		manifest := "# dotfiles-backup-manifest v2\n# records: home-relative-path<TAB>octal-mode; payload uses legacy flat-name encoding\n.zshrc\t600\n"
+		if err := os.WriteFile(filepath.Join(partialRoot, backup.ManifestName), []byte(manifest), 0o600); err != nil {
+			return autoBackupResult{}, err
+		}
+		return autoBackupResult{enabled: true, count: 1, backupDir: partialRoot}, backupErr
+	}
+
+	events := make(chan installEventMsg, 128)
+	go runInstallPlanWorker(context.Background(), events, plan, runtime)
+	var terminal installEventMsg
+	for event := range events {
+		if event.done {
+			terminal = event
+		}
+	}
+	if !backupCalled || !errors.Is(terminal.err, backupErr) {
+		t.Fatalf("backup called=%v terminal error=%v, want injected backup failure", backupCalled, terminal.err)
+	}
+	for _, path := range productPaths {
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("backup failure mutated product path %s: %v", path, statErr)
+		}
+	}
+}
+
 func TestInstallLockReleaseFailureIsJournaledAsTerminalFailure(t *testing.T) {
 	app, _, runtime := newPlanTestApp(t)
 	for _, tool := range tools.GetRegistry().All() {
