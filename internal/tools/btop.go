@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/theme"
@@ -254,6 +255,22 @@ func WriteBtopConfigTracked(cfg BtopConfig, theme string) ([]MutationEvidence, e
 func WriteBtopConfigAtRevisionsTracked(cfg BtopConfig, theme string, themeAccepted, configAccepted safefile.Revision) ([]MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return nil, err
+	}
+	themeParents, err := compatibilityToolConfigParents(filepath.Join(home, ".config", "btop", "themes", theme+".theme"))
+	if err != nil {
+		return nil, err
+	}
+	configParents, err := compatibilityToolConfigParents(filepath.Join(home, ".config", "btop", "btop.conf"))
+	if err != nil {
+		return nil, err
+	}
+	return WriteBtopConfigAtAuthoritiesTracked(cfg, theme, themeAccepted, themeParents, configAccepted, configParents, operation.DefaultLocker)
+}
+
+func WriteBtopConfigAtAuthoritiesTracked(cfg BtopConfig, theme string, themeAccepted safefile.Revision, themeParents *safefile.ParentChain, configAccepted safefile.Revision, configParents *safefile.ParentChain, locker operation.Locker) ([]MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 	themePath := filepath.Join(home, ".config", "btop", "themes", theme+".theme")
@@ -261,8 +278,9 @@ func WriteBtopConfigAtRevisionsTracked(cfg BtopConfig, theme string, themeAccept
 	for _, target := range []struct {
 		path     string
 		accepted safefile.Revision
-	}{{themePath, themeAccepted}, {configPath, configAccepted}} {
-		if err := preflightToolConfigAtRevision(target.path, target.accepted, nil); err != nil {
+		parents  *safefile.ParentChain
+	}{{themePath, themeAccepted, themeParents}, {configPath, configAccepted, configParents}} {
+		if err := preflightToolConfigAtAuthority(target.path, target.accepted, target.parents, locker, nil); err != nil {
 			if target.path == themePath && errors.Is(err, ErrUnmanagedConfig) {
 				return nil, fmt.Errorf("%w; legacy btop theme files carried no verifiable ownership marker and require explicit adoption", err)
 			}
@@ -271,7 +289,7 @@ func WriteBtopConfigAtRevisionsTracked(cfg BtopConfig, theme string, themeAccept
 	}
 
 	var results, committed []MutationEvidence
-	evidence, err := writeToolConfigAtRevisionTracked(themePath, []byte(GenerateBtopTheme(theme)), themeAccepted)
+	evidence, err := writeToolConfigAtAuthorityTracked(themePath, []byte(GenerateBtopTheme(theme)), themeAccepted, themeParents, locker)
 	if err != nil {
 		return nil, partialMutationError(err, committed)
 	}
@@ -279,7 +297,7 @@ func WriteBtopConfigAtRevisionsTracked(cfg BtopConfig, theme string, themeAccept
 	if evidence.Revision != themeAccepted {
 		committed = append(committed, evidence)
 	}
-	evidence, err = writeToolConfigAtRevisionTracked(configPath, []byte(GenerateBtopConfig(cfg, theme)), configAccepted)
+	evidence, err = writeToolConfigAtAuthorityTracked(configPath, []byte(GenerateBtopConfig(cfg, theme)), configAccepted, configParents, locker)
 	if err != nil {
 		return nil, partialMutationError(err, committed)
 	}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/safefile"
@@ -134,6 +135,28 @@ func (t *ClaudeCodeTool) ApplyConfigWithMCPsAtRevisionTracked(enabledMCPs map[st
 		return MutationEvidence{}, err
 	}
 	return MutationEvidence{Path: filepath.Join(home, ".claude.json"), Revision: revision}, nil
+}
+
+func (t *ClaudeCodeTool) ApplyConfigWithMCPsAtAuthorityTracked(enabledMCPs map[string]bool, accepted safefile.Revision, parents *safefile.ParentChain) (MutationEvidence, error) {
+	return t.ApplyConfigWithMCPsAtBoundAuthorityTracked(enabledMCPs, accepted, parents, operation.DefaultLocker)
+}
+
+func (t *ClaudeCodeTool) ApplyConfigWithMCPsAtBoundAuthorityTracked(enabledMCPs map[string]bool, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	if !accepted.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Claude revision is untracked", safefile.ErrRevisionChanged)
+	}
+	if !parents.Tracked() || locker == nil {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Claude authority is incomplete", safefile.ErrParentChanged)
+	}
+	revision, err := config.ApplyClaudeMCPSelectionAtBoundAuthorityTracked(enabledMCPs, accepted, parents, locker)
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return MutationEvidence{Path: filepath.Join(home, ".claude.json"), Revision: revision, Parents: parents}, nil
 }
 
 func (t *ClaudeCodeTool) applyConfigWithMCPsTracked(enabledMCPs map[string]bool, load func() (*config.ClaudeConfig, error)) (MutationEvidence, error) {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,10 @@ const ManifestName = "manifest.txt"
 // mode (e.g. legacy backups created before modes were stored). 0600 matches
 // the project's documented permission policy for config/dotfiles.
 const defaultFileMode os.FileMode = 0o600
+
+var restorePlanTestHooks struct {
+	afterRootValidation func(PlanResult) error
+}
 
 // Entry describes a single file in a backup: its original path relative to
 // the user's home directory and the mode it should be restored with.
@@ -64,10 +69,13 @@ func ReadManifest(backupDir string) ([]Entry, error) {
 	if !revision.Exists() {
 		return nil, nil
 	}
+	home, _ := os.UserHomeDir()
+	return parseManifestData(data, home)
+}
 
+func parseManifestData(data []byte, home string) ([]Entry, error) {
 	var entries []Entry
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	home, _ := os.UserHomeDir()
 	for scanner.Scan() {
 		line := strings.TrimSuffix(scanner.Text(), "\r")
 		trimmed := strings.TrimSpace(line)
@@ -131,16 +139,24 @@ func backupDescendantAnchor(backupDir, rel string) (string, string, error) {
 	if !filepath.IsAbs(cleanBackupDir) {
 		return "", "", fmt.Errorf("invalid backup directory %q: path must be absolute", backupDir)
 	}
-	backupName := filepath.Base(cleanBackupDir)
-	backupRoot := filepath.Dir(cleanBackupDir)
-	backupRootName := filepath.Base(backupRoot)
-	anchor := filepath.Dir(backupRoot)
-	if backupName == "." || backupName == string(os.PathSeparator) ||
-		backupRootName == "." || backupRootName == string(os.PathSeparator) ||
-		backupRoot == anchor {
+	if strings.HasPrefix(cleanBackupDir, string(os.PathSeparator)+"var"+string(os.PathSeparator)) {
+		if target, linkErr := os.Readlink(string(os.PathSeparator) + "var"); linkErr == nil {
+			if target == "private/var" || target == "/private/var" {
+				cleanBackupDir = filepath.Join(string(os.PathSeparator)+"private"+string(os.PathSeparator)+"var", strings.TrimPrefix(cleanBackupDir, string(os.PathSeparator)+"var"+string(os.PathSeparator)))
+			}
+		}
+	}
+	volume := filepath.VolumeName(cleanBackupDir)
+	anchor := volume + string(os.PathSeparator)
+	baseRel := strings.TrimPrefix(cleanBackupDir, anchor)
+	if baseRel == "" || baseRel == "." || hasParentTraversal(baseRel) || !strings.Contains(baseRel, string(os.PathSeparator)) {
 		return "", "", fmt.Errorf("invalid backup directory %q", backupDir)
 	}
-	anchoredRel := filepath.ToSlash(filepath.Join(backupRootName, backupName, rel))
+	// Anchor at the filesystem root so every untrusted component, including
+	// .config/dotfiles or an external XDG state ancestor, is traversed with
+	// O_NOFOLLOW. Promoting a nearby parent to a trusted root would follow a
+	// symlink before safefile gets a chance to reject it.
+	anchoredRel := filepath.ToSlash(filepath.Join(baseRel, rel))
 	return anchor, anchoredRel, nil
 }
 
@@ -224,6 +240,16 @@ type ExpectedState struct {
 	Exists            bool
 	FileRevision      safefile.Revision
 	DirectorySnapshot *safefile.DirectorySnapshot
+	Parents           *safefile.ParentChain
+	OriginalExists    bool
+	OriginalCaptured  bool
+	OriginalData      []byte
+	OriginalMode      os.FileMode
+	OriginalDirectory *safefile.DirectorySnapshot
+	// EmptyOnly marks a parent directory created solely to make an accepted
+	// leaf reachable. Rollback may remove it only after child targets have been
+	// restored and while its exact identity remains empty.
+	EmptyOnly bool
 }
 
 // CaptureExpectedState captures one exact post-write state for conditional
@@ -232,20 +258,20 @@ func CaptureExpectedState(home string, target Target) (ExpectedState, error) {
 	rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.RelPath)))
 	switch target.Kind {
 	case TargetFile:
-		_, revision, err := safefile.ReadWithin(home, rel)
+		_, revision, parents, err := safefile.ObserveFileWithin(home, rel)
 		if err != nil {
 			return ExpectedState{}, err
 		}
-		return ExpectedState{Attempted: true, Captured: true, Kind: TargetFile, Exists: revision.Exists(), FileRevision: revision}, nil
+		return ExpectedState{Attempted: true, Captured: true, Kind: TargetFile, Exists: revision.Exists(), FileRevision: revision, Parents: parents}, nil
 	case TargetDirectory:
-		snapshot, err := safefile.SnapshotDirectoryWithin(home, rel)
+		snapshot, parents, err := safefile.ObserveDirectoryWithin(home, rel)
 		if errors.Is(err, os.ErrNotExist) {
-			return ExpectedState{Attempted: true, Captured: true, Kind: TargetDirectory}, nil
+			return ExpectedState{Attempted: true, Captured: true, Kind: TargetDirectory, Parents: parents}, nil
 		}
 		if err != nil {
 			return ExpectedState{}, err
 		}
-		return ExpectedState{Attempted: true, Captured: true, Kind: TargetDirectory, Exists: true, DirectorySnapshot: snapshot}, nil
+		return ExpectedState{Attempted: true, Captured: true, Kind: TargetDirectory, Exists: true, DirectorySnapshot: snapshot, Parents: parents}, nil
 	default:
 		return ExpectedState{}, fmt.Errorf("invalid expected-state target kind %q", target.Kind)
 	}
@@ -278,6 +304,126 @@ func RestoreExpected(backupDir, home string, expected map[string]ExpectedState) 
 	return restoreWithExpectedOperations(backupDir, home, defaultRestoreOperations(), expected)
 }
 
+// RestoreExpectedPlan restores from immutable in-memory originals captured by
+// the accepted plan. The durable backup root is still validated as recovery
+// evidence, but its mutable pathname contents are never used as automatic
+// rollback input.
+func RestoreExpectedPlan(plan PlanResult, home string, expected map[string]ExpectedState) (RestoreResult, error) {
+	if err := ValidatePlanRoot(plan); err != nil {
+		return RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}, err
+	}
+	if hook := restorePlanTestHooks.afterRootValidation; hook != nil {
+		if err := hook(plan); err != nil {
+			return RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}, err
+		}
+	}
+	exactExpected, err := loadExactPlanOriginals(plan, expected)
+	if err != nil {
+		return RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}, err
+	}
+	items := make([]restoreItem, 0, len(plan.targets))
+	for _, target := range plan.targets {
+		rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.RelPath)))
+		state := exactExpected[rel]
+		items = append(items, restoreItem{
+			relPath: rel,
+			existed: state.OriginalCaptured && state.OriginalExists,
+			isDir:   target.Kind == TargetDirectory,
+			mode:    state.OriginalMode,
+			srcRel:  rel,
+		})
+	}
+	result, err := restoreWithExpectedItems("", home, defaultRestoreOperations(), exactExpected, items)
+	if validationErr := ValidatePlanRoot(plan); validationErr != nil {
+		err = errors.Join(err, validationErr)
+	}
+	return result, err
+}
+
+func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) (map[string]ExpectedState, error) {
+	if plan.sources == nil || plan.targets == nil {
+		return nil, fmt.Errorf("%w: plan backup source authority is unavailable", safefile.ErrDirectoryChanged)
+	}
+	manifest, ok := plan.sources[ManifestName]
+	if !ok || !manifest.file.Tracked() || !manifest.file.Exists() || !manifest.parents.Tracked() {
+		return nil, fmt.Errorf("%w: plan manifest authority is unavailable", safefile.ErrRevisionChanged)
+	}
+	manifestRel := filepath.ToSlash(filepath.Join(filepath.FromSlash(plan.rel), ManifestName))
+	_, currentManifest, err := safefile.ReadWithinAuthorized(plan.anchor, manifestRel, manifest.parents)
+	if err != nil || currentManifest != manifest.file {
+		return nil, fmt.Errorf("%w: plan manifest changed before rollback: %v", safefile.ErrRevisionChanged, err)
+	}
+
+	result := make(map[string]ExpectedState, len(expected))
+	for rel, state := range expected {
+		state.OriginalData = append([]byte(nil), state.OriginalData...)
+		result[filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))] = state
+	}
+	for _, target := range plan.targets {
+		rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.RelPath)))
+		state := result[rel]
+		source, exists := plan.sources[rel]
+		if !exists {
+			if state.OriginalCaptured && state.OriginalExists {
+				return nil, fmt.Errorf("accepted original state for %s disagrees with its absent backup source", rel)
+			}
+			state.OriginalCaptured = true
+			state.OriginalExists = false
+			state.OriginalData = nil
+			state.OriginalMode = 0
+			state.OriginalDirectory = nil
+			result[rel] = state
+			continue
+		}
+		if source.target.Kind != target.Kind || filepath.ToSlash(filepath.Clean(filepath.FromSlash(source.target.RelPath))) != rel || !source.parents.Tracked() {
+			return nil, fmt.Errorf("%w: plan source authority for %s has the wrong target", safefile.ErrDirectoryChanged, rel)
+		}
+		fullRel := filepath.ToSlash(filepath.Join(filepath.FromSlash(plan.rel), filepath.FromSlash(rel)))
+		switch target.Kind {
+		case TargetFile:
+			data, revision, readErr := safefile.ReadWithinAuthorized(plan.anchor, fullRel, source.parents)
+			if readErr != nil || revision != source.file || !revision.Exists() {
+				return nil, fmt.Errorf("%w: plan backup file %s changed before rollback: %v", safefile.ErrRevisionChanged, rel, readErr)
+			}
+			if state.OriginalCaptured && (!state.OriginalExists || state.OriginalMode.Perm() != revision.Permissions() || !bytes.Equal(state.OriginalData, data)) {
+				return nil, fmt.Errorf("accepted original file state for %s disagrees with its exact backup source", rel)
+			}
+			state.OriginalCaptured = true
+			state.OriginalExists = true
+			state.OriginalData = append([]byte(nil), data...)
+			state.OriginalMode = revision.Permissions()
+			state.OriginalDirectory = nil
+		case TargetDirectory:
+			if source.directory == nil {
+				return nil, fmt.Errorf("%w: plan backup directory %s has no snapshot", safefile.ErrDirectoryChanged, rel)
+			}
+			before, bindErr := safefile.BindParentChainWithin(plan.anchor, fullRel, source.parents, nil)
+			if bindErr != nil {
+				return nil, bindErr
+			}
+			snapshot, snapshotErr := safefile.SnapshotDirectoryWithin(plan.anchor, fullRel)
+			after, afterErr := safefile.BindParentChainWithin(plan.anchor, fullRel, source.parents, nil)
+			if snapshotErr != nil || afterErr != nil || !safefile.SameParentChain(before, after) ||
+				!safefile.SameDirectoryRootState(snapshot, source.directory) || snapshot.Digest() != source.directory.Digest() {
+				return nil, fmt.Errorf("%w: plan backup directory %s changed before rollback: %v", safefile.ErrDirectoryChanged, rel, errors.Join(snapshotErr, afterErr))
+			}
+			if state.OriginalCaptured && (!state.OriginalExists || state.OriginalDirectory == nil ||
+				state.OriginalDirectory.Permissions() != snapshot.Permissions() || state.OriginalDirectory.Digest() != snapshot.Digest()) {
+				return nil, fmt.Errorf("accepted original directory state for %s disagrees with its exact backup source", rel)
+			}
+			state.OriginalCaptured = true
+			state.OriginalExists = true
+			state.OriginalDirectory = snapshot
+			state.OriginalData = nil
+			state.OriginalMode = 0
+		default:
+			return nil, fmt.Errorf("invalid plan source target kind %q", target.Kind)
+		}
+		result[rel] = state
+	}
+	return result, nil
+}
+
 func defaultRestoreOperations() restoreOperations {
 	return restoreOperations{
 		replaceFile:              safefile.ReplaceWithin,
@@ -289,21 +435,39 @@ func defaultRestoreOperations() restoreOperations {
 		removeFileRevision:       safefile.RemoveWithinRevision,
 		restoreDirectorySnapshot: safefile.RestoreDirectoryWithinSnapshot,
 		removeDirectorySnapshot:  safefile.RemoveDirectoryWithinSnapshot,
+		removeEmptyDirectory:     safefile.RemoveEmptyDirectoryWithinSnapshot,
+		replaceFileAuthorized: func(root, rel string, expected safefile.Revision, parents *safefile.ParentChain, data []byte, mode os.FileMode) error {
+			_, err := safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, rel, expected, parents, data, mode)
+			return err
+		},
+		removeFileAuthorized: safefile.RemoveWithinRevisionAuthorized,
+		restoreDirectoryAuthorized: func(root, rel string, snapshot, expected *safefile.DirectorySnapshot, parents *safefile.ParentChain) error {
+			_, err := safefile.RestoreDirectoryWithinSnapshotNoCreateAuthorizedTracked(root, rel, snapshot, expected, parents)
+			return err
+		},
+		removeDirectoryAuthorized: safefile.RemoveDirectoryWithinSnapshotAuthorized,
+		removeEmptyAuthorized:     safefile.RemoveEmptyDirectoryWithinSnapshotAuthorized,
 	}
 }
 
 type restoreReplaceFunc func(root, rel string, data []byte, mode os.FileMode) error
 
 type restoreOperations struct {
-	replaceFile              restoreReplaceFunc
-	snapshotDirectory        func(root, rel string) (*safefile.DirectorySnapshot, error)
-	restoreDirectory         func(root, rel string, snapshot *safefile.DirectorySnapshot) error
-	removeFile               func(root, rel string) error
-	removeDirectory          func(root, rel string) error
-	replaceFileRevision      func(root, rel string, expected safefile.Revision, data []byte, mode os.FileMode) error
-	removeFileRevision       func(root, rel string, expected safefile.Revision) error
-	restoreDirectorySnapshot func(root, rel string, snapshot, expected *safefile.DirectorySnapshot) error
-	removeDirectorySnapshot  func(root, rel string, expected *safefile.DirectorySnapshot) error
+	replaceFile                restoreReplaceFunc
+	snapshotDirectory          func(root, rel string) (*safefile.DirectorySnapshot, error)
+	restoreDirectory           func(root, rel string, snapshot *safefile.DirectorySnapshot) error
+	removeFile                 func(root, rel string) error
+	removeDirectory            func(root, rel string) error
+	replaceFileRevision        func(root, rel string, expected safefile.Revision, data []byte, mode os.FileMode) error
+	removeFileRevision         func(root, rel string, expected safefile.Revision) error
+	restoreDirectorySnapshot   func(root, rel string, snapshot, expected *safefile.DirectorySnapshot) error
+	removeDirectorySnapshot    func(root, rel string, expected *safefile.DirectorySnapshot) error
+	removeEmptyDirectory       func(root, rel string, expected *safefile.DirectorySnapshot) error
+	replaceFileAuthorized      func(root, rel string, expected safefile.Revision, parents *safefile.ParentChain, data []byte, mode os.FileMode) error
+	removeFileAuthorized       func(root, rel string, expected safefile.Revision, parents *safefile.ParentChain) error
+	restoreDirectoryAuthorized func(root, rel string, snapshot, expected *safefile.DirectorySnapshot, parents *safefile.ParentChain) error
+	removeDirectoryAuthorized  func(root, rel string, expected *safefile.DirectorySnapshot, parents *safefile.ParentChain) error
+	removeEmptyAuthorized      func(root, rel string, expected *safefile.DirectorySnapshot, parents *safefile.ParentChain) error
 }
 
 func restoreWithReplace(backupDir, home string, replace restoreReplaceFunc) (RestoreResult, error) {
@@ -321,11 +485,37 @@ func restoreWithOperations(backupDir, home string, operations restoreOperations)
 }
 
 func restoreWithExpectedOperations(backupDir, home string, operations restoreOperations, expected map[string]ExpectedState) (RestoreResult, error) {
+	return restoreWithExpectedItems(backupDir, home, operations, expected, nil)
+}
+
+func restoreWithExpectedItems(backupDir, home string, operations restoreOperations, expected map[string]ExpectedState, provided []restoreItem) (RestoreResult, error) {
 	result := RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}
 
-	items, err := restoreItems(backupDir, home)
-	if err != nil {
-		return result, err
+	items := provided
+	if items == nil {
+		var err error
+		items, err = restoreItems(backupDir, home)
+		if err != nil {
+			return result, err
+		}
+	}
+	if expected != nil {
+		if err := validateConditionalManifest(items, expected); err != nil {
+			return result, err
+		}
+		// Child leaves must be restored/removed before the empty parent
+		// directories that made them reachable. Descending depth also handles
+		// nested created parents deterministically; lexical order breaks ties.
+		sort.SliceStable(items, func(i, j int) bool {
+			left := filepath.ToSlash(filepath.Clean(filepath.FromSlash(items[i].relPath)))
+			right := filepath.ToSlash(filepath.Clean(filepath.FromSlash(items[j].relPath)))
+			leftDepth := strings.Count(left, "/")
+			rightDepth := strings.Count(right, "/")
+			if leftDepth != rightDepth {
+				return leftDepth > rightDepth
+			}
+			return left < right
+		})
 	}
 
 	for _, it := range items {
@@ -345,6 +535,10 @@ func restoreWithExpectedOperations(backupDir, home string, operations restoreOpe
 			}
 			if !postState.Captured {
 				result.Skipped[it.key()] = "conditional rollback has no proven post-write state"
+				continue
+			}
+			if !postState.Parents.Tracked() {
+				result.Skipped[it.key()] = "conditional rollback has no bound parent-chain authority"
 				continue
 			}
 			wantKind := TargetFile
@@ -403,19 +597,28 @@ func restoreWithExpectedOperations(backupDir, home string, operations restoreOpe
 				result.Skipped[it.key()] = "backup source is outside the selected backup directory"
 				continue
 			}
-			anchor, sourceRel, err := backupDescendantAnchor(backupDir, it.srcRel)
-			if err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("resolve backup directory: %v", err)
-				continue
-			}
-			snapshot, err := operations.snapshotDirectory(anchor, sourceRel)
-			if err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("snapshot backup directory: %v", err)
-				continue
+			var snapshot *safefile.DirectorySnapshot
+			if conditional && postState.OriginalCaptured {
+				snapshot = postState.OriginalDirectory
+				if snapshot == nil {
+					result.Skipped[it.key()] = "immutable original directory snapshot is unavailable"
+					continue
+				}
+			} else {
+				anchor, sourceRel, err := backupDescendantAnchor(backupDir, it.srcRel)
+				if err != nil {
+					result.Skipped[it.key()] = fmt.Sprintf("resolve backup directory: %v", err)
+					continue
+				}
+				snapshot, err = operations.snapshotDirectory(anchor, sourceRel)
+				if err != nil {
+					result.Skipped[it.key()] = fmt.Sprintf("snapshot backup directory: %v", err)
+					continue
+				}
 			}
 			var restoreErr error
 			if conditional {
-				restoreErr = operations.restoreDirectorySnapshot(home, relKey, snapshot, postState.DirectorySnapshot)
+				restoreErr = operations.restoreDirectoryAuthorized(home, relKey, snapshot, postState.DirectorySnapshot, postState.Parents)
 			} else {
 				restoreErr = operations.restoreDirectory(home, relKey, snapshot)
 			}
@@ -437,14 +640,23 @@ func restoreWithExpectedOperations(backupDir, home string, operations restoreOpe
 			result.Skipped[it.key()] = "backup source is outside the selected backup directory"
 			continue
 		}
-		data, revision, err := readBackupDescendant(backupDir, it.srcRel)
-		if err != nil {
-			result.Skipped[it.key()] = fmt.Sprintf("read backup file: %v", err)
-			continue
-		}
-		if !revision.Exists() {
-			result.Skipped[it.key()] = "read backup file: source does not exist"
-			continue
+		var data []byte
+		mode := it.mode.Perm()
+		if conditional && postState.OriginalCaptured {
+			data = append([]byte(nil), postState.OriginalData...)
+			mode = postState.OriginalMode.Perm()
+		} else {
+			var revision safefile.Revision
+			var err error
+			data, revision, err = readBackupDescendant(backupDir, it.srcRel)
+			if err != nil {
+				result.Skipped[it.key()] = fmt.Sprintf("read backup file: %v", err)
+				continue
+			}
+			if !revision.Exists() {
+				result.Skipped[it.key()] = "read backup file: source does not exist"
+				continue
+			}
 		}
 
 		// Restore ordinary files through the same descriptor-anchored atomic
@@ -454,7 +666,7 @@ func restoreWithExpectedOperations(backupDir, home string, operations restoreOpe
 		// failed precommit write leaves the old destination intact.
 		var replaceErr error
 		if conditional {
-			replaceErr = operations.replaceFileRevision(home, relKey, postState.FileRevision, data, it.mode.Perm())
+			replaceErr = operations.replaceFileAuthorized(home, relKey, postState.FileRevision, postState.Parents, data, mode)
 		} else {
 			replaceErr = operations.replaceFile(home, relKey, data, it.mode.Perm())
 		}
@@ -475,11 +687,53 @@ func restoreWithExpectedOperations(backupDir, home string, operations restoreOpe
 	return result, nil
 }
 
+func validateConditionalManifest(items []restoreItem, expected map[string]ExpectedState) error {
+	type manifestState struct {
+		kind    TargetKind
+		existed bool
+	}
+	manifest := make(map[string]manifestState, len(items))
+	for _, item := range items {
+		if item.skipReason != "" {
+			continue
+		}
+		rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(item.relPath)))
+		if rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, "../") {
+			return fmt.Errorf("conditional rollback manifest has invalid target %q", item.relPath)
+		}
+		if _, duplicate := manifest[rel]; duplicate {
+			return fmt.Errorf("conditional rollback manifest repeats normalized target %s", rel)
+		}
+		kind := TargetFile
+		if item.isDir {
+			kind = TargetDirectory
+		}
+		manifest[rel] = manifestState{kind: kind, existed: item.existed}
+	}
+	for rawRel, state := range expected {
+		if !state.Attempted {
+			continue
+		}
+		rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(rawRel)))
+		entry, ok := manifest[rel]
+		if !ok {
+			return fmt.Errorf("conditional rollback manifest omits attempted target %s", rel)
+		}
+		if state.Captured && entry.kind != state.Kind {
+			return fmt.Errorf("conditional rollback manifest kind for %s is %s, want %s", rel, entry.kind, state.Kind)
+		}
+		if state.OriginalCaptured && entry.existed != state.OriginalExists {
+			return fmt.Errorf("conditional rollback manifest existence for %s does not match immutable original", rel)
+		}
+	}
+	return nil
+}
+
 func removeExpectedTarget(home, rel string, expected ExpectedState, operations restoreOperations) error {
 	if !expected.Exists {
 		switch expected.Kind {
 		case TargetFile:
-			_, current, err := safefile.ReadWithin(home, rel)
+			_, current, err := safefile.ReadWithinAuthorized(home, rel, expected.Parents)
 			if err != nil {
 				return err
 			}
@@ -488,7 +742,11 @@ func removeExpectedTarget(home, rel string, expected ExpectedState, operations r
 			}
 			return nil
 		case TargetDirectory:
-			_, err := safefile.SnapshotDirectoryWithin(home, rel)
+			_, err := safefile.BindParentChainWithin(home, rel, expected.Parents, nil)
+			if err != nil {
+				return err
+			}
+			_, err = safefile.SnapshotDirectoryWithin(home, rel)
 			if errors.Is(err, os.ErrNotExist) {
 				return nil
 			}
@@ -499,9 +757,12 @@ func removeExpectedTarget(home, rel string, expected ExpectedState, operations r
 		}
 	}
 	if expected.Kind == TargetDirectory {
-		return operations.removeDirectorySnapshot(home, rel, expected.DirectorySnapshot)
+		if expected.EmptyOnly {
+			return operations.removeEmptyAuthorized(home, rel, expected.DirectorySnapshot, expected.Parents)
+		}
+		return operations.removeDirectoryAuthorized(home, rel, expected.DirectorySnapshot, expected.Parents)
 	}
-	return operations.removeFileRevision(home, rel, expected.FileRevision)
+	return operations.removeFileAuthorized(home, rel, expected.FileRevision, expected.Parents)
 }
 
 type restoreItem struct {

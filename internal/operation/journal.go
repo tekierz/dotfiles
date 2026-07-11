@@ -189,6 +189,9 @@ func validateRecord(record Record) error {
 	if record.Status != StatusRunning && record.FinishedAt == nil {
 		return fmt.Errorf("%w: terminal record has no finish time", ErrInvalidRecord)
 	}
+	if record.Backup != "" && (!filepath.IsAbs(record.Backup) || filepath.Clean(record.Backup) != record.Backup || strings.ContainsAny(record.Backup, "\x00\r\n\t")) {
+		return fmt.Errorf("%w: backup path must be a clean absolute path", ErrInvalidRecord)
+	}
 	seen := make(map[string]struct{}, len(record.Actions))
 	for _, result := range record.Actions {
 		if result.ActionID == "" {
@@ -360,4 +363,41 @@ func (j Journal) Read(operationID string) (Record, error) {
 		return Record{}, err
 	}
 	return record, nil
+}
+
+// TerminalBackupPaths returns exact clean backup paths referenced by terminal
+// records. Running operations are deliberately excluded so retention cannot
+// prune a rollback point that another process may still need.
+func (j Journal) TerminalBackupPaths() (map[string]struct{}, error) {
+	if j.state == nil {
+		return nil, fmt.Errorf("operation journal has no bound state authority")
+	}
+	base, ok := j.state.children["operations"]
+	if !ok || base.leaf == nil || !base.parents.Tracked() {
+		return nil, fmt.Errorf("operation journal directory authority is unavailable")
+	}
+	leaf, parents, err := safefile.CaptureDirectoryRootWithin(j.root, base.rel)
+	if err != nil || !safefile.SameParentChain(parents, base.parents) || !safefile.SameDirectoryRootState(leaf, base.leaf) {
+		return nil, fmt.Errorf("%w: operation journal directory changed: %v", safefile.ErrParentChanged, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(j.root, filepath.FromSlash(j.rel)))
+	if err != nil {
+		return nil, err
+	}
+	paths := make(map[string]struct{})
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".json" {
+			continue
+		}
+		operationID := strings.TrimSuffix(name, ".json")
+		record, readErr := j.Read(operationID)
+		if readErr != nil {
+			return nil, readErr
+		}
+		if record.Status != StatusRunning && record.FinishedAt != nil && record.Backup != "" {
+			paths[record.Backup] = struct{}{}
+		}
+	}
+	return paths, nil
 }

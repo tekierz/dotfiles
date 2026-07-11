@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
@@ -275,6 +276,46 @@ func TestAcceptedClaudeWriterRejectsIdenticalReplacement(t *testing.T) {
 	}
 }
 
+func TestAuthorityNamedWritersRejectIncompleteNamespaceAuthority(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	missing := func(rel string) safefile.Revision {
+		t.Helper()
+		_, revision, err := safefile.ReadWithin(home, rel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return revision
+	}
+	assertParent := func(name string, err error) {
+		t.Helper()
+		if !errors.Is(err, safefile.ErrParentChanged) {
+			t.Fatalf("%s error = %v, want ErrParentChanged", name, err)
+		}
+	}
+	zshRevision := missing(".zshrc")
+	_, err := WriteZshConfigAtAuthorityTracked(ZshConfig{}, "dracula", zshRevision, nil)
+	assertParent("zsh", err)
+	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	_, err = WriteGhosttyConfigAtAuthorityTracked(ghosttyPath, GhosttyConfig{}, "dracula", missing(".config/ghostty/config"), nil)
+	assertParent("ghostty", err)
+	claude := NewClaudeCodeTool()
+	_, err = claude.ApplyConfigWithMCPsAtAuthorityTracked(nil, missing(".claude.json"), nil)
+	assertParent("claude", err)
+	_, err = WriteGitConfigAtAuthoritiesTracked(GitConfig{}, "dracula", missing(".gitconfig"), nil, missing(gitManagedConfigRel), nil)
+	assertParent("git", err)
+	_, err = WriteYaziConfigAtAuthoritiesTracked(YaziConfig{}, "dracula",
+		missing(".config/yazi/yazi.toml"), nil,
+		missing(".config/yazi/keymap.toml"), nil,
+		missing(".config/yazi/theme.toml"), nil, operation.DefaultLocker)
+	assertParent("yazi", err)
+	_, err = WriteBtopConfigAtAuthoritiesTracked(BtopConfig{}, "dracula",
+		missing(".config/btop/themes/dracula.theme"), nil,
+		missing(".config/btop/btop.conf"), nil, operation.DefaultLocker)
+	assertParent("btop", err)
+}
+
 func TestAcceptedDirectoryWritersRejectIdenticalReplacementBeforeMutation(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -300,7 +341,10 @@ func TestAcceptedDirectoryWritersRejectIdenticalReplacementBeforeMutation(t *tes
 	if err := WriteTmuxConfig(tmuxCfg, "dracula"); err != nil {
 		t.Fatal(err)
 	}
-	tmuxAccepted := readAcceptedFileRevision(t, filepath.Join(home, ".tmux.conf"))
+	_, tmuxAccepted, tmuxParents, err := safefile.ObserveFileWithin(home, ".tmux.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
 	tpmPath := filepath.Join(home, ".tmux", "plugins", "tpm")
 	if err := os.MkdirAll(tpmPath, 0o700); err != nil {
 		t.Fatal(err)
@@ -308,12 +352,20 @@ func TestAcceptedDirectoryWritersRejectIdenticalReplacementBeforeMutation(t *tes
 	if err := os.WriteFile(filepath.Join(tpmPath, "tpm"), []byte("same\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	tpmAccepted, err := safefile.SnapshotDirectoryWithin(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")))
+	tpmAccepted, tpmParents, err := safefile.ObserveDirectoryWithin(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	statePlan, err := operation.CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := operation.BootstrapStateNamespaceTracked(statePlan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	replaceDirectoryWithIdenticalNewIdentity(t, tpmPath)
-	if _, err := SetupTPMAtAuthorityTracked(tmuxCfg, "dracula", tmuxAccepted, tpmAccepted); !errors.Is(err, safefile.ErrDirectoryChanged) {
+	if _, err := SetupTPMAtAuthorityTracked(tmuxCfg, "dracula", tmuxAccepted, tmuxParents, tpmAccepted, tpmParents, state); !errors.Is(err, safefile.ErrDirectoryChanged) {
 		t.Fatalf("TPM error = %v, want ErrDirectoryChanged", err)
 	}
 }

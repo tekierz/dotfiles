@@ -141,6 +141,51 @@ func recursiveDirectorySnapshot(snapshot *DirectorySnapshot) bool {
 	return snapshot != nil && snapshot.tracked && !snapshot.rootOnly
 }
 
+// RecursiveFileStats returns the number and total byte size of regular files
+// captured recursively, excluding any named direct children of the snapshot
+// root. Root-only namespace tokens report zero values.
+func (s *DirectorySnapshot) RecursiveFileStats(excludeRootNames ...string) (int, int64) {
+	if !recursiveDirectorySnapshot(s) {
+		return 0, 0
+	}
+	excluded := make(map[string]struct{}, len(excludeRootNames))
+	for _, name := range excludeRootNames {
+		excluded[name] = struct{}{}
+	}
+	var walk func(directorySnapshotNode) (int, int64)
+	walk = func(node directorySnapshotNode) (int, int64) {
+		var count int
+		var size int64
+		for _, entry := range node.entries {
+			if entry.dir != nil {
+				nestedCount, nestedSize := walk(*entry.dir)
+				count += nestedCount
+				size += nestedSize
+				continue
+			}
+			count++
+			size += int64(len(entry.data))
+		}
+		return count, size
+	}
+	var count int
+	var size int64
+	for _, entry := range s.root.entries {
+		if _, skip := excluded[entry.name]; skip {
+			continue
+		}
+		if entry.dir != nil {
+			nestedCount, nestedSize := walk(*entry.dir)
+			count += nestedCount
+			size += nestedSize
+		} else {
+			count++
+			size += int64(len(entry.data))
+		}
+	}
+	return count, size
+}
+
 // Permissions returns the captured root directory permission bits. A nil or
 // untracked snapshot returns zero.
 func (s *DirectorySnapshot) Permissions() fs.FileMode {

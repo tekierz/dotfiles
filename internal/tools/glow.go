@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
@@ -111,6 +112,14 @@ func WriteGlowConfigAtRevisionTracked(cfg GlowConfig, theme string, accepted saf
 		return MutationEvidence{}, err
 	}
 	return writeToolConfigAtRevisionTracked(configPath, []byte(GenerateGlowConfig(cfg, theme)), accepted)
+}
+
+func WriteGlowConfigAtAuthorityTracked(cfg GlowConfig, theme string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	configPath, err := glowConfigPath()
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return writeToolConfigAtAuthorityTracked(configPath, []byte(GenerateGlowConfig(cfg, theme)), accepted, parents, locker)
 }
 
 // glowConfigPath returns the config file glow itself loads. Glow resolves its

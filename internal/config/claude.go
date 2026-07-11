@@ -139,13 +139,13 @@ func SaveClaudeConfig(cfg *ClaudeConfig) (returnErr error) {
 }
 
 func SaveClaudeConfigTracked(cfg *ClaudeConfig) (committedRevision safefile.Revision, returnErr error) {
-	return saveClaudeConfigAtRevisionTracked(cfg, nil, nil)
+	return saveClaudeConfigAtRevisionTracked(cfg, nil, nil, operation.DefaultLocker, nil)
 }
 
 // SaveClaudeConfigAtRevisionTracked applies the merge only while the source
 // still matches a reviewed plan's exact accepted revision.
 func SaveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted safefile.Revision) (safefile.Revision, error) {
-	return saveClaudeConfigAtRevisionTracked(cfg, &accepted, nil)
+	return saveClaudeConfigAtRevisionTracked(cfg, &accepted, nil, operation.DefaultLocker, nil)
 }
 
 // ApplyClaudeMCPSelectionAtRevisionTracked performs the accepted read,
@@ -156,10 +156,25 @@ func ApplyClaudeMCPSelectionAtRevisionTracked(enabled map[string]bool, accepted 
 	for name, value := range enabled {
 		selection[name] = value
 	}
-	return saveClaudeConfigAtRevisionTracked(nil, &accepted, selection)
+	return saveClaudeConfigAtRevisionTracked(nil, &accepted, nil, operation.DefaultLocker, selection)
 }
 
-func saveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted *safefile.Revision, selection map[string]bool) (committedRevision safefile.Revision, returnErr error) {
+func ApplyClaudeMCPSelectionAtAuthorityTracked(enabled map[string]bool, accepted safefile.Revision, parents *safefile.ParentChain) (safefile.Revision, error) {
+	return ApplyClaudeMCPSelectionAtBoundAuthorityTracked(enabled, accepted, parents, operation.DefaultLocker)
+}
+
+func ApplyClaudeMCPSelectionAtBoundAuthorityTracked(enabled map[string]bool, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (safefile.Revision, error) {
+	if !parents.Tracked() || locker == nil {
+		return safefile.Revision{}, fmt.Errorf("%w: Claude config authority is incomplete", safefile.ErrParentChanged)
+	}
+	selection := make(map[string]bool, len(enabled))
+	for name, value := range enabled {
+		selection[name] = value
+	}
+	return saveClaudeConfigAtRevisionTracked(nil, &accepted, parents, locker, selection)
+}
+
+func saveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted *safefile.Revision, parents *safefile.ParentChain, locker operation.Locker, selection map[string]bool) (committedRevision safefile.Revision, returnErr error) {
 	if cfg == nil && selection == nil {
 		return safefile.Revision{}, errors.New("claude config is nil")
 	}
@@ -174,7 +189,7 @@ func saveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted *safefile.Rev
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("resolve Claude config path: %w", err)
 	}
-	release, err := operation.AcquireStateLock("claude-config", path)
+	release, err := locker("claude-config", path)
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("lock Claude config: %w", err)
 	}
@@ -193,7 +208,13 @@ func saveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted *safefile.Rev
 	// Read existing content into a generic map so unrelated keys (model,
 	// permissions, hooks, statusLine, projects, etc.) survive the round-trip.
 	raw := make(map[string]json.RawMessage)
-	existing, revision, err := safefile.ReadWithin(root, rel)
+	var existing []byte
+	var revision safefile.Revision
+	if accepted != nil && parents != nil {
+		existing, revision, err = safefile.ReadWithinAuthorized(root, rel, parents)
+	} else {
+		existing, revision, err = safefile.ReadWithin(root, rel)
+	}
 	if err != nil {
 		return safefile.Revision{}, err
 	}
@@ -248,7 +269,14 @@ func saveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted *safefile.Rev
 			return safefile.Revision{}, fmt.Errorf("before Claude config commit: %w", err)
 		}
 	}
-	finalRevision, err := safefile.ReplaceWithinRevisionTracked(root, rel, revision, data, 0600)
+	var finalRevision safefile.Revision
+	if accepted != nil && parents != nil {
+		finalRevision, err = safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, rel, revision, parents, data, 0600)
+	} else if accepted != nil {
+		finalRevision, err = safefile.ReplaceWithinRevisionNoCreateTracked(root, rel, revision, data, 0600)
+	} else {
+		finalRevision, err = safefile.ReplaceWithinRevisionTracked(root, rel, revision, data, 0600)
+	}
 	if err != nil {
 		var committed interface{ Committed() bool }
 		if errors.As(err, &committed) && committed.Committed() {

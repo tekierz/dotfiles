@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/safefile"
@@ -35,6 +37,8 @@ type installPlan struct {
 	animations    bool
 	globalConfig  *config.GlobalConfig
 	authority     map[string]map[string]acceptedTarget
+	parentDirs    []string
+	statePlan     *operation.StatePlan
 	// ghosttyConfigTarget is the exact absolute destination accepted during
 	// planning. Execution must not rediscover a different higher-precedence file
 	// after preview/revalidation.
@@ -56,6 +60,8 @@ type acceptedTarget struct {
 	kind      acceptedTargetKind
 	file      safefile.Revision
 	directory *safefile.DirectorySnapshot
+	parents   *safefile.ParentChain
+	data      []byte
 }
 
 func (p *installPlan) hash() string {
@@ -77,6 +83,34 @@ func (p *installPlan) backupTargets() []string {
 		return nil
 	}
 	return p.document.BackupTargets()
+}
+
+func (p *installPlan) backupTargetSpecs() ([]backup.Target, error) {
+	if p == nil {
+		return nil, fmt.Errorf("no accepted plan")
+	}
+	var targets []backup.Target
+	for _, action := range p.actions() {
+		if action.Disposition != operation.DispositionApply {
+			continue
+		}
+		paths := append([]string(nil), action.BackupTargets...)
+		if action.BackupTarget != "" {
+			paths = append(paths, action.BackupTarget)
+		}
+		for _, rel := range paths {
+			target, err := p.acceptedTarget(action.ID, rel)
+			if err != nil {
+				return nil, err
+			}
+			kind := backup.TargetFile
+			if target.kind == acceptedDirectoryTarget {
+				kind = backup.TargetDirectory
+			}
+			targets = append(targets, backup.Target{RelPath: rel, Kind: kind})
+		}
+	}
+	return targets, nil
 }
 
 func (p *installPlan) hasBlocked() bool { return p != nil && p.document.HasBlocked() }
@@ -115,6 +149,28 @@ func (p *installPlan) acceptedDirectorySnapshot(actionID, rel string) (*safefile
 	return target.directory, nil
 }
 
+func (p *installPlan) acceptedFileAuthority(actionID, rel string) (safefile.Revision, *safefile.ParentChain, error) {
+	target, err := p.acceptedTarget(actionID, rel)
+	if err != nil {
+		return safefile.Revision{}, nil, err
+	}
+	if target.kind != acceptedFileTarget || !target.file.Tracked() || !target.parents.Tracked() {
+		return safefile.Revision{}, nil, fmt.Errorf("accepted target %s for %s has incomplete file authority", rel, actionID)
+	}
+	return target.file, target.parents, nil
+}
+
+func (p *installPlan) acceptedDirectoryAuthority(actionID, rel string) (*safefile.DirectorySnapshot, *safefile.ParentChain, error) {
+	target, err := p.acceptedTarget(actionID, rel)
+	if err != nil {
+		return nil, nil, err
+	}
+	if target.kind != acceptedDirectoryTarget || !target.parents.Tracked() {
+		return nil, nil, fmt.Errorf("accepted target %s for %s has incomplete directory authority", rel, actionID)
+	}
+	return target.directory, target.parents, nil
+}
+
 func (p *installPlan) acceptedTarget(actionID, rel string) (acceptedTarget, error) {
 	if p == nil {
 		return acceptedTarget{}, fmt.Errorf("no accepted plan")
@@ -133,6 +189,13 @@ func (p *installPlan) plannedGlobalConfig() (*config.GlobalConfig, error) {
 		return nil, fmt.Errorf("accepted plan has no global config snapshot")
 	}
 	return config.CloneGlobalConfig(p.globalConfig), nil
+}
+
+func (p *installPlan) parentDirectoryTargets() []string {
+	if p == nil {
+		return nil
+	}
+	return slices.Clone(p.parentDirs)
 }
 
 func (p *installPlan) acceptedGhosttyConfigTarget() (string, error) {
@@ -186,6 +249,10 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 	if a == nil || a.deepDiveConfig == nil {
 		return nil, fmt.Errorf("cannot build install plan without installer state")
 	}
+	statePlan, err := operation.CaptureStatePlan()
+	if err != nil {
+		return nil, fmt.Errorf("capture private operation state before planning: %w", err)
+	}
 	globalConfig, err := config.LoadGlobalConfig()
 	if err != nil {
 		return nil, fmt.Errorf("validate global config before planning: %w", err)
@@ -225,7 +292,11 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 	authority := make(map[string]map[string]acceptedTarget)
 	if globalDisposition == operation.DispositionApply {
 		globalRevision, _ := config.GlobalConfigRevision(globalConfig)
-		authority["state:global"] = map[string]acceptedTarget{globalTarget: {kind: acceptedFileTarget, file: globalRevision}}
+		globalData, observedRevision, globalParents, observeErr := safefile.ObserveFileWithin(home, globalTarget)
+		if observeErr != nil || observedRevision != globalRevision {
+			return nil, fmt.Errorf("stably observe global settings namespace: %w", errors.Join(observeErr, safefile.ErrRevisionChanged))
+		}
+		authority["state:global"] = map[string]acceptedTarget{globalTarget: {kind: acceptedFileTarget, file: globalRevision, parents: globalParents, data: slices.Clone(globalData)}}
 	}
 	actions := []operation.Action{{
 		ID:          "state:global",
@@ -271,7 +342,7 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		rel := filepath.ToSlash(filepath.Join(".local", "bin", helper))
 		desiredContent := scriptsForPlan(helper)
 		desired := sha256.Sum256(desiredContent)
-		observation, revision, err := observeRelativeFile(home, rel)
+		observation, revision, parents, original, err := observeRelativeFile(home, rel)
 		if err != nil {
 			return nil, fmt.Errorf("observe helper %s: %w", helper, err)
 		}
@@ -299,7 +370,7 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 			Observations:  []operation.Observation{observation},
 		})
 		if disposition == operation.DispositionApply {
-			authority["helper:"+helper] = map[string]acceptedTarget{rel: {kind: acceptedFileTarget, file: revision}}
+			authority["helper:"+helper] = map[string]acceptedTarget{rel: {kind: acceptedFileTarget, file: revision, parents: parents, data: original}}
 		}
 	}
 
@@ -352,6 +423,41 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 			authority[action.ID] = actionAuthority
 		}
 	}
+	if err := validateStateProductSeparation(home, actions); err != nil {
+		return nil, err
+	}
+
+	parents, err := missingProductParentDirectories(home, actions)
+	if err != nil {
+		return nil, err
+	}
+	if len(parents) > 0 {
+		observations := make([]operation.Observation, 0, len(parents))
+		parentAuthority := make(map[string]acceptedTarget, len(parents))
+		for _, rel := range parents {
+			_, parentChain, observeErr := safefile.ObserveDirectoryWithin(home, rel)
+			if observeErr != nil && !errors.Is(observeErr, os.ErrNotExist) {
+				return nil, fmt.Errorf("observe planned parent %s: %w", rel, observeErr)
+			}
+			observations = append(observations, operation.Observation{Source: rel})
+			parentAuthority[rel] = acceptedTarget{kind: acceptedDirectoryTarget, parents: parentChain}
+		}
+		parentAction := operation.Action{
+			ID:            "state:parents",
+			Kind:          operation.KindUpdateState,
+			Target:        strings.Join(parents, ", "),
+			Description:   "create reviewed private parent directories for selected configuration",
+			Disposition:   operation.DispositionApply,
+			DesiredDigest: digestPlanValue(parents),
+			Ownership:     operation.OwnershipManagedFile,
+			Reversibility: operation.ReversibilityBackup,
+			BackupTargets: slices.Clone(parents),
+			Observation:   operation.Observation{Source: strings.Join(parents, ",")},
+			Observations:  observations,
+		}
+		actions = append([]operation.Action{parentAction}, actions...)
+		authority[parentAction.ID] = parentAuthority
+	}
 
 	document, err := operation.NewPlan(now, actions)
 	if err != nil {
@@ -370,8 +476,140 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		animations:          a.animationsEnabled,
 		globalConfig:        plannedGlobal,
 		authority:           authority,
+		parentDirs:          slices.Clone(parents),
+		statePlan:           statePlan,
 		ghosttyConfigTarget: ghosttyConfigTarget,
 	}, nil
+}
+
+func validateStateProductSeparation(home string, actions []operation.Action) error {
+	stateChild, err := operation.StateSubdirectory("separation-probe")
+	if err != nil {
+		return err
+	}
+	stateRoot, err := canonicalProspectivePath(filepath.Dir(stateChild))
+	if err != nil {
+		return fmt.Errorf("canonicalize operation state namespace: %w", err)
+	}
+	for _, action := range actions {
+		if action.Disposition != operation.DispositionApply {
+			continue
+		}
+		targets := append([]string(nil), action.BackupTargets...)
+		if action.BackupTarget != "" {
+			targets = append(targets, action.BackupTarget)
+		}
+		for _, rel := range targets {
+			absolute := rel
+			if !filepath.IsAbs(absolute) {
+				absolute = filepath.Join(home, filepath.FromSlash(rel))
+			}
+			product, err := canonicalProspectivePath(absolute)
+			if err != nil {
+				return fmt.Errorf("canonicalize product target %s: %w", rel, err)
+			}
+			if pathContains(stateRoot, product) || pathContains(product, stateRoot) {
+				return fmt.Errorf("operation state namespace overlaps reviewed product target %s", rel)
+			}
+		}
+	}
+	return nil
+}
+
+func canonicalProspectivePath(path string) (string, error) {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		return "", fmt.Errorf("path must be absolute: %s", path)
+	}
+	ancestor := clean
+	var suffix []string
+	for {
+		if _, err := os.Lstat(ancestor); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			return "", fmt.Errorf("no existing ancestor for %s", path)
+		}
+		suffix = append([]string{filepath.Base(ancestor)}, suffix...)
+		ancestor = parent
+	}
+	resolved, err := filepath.EvalSymlinks(ancestor)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(append([]string{resolved}, suffix...)...), nil
+}
+
+func pathContains(parent, child string) bool {
+	if runtime.GOOS == "darwin" {
+		parent = strings.ToLower(parent)
+		child = strings.ToLower(child)
+	}
+	rel, err := filepath.Rel(parent, child)
+	return err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))))
+}
+
+func missingProductParentDirectories(home string, actions []operation.Action) ([]string, error) {
+	seen := make(map[string]struct{})
+	operationalAncestors := make(map[string]struct{})
+	stateChild, err := operation.StateSubdirectory("planning-anchor")
+	if err != nil {
+		return nil, fmt.Errorf("resolve operational state namespace: %w", err)
+	}
+	stateRoot := filepath.Dir(stateChild)
+	if stateRel, relErr := filepath.Rel(home, stateRoot); relErr == nil && stateRel != "." && !filepath.IsAbs(stateRel) && stateRel != ".." && !strings.HasPrefix(stateRel, ".."+string(filepath.Separator)) {
+		current := filepath.ToSlash(filepath.Clean(stateRel))
+		for current != "." && current != "" {
+			operationalAncestors[current] = struct{}{}
+			current = filepath.ToSlash(filepath.Dir(filepath.FromSlash(current)))
+		}
+	}
+	for _, action := range actions {
+		if action.Disposition != operation.DispositionApply {
+			continue
+		}
+		targets := append([]string(nil), action.BackupTargets...)
+		if action.BackupTarget != "" {
+			targets = append(targets, action.BackupTarget)
+		}
+		for _, target := range targets {
+			parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(target)))
+			for parent != "." && parent != "" {
+				absolute := filepath.Join(home, filepath.FromSlash(parent))
+				info, err := os.Lstat(absolute)
+				switch {
+				case err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0:
+					parent = "."
+					continue
+				case err == nil:
+					return nil, fmt.Errorf("planned parent %s is not a real directory", parent)
+				case !errors.Is(err, os.ErrNotExist):
+					return nil, fmt.Errorf("inspect planned parent %s: %w", parent, err)
+				default:
+					if _, operational := operationalAncestors[parent]; !operational {
+						seen[parent] = struct{}{}
+					}
+					parent = filepath.ToSlash(filepath.Dir(filepath.FromSlash(parent)))
+				}
+			}
+		}
+	}
+	parents := make([]string, 0, len(seen))
+	for rel := range seen {
+		parents = append(parents, rel)
+	}
+	sort.Slice(parents, func(i, j int) bool {
+		leftDepth := strings.Count(parents[i], "/")
+		rightDepth := strings.Count(parents[j], "/")
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		return parents[i] < parents[j]
+	})
+	return parents, nil
 }
 
 func validateInstallPlanAuthority(actions []operation.Action, authority map[string]map[string]acceptedTarget) error {
@@ -412,8 +650,19 @@ func validateInstallPlanAuthority(actions []operation.Action, authority map[stri
 			if target.kind == acceptedFileTarget && !target.file.Tracked() {
 				return fmt.Errorf("accepted file authority for %s target %s is untracked", actionID, rel)
 			}
+			if target.kind == acceptedFileTarget {
+				if target.file.Exists() && sha256.Sum256(target.data) != target.file.Digest() {
+					return fmt.Errorf("accepted file bytes for %s target %s do not match its revision", actionID, rel)
+				}
+				if !target.file.Exists() && len(target.data) != 0 {
+					return fmt.Errorf("accepted absent file %s target %s carries unexpected bytes", actionID, rel)
+				}
+			}
 			if target.kind != acceptedFileTarget && target.kind != acceptedDirectoryTarget {
 				return fmt.Errorf("accepted authority for %s target %s has invalid kind", actionID, rel)
+			}
+			if !target.parents.Tracked() {
+				return fmt.Errorf("accepted parent-chain authority for %s target %s is untracked", actionID, rel)
 			}
 		}
 	}
@@ -509,7 +758,7 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			if external {
 				return operation.Action{}, nil, fmt.Errorf("external directory config target is unsupported: %s", absolute)
 			}
-			snapshot, snapshotErr := safefile.SnapshotDirectoryWithin(home, filepath.ToSlash(rel))
+			snapshot, parents, snapshotErr := safefile.ObserveDirectoryWithin(home, filepath.ToSlash(rel))
 			if snapshotErr != nil {
 				return operation.Action{}, nil, fmt.Errorf("snapshot %s target %s: %w", spec.toolID, rel, snapshotErr)
 			}
@@ -517,7 +766,7 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			combined.Exists = true
 			allExistingManaged = false
 			observations = append(observations, operation.Observation{Exists: true, Source: rel, Digest: hex.EncodeToString(digest[:])})
-			authority[rel] = acceptedTarget{kind: acceptedDirectoryTarget, directory: snapshot}
+			authority[rel] = acceptedTarget{kind: acceptedDirectoryTarget, directory: snapshot, parents: parents}
 			if spec.fullFilePolicy {
 				disposition = operation.DispositionBlocked
 				reason = "an existing managed-directory target has no ownership manifest"
@@ -531,12 +780,16 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			return operation.Action{}, nil, fmt.Errorf("observe %s target %s: unsupported file type", spec.toolID, rel)
 		}
 		if errors.Is(statErr, os.ErrNotExist) && plannedDirectoryConfigTarget(spec.toolID, rel) {
+			snapshot, parents, observeErr := safefile.ObserveDirectoryWithin(home, filepath.ToSlash(rel))
+			if !errors.Is(observeErr, os.ErrNotExist) || snapshot != nil {
+				return operation.Action{}, nil, fmt.Errorf("observe absent %s directory target %s: %w", spec.toolID, rel, observeErr)
+			}
 			observations = append(observations, operation.Observation{Source: rel})
-			authority[rel] = acceptedTarget{kind: acceptedDirectoryTarget}
+			authority[rel] = acceptedTarget{kind: acceptedDirectoryTarget, parents: parents}
 			allExistingManaged = false
 			continue
 		}
-		content, revision, err := safefile.ReadWithin(home, filepath.ToSlash(rel))
+		content, revision, parents, err := safefile.ObserveFileWithin(home, filepath.ToSlash(rel))
 		if err != nil {
 			return operation.Action{}, nil, fmt.Errorf("observe %s target %s: %w", spec.toolID, rel, err)
 		}
@@ -546,7 +799,7 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			observed.Digest = hex.EncodeToString(digest[:])
 			observed.Managed = tools.IsManagedGeneratedConfigContent(content)
 		}
-		authority[rel] = acceptedTarget{kind: acceptedFileTarget, file: revision}
+		authority[rel] = acceptedTarget{kind: acceptedFileTarget, file: revision, parents: parents, data: slices.Clone(content)}
 		if observed.Exists {
 			combined.Exists = true
 			if !observed.Managed {
@@ -598,12 +851,12 @@ func digestPlanValue(value any) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func observeRelativeFile(home, rel string) (operation.Observation, safefile.Revision, error) {
-	_, revision, err := safefile.ReadWithin(home, filepath.ToSlash(rel))
+func observeRelativeFile(home, rel string) (operation.Observation, safefile.Revision, *safefile.ParentChain, []byte, error) {
+	data, revision, parents, err := safefile.ObserveFileWithin(home, filepath.ToSlash(rel))
 	if err != nil {
-		return operation.Observation{}, safefile.Revision{}, err
+		return operation.Observation{}, safefile.Revision{}, nil, nil, err
 	}
-	return observationFromFileRevision(rel, revision, false), revision, nil
+	return observationFromFileRevision(rel, revision, false), revision, parents, slices.Clone(data), nil
 }
 
 func observationFromFileRevision(rel string, revision safefile.Revision, managed bool) operation.Observation {
@@ -618,6 +871,10 @@ func observationFromFileRevision(rel string, revision safefile.Revision, managed
 }
 
 func revalidateInstallPlan(plan *installPlan) error {
+	return revalidateInstallPlanWithCreated(plan, nil)
+}
+
+func revalidateInstallPlanWithCreated(plan *installPlan, created map[string]*safefile.DirectorySnapshot) error {
 	if plan == nil {
 		return fmt.Errorf("no accepted plan")
 	}
@@ -630,17 +887,28 @@ func revalidateInstallPlan(plan *installPlan) error {
 			continue
 		}
 		for rel, expected := range plan.authority[action.ID] {
+			boundParents, bindErr := safefile.ValidateParentChainWithin(home, rel, expected.parents, created)
+			if bindErr != nil {
+				return fmt.Errorf("action %s target %s parent authority changed after preview: %w", action.ID, rel, bindErr)
+			}
 			var verifyErr error
 			switch expected.kind {
 			case acceptedFileTarget:
-				_, current, err := safefile.ReadWithin(home, rel)
+				_, current, parents, err := safefile.ObserveFileWithin(home, rel)
 				if err != nil {
 					verifyErr = err
-				} else if current != expected.file {
+				} else if current != expected.file || !safefile.SameParentChain(parents, boundParents) {
 					verifyErr = safefile.ErrRevisionChanged
 				}
 			case acceptedDirectoryTarget:
-				verifyErr = safefile.VerifyDirectoryWithinSnapshot(home, rel, expected.directory)
+				current, parents, observeErr := safefile.ObserveDirectoryWithin(home, rel)
+				if expected.directory == nil && errors.Is(observeErr, os.ErrNotExist) && safefile.SameParentChain(parents, boundParents) {
+					verifyErr = nil
+				} else if observeErr != nil {
+					verifyErr = observeErr
+				} else if !safefile.SameParentChain(parents, boundParents) || current == nil || expected.directory == nil || current.Digest() != expected.directory.Digest() || !safefile.SameDirectoryRootState(current, expected.directory) {
+					verifyErr = safefile.ErrDirectoryChanged
+				}
 			default:
 				verifyErr = fmt.Errorf("invalid accepted authority kind")
 			}
@@ -650,4 +918,20 @@ func revalidateInstallPlan(plan *installPlan) error {
 		}
 	}
 	return nil
+}
+
+func bindInstallPlanAuthority(home string, plan *installPlan, created map[string]*safefile.DirectorySnapshot) (map[string]map[string]acceptedTarget, error) {
+	bound := make(map[string]map[string]acceptedTarget, len(plan.authority))
+	for actionID, targets := range plan.authority {
+		bound[actionID] = make(map[string]acceptedTarget, len(targets))
+		for rel, accepted := range targets {
+			parents, err := safefile.BindParentChainWithin(home, rel, accepted.parents, created)
+			if err != nil {
+				return nil, fmt.Errorf("bind %s target %s parent authority: %w", actionID, rel, err)
+			}
+			accepted.parents = parents
+			bound[actionID][rel] = accepted
+		}
+	}
+	return bound, nil
 }

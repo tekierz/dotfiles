@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -564,35 +565,17 @@ func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
 func loadBackupsCmd() tea.Cmd {
 	return func() tea.Msg {
 		backupDir := filepath.Join(config.ConfigDir(), "backups")
-		entries, err := os.ReadDir(backupDir)
+		entries, err := backup.ListCatalog(backupDir)
 		if err != nil {
-			if os.IsNotExist(err) {
-				return backupsLoadedMsg{backups: []BackupEntry{}}
-			}
 			return backupsLoadedMsg{err: err}
 		}
 
-		var backups []BackupEntry
+		backups := make([]BackupEntry, 0, len(entries))
 		for _, entry := range entries {
-			if entry.IsDir() {
-				info, _ := entry.Info()
-				path := filepath.Join(backupDir, entry.Name())
-				count := countBackupFiles(path)
-				size := calcDirSize(path)
-
-				timestamp := time.Time{}
-				if info != nil {
-					timestamp = info.ModTime()
-				}
-
-				backups = append(backups, BackupEntry{
-					Name:      entry.Name(),
-					Timestamp: timestamp,
-					FileCount: count,
-					Size:      size,
-					Path:      path,
-				})
-			}
+			backups = append(backups, BackupEntry{
+				Name: entry.Name, Timestamp: entry.Timestamp, FileCount: entry.FileCount,
+				Size: entry.Size, Path: entry.Path, Catalog: entry,
+			})
 		}
 
 		// Sort by timestamp descending (newest first)
@@ -602,20 +585,6 @@ func loadBackupsCmd() tea.Cmd {
 
 		return backupsLoadedMsg{backups: backups}
 	}
-}
-
-// countBackupFiles counts backed-up dotfiles in a backup directory.
-// The manifest (backup.ManifestName) is metadata, not a backed-up dotfile, so
-// it is excluded so the displayed count matches what restore will actually write.
-func countBackupFiles(path string) int {
-	count := 0
-	_ = filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
-		if info != nil && !info.IsDir() && info.Name() != backup.ManifestName {
-			count++
-		}
-		return nil
-	})
-	return count
 }
 
 // makeUniqueBackupDir returns a path inside backupsDir that does not yet exist,
@@ -633,18 +602,6 @@ func makeUniqueBackupDir(backupsDir, baseName string) string {
 			return candidate
 		}
 	}
-}
-
-// calcDirSize calculates the total size of files in a directory
-func calcDirSize(path string) int64 {
-	var size int64
-	_ = filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
-		if info != nil && !info.IsDir() {
-			size += info.Size()
-		}
-		return nil
-	})
-	return size
 }
 
 // formatBytes formats a byte count into a human-readable string
@@ -671,6 +628,9 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 			return backupRestoreDoneMsg{name: b.Name, err: err}
 		}
 
+		if err := backup.ValidateCatalogEntry(b.Catalog); err != nil {
+			return backupRestoreDoneMsg{name: b.Name, err: err}
+		}
 		result, err := backup.Restore(b.Path, home)
 		if err != nil {
 			return backupRestoreDoneMsg{name: b.Name, err: err}
@@ -710,7 +670,7 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 // deleteBackupCmd deletes a backup directory
 func deleteBackupCmd(b BackupEntry) tea.Cmd {
 	return func() tea.Msg {
-		err := os.RemoveAll(b.Path)
+		err := backup.RemoveCatalogEntry(b.Catalog)
 		return backupDeleteDoneMsg{name: b.Name, err: err}
 	}
 }
@@ -765,10 +725,8 @@ var defaultBackupFiles = []string{
 
 // cleanupBackups removes old backups based on global config settings. It returns
 // an aggregated error naming every backup it failed to remove: ignoring those
-// os.RemoveAll failures let the max-count / max-age retention policy silently
-// never take effect (the over-limit/expired directories piled up unremoved). The
-// loop keeps going past a failure so one un-removable directory does not block
-// pruning the rest, and callers surface the returned error.
+// Exact authorized removal failures are aggregated so one unremovable backup
+// does not block pruning the rest and callers can surface stalled retention.
 func cleanupBackups() error {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
@@ -776,43 +734,74 @@ func cleanupBackups() error {
 	}
 
 	backupsDir := filepath.Join(config.ConfigDir(), "backups")
-	entries, err := os.ReadDir(backupsDir)
+	entries, err := backup.ListCatalog(backupsDir)
 	if err != nil {
-		// A missing backups dir is not an error: there is simply nothing to prune.
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
+	return cleanupBackupCatalog(entries, cfg, nil)
+}
 
-	type backupInfo struct {
-		name    string
-		modTime time.Time
+func cleanupBackupsWithState(state *operation.StateAuthority) error {
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return err
 	}
+	var cleanupErrs []error
+	convenience, err := backup.ListCatalog(filepath.Join(config.ConfigDir(), "backups"))
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("list convenience backups: %w", err))
+	} else if err := cleanupBackupCatalog(convenience, cfg, nil); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if state == nil {
+		return errors.Join(cleanupErrs...)
+	}
+	journal, err := operation.DefaultJournalWithAuthority(state)
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+		return errors.Join(cleanupErrs...)
+	}
+	terminal, err := journal.TerminalBackupPaths()
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("list terminal operation backups: %w", err))
+		return errors.Join(cleanupErrs...)
+	}
+	stateBackups, err := operation.StateSubdirectory("backups")
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+		return errors.Join(cleanupErrs...)
+	}
+	planEntries, err := backup.ListCatalog(stateBackups)
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("list plan backups: %w", err))
+	} else if err := cleanupBackupCatalog(planEntries, cfg, terminal); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	return errors.Join(cleanupErrs...)
+}
 
-	var backups []backupInfo
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+func cleanupBackupCatalog(entries []backup.CatalogEntry, cfg *config.GlobalConfig, eligible map[string]struct{}) error {
+	if cfg == nil {
+		return fmt.Errorf("backup retention config is unavailable")
+	}
+	if eligible != nil {
+		filtered := entries[:0]
+		for _, entry := range entries {
+			if _, ok := eligible[filepath.Clean(entry.Path)]; ok {
+				filtered = append(filtered, entry)
+			}
 		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		backups = append(backups, backupInfo{
-			name:    entry.Name(),
-			modTime: info.ModTime(),
-		})
+		entries = filtered
 	}
 
 	// Sort by modification time (newest first)
-	sort.Slice(backups, func(i, j int) bool {
-		return backups[i].modTime.After(backups[j].modTime)
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.After(entries[j].Timestamp)
 	})
 
 	now := time.Now()
 	var removeErrs []error
-	for i, bk := range backups {
+	for i, entry := range entries {
 		shouldDelete := false
 
 		// Delete if exceeds max count (and max count is set)
@@ -822,16 +811,15 @@ func cleanupBackups() error {
 
 		// Delete if exceeds max age (and max age is set)
 		if cfg.BackupMaxAgeDays > 0 {
-			age := now.Sub(bk.modTime)
+			age := now.Sub(entry.Timestamp)
 			if age > time.Duration(cfg.BackupMaxAgeDays)*24*time.Hour {
 				shouldDelete = true
 			}
 		}
 
 		if shouldDelete {
-			backupPath := filepath.Join(backupsDir, bk.name)
-			if err := os.RemoveAll(backupPath); err != nil {
-				removeErrs = append(removeErrs, fmt.Errorf("%s: %w", bk.name, err))
+			if err := backup.RemoveCatalogEntry(entry); err != nil {
+				removeErrs = append(removeErrs, fmt.Errorf("%s: %w", entry.Name, err))
 			}
 		}
 	}
@@ -850,6 +838,7 @@ type autoBackupResult struct {
 	count      int  // number of files actually captured
 	backupDir  string
 	cleanupErr error // non-fatal: retention cleanup after the backup failed
+	plan       *backup.PlanResult
 }
 
 // autoBackupIfEnabled creates a backup if auto-backup is enabled in settings.
@@ -901,27 +890,40 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 // mutation scope. Unlike the user's convenience auto-backup preference, this
 // safety boundary cannot be disabled. Missing targets are recorded explicitly
 // so rollback can remove files/directories created by the operation.
-func backupPlanTargets(files []string) (autoBackupResult, error) {
-	if len(files) == 0 {
+func backupPlanTargets(targets []backup.Target) (autoBackupResult, error) {
+	return backupPlanTargetsWithState(nil, targets)
+}
+
+func backupPlanTargetsWithState(state *operation.StateAuthority, targets []backup.Target) (autoBackupResult, error) {
+	if len(targets) == 0 {
 		return autoBackupResult{}, fmt.Errorf("accepted plan has no rollback targets")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return autoBackupResult{enabled: true}, err
 	}
-	targets, err := plannedBackupTargets(home, files)
+	timestamp := time.Now().Format("2006-01-02_15-04-05") + "_plan"
+	backupsDir, err := operation.StateSubdirectory("backups")
 	if err != nil {
 		return autoBackupResult{enabled: true}, err
 	}
-	timestamp := time.Now().Format("2006-01-02_15-04-05") + "_plan"
-	backupsDir := filepath.Join(config.ConfigDir(), "backups")
 	backupDir := makeUniqueBackupDir(backupsDir, timestamp)
-	count, err := backup.CreatePlan(home, backupDir, targets)
-	if err != nil {
-		return autoBackupResult{enabled: true, count: count, backupDir: backupDir}, err
+	var planResult backup.PlanResult
+	if state != nil {
+		planResult, err = backup.CreatePlanTrackedWithState(home, backupDir, targets, state)
+	} else {
+		planResult, err = backup.CreatePlanTracked(home, backupDir, targets)
 	}
-	cleanupErr := cleanupBackups()
-	return autoBackupResult{enabled: true, count: count, backupDir: backupDir, cleanupErr: cleanupErr}, nil
+	if err != nil {
+		return autoBackupResult{enabled: true, count: planResult.Count, backupDir: backupDir}, err
+	}
+	var cleanupErr error
+	if state != nil {
+		cleanupErr = cleanupBackupsWithState(state)
+	} else {
+		cleanupErr = cleanupBackups()
+	}
+	return autoBackupResult{enabled: true, count: planResult.Count, backupDir: backupDir, cleanupErr: cleanupErr, plan: &planResult}, nil
 }
 
 func plannedBackupTargets(home string, files []string) ([]backup.Target, error) {

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/theme"
@@ -272,8 +273,16 @@ func WriteFzfConfigTracked(cfg FzfConfig, theme string) (MutationEvidence, error
 func WriteFzfConfigAtRevisionTracked(cfg FzfConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return writeToolConfigAtRevisionTracked(filepath.Join(home, ".config", "fzf", "fzf.zsh"), []byte(GenerateFzfConfig(cfg, theme)), accepted)
+}
+
+func WriteFzfConfigAtAuthorityTracked(cfg FzfConfig, theme string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 	configPath := filepath.Join(home, ".config", "fzf", "fzf.zsh")
-	return writeToolConfigAtRevisionTracked(configPath, []byte(GenerateFzfConfig(cfg, theme)), accepted)
+	return writeToolConfigAtAuthorityTracked(configPath, []byte(GenerateFzfConfig(cfg, theme)), accepted, parents, locker)
 }

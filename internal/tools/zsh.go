@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
+
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
@@ -362,7 +364,7 @@ func WriteZshConfig(cfg ZshConfig, theme string) error {
 }
 
 func WriteZshConfigTracked(cfg ZshConfig, theme string) (MutationEvidence, error) {
-	return writeZshConfigAtRevisionTracked(cfg, theme, nil)
+	return writeZshConfigAtRevisionTracked(cfg, theme, nil, nil)
 }
 
 // WriteZshConfigAtRevisionTracked applies a plan-accepted Zsh revision.
@@ -370,10 +372,21 @@ func WriteZshConfigAtRevisionTracked(cfg ZshConfig, theme string, accepted safef
 	if !accepted.Tracked() {
 		return MutationEvidence{}, fmt.Errorf("%w: accepted Zsh revision is untracked", safefile.ErrRevisionChanged)
 	}
-	return writeZshConfigAtRevisionTracked(cfg, theme, &accepted)
+	return writeZshConfigAtRevisionTracked(cfg, theme, &accepted, nil)
 }
 
-func writeZshConfigAtRevisionTracked(cfg ZshConfig, theme string, accepted *safefile.Revision) (MutationEvidence, error) {
+func WriteZshConfigAtAuthorityTracked(cfg ZshConfig, theme string, accepted safefile.Revision, parents *safefile.ParentChain) (MutationEvidence, error) {
+	return WriteZshConfigAtBoundAuthorityTracked(cfg, theme, accepted, parents, operation.DefaultLocker)
+}
+
+func WriteZshConfigAtBoundAuthorityTracked(cfg ZshConfig, theme string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	if !parents.Tracked() || locker == nil {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Zsh authority is incomplete", safefile.ErrParentChanged)
+	}
+	return writeZshConfigAtRevisionTracked(cfg, theme, &accepted, parents, locker)
+}
+
+func writeZshConfigAtRevisionTracked(cfg ZshConfig, theme string, accepted *safefile.Revision, parents *safefile.ParentChain, lockers ...operation.Locker) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
@@ -382,8 +395,25 @@ func writeZshConfigAtRevisionTracked(cfg ZshConfig, theme string, accepted *safe
 	configPath := filepath.Join(home, ".zshrc")
 	managed := []byte(wrapZshManagedSection(GenerateZshConfig(cfg, theme)))
 	var evidence MutationEvidence
-	err = withToolConfigLock(configPath, func(root, rel string) error {
-		existing, revision, err := readToolConfig(root, rel)
+	lock := withToolConfigLock
+	if accepted != nil {
+		locker := operation.DefaultLocker
+		if len(lockers) != 0 && lockers[0] != nil {
+			locker = lockers[0]
+		}
+		lock = func(path string, mutate func(string, string) error) error {
+			return withToolConfigLockAuthorized(path, locker, mutate)
+		}
+	}
+	err = lock(configPath, func(root, rel string) error {
+		var existing []byte
+		var revision safefile.Revision
+		var err error
+		if parents != nil {
+			existing, revision, err = safefile.ReadWithinAuthorized(root, rel, parents)
+		} else {
+			existing, revision, err = readToolConfig(root, rel)
+		}
 		if err != nil {
 			return err
 		}
@@ -401,9 +431,18 @@ func writeZshConfigAtRevisionTracked(cfg ZshConfig, theme string, accepted *safe
 		if accepted != nil {
 			expected = *accepted
 		}
-		committed, err := replaceToolConfigAtRevisionTracked(root, rel, expected, content)
+		var committed safefile.Revision
+		if accepted != nil {
+			if parents != nil {
+				committed, err = replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, rel, expected, parents, content)
+			} else {
+				committed, err = replaceToolConfigAtRevisionNoCreateTracked(root, rel, expected, content)
+			}
+		} else {
+			committed, err = replaceToolConfigAtRevisionTracked(root, rel, expected, content)
+		}
 		if err == nil {
-			evidence = MutationEvidence{Path: configPath, Revision: committed}
+			evidence = MutationEvidence{Path: configPath, Revision: committed, Parents: parents}
 		}
 		return err
 	})

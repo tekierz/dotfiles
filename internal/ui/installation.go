@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -78,12 +77,14 @@ func emitInstallEvent(ctx context.Context, events chan<- installEventMsg, line s
 // Tool's Install method without replacing the process-wide registry or package
 // manager caches.
 type toolInstallRuntime struct {
-	lookupTool      func(string) (tools.Tool, bool)
-	detectManager   func() pkg.PackageManager
-	detectPlatform  func() pkg.Platform
-	isToolInstalled func(tools.Tool) bool
-	autoBackup      func() (autoBackupResult, error)
-	backupTargets   func([]string) (autoBackupResult, error)
+	lookupTool             func(string) (tools.Tool, bool)
+	detectManager          func() pkg.PackageManager
+	detectPlatform         func() pkg.Platform
+	isToolInstalled        func(tools.Tool) bool
+	autoBackup             func() (autoBackupResult, error)
+	backupTargets          func([]backup.Target) (autoBackupResult, error)
+	backupTargetsWithState func(*operation.StateAuthority, []backup.Target) (autoBackupResult, error)
+	acquireInstallLock     func(*operation.StateAuthority, string, string) (func() error, error)
 }
 
 func defaultToolInstallRuntime() toolInstallRuntime {
@@ -95,8 +96,10 @@ func defaultToolInstallRuntime() toolInstallRuntime {
 		isToolInstalled: func(t tools.Tool) bool {
 			return t.IsInstalled()
 		},
-		autoBackup:    autoBackupIfEnabled,
-		backupTargets: backupPlanTargets,
+		autoBackup:             autoBackupIfEnabled,
+		backupTargets:          backupPlanTargets,
+		backupTargetsWithState: backupPlanTargetsWithState,
+		acquireInstallLock:     operation.AcquireStateLockWithAuthority,
 	}
 }
 
@@ -370,7 +373,22 @@ func invalidateRollbackAction(plan *installPlan, actionID string, expected map[s
 		}
 		for _, rel := range append([]string{action.BackupTarget}, action.BackupTargets...) {
 			if rel != "" {
-				expected[filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))] = backup.ExpectedState{Attempted: true}
+				rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+				target, ok := plan.authority[actionID][rel]
+				state := backup.ExpectedState{Attempted: true}
+				if ok && target.kind == acceptedFileTarget {
+					state.Kind = backup.TargetFile
+					state.OriginalExists = target.file.Exists()
+					state.OriginalCaptured = true
+					state.OriginalData = slices.Clone(target.data)
+					state.OriginalMode = target.file.Permissions()
+				} else if ok && target.kind == acceptedDirectoryTarget {
+					state.Kind = backup.TargetDirectory
+					state.OriginalExists = target.directory != nil
+					state.OriginalCaptured = true
+					state.OriginalDirectory = target.directory
+				}
+				expected[rel] = state
 			}
 		}
 		return
@@ -405,7 +423,7 @@ func recordFailedActionRollbackState(home string, plan *installPlan, actionID st
 		}
 		invalidateRollbackAction(plan, actionID, expected)
 		for rel, state := range states {
-			expected[rel] = state
+			expected[rel] = preserveOriginalState(expected[rel], state)
 		}
 		return nil
 	} else {
@@ -444,6 +462,9 @@ func validateMutationEvidenceSet(home string, allowedFiles []string, evidenceSet
 		if _, duplicate := validated[rel]; duplicate {
 			return nil, fmt.Errorf("duplicate mutation evidence for %s", rel)
 		}
+		if !evidence.Parents.Tracked() {
+			return nil, fmt.Errorf("mutation evidence for %s has no bound parent-chain authority", rel)
+		}
 		targets, err := plannedBackupTargets(home, []string{rel})
 		if err != nil {
 			return nil, fmt.Errorf("classify mutation evidence %s: %w", rel, err)
@@ -455,13 +476,24 @@ func validateMutationEvidenceSet(home string, allowedFiles []string, evidenceSet
 			if evidence.Directory == nil {
 				return nil, fmt.Errorf("directory mutation evidence for %s has no snapshot", rel)
 			}
-			validated[rel] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetDirectory, Exists: true, DirectorySnapshot: evidence.Directory}
+			if _, err := safefile.BindParentChainWithin(home, rel, evidence.Parents, nil); err != nil {
+				return nil, fmt.Errorf("directory mutation evidence parent chain for %s changed: %w", rel, err)
+			}
+			current, err := safefile.SnapshotDirectoryWithin(home, rel)
+			if err != nil || !safefile.SameDirectoryRootState(current, evidence.Directory) || current.Digest() != evidence.Directory.Digest() {
+				return nil, fmt.Errorf("directory mutation evidence for %s no longer matches live state: %w", rel, errors.Join(err, safefile.ErrDirectoryChanged))
+			}
+			validated[rel] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetDirectory, Exists: true, DirectorySnapshot: evidence.Directory, Parents: evidence.Parents}
 			continue
 		}
 		if !evidence.Revision.Tracked() || !evidence.Revision.Exists() {
 			return nil, fmt.Errorf("file mutation evidence for %s has no tracked existing revision", rel)
 		}
-		validated[rel] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetFile, Exists: true, FileRevision: evidence.Revision}
+		_, current, err := safefile.ReadWithinAuthorized(home, rel, evidence.Parents)
+		if err != nil || current != evidence.Revision {
+			return nil, fmt.Errorf("file mutation evidence for %s no longer matches live state: %w", rel, errors.Join(err, safefile.ErrRevisionChanged))
+		}
+		validated[rel] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetFile, Exists: true, FileRevision: evidence.Revision, Parents: evidence.Parents}
 	}
 	return validated, nil
 }
@@ -498,8 +530,11 @@ func authorizeMutationEvidenceSet(home string, plan *installPlan, actionID strin
 	if err != nil {
 		return err
 	}
+	if len(validated) != len(allowed) {
+		return fmt.Errorf("mutation evidence path set is incomplete: got %d target(s), want %d", len(validated), len(allowed))
+	}
 	for rel, state := range validated {
-		expected[rel] = state
+		expected[rel] = preserveOriginalState(expected[rel], state)
 	}
 	return nil
 }
@@ -519,6 +554,9 @@ func authorizeHelperMutationEvidence(home string, plan *installPlan, attempted [
 		if err != nil {
 			return fmt.Errorf("%s evidence: %w", actionID, err)
 		}
+		if len(validated) != 1 {
+			return fmt.Errorf("%s evidence did not prove its exact target", actionID)
+		}
 		for rel, state := range validated {
 			if _, duplicate := validatedAll[rel]; duplicate {
 				return fmt.Errorf("duplicate helper mutation evidence for %s", rel)
@@ -527,9 +565,18 @@ func authorizeHelperMutationEvidence(home string, plan *installPlan, attempted [
 		}
 	}
 	for rel, state := range validatedAll {
-		expected[rel] = state
+		expected[rel] = preserveOriginalState(expected[rel], state)
 	}
 	return nil
+}
+
+func preserveOriginalState(original, post backup.ExpectedState) backup.ExpectedState {
+	post.OriginalExists = original.OriginalExists
+	post.OriginalCaptured = original.OriginalCaptured
+	post.OriginalData = slices.Clone(original.OriginalData)
+	post.OriginalMode = original.OriginalMode
+	post.OriginalDirectory = original.OriginalDirectory
+	return post
 }
 
 func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan installEventMsg, plan *installPlan, installRuntime toolInstallRuntime, persistJournal bool, savePrefsErr ...error) {
@@ -574,9 +621,22 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	var journalRecord *operation.Record
 	var journalResults []operation.ActionResult
 	var operationID string
+	var releaseInstallOperation func() error
+	var stateAuthority *operation.StateAuthority
+	var stateCreated map[string]*safefile.DirectorySnapshot
+	var boundLocker operation.Locker
 	var backupRes autoBackupResult
 	mutationStarted := false
 	var rollbackExpected map[string]backup.ExpectedState
+	var executionAuthority map[string]map[string]acceptedTarget
+	executionTarget := func(actionID, rel string) (acceptedTarget, error) {
+		rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+		target, ok := executionAuthority[actionID][rel]
+		if !ok || !target.parents.Tracked() {
+			return acceptedTarget{}, fmt.Errorf("execution authority unavailable for %s target %s", actionID, rel)
+		}
+		return target, nil
+	}
 	var journalWarnings []string
 	markAction := func(actionID string, status operation.ActionStatus, summary string) {
 		for index := range journalResults {
@@ -596,7 +656,13 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 				rollbackOutcome = &operation.RollbackResult{Status: operation.RollbackFailed, Summary: "could not determine HOME"}
 				err = errors.Join(err, fmt.Errorf("automatic rollback could not determine HOME: %w", homeErr))
 			} else {
-				rollback, rollbackErr := backup.RestoreExpected(backupRes.backupDir, home, rollbackExpected)
+				var rollback backup.RestoreResult
+				var rollbackErr error
+				if backupRes.plan == nil {
+					rollbackErr = fmt.Errorf("reviewed installation has no exact plan-backup authority")
+				} else {
+					rollback, rollbackErr = backup.RestoreExpectedPlan(*backupRes.plan, home, rollbackExpected)
+				}
 				switch {
 				case rollbackErr != nil:
 					rollbackOutcome = &operation.RollbackResult{Status: operation.RollbackFailed, Summary: "rollback restore returned a fatal error"}
@@ -609,6 +675,15 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 					emitLine(fmt.Sprintf("↶ Rolled back %d restored and %d created path(s)", len(rollback.Restored), len(rollback.Removed)))
 				}
 			}
+		}
+		// Release the overall operation lock before deciding the terminal journal
+		// status. A release verification failure means the operation did not end
+		// cleanly and must never be journaled as succeeded.
+		if releaseInstallOperation != nil {
+			if releaseErr := releaseInstallOperation(); releaseErr != nil {
+				err = errors.Join(err, fmt.Errorf("release install operation lock: %w", releaseErr))
+			}
+			releaseInstallOperation = nil
 		}
 		if journalRecord != nil && journal != nil {
 			if rollbackOutcome != nil {
@@ -682,13 +757,30 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		}
 		ghosttyConfigTarget = acceptedTarget
 	}
+	var err error
 	if persistJournal {
+		stateAuthority, err = operation.BootstrapStateNamespaceTracked(plan.statePlan)
+		if err != nil {
+			finish(fmt.Errorf("bootstrap accepted operation state: %w", err))
+			return
+		}
+		stateCreated = stateAuthority.CreatedDirectoriesWithin(home)
+		boundLocker = operation.BoundLocker(stateAuthority)
+		acquireInstallLock := installRuntime.acquireInstallLock
+		if acquireInstallLock == nil {
+			acquireInstallLock = operation.AcquireStateLockWithAuthority
+		}
+		releaseInstallOperation, err = acquireInstallLock(stateAuthority, "install-operation", home)
+		if err != nil {
+			finish(fmt.Errorf("serialize reviewed installation: %w", err))
+			return
+		}
 		record, err := operation.StartRecord(plan.document, time.Now())
 		if err != nil {
 			finish(fmt.Errorf("create operation journal record: %w", err))
 			return
 		}
-		createdJournal, err := operation.DefaultJournal()
+		createdJournal, err := operation.DefaultJournalWithAuthority(stateAuthority)
 		if err != nil {
 			finish(fmt.Errorf("open operation journal: %w", err))
 			return
@@ -703,7 +795,7 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		journalRecord = &record
 		operationID = record.OperationID
 		emitLine("Operation " + record.OperationID + " • plan " + plan.hash()[:12])
-		if err := revalidateInstallPlan(plan); err != nil {
+		if err := revalidateInstallPlanWithCreated(plan, stateCreated); err != nil {
 			finish(fmt.Errorf("installation plan expired before execution: %w", err))
 			return
 		}
@@ -713,16 +805,25 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// it only reports a created backup when at least one file was captured and
 	// the manifest persisted, so we never claim a rollback point exists right
 	// before overwriting the user's dotfiles (C5).
-	var err error
-	if persistJournal && installRuntime.backupTargets != nil {
-		backupRes, err = installRuntime.backupTargets(plan.backupTargets())
+	if persistJournal && installRuntime.backupTargetsWithState != nil {
+		var targets []backup.Target
+		targets, err = plan.backupTargetSpecs()
+		if err == nil {
+			backupRes, err = installRuntime.backupTargetsWithState(stateAuthority, targets)
+		}
+	} else if persistJournal && installRuntime.backupTargets != nil {
+		var targets []backup.Target
+		targets, err = plan.backupTargetSpecs()
+		if err == nil {
+			backupRes, err = installRuntime.backupTargets(targets)
+		}
 	} else {
 		backupRes, err = installRuntime.autoBackup()
 	}
 	if err != nil {
 		finish(fmt.Errorf("auto-backup failed; installation stopped before mutation: %w", err))
 		return
-	} else if persistJournal && (!backupRes.enabled || backupRes.backupDir == "") {
+	} else if persistJournal && (!backupRes.enabled || backupRes.backupDir == "" || backupRes.plan == nil) {
 		finish(fmt.Errorf("mandatory rollback point was not created; installation stopped before mutation"))
 		return
 	} else if backupRes.enabled {
@@ -750,7 +851,7 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	if persistJournal {
 		// Backup reads every planned target, then a second observation check
 		// narrows the final pre-mutation window and refuses a stale preview.
-		if err := revalidateInstallPlan(plan); err != nil {
+		if err := revalidateInstallPlanWithCreated(plan, stateCreated); err != nil {
 			finish(fmt.Errorf("installation plan changed while creating rollback point: %w", err))
 			return
 		}
@@ -795,13 +896,74 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		// their own defaults. Revalidate the complete accepted config authority
 		// again before the first reviewed user-config mutation; individual writers
 		// still consume exact authority under their lock/transaction afterward.
-		if err := revalidateInstallPlan(plan); err != nil {
+		if err := revalidateInstallPlanWithCreated(plan, stateCreated); err != nil {
 			finish(fmt.Errorf("installation plan changed during package installation: %w", err))
 			return
 		}
 		rollbackExpected = make(map[string]backup.ExpectedState)
 		mutationStarted = true
-		globalEvidence, saveErr := savePlannedInstallerPreferencesTracked(plan)
+		parentsCreated := 0
+		createdParents := make(map[string]*safefile.DirectorySnapshot, len(stateCreated)+len(plan.parentDirectoryTargets()))
+		for rel, snapshot := range stateCreated {
+			createdParents[rel] = snapshot
+		}
+		for _, rel := range plan.parentDirectoryTargets() {
+			accepted, acceptedParents, err := plan.acceptedDirectoryAuthority("state:parents", rel)
+			if err != nil {
+				markAction("state:parents", operation.ActionFailed, "parent authority was unavailable")
+				finish(fmt.Errorf("resolve accepted parent %s: %w", rel, err))
+				return
+			}
+			boundParents, bindErr := safefile.BindParentChainWithin(home, rel, acceptedParents, createdParents)
+			if bindErr != nil {
+				rollbackExpected[rel] = backup.ExpectedState{Attempted: true, Kind: backup.TargetDirectory, OriginalCaptured: true}
+				markAction("state:parents", operation.ActionFailed, "parent namespace changed")
+				finish(fmt.Errorf("bind accepted parent %s: %w", rel, bindErr))
+				return
+			}
+			rollbackExpected[rel] = backup.ExpectedState{Attempted: true, Kind: backup.TargetDirectory, Parents: boundParents, OriginalCaptured: true}
+			snapshot, err := safefile.EnsureShallowDirectoryWithinParentChainTracked(home, rel, accepted, boundParents, 0o700)
+			if err != nil {
+				if snapshot != nil {
+					rollbackExpected[rel] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetDirectory, Exists: true, DirectorySnapshot: snapshot, EmptyOnly: true, Parents: boundParents, OriginalCaptured: true}
+				}
+				markAction("state:parents", operation.ActionFailed, "parent creation failed")
+				finish(fmt.Errorf("create accepted parent %s: %w", rel, err))
+				return
+			}
+			rollbackExpected[rel] = backup.ExpectedState{
+				Attempted:         true,
+				Captured:          true,
+				Kind:              backup.TargetDirectory,
+				Exists:            true,
+				DirectorySnapshot: snapshot,
+				EmptyOnly:         true,
+				Parents:           boundParents,
+				OriginalCaptured:  true,
+			}
+			createdParents[rel] = snapshot
+			parentsCreated++
+		}
+		if parentsCreated > 0 {
+			markAction("state:parents", operation.ActionSucceeded, fmt.Sprintf("created %d reviewed parent directories", parentsCreated))
+		}
+		executionAuthority, err = bindInstallPlanAuthority(home, plan, createdParents)
+		if err != nil {
+			finish(fmt.Errorf("bind accepted execution authority: %w", err))
+			return
+		}
+		invalidateRollbackAction(plan, "state:global", rollbackExpected)
+		globalRels, authorityErr := rollbackTargetsForAction(plan, "state:global")
+		if authorityErr != nil || len(globalRels) != 1 {
+			finish(fmt.Errorf("resolve global execution target: %w", authorityErr))
+			return
+		}
+		globalTarget, authorityErr := executionTarget("state:global", globalRels[0])
+		if authorityErr != nil {
+			finish(authorityErr)
+			return
+		}
+		globalEvidence, saveErr := savePlannedInstallerPreferencesTracked(plan, globalTarget, boundLocker)
 		if saveErr != nil {
 			captureErr := recordFailedActionRollbackState(home, plan, "state:global", saveErr, rollbackExpected)
 			markAction("state:global", operation.ActionFailed, "global preferences could not be persisted")
@@ -841,6 +1003,9 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			return false
 		}
 		stepLine(header)
+		if persistJournal {
+			invalidateRollbackAction(plan, "config:"+toolID, rollbackExpected)
+		}
 		evidence, actionErr := run()
 		if actionErr != nil {
 			emitLine(fmt.Sprintf("  ⚠ %v", actionErr))
@@ -878,7 +1043,9 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		var helperResult utilityInstallResult
 		_ = configPhase("\n▶ Installing dotfiles utilities...", func() error {
 			if persistJournal {
-				helperResult = installUtilitiesAtPlanTracked(plan, cfg.Utilities)
+				helperResult = installUtilitiesAtAuthorityTracked(executionAuthority, cfg.Utilities, boundLocker, func(name string) {
+					invalidateRollbackAction(plan, "helper:"+name, rollbackExpected)
+				})
 			} else {
 				helperResult = installUtilitiesTracked(cfg.Utilities)
 			}
@@ -889,7 +1056,17 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		}, "  ✓ Utilities installed to ~/.local/bin")
 		helpers := enabledHelpers(cfg.Utilities)
 		authorizationOK := true
-		if len(helperResult.Evidence) > 0 {
+		if persistJournal {
+			wantEvidence := len(helperResult.Attempted)
+			if helperResult.Failed != "" {
+				wantEvidence--
+			}
+			if len(helperResult.Evidence) != wantEvidence {
+				authorizationOK = false
+				noteFailure(fmt.Errorf("helper mutation evidence set is incomplete: got %d target(s), want %d", len(helperResult.Evidence), wantEvidence))
+			}
+		}
+		if persistJournal && authorizationOK && len(helperResult.Evidence) > 0 {
 			if err := authorizeHelperMutationEvidence(home, plan, helperResult.Attempted, helperResult.Evidence, rollbackExpected); err != nil {
 				authorizationOK = false
 				authorizationErr := fmt.Errorf("authorize helper mutation evidence; automatic rollback is incomplete and manual recovery may be required: %w", err)
@@ -930,18 +1107,18 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	tmuxCfg := tmuxConfigFrom(cfg)
 	tmuxConfigured := toolConfigPhase("tmux", "\n▶ Configuring tmux...", func() ([]tools.MutationEvidence, error) {
 		if persistJournal {
-			tmuxAccepted, err := plan.acceptedFileRevision("config:tmux", ".tmux.conf")
+			tmuxAuthority, err := executionTarget("config:tmux", ".tmux.conf")
 			if err != nil {
 				return nil, err
 			}
-			var tpmAccepted *safefile.DirectorySnapshot
+			var tpmAuthority acceptedTarget
 			if tmuxCfg.TPMEnabled {
-				tpmAccepted, err = plan.acceptedDirectorySnapshot("config:tmux", ".tmux/plugins/tpm")
+				tpmAuthority, err = executionTarget("config:tmux", ".tmux/plugins/tpm")
 				if err != nil {
 					return nil, err
 				}
 			}
-			evidence, err := tools.SetupTPMAtAuthorityTracked(tmuxCfg, theme, tmuxAccepted, tpmAccepted)
+			evidence, err := tools.SetupTPMAtAuthorityTracked(tmuxCfg, theme, tmuxAuthority.file, tmuxAuthority.parents, tpmAuthority.directory, tpmAuthority.parents, stateAuthority)
 			return evidence, wrapMutationError("failed to configure tmux", err)
 		}
 		evidence, err := tools.SetupTPMTracked(tmuxCfg, theme)
@@ -968,11 +1145,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		toolConfigPhase("claude-code", "\n▶ Configuring Claude Code MCP servers...", func() ([]tools.MutationEvidence, error) {
 			claudeTool := tools.NewClaudeCodeTool()
 			if persistJournal {
-				accepted, err := plan.acceptedFileRevision("config:claude-code", ".claude.json")
+				accepted, err := executionTarget("config:claude-code", ".claude.json")
 				if err != nil {
 					return nil, err
 				}
-				evidence, err := claudeTool.ApplyConfigWithMCPsAtRevisionTracked(cfg.ClaudeCodeMCPs, accepted)
+				evidence, err := claudeTool.ApplyConfigWithMCPsAtBoundAuthorityTracked(cfg.ClaudeCodeMCPs, accepted.file, accepted.parents, boundLocker)
 				return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Claude MCP", err)
 			}
 			evidence, err := claudeTool.ApplyConfigWithMCPsTracked(cfg.ClaudeCodeMCPs)
@@ -989,11 +1166,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			if relErr != nil {
 				return nil, relErr
 			}
-			accepted, acceptedErr := plan.acceptedFileRevision("config:ghostty", filepath.ToSlash(rel))
+			accepted, acceptedErr := executionTarget("config:ghostty", filepath.ToSlash(rel))
 			if acceptedErr != nil {
 				return nil, acceptedErr
 			}
-			evidence, err = tools.WriteGhosttyConfigAtRevisionTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme, accepted)
+			evidence, err = tools.WriteGhosttyConfigAtBoundAuthorityTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme, accepted.file, accepted.parents, boundLocker)
 		} else if ghosttyConfigTarget != "" {
 			evidence, err = tools.WriteGhosttyConfigAtTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme)
 		} else {
@@ -1007,11 +1184,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// Configure Zsh
 	toolConfigPhase("zsh", "\n▶ Configuring Zsh...", func() ([]tools.MutationEvidence, error) {
 		if persistJournal {
-			accepted, err := plan.acceptedFileRevision("config:zsh", ".zshrc")
+			accepted, err := executionTarget("config:zsh", ".zshrc")
 			if err != nil {
 				return nil, err
 			}
-			evidence, err := tools.WriteZshConfigAtRevisionTracked(zshConfigFrom(cfg), theme, accepted)
+			evidence, err := tools.WriteZshConfigAtBoundAuthorityTracked(zshConfigFrom(cfg), theme, accepted.file, accepted.parents, boundLocker)
 			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Zsh", err)
 		}
 		evidence, err := tools.WriteZshConfigTracked(zshConfigFrom(cfg), theme)
@@ -1029,11 +1206,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	}
 	toolConfigPhase("neovim", "\n▶ Configuring Neovim...", func() ([]tools.MutationEvidence, error) {
 		if persistJournal {
-			accepted, err := plan.acceptedDirectorySnapshot("config:neovim", ".config/nvim")
+			accepted, err := executionTarget("config:neovim", ".config/nvim")
 			if err != nil {
 				return nil, err
 			}
-			evidence, err := tools.WriteNeovimConfigAtSnapshotTracked(neovimCfg, theme, accepted)
+			evidence, err := tools.WriteNeovimConfigAtBoundAuthorityTracked(neovimCfg, theme, accepted.directory, accepted.parents, stateAuthority)
 			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Neovim", err)
 		}
 		evidence, err := tools.WriteNeovimConfigTracked(neovimCfg, theme)
@@ -1043,15 +1220,15 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// Configure Git
 	toolConfigPhase("git", "\n▶ Configuring Git...", func() ([]tools.MutationEvidence, error) {
 		if persistJournal {
-			rootAccepted, err := plan.acceptedFileRevision("config:git", ".gitconfig")
+			rootAccepted, err := executionTarget("config:git", ".gitconfig")
 			if err != nil {
 				return nil, err
 			}
-			managedAccepted, err := plan.acceptedFileRevision("config:git", gitManagedConfigRelForPlan)
+			managedAccepted, err := executionTarget("config:git", gitManagedConfigRelForPlan)
 			if err != nil {
 				return nil, err
 			}
-			evidence, err := tools.WriteGitConfigAtRevisionsTracked(gitConfigFrom(cfg), theme, rootAccepted, managedAccepted)
+			evidence, err := tools.WriteGitConfigAtBoundAuthoritiesTracked(gitConfigFrom(cfg), theme, rootAccepted.file, rootAccepted.parents, managedAccepted.file, managedAccepted.parents, boundLocker)
 			return evidence, wrapMutationError("failed to configure Git", err)
 		}
 		evidence, err := tools.WriteGitConfigTracked(gitConfigFrom(cfg), theme)
@@ -1061,19 +1238,19 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// Configure Yazi
 	toolConfigPhase("yazi", "\n▶ Configuring Yazi...", func() ([]tools.MutationEvidence, error) {
 		if persistJournal {
-			yaziAccepted, err := plan.acceptedFileRevision("config:yazi", ".config/yazi/yazi.toml")
+			yaziAccepted, err := executionTarget("config:yazi", ".config/yazi/yazi.toml")
 			if err != nil {
 				return nil, err
 			}
-			keymapAccepted, err := plan.acceptedFileRevision("config:yazi", ".config/yazi/keymap.toml")
+			keymapAccepted, err := executionTarget("config:yazi", ".config/yazi/keymap.toml")
 			if err != nil {
 				return nil, err
 			}
-			themeAccepted, err := plan.acceptedFileRevision("config:yazi", ".config/yazi/theme.toml")
+			themeAccepted, err := executionTarget("config:yazi", ".config/yazi/theme.toml")
 			if err != nil {
 				return nil, err
 			}
-			evidence, err := tools.WriteYaziConfigAtRevisionsTracked(yaziConfigFrom(cfg), theme, yaziAccepted, keymapAccepted, themeAccepted)
+			evidence, err := tools.WriteYaziConfigAtAuthoritiesTracked(yaziConfigFrom(cfg), theme, yaziAccepted.file, yaziAccepted.parents, keymapAccepted.file, keymapAccepted.parents, themeAccepted.file, themeAccepted.parents, boundLocker)
 			return evidence, wrapMutationError("failed to configure Yazi", err)
 		}
 		evidence, err := tools.WriteYaziConfigTracked(yaziConfigFrom(cfg), theme)
@@ -1083,11 +1260,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// Configure FZF
 	toolConfigPhase("fzf", "\n▶ Configuring FZF...", func() ([]tools.MutationEvidence, error) {
 		if persistJournal {
-			accepted, err := plan.acceptedFileRevision("config:fzf", ".config/fzf/fzf.zsh")
+			accepted, err := executionTarget("config:fzf", ".config/fzf/fzf.zsh")
 			if err != nil {
 				return nil, err
 			}
-			evidence, err := tools.WriteFzfConfigAtRevisionTracked(fzfConfigFrom(cfg), theme, accepted)
+			evidence, err := tools.WriteFzfConfigAtAuthorityTracked(fzfConfigFrom(cfg), theme, accepted.file, accepted.parents, boundLocker)
 			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure FZF", err)
 		}
 		evidence, err := tools.WriteFzfConfigTracked(fzfConfigFrom(cfg), theme)
@@ -1100,11 +1277,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	if cfg.CLITools["lazygit"] {
 		toolConfigPhase("lazygit", "\n▶ Configuring LazyGit...", func() ([]tools.MutationEvidence, error) {
 			if persistJournal {
-				accepted, err := plan.acceptedFileRevision("config:lazygit", ".config/lazygit/config.yml")
+				accepted, err := executionTarget("config:lazygit", ".config/lazygit/config.yml")
 				if err != nil {
 					return nil, err
 				}
-				evidence, err := tools.WriteLazyGitConfigAtRevisionTracked(lazygitConfigFrom(cfg), theme, accepted)
+				evidence, err := tools.WriteLazyGitConfigAtAuthorityTracked(lazygitConfigFrom(cfg), theme, accepted.file, accepted.parents, boundLocker)
 				return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure LazyGit", err)
 			}
 			evidence, err := tools.WriteLazyGitConfigTracked(lazygitConfigFrom(cfg), theme)
@@ -1118,15 +1295,15 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		toolConfigPhase("btop", "\n▶ Configuring Btop...", func() ([]tools.MutationEvidence, error) {
 			if persistJournal {
 				themeRel := filepath.ToSlash(filepath.Join(".config", "btop", "themes", theme+".theme"))
-				themeAccepted, err := plan.acceptedFileRevision("config:btop", themeRel)
+				themeAccepted, err := executionTarget("config:btop", themeRel)
 				if err != nil {
 					return nil, err
 				}
-				configAccepted, err := plan.acceptedFileRevision("config:btop", ".config/btop/btop.conf")
+				configAccepted, err := executionTarget("config:btop", ".config/btop/btop.conf")
 				if err != nil {
 					return nil, err
 				}
-				evidence, err := tools.WriteBtopConfigAtRevisionsTracked(btopConfigFrom(cfg), theme, themeAccepted, configAccepted)
+				evidence, err := tools.WriteBtopConfigAtAuthoritiesTracked(btopConfigFrom(cfg), theme, themeAccepted.file, themeAccepted.parents, configAccepted.file, configAccepted.parents, boundLocker)
 				return evidence, wrapMutationError("failed to configure Btop", err)
 			}
 			evidence, err := tools.WriteBtopConfigTracked(btopConfigFrom(cfg), theme)
@@ -1146,11 +1323,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 				if len(targets) != 1 {
 					return nil, fmt.Errorf("resolve accepted Glow target: got %d targets", len(targets))
 				}
-				accepted, err := plan.acceptedFileRevision("config:glow", targets[0])
+				accepted, err := executionTarget("config:glow", targets[0])
 				if err != nil {
 					return nil, err
 				}
-				evidence, err := tools.WriteGlowConfigAtRevisionTracked(glowConfigFrom(cfg), theme, accepted)
+				evidence, err := tools.WriteGlowConfigAtAuthorityTracked(glowConfigFrom(cfg), theme, accepted.file, accepted.parents, boundLocker)
 				return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Glow", err)
 			}
 			evidence, err := tools.WriteGlowConfigTracked(glowConfigFrom(cfg), theme)
@@ -1291,18 +1468,22 @@ func installUtilitiesTracked(utilities map[string]bool) utilityInstallResult {
 	return installUtilitiesTrackedWith(utilities, installScriptFileTracked)
 }
 
-func installUtilitiesAtPlanTracked(plan *installPlan, utilities map[string]bool) utilityInstallResult {
-	return installUtilitiesTrackedWith(utilities, func(home, name string, content []byte) (tools.MutationEvidence, error) {
+func installUtilitiesAtAuthorityTracked(authority map[string]map[string]acceptedTarget, utilities map[string]bool, locker operation.Locker, beforeAttempt func(string)) utilityInstallResult {
+	return installUtilitiesTrackedWithBefore(utilities, beforeAttempt, func(home, name string, content []byte) (tools.MutationEvidence, error) {
 		rel := filepath.ToSlash(filepath.Join(".local", "bin", name))
-		accepted, err := plan.acceptedFileRevision("helper:"+name, rel)
-		if err != nil {
-			return tools.MutationEvidence{}, err
+		accepted, ok := authority["helper:"+name][rel]
+		if !ok || accepted.kind != acceptedFileTarget || !accepted.parents.Tracked() {
+			return tools.MutationEvidence{}, fmt.Errorf("execution authority unavailable for helper %s", name)
 		}
-		return installScriptFileAtRevisionTracked(home, name, content, accepted)
+		return installScriptFileAtAuthorityTracked(home, name, content, accepted.file, accepted.parents, locker)
 	})
 }
 
 func installUtilitiesTrackedWith(utilities map[string]bool, install utilityInstaller) utilityInstallResult {
+	return installUtilitiesTrackedWithBefore(utilities, nil, install)
+}
+
+func installUtilitiesTrackedWithBefore(utilities map[string]bool, beforeAttempt func(string), install utilityInstaller) utilityInstallResult {
 	var result utilityInstallResult
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -1317,6 +1498,9 @@ func installUtilitiesTrackedWith(utilities map[string]bool, install utilityInsta
 	// Install selected utility scripts
 	for _, name := range enabledHelpers(utilities) {
 		result.Attempted = append(result.Attempted, name)
+		if beforeAttempt != nil {
+			beforeAttempt(name)
+		}
 		script := scripts.GetScript(name)
 		if script == "" {
 			result.Failed = name
@@ -1345,20 +1529,27 @@ func installScriptFile(home, name string, content []byte) (returnErr error) {
 }
 
 func installScriptFileTracked(home, name string, content []byte) (evidence tools.MutationEvidence, returnErr error) {
-	return installScriptFileWithAuthority(home, name, content, nil)
+	return installScriptFileWithAuthority(home, name, content, nil, nil)
 }
 
-func installScriptFileAtRevisionTracked(home, name string, content []byte, accepted safefile.Revision) (tools.MutationEvidence, error) {
-	return installScriptFileWithAuthority(home, name, content, &accepted)
+func installScriptFileAtAuthorityTracked(home, name string, content []byte, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (tools.MutationEvidence, error) {
+	if !parents.Tracked() || locker == nil {
+		return tools.MutationEvidence{}, fmt.Errorf("%w: helper authority is incomplete", safefile.ErrParentChanged)
+	}
+	return installScriptFileWithAuthority(home, name, content, &accepted, parents, locker)
 }
 
-func installScriptFileWithAuthority(home, name string, content []byte, accepted *safefile.Revision) (evidence tools.MutationEvidence, returnErr error) {
+func installScriptFileWithAuthority(home, name string, content []byte, accepted *safefile.Revision, parents *safefile.ParentChain, lockers ...operation.Locker) (evidence tools.MutationEvidence, returnErr error) {
 	if name == "" || name == "." || filepath.Base(name) != name {
 		return tools.MutationEvidence{}, fmt.Errorf("invalid utility name %q", name)
 	}
 	rel := filepath.ToSlash(filepath.Join(".local", "bin", name))
 	targetPath := filepath.Join(home, filepath.FromSlash(rel))
-	release, err := operation.AcquireStateLock("helper", targetPath)
+	locker := operation.DefaultLocker
+	if len(lockers) != 0 && lockers[0] != nil {
+		locker = lockers[0]
+	}
+	release, err := locker("helper", targetPath)
 	if err != nil {
 		return tools.MutationEvidence{}, fmt.Errorf("lock utility %s: %w", name, err)
 	}
@@ -1368,10 +1559,18 @@ func installScriptFileWithAuthority(home, name string, content []byte, accepted 
 		}
 	}()
 	parent := filepath.ToSlash(filepath.Dir(rel))
-	if err := safefile.EnsureDirectoryWithin(home, parent, 0o700); err != nil {
-		return tools.MutationEvidence{}, fmt.Errorf("create utility directory: %w", err)
+	if accepted == nil {
+		if err := safefile.EnsureDirectoryWithin(home, parent, 0o700); err != nil {
+			return tools.MutationEvidence{}, fmt.Errorf("create utility directory: %w", err)
+		}
 	}
-	existing, revision, err := safefile.ReadWithin(home, rel)
+	var existing []byte
+	var revision safefile.Revision
+	if accepted != nil && parents != nil {
+		existing, revision, err = safefile.ReadWithinAuthorized(home, rel, parents)
+	} else {
+		existing, revision, err = safefile.ReadWithin(home, rel)
+	}
 	if err != nil {
 		return tools.MutationEvidence{}, fmt.Errorf("inspect utility %s: %w", name, err)
 	}
@@ -1385,65 +1584,20 @@ func installScriptFileWithAuthority(home, name string, content []byte, accepted 
 	if accepted != nil {
 		expected = *accepted
 	}
-	committed, err := safefile.ReplaceWithinRevisionTracked(home, rel, expected, content, 0o700)
+	var committed safefile.Revision
+	if accepted != nil {
+		if parents != nil {
+			committed, err = safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(home, rel, expected, parents, content, 0o700)
+		} else {
+			committed, err = safefile.ReplaceWithinRevisionNoCreateTracked(home, rel, expected, content, 0o700)
+		}
+	} else {
+		committed, err = safefile.ReplaceWithinRevisionTracked(home, rel, expected, content, 0o700)
+	}
 	if err != nil {
 		return tools.MutationEvidence{}, err
 	}
-	return tools.MutationEvidence{Path: filepath.Join(home, filepath.FromSlash(rel)), Revision: committed}, nil
-}
-
-func installBinary(execPath, destPath string) error {
-	tempFile, err := os.CreateTemp(filepath.Dir(destPath), ".dotfiles-*")
-	if err != nil {
-		return fmt.Errorf("cannot create temporary binary: %w", err)
-	}
-	tempPath := tempFile.Name()
-	cleanupTemp := true
-	defer func() {
-		if cleanupTemp {
-			_ = os.Remove(tempPath)
-		}
-	}()
-
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("cannot close temporary binary: %w", err)
-	}
-	if err := copyFile(execPath, tempPath); err != nil {
-		return fmt.Errorf("cannot copy binary: %w", err)
-	}
-	// Owner-only (0700) matches the per-user script policy used for
-	// hk/caff/sshh and the bin directory above; this is the final
-	// authoritative mode on the binary.
-	if err := os.Chmod(tempPath, 0o700); err != nil {
-		return fmt.Errorf("cannot set permissions: %w", err)
-	}
-	if err := os.Rename(tempPath, destPath); err != nil {
-		return fmt.Errorf("cannot replace binary: %w", err)
-	}
-	cleanupTemp = false
-
-	return nil
-}
-
-// copyFile copies a file from src to dst. The destination is created with
-// explicit owner-only permissions (0700) via OpenFile rather than os.Create's
-// umask-default 0666, so the file is never momentarily group- or other-readable
-// /writable before the caller applies the final authoritative mode.
-func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o700)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, sourceFile)
-	return err
+	return tools.MutationEvidence{Path: filepath.Join(home, filepath.FromSlash(rel)), Revision: committed, Parents: parents}, nil
 }
 
 // alwaysConfiguredToolIDs are configured unconditionally later in the wizard
@@ -1856,7 +2010,7 @@ func saveInstallerPreferencesTracked(theme, navStyle string, animationsEnabled b
 	return tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision}, nil
 }
 
-func savePlannedInstallerPreferencesTracked(plan *installPlan) (tools.MutationEvidence, error) {
+func savePlannedInstallerPreferencesTracked(plan *installPlan, authority acceptedTarget, locker operation.Locker) (tools.MutationEvidence, error) {
 	planned, err := plan.plannedGlobalConfig()
 	if err != nil {
 		return tools.MutationEvidence{}, err
@@ -1868,13 +2022,12 @@ func savePlannedInstallerPreferencesTracked(plan *installPlan) (tools.MutationEv
 	if len(actionTargets) != 1 {
 		return tools.MutationEvidence{}, fmt.Errorf("resolve accepted global target: got %d targets", len(actionTargets))
 	}
-	accepted, err := plan.acceptedFileRevision("state:global", actionTargets[0])
+	if authority.kind != acceptedFileTarget || !authority.file.Tracked() || !authority.parents.Tracked() {
+		return tools.MutationEvidence{}, fmt.Errorf("global execution authority is incomplete")
+	}
+	revision, err := config.SaveGlobalConfigAtBoundAuthorityTracked(planned, authority.file, authority.parents, locker)
 	if err != nil {
 		return tools.MutationEvidence{}, err
 	}
-	revision, err := config.SaveGlobalConfigAtRevisionTracked(planned, accepted)
-	if err != nil {
-		return tools.MutationEvidence{}, err
-	}
-	return tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision}, nil
+	return tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision, Parents: authority.parents}, nil
 }

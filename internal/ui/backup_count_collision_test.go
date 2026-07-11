@@ -9,29 +9,6 @@ import (
 	"github.com/tekierz/dotfiles/internal/backup"
 )
 
-// TestCountBackupFilesExcludesManifest verifies that countBackupFiles reports
-// exactly the number of backed-up dotfiles (N), not N+1, when a manifest is
-// present alongside the backed-up files.
-func TestCountBackupFilesExcludesManifest(t *testing.T) {
-	dir := t.TempDir()
-
-	// Write 2 dotfile entries (flat-encoded names) and the manifest.
-	files := []string{"_zshrc", "_gitconfig"}
-	for _, name := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("data"), 0o600); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dir, backup.ManifestName), []byte("manifest content"), 0o600); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
-
-	got := countBackupFiles(dir)
-	if got != len(files) {
-		t.Errorf("countBackupFiles = %d, want %d (manifest must not be counted)", got, len(files))
-	}
-}
-
 // TestCreateBackupCmdCollisionYieldsTwoDistinctDirs verifies that two backups
 // whose timestamp-derived directory names would collide (same second) result in
 // two distinct, non-empty directories instead of one overwriting the other.

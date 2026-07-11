@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -569,58 +568,25 @@ func checkUpdates() {
 func listBackups() {
 	backupDir := filepath.Join(config.ConfigDir(), "backups")
 
-	entries, err := os.ReadDir(backupDir)
+	entries, err := backup.ListCatalog(backupDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("No backups found.")
-			fmt.Printf("Backup directory: %s\n", backupDir)
-			return
-		}
 		fmt.Fprintf(os.Stderr, "Error reading backups: %v\n", err)
 		return
 	}
-
-	// Filter for directories only (backups are stored in timestamped dirs)
-	var backups []os.DirEntry
-	for _, e := range entries {
-		if e.IsDir() {
-			backups = append(backups, e)
-		}
-	}
-
-	if len(backups) == 0 {
+	if len(entries) == 0 {
 		fmt.Println("No backups found.")
+		fmt.Printf("Backup directory: %s\n", backupDir)
 		return
 	}
 
-	// Sort by name (timestamps sort chronologically)
-	sort.Slice(backups, func(i, j int) bool {
-		return backups[i].Name() > backups[j].Name() // Most recent first
-	})
-
-	fmt.Printf("Available backups (%d):\n", len(backups))
+	fmt.Printf("Available backups (%d):\n", len(entries))
 	fmt.Println("─────────────────────────")
 
-	for _, b := range backups {
-		info, err := b.Info()
-		if err != nil {
-			fmt.Printf("  %s\n", b.Name())
-			continue
-		}
-
-		// Count backed-up dotfiles; skip the manifest (metadata, not a dotfile).
-		files, _ := os.ReadDir(filepath.Join(backupDir, b.Name()))
-		fileCount := 0
-		for _, f := range files {
-			if !f.IsDir() && f.Name() != backup.ManifestName {
-				fileCount++
-			}
-		}
-
+	for _, entry := range entries {
 		fmt.Printf("  %s  (%d files, %s)\n",
-			b.Name(),
-			fileCount,
-			info.ModTime().Format("Jan 02 15:04"))
+			entry.Name,
+			entry.FileCount,
+			entry.Timestamp.Format("Jan 02 15:04"))
 	}
 
 	fmt.Println()
@@ -658,21 +624,25 @@ func restoreBackup(name string) (int, int, error) {
 	}
 
 	backupDir := filepath.Join(config.ConfigDir(), "backups", name)
-
-	info, err := os.Stat(backupDir)
+	catalog, err := backup.ListCatalog(filepath.Dir(backupDir))
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "Backup '%s' not found.\n", name)
-			fmt.Println("Run 'dotfiles backups' to see available backups.")
-			return 0, 0, err
-		}
 		fmt.Fprintf(os.Stderr, "Error accessing backup: %v\n", err)
 		return 0, 0, err
 	}
-
-	if !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "'%s' is not a valid backup directory.\n", name)
-		return 0, 0, fmt.Errorf("%q is not a valid backup directory", name)
+	var selected *backup.CatalogEntry
+	for index := range catalog {
+		if catalog[index].Name == name {
+			selected = &catalog[index]
+			break
+		}
+	}
+	if selected == nil {
+		fmt.Fprintf(os.Stderr, "Backup '%s' not found or has no valid manifest.\n", name)
+		fmt.Println("Run 'dotfiles backups' to see available backups.")
+		return 0, 0, os.ErrNotExist
+	}
+	if err := backup.ValidateCatalogEntry(*selected); err != nil {
+		return 0, 0, err
 	}
 
 	home, err := os.UserHomeDir()

@@ -10,7 +10,10 @@ import (
 )
 
 func TestGlobalConfigLockUnsupportedIsTyped(t *testing.T) {
-	_, err := acquireGlobalConfigLock(".", ".global.json.lock")
+	unsupported := func(_, _ string) (func() error, error) {
+		return nil, safefile.ErrUnsupported
+	}
+	_, err := acquireGlobalConfigStateLock(unsupported, "/global.json")
 	if !errors.Is(err, ErrGlobalConfigLockUnsupported) {
 		t.Fatalf("lock error = %v, want ErrGlobalConfigLockUnsupported", err)
 	}

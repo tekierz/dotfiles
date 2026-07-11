@@ -30,6 +30,7 @@ type MutationEvidence struct {
 	Path      string
 	Revision  safefile.Revision
 	Directory *safefile.DirectorySnapshot
+	Parents   *safefile.ParentChain
 }
 
 func (e *PartialMutationError) Error() string { return e.Err.Error() }
@@ -312,16 +313,52 @@ func writeToolConfigTracked(path string, content []byte) (MutationEvidence, erro
 // same-content checks happen only after the locked live target has been proven
 // to be the exact namespace object accepted by the user.
 func writeToolConfigAtRevisionTracked(path string, content []byte, accepted safefile.Revision) (MutationEvidence, error) {
+	parents, err := compatibilityToolConfigParents(path)
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return writeToolConfigAtAuthorityTracked(path, content, accepted, parents, operation.DefaultLocker)
+}
+
+func compatibilityToolConfigParents(path string) (*safefile.ParentChain, error) {
+	root, rel, createRoot, err := generatedConfigDestination(path)
+	if err != nil || createRoot {
+		return nil, fmt.Errorf("resolve compatibility config authority for %s: %w", path, err)
+	}
+	parents, err := safefile.CaptureParentChainWithin(root, rel)
+	if err != nil {
+		return nil, err
+	}
+	return parents, nil
+}
+
+// writeToolConfigAtAuthorityTracked is the production install-plan writer. It
+// binds both the accepted leaf revision and the complete root-to-parent
+// namespace chain at the commit boundary.
+func writeToolConfigAtAuthorityTracked(path string, content []byte, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
 	if !accepted.Tracked() {
 		return MutationEvidence{}, fmt.Errorf("%w: accepted revision for %s is untracked", safefile.ErrRevisionChanged, path)
+	}
+	if parents != nil && !parents.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted parent chain for %s is untracked", safefile.ErrParentChanged, path)
+	}
+	if !parents.Tracked() || locker == nil {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted writer authority for %s is incomplete", safefile.ErrParentChanged, path)
 	}
 	if !hasGeneratedConfigHeader(content) {
 		return MutationEvidence{}, fmt.Errorf("%w: replacement for %s has no recognized ownership header", ErrUnmanagedConfig, path)
 	}
 
 	var evidence MutationEvidence
-	err := withToolConfigLock(path, func(root, rel string) error {
-		existing, current, err := readToolConfig(root, rel)
+	err := withToolConfigLockAuthorized(path, locker, func(root, rel string) error {
+		var existing []byte
+		var current safefile.Revision
+		var err error
+		if parents != nil {
+			existing, current, err = safefile.ReadWithinAuthorized(root, rel, parents)
+		} else {
+			existing, current, err = readToolConfig(root, rel)
+		}
 		if err != nil {
 			return err
 		}
@@ -332,12 +369,17 @@ func writeToolConfigAtRevisionTracked(path string, content []byte, accepted safe
 			return fmt.Errorf("%w: %s", ErrUnmanagedConfig, path)
 		}
 		if current.Exists() && bytes.Equal(existing, content) {
-			evidence = MutationEvidence{Path: path, Revision: current}
+			evidence = MutationEvidence{Path: path, Revision: current, Parents: parents}
 			return nil
 		}
-		committed, err := replaceToolConfigAtRevisionTracked(root, rel, accepted, content)
+		var committed safefile.Revision
+		if parents != nil {
+			committed, err = replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, rel, accepted, parents, content)
+		} else {
+			committed, err = replaceToolConfigAtRevisionNoCreateTracked(root, rel, accepted, content)
+		}
 		if err == nil {
-			evidence = MutationEvidence{Path: path, Revision: committed}
+			evidence = MutationEvidence{Path: path, Revision: committed, Parents: parents}
 		}
 		return err
 	})
@@ -345,11 +387,22 @@ func writeToolConfigAtRevisionTracked(path string, content []byte, accepted safe
 }
 
 func preflightToolConfigAtRevision(path string, accepted safefile.Revision, allowLegacy func([]byte) bool) error {
+	parents, err := compatibilityToolConfigParents(path)
+	if err != nil {
+		return err
+	}
+	return preflightToolConfigAtAuthority(path, accepted, parents, operation.DefaultLocker, allowLegacy)
+}
+
+func preflightToolConfigAtAuthority(path string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker, allowLegacy func([]byte) bool) error {
 	if !accepted.Tracked() {
 		return fmt.Errorf("%w: accepted revision for %s is untracked", safefile.ErrRevisionChanged, path)
 	}
-	return withToolConfigLock(path, func(root, rel string) error {
-		existing, current, err := readToolConfig(root, rel)
+	if !parents.Tracked() || locker == nil {
+		return fmt.Errorf("%w: preflight authority for %s is incomplete", safefile.ErrParentChanged, path)
+	}
+	return withToolConfigLockAuthorized(path, locker, func(root, rel string) error {
+		existing, current, err := safefile.ReadWithinAuthorized(root, rel, parents)
 		if err != nil {
 			return err
 		}
@@ -392,7 +445,22 @@ func writeGeneratedConfigWith(path string, content []byte, mode os.FileMode, rep
 // operational-state root, so locking never creates an unplanned sidecar beside
 // user configuration. Target parents are created only after acquiring it.
 func withToolConfigLock(path string, mutate func(root, rel string) error) (returnErr error) {
-	release, err := operation.AcquireStateLock("tool-config", path)
+	return withToolConfigLockPolicy(path, true, operation.DefaultLocker, mutate)
+}
+
+func withToolConfigLockNoCreate(path string, mutate func(root, rel string) error) (returnErr error) {
+	return withToolConfigLockPolicy(path, false, operation.DefaultLocker, mutate)
+}
+
+func withToolConfigLockAuthorized(path string, locker operation.Locker, mutate func(root, rel string) error) (returnErr error) {
+	if locker == nil {
+		return fmt.Errorf("accepted tool config locker is unavailable")
+	}
+	return withToolConfigLockPolicy(path, false, locker, mutate)
+}
+
+func withToolConfigLockPolicy(path string, createParents bool, locker operation.Locker, mutate func(root, rel string) error) (returnErr error) {
+	release, err := locker("tool-config", path)
 	if err != nil {
 		return fmt.Errorf("failed to lock generated config %s: %w", path, err)
 	}
@@ -402,15 +470,24 @@ func withToolConfigLock(path string, mutate func(root, rel string) error) (retur
 		}
 	}()
 
-	root, rel, err := prepareGeneratedConfigDestination(path)
-	if err != nil {
-		return err
-	}
-	parent := filepath.ToSlash(filepath.Dir(rel))
-	if parent != "." {
-		if err := safefile.EnsureDirectoryWithin(root, parent, 0700); err != nil {
-			return fmt.Errorf("failed to create generated config parent for %s: %w", path, err)
+	var root, rel string
+	if createParents {
+		root, rel, err = prepareGeneratedConfigDestination(path)
+		if err == nil {
+			parent := filepath.ToSlash(filepath.Dir(rel))
+			if parent != "." {
+				err = safefile.EnsureDirectoryWithin(root, parent, 0700)
+			}
 		}
+	} else {
+		var createRoot bool
+		root, rel, createRoot, err = generatedConfigDestination(path)
+		if err == nil && createRoot {
+			err = fmt.Errorf("accepted config root does not exist: %s", root)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("prepare generated config parent for %s: %w", path, err)
 	}
 	return mutate(root, rel)
 }
@@ -446,6 +523,30 @@ func replaceToolConfigAtRevisionTracked(root, rel string, expected safefile.Revi
 	revision, err := safefile.ReplaceWithinRevisionTracked(root, rel, expected, content, 0600)
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("failed to replace generated config %s: %w", rel, err)
+	}
+	return revision, nil
+}
+
+func replaceToolConfigAtRevisionNoCreateTracked(root, rel string, expected safefile.Revision, content []byte) (safefile.Revision, error) {
+	if err := verifyToolConfigRevision(root, rel, expected); err != nil {
+		return safefile.Revision{}, err
+	}
+	revision, err := safefile.ReplaceWithinRevisionNoCreateTracked(root, rel, expected, content, 0600)
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("failed to replace generated config %s: %w", rel, err)
+	}
+	return revision, nil
+}
+
+func replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, rel string, expected safefile.Revision, parents *safefile.ParentChain, content []byte) (safefile.Revision, error) {
+	if _, current, err := safefile.ReadWithinAuthorized(root, rel, parents); err != nil {
+		return safefile.Revision{}, err
+	} else if current != expected {
+		return safefile.Revision{}, fmt.Errorf("%w: generated config %s changed before replacement", safefile.ErrRevisionChanged, rel)
+	}
+	revision, err := safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, rel, expected, parents, content, 0600)
+	if err != nil {
+		return revision, fmt.Errorf("failed to replace generated config %s: %w", rel, err)
 	}
 	return revision, nil
 }

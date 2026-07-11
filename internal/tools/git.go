@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
+
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	themepkg "github.com/tekierz/dotfiles/internal/theme"
@@ -377,8 +379,23 @@ func WriteGitConfigTracked(cfg GitConfig, theme string) ([]MutationEvidence, err
 
 // WriteGitConfigAtRevisionsTracked applies the complete plan-accepted Git set.
 func WriteGitConfigAtRevisionsTracked(cfg GitConfig, theme string, rootAccepted, managedAccepted safefile.Revision) ([]MutationEvidence, error) {
+	return writeGitConfigAtBoundAuthoritiesTracked(cfg, theme, rootAccepted, nil, managedAccepted, nil, operation.DefaultLocker, true)
+}
+
+func WriteGitConfigAtAuthoritiesTracked(cfg GitConfig, theme string, rootAccepted safefile.Revision, rootParents *safefile.ParentChain, managedAccepted safefile.Revision, managedParents *safefile.ParentChain) ([]MutationEvidence, error) {
+	return WriteGitConfigAtBoundAuthoritiesTracked(cfg, theme, rootAccepted, rootParents, managedAccepted, managedParents, operation.DefaultLocker)
+}
+
+func WriteGitConfigAtBoundAuthoritiesTracked(cfg GitConfig, theme string, rootAccepted safefile.Revision, rootParents *safefile.ParentChain, managedAccepted safefile.Revision, managedParents *safefile.ParentChain, locker operation.Locker) ([]MutationEvidence, error) {
+	return writeGitConfigAtBoundAuthoritiesTracked(cfg, theme, rootAccepted, rootParents, managedAccepted, managedParents, locker, false)
+}
+
+func writeGitConfigAtBoundAuthoritiesTracked(cfg GitConfig, theme string, rootAccepted safefile.Revision, rootParents *safefile.ParentChain, managedAccepted safefile.Revision, managedParents *safefile.ParentChain, locker operation.Locker, allowRevisionCompatibility bool) ([]MutationEvidence, error) {
 	if !rootAccepted.Tracked() || !managedAccepted.Tracked() {
 		return nil, fmt.Errorf("%w: accepted Git revisions must be tracked", safefile.ErrRevisionChanged)
+	}
+	if !allowRevisionCompatibility && (!rootParents.Tracked() || !managedParents.Tracked() || locker == nil) {
+		return nil, fmt.Errorf("%w: accepted Git authority is incomplete", safefile.ErrParentChanged)
 	}
 	if override := os.Getenv("GIT_CONFIG_GLOBAL"); override != "" {
 		return nil, fmt.Errorf("refusing to write ~/.gitconfig while GIT_CONFIG_GLOBAL overrides the global source: %s", override)
@@ -396,12 +413,30 @@ func WriteGitConfigAtRevisionsTracked(cfg GitConfig, theme string, rootAccepted,
 	includeSection := wrapManagedConfigSection(gitManagedIncludeStart, gitManagedIncludeEnd, "[include]\n\tpath = "+gitManagedIncludePath)
 
 	var results, committed []MutationEvidence
-	err = withToolConfigLock(configPath, func(root, rel string) error {
-		existing, rootCurrent, err := readToolConfig(root, rel)
+	lock := withToolConfigLockNoCreate
+	if !allowRevisionCompatibility {
+		lock = func(path string, mutate func(string, string) error) error {
+			return withToolConfigLockAuthorized(path, locker, mutate)
+		}
+	}
+	err = lock(configPath, func(root, rel string) error {
+		var existing []byte
+		var rootCurrent safefile.Revision
+		if rootParents != nil {
+			existing, rootCurrent, err = safefile.ReadWithinAuthorized(root, rel, rootParents)
+		} else {
+			existing, rootCurrent, err = readToolConfig(root, rel)
+		}
 		if err != nil {
 			return err
 		}
-		existingManaged, managedCurrent, err := readToolConfig(root, gitManagedConfigRel)
+		var existingManaged []byte
+		var managedCurrent safefile.Revision
+		if managedParents != nil {
+			existingManaged, managedCurrent, err = safefile.ReadWithinAuthorized(root, gitManagedConfigRel, managedParents)
+		} else {
+			existingManaged, managedCurrent, err = readToolConfig(root, gitManagedConfigRel)
+		}
 		if err != nil {
 			return fmt.Errorf("inspect managed Git config: %w", err)
 		}
@@ -420,12 +455,16 @@ func WriteGitConfigAtRevisionsTracked(cfg GitConfig, theme string, rootAccepted,
 
 		managedResult := managedCurrent
 		if !managedCurrent.Exists() || !bytes.Equal(existingManaged, managedContent) {
-			managedResult, err = replaceToolConfigAtRevisionTracked(root, gitManagedConfigRel, managedAccepted, managedContent)
+			if managedParents != nil {
+				managedResult, err = replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, gitManagedConfigRel, managedAccepted, managedParents, managedContent)
+			} else {
+				managedResult, err = replaceToolConfigAtRevisionNoCreateTracked(root, gitManagedConfigRel, managedAccepted, managedContent)
+			}
 			if err != nil {
 				return fmt.Errorf("write managed Git config: %w", err)
 			}
 		}
-		managedEvidence := MutationEvidence{Path: managedPath, Revision: managedResult}
+		managedEvidence := MutationEvidence{Path: managedPath, Revision: managedResult, Parents: managedParents}
 		results = append(results, managedEvidence)
 		if managedResult != managedAccepted {
 			committed = append(committed, managedEvidence)
@@ -433,12 +472,16 @@ func WriteGitConfigAtRevisionsTracked(cfg GitConfig, theme string, rootAccepted,
 
 		rootResult := rootCurrent
 		if !rootCurrent.Exists() || !bytes.Equal(existing, merged) {
-			rootResult, err = replaceToolConfigAtRevisionTracked(root, rel, rootAccepted, merged)
+			if rootParents != nil {
+				rootResult, err = replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, rel, rootAccepted, rootParents, merged)
+			} else {
+				rootResult, err = replaceToolConfigAtRevisionNoCreateTracked(root, rel, rootAccepted, merged)
+			}
 			if err != nil {
 				return fmt.Errorf("install managed Git include: %w", err)
 			}
 		}
-		rootEvidence := MutationEvidence{Path: configPath, Revision: rootResult}
+		rootEvidence := MutationEvidence{Path: configPath, Revision: rootResult, Parents: rootParents}
 		results = append(results, rootEvidence)
 		if rootResult != rootAccepted {
 			committed = append(committed, rootEvidence)

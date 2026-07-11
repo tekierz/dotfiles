@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	dotfilesTheme "github.com/tekierz/dotfiles/internal/theme"
@@ -89,20 +90,34 @@ func InstallTPM() error {
 }
 
 func installTPMTracked() (result MutationEvidence, returnErr error) {
-	return installTPMAtSnapshotTracked(nil)
+	return installTPMAtSnapshotTracked(nil, nil)
 }
 
-func installTPMAtSnapshotTracked(accepted *safefile.DirectorySnapshot) (result MutationEvidence, returnErr error) {
+func installTPMAtSnapshotTracked(accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, states ...*operation.StateAuthority) (result MutationEvidence, returnErr error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("determine HOME for TPM: %w", err)
 	}
-	staging, err := os.MkdirTemp(home, ".dotfiles-tpm-clone-*")
+	var staging string
+	var createdStaging *operation.StateStagingAuthority
+	if len(states) != 0 && states[0] != nil {
+		staging, createdStaging, err = operation.CreateStateStagingDirectoryWithAuthorityTracked(states[0], "tmux-tpm")
+	} else {
+		staging, createdStaging, err = operation.CreateStateStagingDirectoryTracked("tmux-tpm")
+	}
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("create TPM clone staging directory: %w", err)
 	}
+	var cleanupExpected *safefile.DirectorySnapshot
 	defer func() {
-		if cleanupErr := safefile.RemoveDirectoryWithin(home, filepath.Base(staging)); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+		if cleanupExpected == nil {
+			cleanupExpected, err = operation.SnapshotStateStagingDirectory(staging, createdStaging)
+			if err != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("capture TPM staging cleanup authority: %w", err))
+				return
+			}
+		}
+		if cleanupErr := operation.RemoveStateStagingDirectoryAuthorized(staging, createdStaging, cleanupExpected); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
 			returnErr = errors.Join(returnErr, fmt.Errorf("clean TPM clone staging directory: %w", cleanupErr))
 		}
 	}()
@@ -111,23 +126,40 @@ func installTPMAtSnapshotTracked(accepted *safefile.DirectorySnapshot) (result M
 	// becoming a planned mutation target.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	// #nosec G204 -- TPM URL is fixed and the destination is derived from HOME.
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1",
-		"https://github.com/tmux-plugins/tpm",
-		staging)
-
-	if err := cmd.Run(); err != nil {
-		return MutationEvidence{}, fmt.Errorf("failed to clone TPM: %w", err)
+	stagingFD, err := operation.OpenStateStagingDirectory(staging, createdStaging)
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("open exact TPM staging directory: %w", err)
 	}
-	snapshot, err := safefile.SnapshotDirectoryWithin(home, filepath.Base(staging))
+	defer func() { returnErr = errors.Join(returnErr, stagingFD.Close()) }()
+	// os/exec cannot portably fchdir the child. Keep the exact staging descriptor
+	// open across git, use the randomized private path as cwd, and revalidate the
+	// original staging inode before its bytes can enter the live namespace.
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1",
+		"https://github.com/tmux-plugins/tpm", ".")
+	cmd.Dir = staging
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return MutationEvidence{}, fmt.Errorf("failed to clone TPM: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	snapshot, err := operation.SnapshotStateStagingDirectory(staging, createdStaging)
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("snapshot cloned TPM: %w", err)
 	}
-	live, err := safefile.RestoreDirectoryWithinSnapshotTracked(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), snapshot, accepted)
-	if err != nil {
-		return MutationEvidence{Path: TPMPath(), Directory: live}, err
+	cleanupExpected = snapshot
+	var live *safefile.DirectorySnapshot
+	if accepted != nil {
+		if parents != nil {
+			live, err = safefile.RestoreDirectoryWithinSnapshotNoCreateAuthorizedTracked(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), snapshot, accepted, parents)
+		} else {
+			live, err = safefile.RestoreDirectoryWithinSnapshotNoCreateTracked(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), snapshot, accepted)
+		}
+	} else {
+		live, err = safefile.RestoreDirectoryWithinSnapshotTracked(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), snapshot, accepted)
 	}
-	return MutationEvidence{Path: TPMPath(), Directory: live}, nil
+	if err != nil {
+		return MutationEvidence{Path: TPMPath(), Directory: live, Parents: parents}, err
+	}
+	return MutationEvidence{Path: TPMPath(), Directory: live, Parents: parents}, nil
 }
 
 // RunTPMInstall triggers TPM to install plugins
@@ -342,10 +374,18 @@ func WriteTmuxConfigTracked(cfg TmuxConfig, theme string) (MutationEvidence, err
 func WriteTmuxConfigAtRevisionTracked(cfg TmuxConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return writeToolConfigAtRevisionTracked(filepath.Join(home, ".tmux.conf"), []byte(GenerateTmuxConfig(cfg, theme)), accepted)
+}
+
+func WriteTmuxConfigAtAuthorityTracked(cfg TmuxConfig, theme string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 	configPath := filepath.Join(home, ".tmux.conf")
-	return writeToolConfigAtRevisionTracked(configPath, []byte(GenerateTmuxConfig(cfg, theme)), accepted)
+	return writeToolConfigAtAuthorityTracked(configPath, []byte(GenerateTmuxConfig(cfg, theme)), accepted, parents, locker)
 }
 
 // SetupTPM handles TPM installation and plugin setup
@@ -382,22 +422,26 @@ func SetupTPMTracked(cfg TmuxConfig, theme string) ([]MutationEvidence, error) {
 	return committed, nil
 }
 
-// SetupTPMAtAuthorityTracked applies plan-accepted tmux and TPM targets.
-func SetupTPMAtAuthorityTracked(cfg TmuxConfig, theme string, tmuxAccepted safefile.Revision, tpmAccepted *safefile.DirectorySnapshot) ([]MutationEvidence, error) {
+// SetupTPMAtAuthorityTracked applies only exact plan-accepted tmux and TPM
+// namespace authority with one already-bound operational state.
+func SetupTPMAtAuthorityTracked(cfg TmuxConfig, theme string, tmuxAccepted safefile.Revision, tmuxParents *safefile.ParentChain, tpmAccepted *safefile.DirectorySnapshot, tpmParents *safefile.ParentChain, state *operation.StateAuthority) ([]MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("determine HOME for TPM: %w", err)
 	}
-	if !tmuxAccepted.Tracked() {
-		return nil, fmt.Errorf("%w: accepted tmux revision is untracked", safefile.ErrRevisionChanged)
+	if !tmuxAccepted.Tracked() || !tmuxParents.Tracked() || state == nil {
+		return nil, fmt.Errorf("%w: accepted tmux/TPM authority is incomplete", safefile.ErrParentChanged)
 	}
 	// Preflight the complete accepted set before the first config mutation.
 	if cfg.TPMEnabled {
+		if !tpmParents.Tracked() {
+			return nil, fmt.Errorf("%w: accepted TPM parent authority is incomplete", safefile.ErrParentChanged)
+		}
 		if err := safefile.VerifyDirectoryWithinSnapshot(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), tpmAccepted); err != nil {
 			return nil, fmt.Errorf("preflight accepted TPM target: %w", err)
 		}
 	}
-	configEvidence, err := WriteTmuxConfigAtRevisionTracked(cfg, theme, tmuxAccepted)
+	configEvidence, err := WriteTmuxConfigAtAuthorityTracked(cfg, theme, tmuxAccepted, tmuxParents, operation.BoundLocker(state))
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +452,7 @@ func SetupTPMAtAuthorityTracked(cfg TmuxConfig, theme string, tmuxAccepted safef
 	if !cfg.TPMEnabled {
 		return []MutationEvidence{configEvidence}, nil
 	}
-	tpmEvidence, err := installTPMAtSnapshotTracked(tpmAccepted)
+	tpmEvidence, err := installTPMAtSnapshotTracked(tpmAccepted, tpmParents, state)
 	if err != nil {
 		if tpmEvidence.Directory != nil || tpmEvidence.Revision.Tracked() {
 			committed = append(committed, tpmEvidence)

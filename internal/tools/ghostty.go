@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
+
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/theme"
@@ -287,7 +289,7 @@ func WriteGhosttyConfigAt(configPath string, cfg GhosttyConfig, themeName string
 }
 
 func WriteGhosttyConfigAtTracked(configPath string, cfg GhosttyConfig, themeName string) (MutationEvidence, error) {
-	return writeGhosttyConfigAtRevisionTracked(configPath, cfg, themeName, nil)
+	return writeGhosttyConfigAtRevisionTracked(configPath, cfg, themeName, nil, nil)
 }
 
 // WriteGhosttyConfigAtRevisionTracked applies a plan-accepted Ghostty revision.
@@ -295,10 +297,21 @@ func WriteGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, t
 	if !accepted.Tracked() {
 		return MutationEvidence{}, fmt.Errorf("%w: accepted Ghostty revision is untracked", safefile.ErrRevisionChanged)
 	}
-	return writeGhosttyConfigAtRevisionTracked(configPath, cfg, themeName, &accepted)
+	return writeGhosttyConfigAtRevisionTracked(configPath, cfg, themeName, &accepted, nil)
 }
 
-func writeGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, themeName string, accepted *safefile.Revision) (MutationEvidence, error) {
+func WriteGhosttyConfigAtAuthorityTracked(configPath string, cfg GhosttyConfig, themeName string, accepted safefile.Revision, parents *safefile.ParentChain) (MutationEvidence, error) {
+	return WriteGhosttyConfigAtBoundAuthorityTracked(configPath, cfg, themeName, accepted, parents, operation.DefaultLocker)
+}
+
+func WriteGhosttyConfigAtBoundAuthorityTracked(configPath string, cfg GhosttyConfig, themeName string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	if !parents.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Ghostty parent authority is untracked", safefile.ErrParentChanged)
+	}
+	return writeGhosttyConfigAtRevisionTracked(configPath, cfg, themeName, &accepted, parents, locker)
+}
+
+func writeGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, themeName string, accepted *safefile.Revision, parents *safefile.ParentChain, lockers ...operation.Locker) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
@@ -321,8 +334,25 @@ func writeGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, t
 	)
 
 	var evidence MutationEvidence
-	err = withToolConfigLock(cleanTarget, func(root, rel string) error {
-		existing, revision, err := readToolConfig(root, rel)
+	lock := withToolConfigLock
+	if accepted != nil {
+		locker := operation.DefaultLocker
+		if len(lockers) != 0 && lockers[0] != nil {
+			locker = lockers[0]
+		}
+		lock = func(path string, mutate func(string, string) error) error {
+			return withToolConfigLockAuthorized(path, locker, mutate)
+		}
+	}
+	err = lock(cleanTarget, func(root, rel string) error {
+		var existing []byte
+		var revision safefile.Revision
+		var err error
+		if parents != nil {
+			existing, revision, err = safefile.ReadWithinAuthorized(root, rel, parents)
+		} else {
+			existing, revision, err = readToolConfig(root, rel)
+		}
 		if err != nil {
 			return err
 		}
@@ -340,18 +370,27 @@ func writeGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, t
 			return err
 		}
 		if revision.Exists() && bytes.Equal(existing, merged) {
-			evidence = MutationEvidence{Path: cleanTarget, Revision: revision}
+			evidence = MutationEvidence{Path: cleanTarget, Revision: revision, Parents: parents}
 			return nil
 		}
 		expected := revision
 		if accepted != nil {
 			expected = *accepted
 		}
-		committed, err := replaceToolConfigAtRevisionTracked(root, rel, expected, merged)
+		var committed safefile.Revision
+		if accepted != nil {
+			if parents != nil {
+				committed, err = replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, rel, expected, parents, merged)
+			} else {
+				committed, err = replaceToolConfigAtRevisionNoCreateTracked(root, rel, expected, merged)
+			}
+		} else {
+			committed, err = replaceToolConfigAtRevisionTracked(root, rel, expected, merged)
+		}
 		if err != nil {
 			return fmt.Errorf("write managed Ghostty config: %w", err)
 		}
-		evidence = MutationEvidence{Path: cleanTarget, Revision: committed}
+		evidence = MutationEvidence{Path: cleanTarget, Revision: committed, Parents: parents}
 		return nil
 	})
 	return evidence, err

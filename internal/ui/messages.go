@@ -4,6 +4,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
 )
@@ -85,6 +86,7 @@ type BackupEntry struct {
 	FileCount int
 	Size      int64 // bytes
 	Path      string
+	Catalog   backup.CatalogEntry
 }
 
 // backupsLoadedMsg indicates the async backup list loading completed

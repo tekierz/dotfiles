@@ -89,6 +89,46 @@ func TestJournalPersistsSanitizedRollbackOutcome(t *testing.T) {
 	}
 }
 
+func TestTerminalBackupPathsExcludesRunningOperations(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	journal, err := DefaultJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	running, err := StartRecord(testPlan(t, now), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running.Backup = filepath.Join(home, ".local", "state", "dotfiles", "backups", "running")
+	if err := journal.Write(running); err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := StartRecord(testPlan(t, now.Add(time.Second)), now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal.Backup = filepath.Join(home, ".local", "state", "dotfiles", "backups", "terminal")
+	if err := terminal.Finish(StatusFailed, now.Add(2*time.Second), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Write(terminal); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := journal.TerminalBackupPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := paths[terminal.Backup]; !ok {
+		t.Fatalf("terminal backup missing from %v", paths)
+	}
+	if _, ok := paths[running.Backup]; ok {
+		t.Fatalf("running backup was retention-eligible: %v", paths)
+	}
+}
+
 func TestJournalRefusesSymlinkedStateDescendant(t *testing.T) {
 	home := t.TempDir()
 	outside := t.TempDir()

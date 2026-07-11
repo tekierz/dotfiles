@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 func TestDefaultGlobalConfig(t *testing.T) {
@@ -176,19 +178,6 @@ func TestGlobalConfigSupportsAbsoluteXDGWithoutHOME(t *testing.T) {
 	}
 	if loaded.Theme != "dracula" {
 		t.Fatalf("saved XDG-only theme = %q, want dracula", loaded.Theme)
-	}
-}
-
-func TestGlobalConfigLockNameIsStableAndTargetSpecific(t *testing.T) {
-	first := globalConfigLockRel("dotfiles/global.json")
-	if first != globalConfigLockRel("dotfiles/global.json") {
-		t.Fatal("global config lock name is not stable")
-	}
-	if first == globalConfigLockRel("other/global.json") {
-		t.Fatal("distinct config targets share one lock name")
-	}
-	if strings.Contains(first, "/") || !strings.HasPrefix(first, ".dotfiles-global-config-") {
-		t.Fatalf("unsafe global config lock name %q", first)
 	}
 }
 
@@ -831,6 +820,22 @@ func TestGlobalConfigCASRejectsUntrackedStructLiteralOverExistingFile(t *testing
 	err := SaveGlobalConfig(&GlobalConfig{Theme: "dracula", NavStyle: "vim"})
 	if !errors.Is(err, ErrGlobalConfigConflict) {
 		t.Fatalf("untracked replacement error = %v, want ErrGlobalConfigConflict", err)
+	}
+}
+
+func TestGlobalConfigAuthorityWriterRejectsMissingParentChain(t *testing.T) {
+	cleanup := setupTestConfigDir(t)
+	defer cleanup()
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, ok := GlobalConfigRevision(cfg)
+	if !ok {
+		t.Fatal("loaded global config has no revision")
+	}
+	if _, err := SaveGlobalConfigAtAuthorityTracked(cfg, revision, nil); !errors.Is(err, safefile.ErrParentChanged) {
+		t.Fatalf("authority save error = %v, want ErrParentChanged", err)
 	}
 }
 

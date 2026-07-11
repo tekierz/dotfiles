@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
@@ -234,6 +235,27 @@ func WriteYaziConfigTracked(cfg YaziConfig, theme string) ([]MutationEvidence, e
 func WriteYaziConfigAtRevisionsTracked(cfg YaziConfig, theme string, yaziAccepted, keymapAccepted, themeAccepted safefile.Revision) ([]MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(home, ".config", "yazi")
+	yp, err := compatibilityToolConfigParents(filepath.Join(dir, "yazi.toml"))
+	if err != nil {
+		return nil, err
+	}
+	kp, err := compatibilityToolConfigParents(filepath.Join(dir, "keymap.toml"))
+	if err != nil {
+		return nil, err
+	}
+	tp, err := compatibilityToolConfigParents(filepath.Join(dir, "theme.toml"))
+	if err != nil {
+		return nil, err
+	}
+	return WriteYaziConfigAtAuthoritiesTracked(cfg, theme, yaziAccepted, yp, keymapAccepted, kp, themeAccepted, tp, operation.DefaultLocker)
+}
+
+func WriteYaziConfigAtAuthoritiesTracked(cfg YaziConfig, theme string, yaziAccepted safefile.Revision, yaziParents *safefile.ParentChain, keymapAccepted safefile.Revision, keymapParents *safefile.ParentChain, themeAccepted safefile.Revision, themeParents *safefile.ParentChain, locker operation.Locker) ([]MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 	configDir := filepath.Join(home, ".config", "yazi")
@@ -243,19 +265,20 @@ func WriteYaziConfigAtRevisionsTracked(cfg YaziConfig, theme string, yaziAccepte
 	for _, target := range []struct {
 		path     string
 		accepted safefile.Revision
+		parents  *safefile.ParentChain
 		legacy   func([]byte) bool
 	}{
-		{yaziPath, yaziAccepted, nil},
-		{keymapPath, keymapAccepted, nil},
-		{themePath, themeAccepted, hasLegacyGeneratedYaziThemeHeader},
+		{yaziPath, yaziAccepted, yaziParents, nil},
+		{keymapPath, keymapAccepted, keymapParents, nil},
+		{themePath, themeAccepted, themeParents, hasLegacyGeneratedYaziThemeHeader},
 	} {
-		if err := preflightToolConfigAtRevision(target.path, target.accepted, target.legacy); err != nil {
+		if err := preflightToolConfigAtAuthority(target.path, target.accepted, target.parents, locker, target.legacy); err != nil {
 			return nil, fmt.Errorf("preflight accepted Yazi config set: %w", err)
 		}
 	}
 
 	var results, committed []MutationEvidence
-	evidence, err := writeToolConfigAtRevisionTracked(yaziPath, []byte(GenerateYaziConfig(cfg, theme)), yaziAccepted)
+	evidence, err := writeToolConfigAtAuthorityTracked(yaziPath, []byte(GenerateYaziConfig(cfg, theme)), yaziAccepted, yaziParents, locker)
 	if err != nil {
 		return nil, partialMutationError(err, committed)
 	}
@@ -263,7 +286,7 @@ func WriteYaziConfigAtRevisionsTracked(cfg YaziConfig, theme string, yaziAccepte
 	if evidence.Revision != yaziAccepted {
 		committed = append(committed, evidence)
 	}
-	evidence, err = writeToolConfigAtRevisionTracked(keymapPath, []byte(GenerateYaziKeymap(cfg, theme)), keymapAccepted)
+	evidence, err = writeToolConfigAtAuthorityTracked(keymapPath, []byte(GenerateYaziKeymap(cfg, theme)), keymapAccepted, keymapParents, locker)
 	if err != nil {
 		return nil, partialMutationError(err, committed)
 	}
@@ -271,7 +294,7 @@ func WriteYaziConfigAtRevisionsTracked(cfg YaziConfig, theme string, yaziAccepte
 	if evidence.Revision != keymapAccepted {
 		committed = append(committed, evidence)
 	}
-	evidence, err = writeYaziThemeConfigAtRevisionTracked(themePath, []byte(GenerateYaziTheme(theme)), themeAccepted)
+	evidence, err = writeYaziThemeConfigAtAuthorityTracked(themePath, []byte(GenerateYaziTheme(theme)), themeAccepted, themeParents, locker)
 	if err != nil {
 		return nil, partialMutationError(err, committed)
 	}
@@ -360,15 +383,33 @@ func writeYaziThemeConfigTracked(path string, content []byte) (MutationEvidence,
 }
 
 func writeYaziThemeConfigAtRevisionTracked(path string, content []byte, accepted safefile.Revision) (MutationEvidence, error) {
+	parents, err := compatibilityToolConfigParents(path)
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return writeYaziThemeConfigAtAuthorityTracked(path, content, accepted, parents, operation.DefaultLocker)
+}
+
+func writeYaziThemeConfigAtAuthorityTracked(path string, content []byte, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
 	if !accepted.Tracked() {
 		return MutationEvidence{}, fmt.Errorf("%w: accepted Yazi theme revision is untracked", safefile.ErrRevisionChanged)
+	}
+	if !parents.Tracked() || locker == nil {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Yazi theme authority is incomplete", safefile.ErrParentChanged)
 	}
 	if !hasGeneratedConfigHeader(content) {
 		return MutationEvidence{}, fmt.Errorf("%w: replacement for %s has no recognized ownership header", ErrUnmanagedConfig, path)
 	}
 	var evidence MutationEvidence
-	err := withToolConfigLock(path, func(root, rel string) error {
-		existing, current, err := readToolConfig(root, rel)
+	err := withToolConfigLockAuthorized(path, locker, func(root, rel string) error {
+		var existing []byte
+		var current safefile.Revision
+		var err error
+		if parents != nil {
+			existing, current, err = safefile.ReadWithinAuthorized(root, rel, parents)
+		} else {
+			existing, current, err = readToolConfig(root, rel)
+		}
 		if err != nil {
 			return err
 		}
@@ -380,12 +421,17 @@ func writeYaziThemeConfigAtRevisionTracked(path string, content []byte, accepted
 			return fmt.Errorf("%w: %s", ErrUnmanagedConfig, path)
 		}
 		if current.Exists() && bytes.Equal(existing, content) {
-			evidence = MutationEvidence{Path: path, Revision: current}
+			evidence = MutationEvidence{Path: path, Revision: current, Parents: parents}
 			return nil
 		}
-		committed, err := replaceToolConfigAtRevisionTracked(root, rel, accepted, content)
+		var committed safefile.Revision
+		if parents != nil {
+			committed, err = replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, rel, accepted, parents, content)
+		} else {
+			committed, err = replaceToolConfigAtRevisionNoCreateTracked(root, rel, accepted, content)
+		}
 		if err == nil {
-			evidence = MutationEvidence{Path: path, Revision: committed}
+			evidence = MutationEvidence{Path: path, Revision: committed, Parents: parents}
 		}
 		return err
 	})

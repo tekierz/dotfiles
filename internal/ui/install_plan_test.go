@@ -40,7 +40,7 @@ func newPlanTestApp(t *testing.T) (*App, string, toolInstallRuntime) {
 	app.installCacheLoading = false
 	app.manageInstalled = map[string]bool{}
 	runtime := registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
-	runtime.backupTargets = func([]string) (autoBackupResult, error) { return autoBackupResult{}, nil }
+	runtime.backupTargets = func([]backup.Target) (autoBackupResult, error) { return autoBackupResult{}, nil }
 	return app, home, runtime
 }
 
@@ -437,16 +437,22 @@ func TestInstallPlanWorkerJournalsExactReviewedHash(t *testing.T) {
 		app.manageInstalled[tool.ID()] = true
 	}
 	runtime = registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
-	runtime.backupTargets = func(targets []string) (autoBackupResult, error) {
+	runtime.backupTargets = func(targets []backup.Target) (autoBackupResult, error) {
 		if len(targets) == 0 {
 			t.Fatal("fresh plan omitted newly-created paths from rollback scope")
 		}
-		return autoBackupResult{enabled: true, backupDir: filepath.Join(home, ".config", "dotfiles", "backups", "test-plan")}, nil
+		backupDir := filepath.Join(home, ".config", "dotfiles", "backups", "test-plan")
+		result, err := backup.CreatePlanTracked(home, backupDir, targets)
+		return autoBackupResult{enabled: true, count: result.Count, backupDir: backupDir, plan: &result}, err
 	}
 	app.deepDiveConfig.NeovimConfig = "custom"
 	app.deepDiveConfig.TmuxTPMEnabled = false
 	for id := range app.deepDiveConfig.CLITools {
 		app.deepDiveConfig.CLITools[id] = false
+	}
+	globalPath := filepath.Join(config.ConfigDir(), "global.json")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
+		t.Fatal(err)
 	}
 	plan, err := buildInstallPlan(app, runtime, time.Now())
 	if err != nil {
@@ -466,6 +472,12 @@ func TestInstallPlanWorkerJournalsExactReviewedHash(t *testing.T) {
 	}
 	if terminal.err != nil {
 		t.Fatalf("plan worker failed: %v\n%s", terminal.err, terminal.context)
+	}
+	for _, helper := range []string{"caff", "hk", "sshh"} {
+		info, err := os.Stat(filepath.Join(home, ".local", "bin", helper))
+		if err != nil || info.Mode().Perm() != 0o700 {
+			t.Fatalf("fresh-HOME helper %s = %v, %v", helper, info, err)
+		}
 	}
 
 	operationsDir := filepath.Join(home, ".local", "state", "dotfiles", "operations")
@@ -500,8 +512,104 @@ func TestInstallPlanWorkerJournalsExactReviewedHash(t *testing.T) {
 	}
 }
 
+func TestInstallLockReleaseFailureIsJournaledAsTerminalFailure(t *testing.T) {
+	app, _, runtime := newPlanTestApp(t)
+	for _, tool := range tools.GetRegistry().All() {
+		app.manageInstalled[tool.ID()] = true
+	}
+	runtime = registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
+	runtime.backupTargets = backupPlanTargets
+	runtime.acquireInstallLock = func(*operation.StateAuthority, string, string) (func() error, error) {
+		return func() error { return errors.New("injected release verification failure") }, nil
+	}
+	app.deepDiveConfig.NeovimConfig = "custom"
+	app.deepDiveConfig.TmuxTPMEnabled = false
+	for id := range app.deepDiveConfig.CLITools {
+		app.deepDiveConfig.CLITools[id] = false
+	}
+	if err := os.MkdirAll(config.ConfigDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil || plan.hasBlocked() {
+		t.Fatalf("plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+	}
+	events := make(chan installEventMsg, 128)
+	go runInstallPlanWorker(context.Background(), events, plan, runtime)
+	var terminal installEventMsg
+	for event := range events {
+		if event.done {
+			terminal = event
+		}
+	}
+	if terminal.err == nil || !strings.Contains(terminal.err.Error(), "release install operation lock") {
+		t.Fatalf("terminal error = %v, want release failure", terminal.err)
+	}
+	journal, err := operation.DefaultJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := journal.Read(terminal.operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != operation.StatusFailed {
+		t.Fatalf("journal status = %s, want failed", record.Status)
+	}
+}
+
+func TestStateProductSeparationRejectsAncestorsDescendantsAndAliases(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	stateRoot := filepath.Join(home, "state")
+	if err := os.Mkdir(stateRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	check := func(target string) error {
+		return validateStateProductSeparation(home, []operation.Action{{
+			Disposition:  operation.DispositionApply,
+			BackupTarget: target,
+		}})
+	}
+	for _, target := range []string{"state", "state/dotfiles/config"} {
+		if err := check(target); err == nil {
+			t.Fatalf("overlap target %q was accepted", target)
+		}
+	}
+	if err := check(".config/ghostty/config"); err != nil {
+		t.Fatalf("unrelated product target was rejected: %v", err)
+	}
+	if err := os.Symlink(stateRoot, filepath.Join(home, "state-alias")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := check("state-alias/dotfiles/config"); err == nil {
+		t.Fatal("symlink alias of state namespace was accepted")
+	}
+}
+
+func TestStateProductSeparationRejectsDarwinCaseAlias(t *testing.T) {
+	if goruntime.GOOS != "darwin" {
+		t.Skip("Darwin path policy")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, "State"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "State"))
+	err := validateStateProductSeparation(home, []operation.Action{{
+		Disposition:  operation.DispositionApply,
+		BackupTarget: "state/dotfiles/config",
+	}})
+	if err == nil {
+		t.Fatal("case-folded state namespace alias was accepted")
+	}
+}
+
 func TestInstallPlanFailureAutomaticallyRestoresGlobalState(t *testing.T) {
 	app, home, runtime := newPlanTestApp(t)
+	globalPath := filepath.Join(config.ConfigDir(), "global.json")
 	global, err := config.LoadGlobalConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -512,7 +620,6 @@ func TestInstallPlanFailureAutomaticallyRestoresGlobalState(t *testing.T) {
 	if err := config.SaveGlobalConfig(global); err != nil {
 		t.Fatal(err)
 	}
-	globalPath := filepath.Join(config.ConfigDir(), "global.json")
 	wantBytes, err := os.ReadFile(globalPath)
 	if err != nil {
 		t.Fatal(err)
@@ -598,7 +705,7 @@ func TestSecondRevalidationRefusalDoesNotRollbackExternalEdit(t *testing.T) {
 	}
 	tmuxPath := filepath.Join(home, ".tmux.conf")
 	external := []byte("# external edit during backup\n")
-	runtime.backupTargets = func(targets []string) (autoBackupResult, error) {
+	runtime.backupTargets = func(targets []backup.Target) (autoBackupResult, error) {
 		result, err := backupPlanTargets(targets)
 		if err != nil {
 			return result, err
@@ -642,12 +749,15 @@ func TestPostPackageRevalidationPreservesExternalEditWithoutRollback(t *testing.
 	for id := range app.deepDiveConfig.CLITools {
 		app.deepDiveConfig.CLITools[id] = false
 	}
+	globalPath := filepath.Join(config.ConfigDir(), "global.json")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	plan, err := buildInstallPlan(app, runtime, time.Now())
 	if err != nil || plan.hasBlocked() {
 		t.Fatalf("plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
 	}
 	runtime.backupTargets = backupPlanTargets
-	globalPath := filepath.Join(config.ConfigDir(), "global.json")
 	external := []byte("{\"schema_version\":1,\"theme\":\"nord\",\"nav_style\":\"vim\",\"external_edit\":true}\n")
 	edited := false
 	var injectionErr error
@@ -802,11 +912,11 @@ func TestMutationEvidenceSetsRejectOutOfScopePathsAtomicallyInBothOrders(t *test
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, revision, err := safefile.ReadWithin(home, rel)
+		_, revision, parents, err := safefile.ObserveFileWithin(home, rel)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return tools.MutationEvidence{Path: path, Revision: revision}
+		return tools.MutationEvidence{Path: path, Revision: revision, Parents: parents}
 	}
 	validRel := ".config/yazi/yazi.toml"
 	valid := makeEvidence(validRel, "# generated\n")
@@ -868,11 +978,11 @@ func TestInstallUtilitiesTrackedStopsAtExactFailureBoundary(t *testing.T) {
 		if err := os.WriteFile(path, []byte(name), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		_, revision, err := safefile.ReadWithin(home, rel)
+		_, revision, parents, err := safefile.ObserveFileWithin(home, rel)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return tools.MutationEvidence{Path: path, Revision: revision}, nil
+		return tools.MutationEvidence{Path: path, Revision: revision, Parents: parents}, nil
 	})
 	if !slices.Equal(calls, []string{"caff", "hk"}) || !slices.Equal(result.Attempted, []string{"caff", "hk"}) {
 		t.Fatalf("helper boundary calls=%v attempted=%v", calls, result.Attempted)

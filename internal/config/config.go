@@ -2,7 +2,6 @@ package config
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
@@ -227,16 +227,11 @@ func relativePathBelowHomeIdentity(home, path string) (root, rel string, ok bool
 	return "", "", false
 }
 
-func globalConfigLockRel(targetRel string) string {
-	// The lock lives in the same already-openable trusted anchor as global.json.
-	// Hashing the complete relative target keeps distinct configs below one root
-	// from sharing a lock and avoids exposing descendant path separators in the
-	// lock name. Symlink spellings of one trusted root still open the same inode.
-	return fmt.Sprintf(".dotfiles-global-config-%x.lock", sha256.Sum256([]byte(targetRel)))
-}
-
-func acquireGlobalConfigLock(root, rel string) (func() error, error) {
-	release, err := safefile.AcquireLockWithin(root, rel, 0600)
+func acquireGlobalConfigStateLock(locker operation.Locker, path string) (func() error, error) {
+	if locker == nil {
+		return nil, fmt.Errorf("global config locker is unavailable")
+	}
+	release, err := locker("global-config", path)
 	if errors.Is(err, safefile.ErrUnsupported) {
 		return nil, errors.Join(ErrGlobalConfigLockUnsupported, err)
 	}
@@ -657,7 +652,7 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 // write failure cannot roll back side effects performed by beforeCommit, so the
 // callback should remain small and independently retryable.
 func SaveGlobalConfigWithReservedRevision(cfg *GlobalConfig, beforeCommit func() error) error {
-	_, err := saveGlobalConfigAtRevisionTracked(cfg, nil, beforeCommit)
+	_, err := saveGlobalConfigAtRevisionTracked(cfg, nil, nil, operation.DefaultLocker, beforeCommit)
 	return err
 }
 
@@ -668,10 +663,24 @@ func SaveGlobalConfigWithReservedRevision(cfg *GlobalConfig, beforeCommit func()
 // captured by that transaction and can therefore authorize conditional
 // rollback without a later path re-read.
 func SaveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted safefile.Revision) (safefile.Revision, error) {
-	return saveGlobalConfigAtRevisionTracked(cfg, &accepted, nil)
+	return saveGlobalConfigAtRevisionTracked(cfg, &accepted, nil, operation.DefaultLocker, nil)
 }
 
-func saveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted *safefile.Revision, beforeCommit func() error) (committedRevision safefile.Revision, returnErr error) {
+func SaveGlobalConfigAtAuthorityTracked(cfg *GlobalConfig, accepted safefile.Revision, parents *safefile.ParentChain) (safefile.Revision, error) {
+	if !parents.Tracked() {
+		return safefile.Revision{}, fmt.Errorf("%w: global config authority is incomplete", safefile.ErrParentChanged)
+	}
+	return saveGlobalConfigAtRevisionTracked(cfg, &accepted, parents, operation.DefaultLocker, nil)
+}
+
+func SaveGlobalConfigAtBoundAuthorityTracked(cfg *GlobalConfig, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (safefile.Revision, error) {
+	if !parents.Tracked() || locker == nil {
+		return safefile.Revision{}, fmt.Errorf("%w: global config authority is incomplete", safefile.ErrParentChanged)
+	}
+	return saveGlobalConfigAtRevisionTracked(cfg, &accepted, parents, locker, nil)
+}
+
+func saveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted *safefile.Revision, parents *safefile.ParentChain, locker operation.Locker, beforeCommit func() error) (committedRevision safefile.Revision, returnErr error) {
 	// SaveGlobalConfig refreshes cfg.sourceRevision after a successful write.
 	// Lock before reading any cfg field so concurrent saves of the same pointer do
 	// not race with that refresh. This also protects unknownFields map reads made
@@ -697,19 +706,24 @@ func saveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted *safefile.Rev
 		return safefile.Revision{}, ErrNoConfigDir
 	}
 	path := filepath.Join(dir, "global.json")
-	if err := ensureConfiguredXDGRoot(path); err != nil {
-		return safefile.Revision{}, fmt.Errorf("prepare global config path: %w", err)
+	if accepted == nil {
+		if err := ensureConfiguredXDGRoot(path); err != nil {
+			return safefile.Revision{}, fmt.Errorf("prepare global config path: %w", err)
+		}
+	} else if parents != nil && !parents.Tracked() {
+		return safefile.Revision{}, fmt.Errorf("%w: global config parent authority is untracked", safefile.ErrParentChanged)
 	}
 	root, rel, err := anchoredFilePath(path)
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("resolve global config path: %w", err)
 	}
-	lockRoot := root
-	lockRel := globalConfigLockRel(rel)
-	release, err := acquireGlobalConfigLock(lockRoot, lockRel)
+	// Ordinary and reviewed writers share the private state lock so neither can
+	// bypass the other's reserved read/modify/write window.
+	stateRelease, err := acquireGlobalConfigStateLock(locker, path)
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("lock global config: %w", err)
 	}
+	release := stateRelease
 	didCommit := false
 	defer func() {
 		if err := release(); err != nil {
@@ -739,7 +753,11 @@ func saveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted *safefile.Rev
 	}
 
 	var revision safefile.Revision
-	if expectedRevision.Tracked() {
+	if accepted != nil && parents != nil {
+		revision, err = safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, rel, expectedRevision, parents, data, 0600)
+	} else if accepted != nil {
+		revision, err = safefile.ReplaceWithinRevisionNoCreateTracked(root, rel, expectedRevision, data, 0600)
+	} else if expectedRevision.Tracked() {
 		revision, err = safefile.ReplaceWithinRevisionTracked(root, rel, expectedRevision, data, 0600)
 	} else {
 		// Preserve the documented compatibility path for a programmatically
