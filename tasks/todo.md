@@ -100,6 +100,8 @@ observability land before new integrations or broad UI work.
 - Tmux discovery now follows upstream's user-config precedence and binds both planning and
   writing to the same active legacy/XDG source; the reload hotkey targets that source, and
   unsafe relative XDG paths or symlinked candidates fail closed.
+- Manage and standalone tmux saves cannot silently adopt an existing native source: first
+  ownership requires the reviewed installer plan and its mandatory rollback point.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 

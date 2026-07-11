@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
@@ -63,7 +64,11 @@ func TestWriteTmuxConfigPreservesNativeSettingsInManagedSection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := WriteTmuxConfig(TmuxConfig{Prefix: "ctrl-a", StatusBar: "bottom"}, "nord"); err != nil {
+	_, accepted, parents, err := safefile.ObserveFileWithin(home, ".tmux.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteTmuxConfigAtAuthorityTracked(TmuxConfig{Prefix: "ctrl-a", StatusBar: "bottom"}, "nord", accepted, parents, operation.DefaultLocker); err != nil {
 		t.Fatal(err)
 	}
 	first, err := os.ReadFile(path)
@@ -83,6 +88,24 @@ func TestWriteTmuxConfigPreservesNativeSettingsInManagedSection(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(second), native) || strings.Count(string(second), tmuxManagedStart) != 1 || !strings.Contains(string(second), "set -g prefix C-b") {
 		t.Fatalf("managed tmux update changed native bytes or duplicated the section:\n%s", second)
+	}
+}
+
+func TestWriteTmuxConfigRequiresReviewedNativeAdoption(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path := filepath.Join(home, ".tmux.conf")
+	const original = "# user setting\nset -g focus-events on\n"
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteTmuxConfig(TmuxConfig{}, "nord"); !errors.Is(err, ErrUnmanagedConfig) {
+		t.Fatalf("native adoption error = %v, want ErrUnmanagedConfig", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != original {
+		t.Fatalf("refused native config changed: %q err=%v", got, err)
 	}
 }
 
@@ -142,7 +165,11 @@ func TestTmuxConfigMutationPathUsesFirstExistingCandidate(t *testing.T) {
 	if got != xdgPath {
 		t.Fatalf("active tmux path = %q, want %q", got, xdgPath)
 	}
-	if err := WriteTmuxConfig(TmuxConfig{Prefix: "ctrl-a"}, "nord"); err != nil {
+	_, accepted, parents, err := safefile.ObserveFileWithin(home, filepath.ToSlash(filepath.Join(".config", "tmux", "tmux.conf")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteTmuxConfigAtAuthorityTracked(TmuxConfig{Prefix: "ctrl-a"}, "nord", accepted, parents, operation.DefaultLocker); err != nil {
 		t.Fatal(err)
 	}
 	updated, err := os.ReadFile(xdgPath)

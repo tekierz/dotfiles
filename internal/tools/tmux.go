@@ -493,9 +493,13 @@ func writeTmuxConfigAtRevisionTracked(cfg TmuxConfig, theme string, accepted *sa
 				// second active copy of the old generated settings.
 				merged = managed
 			} else {
-				merged, _, readErr = mergeManagedConfigSection(existing, managed, tmuxManagedStart, tmuxManagedEnd, "tmux config")
+				var ownershipAdded bool
+				merged, ownershipAdded, readErr = mergeManagedConfigSection(existing, managed, tmuxManagedStart, tmuxManagedEnd, "tmux config")
 				if readErr != nil {
 					return readErr
+				}
+				if ownershipAdded && accepted == nil {
+					return fmt.Errorf("%w: native tmux config requires reviewed adoption with a rollback point", ErrUnmanagedConfig)
 				}
 			}
 		}
