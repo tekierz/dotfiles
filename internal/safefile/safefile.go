@@ -114,6 +114,7 @@ type Revision struct {
 	device     uint64
 	inode      uint64
 	mode       uint32
+	links      uint64
 	size       int64
 	modifiedNS int64
 	digest     [32]byte
@@ -128,6 +129,12 @@ func (r Revision) Exists() bool { return r.tracked && r.exists }
 // Permissions returns the permission bits observed on the held descriptor.
 // Missing and untracked revisions return zero.
 func (r Revision) Permissions() fs.FileMode { return fs.FileMode(r.mode).Perm() }
+
+// LinkCount reports the number of directory entries observed for the opened
+// inode. Missing and untracked revisions return zero. Mutation workflows can
+// require exactly one link before removing a user-local file, avoiding changes
+// to another package manager or user path that happens to share the inode.
+func (r Revision) LinkCount() uint64 { return r.links }
 
 // CommittedError reports a failure discovered after a mutation reached its
 // commit point: a staged file was renamed over its target or a named file was

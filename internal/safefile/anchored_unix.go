@@ -18,6 +18,7 @@ import (
 type descriptorSnapshot struct {
 	identity   fileIdentity
 	mode       uint32
+	links      uint64
 	size       int64
 	modifiedNS int64
 }
@@ -118,6 +119,7 @@ func ReadWithin(root, rel string) ([]byte, Revision, error) {
 		device:     after.identity.device,
 		inode:      after.identity.inode,
 		mode:       after.mode,
+		links:      after.links,
 		size:       after.size,
 		modifiedNS: after.modifiedNS,
 		digest:     sha256.Sum256(data),
@@ -137,9 +139,14 @@ func snapshotDescriptor(fd int, file *os.File) (descriptorSnapshot, error) {
 	if err != nil {
 		return descriptorSnapshot{}, err
 	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return descriptorSnapshot{}, err
+	}
 	return descriptorSnapshot{
 		identity:   identity,
 		mode:       uint32(info.Mode()),
+		links:      uint64(stat.Nlink),
 		size:       info.Size(),
 		modifiedNS: info.ModTime().UnixNano(),
 	}, nil
@@ -173,6 +180,21 @@ func classifyLeafOpenError(parentFD int, target string, openErr error) error {
 // after unlink are returned as *CommittedError because the requested name was
 // removed.
 func RemoveWithin(root, rel string) (returnErr error) {
+	return removeWithin(root, rel, nil)
+}
+
+// RemoveWithinRevision removes rel only if the opened regular file still has
+// the exact descriptor-anchored Revision observed by ReadWithin. The expected
+// inode, link count, permissions, size, modification time, and content digest
+// are revalidated inside the removal operation immediately before unlink.
+func RemoveWithinRevision(root, rel string, expected Revision) error {
+	if !expected.Tracked() || !expected.Exists() {
+		return fmt.Errorf("%w: expected removal revision must describe an existing file", ErrRevisionChanged)
+	}
+	return removeWithin(root, rel, &expected)
+}
+
+func removeWithin(root, rel string, expected *Revision) (returnErr error) {
 	directories, target, err := splitRelativePath(rel)
 	if err != nil {
 		return err
@@ -206,7 +228,12 @@ func RemoveWithin(root, rel string) (returnErr error) {
 		return fmt.Errorf("%w: removal target %q has file type %#o", ErrNonRegular, target, inspectedType)
 	}
 
-	fd, err := openRemovalTarget(parentFD, target)
+	var fd int
+	if expected != nil {
+		fd, err = unix.Openat(parentFD, target, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	} else {
+		fd, err = openRemovalTarget(parentFD, target)
+	}
 	descriptorHeld := err == nil
 	if err != nil && !errors.Is(err, unix.EACCES) && !errors.Is(err, unix.EPERM) {
 		return classifyRemoveOpenError(parentFD, target, err)
@@ -232,6 +259,14 @@ func RemoveWithin(root, rel string) (returnErr error) {
 		}
 		wantedTarget = openedTarget
 	}
+	if expected != nil {
+		if !descriptorHeld {
+			return fmt.Errorf("%w: removal target %q could not be held for revision verification", ErrRevisionChanged, target)
+		}
+		if err := verifyDescriptorRevision(fd, *expected); err != nil {
+			return fmt.Errorf("verify removal revision for %q: %w", target, err)
+		}
+	}
 	if hook := replaceTestHooks.beforeRemove; hook != nil {
 		if err := hook(parentFD, fd, target); err != nil {
 			return fmt.Errorf("before removing %q: %w", target, err)
@@ -242,6 +277,16 @@ func RemoveWithin(root, rel string) (returnErr error) {
 	}
 	if err := verifyRemovalEntry(parentFD, target, wantedTarget); err != nil {
 		return err
+	}
+	if expected != nil {
+		if err := verifyDescriptorRevision(fd, *expected); err != nil {
+			return fmt.Errorf("final removal revision for %q: %w", target, err)
+		}
+		// Recheck the namespace after reading the held descriptor so a swap at
+		// the revision-check boundary cannot redirect unlink to a replacement.
+		if err := verifyRemovalEntry(parentFD, target, wantedTarget); err != nil {
+			return err
+		}
 	}
 
 	if err := unix.Unlinkat(parentFD, target, 0); err != nil {
@@ -283,6 +328,68 @@ func RemoveWithin(root, rel string) (returnErr error) {
 	return nil
 }
 
+func verifyDescriptorRevision(fd int, expected Revision) error {
+	var before unix.Stat_t
+	if err := unix.Fstat(fd, &before); err != nil {
+		return fmt.Errorf("%w: inspect held descriptor: %w", ErrRevisionChanged, err)
+	}
+	if uint32(before.Mode)&unix.S_IFMT != unix.S_IFREG ||
+		identityFromStat(&before) != (fileIdentity{device: expected.device, inode: expected.inode}) ||
+		uint64(before.Nlink) != expected.links ||
+		uint32(before.Mode)&0o777 != expected.mode&0o777 ||
+		before.Size != expected.size || statModifiedNanoseconds(&before) != expected.modifiedNS {
+		return ErrRevisionChanged
+	}
+
+	hash := sha256.New()
+	buffer := make([]byte, 64*1024)
+	var offset int64
+	for offset < expected.size {
+		want := int64(len(buffer))
+		if remaining := expected.size - offset; remaining < want {
+			want = remaining
+		}
+		read, err := unix.Pread(fd, buffer[:int(want)], offset)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("%w: read held descriptor: %w", ErrRevisionChanged, err)
+		}
+		if read == 0 {
+			return ErrRevisionChanged
+		}
+		_, _ = hash.Write(buffer[:read])
+		offset += int64(read)
+	}
+	var extra [1]byte
+	if read, err := unix.Pread(fd, extra[:], expected.size); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("%w: verify held descriptor length: %w", ErrRevisionChanged, err)
+	} else if read != 0 {
+		return ErrRevisionChanged
+	}
+	var actualDigest [sha256.Size]byte
+	copy(actualDigest[:], hash.Sum(nil))
+	if actualDigest != expected.digest {
+		return ErrRevisionChanged
+	}
+
+	var after unix.Stat_t
+	if err := unix.Fstat(fd, &after); err != nil {
+		return fmt.Errorf("%w: reinspect held descriptor: %w", ErrRevisionChanged, err)
+	}
+	if identityFromStat(&after) != identityFromStat(&before) || after.Nlink != before.Nlink ||
+		after.Mode != before.Mode || after.Size != before.Size ||
+		statModifiedNanoseconds(&after) != statModifiedNanoseconds(&before) {
+		return ErrRevisionChanged
+	}
+	return nil
+}
+
+func statModifiedNanoseconds(stat *unix.Stat_t) int64 {
+	return stat.Mtim.Sec*1_000_000_000 + stat.Mtim.Nsec
+}
+
 func closeRemovedTarget(fd int) error {
 	if hook := replaceTestHooks.closeRemoved; hook != nil {
 		return hook(fd)
@@ -315,7 +422,7 @@ func descriptorIdentityAndType(fd int) (fileIdentity, uint32, error) {
 func verifyRemovalEntry(parentFD int, target string, expected fileIdentity) error {
 	actual, fileType, err := identityAt(parentFD, target)
 	if err != nil {
-		return fmt.Errorf("%w: inspect removal target %q: %v", ErrTargetChanged, target, err)
+		return fmt.Errorf("%w: inspect removal target %q: %w", ErrTargetChanged, target, err)
 	}
 	if fileType != unix.S_IFREG || actual != expected {
 		return fmt.Errorf("%w: removal target %q no longer names opened regular file", ErrTargetChanged, target)
@@ -502,7 +609,7 @@ func verifyLockDescriptor(fd int, expected fileIdentity, mode uint32) error {
 func verifyLockEntry(parentFD int, target string, expected fileIdentity, mode uint32) error {
 	var stat unix.Stat_t
 	if err := unix.Fstatat(parentFD, target, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-		return fmt.Errorf("%w: inspect lock entry %q: %v", ErrLockChanged, target, err)
+		return fmt.Errorf("%w: inspect lock entry %q: %w", ErrLockChanged, target, err)
 	}
 	identity := identityFromStat(&stat)
 	if uint32(stat.Mode)&unix.S_IFMT != unix.S_IFREG || identity != expected {

@@ -249,6 +249,74 @@ func TestRestoreDirectoryWithinRollsBackMoveAsideFailure(t *testing.T) {
 	assertNoSafefileDirectoryArtifacts(t, root)
 }
 
+func TestRestoreDirectoryWithinSnapshotRefusesExternalEditBeforeRollback(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "backup"), 0o700)
+	mustWrite(t, filepath.Join(root, "backup", "config"), "backup\n", 0o600)
+	backupSnapshot, err := SnapshotDirectoryWithin(root, "backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(root, "live"), 0o700)
+	mustWrite(t, filepath.Join(root, "live", "config"), "operation post-state\n", 0o600)
+	expected, err := SnapshotDirectoryWithin(root, "live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(root, "live", "config"), "external edit\n", 0o600)
+	err = RestoreDirectoryWithinSnapshot(root, "live", backupSnapshot, expected)
+	if !errors.Is(err, ErrDirectoryChanged) {
+		t.Fatalf("RestoreDirectoryWithinSnapshot error = %v, want ErrDirectoryChanged", err)
+	}
+	assertContent(t, filepath.Join(root, "live", "config"), "external edit\n")
+}
+
+func TestRestoreDirectoryWithinDetectsExternalEditAfterMoveAside(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "backup"), 0o700)
+	mustWrite(t, filepath.Join(root, "backup", "config"), "backup\n", 0o600)
+	backupSnapshot, err := SnapshotDirectoryWithin(root, "backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(root, "live"), 0o700)
+	mustWrite(t, filepath.Join(root, "live", "config"), "operation post-state\n", 0o600)
+	expected, err := SnapshotDirectoryWithin(root, "live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setDirectoryHooks(t, func(hooks *directoryHooks) {
+		hooks.afterMoveAside = func(_ int, _, recovery string) error {
+			return os.WriteFile(filepath.Join(root, recovery, "config"), []byte("external edit after staging\n"), 0o600)
+		}
+	})
+	err = RestoreDirectoryWithinSnapshot(root, "live", backupSnapshot, expected)
+	if !errors.Is(err, ErrDirectoryChanged) {
+		t.Fatalf("RestoreDirectoryWithinSnapshot error = %v, want ErrDirectoryChanged", err)
+	}
+	assertContent(t, filepath.Join(root, "live", "config"), "external edit after staging\n")
+}
+
+func TestRemoveDirectoryWithinSnapshotDetectsEditAfterMoveAside(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "created"), 0o700)
+	mustWrite(t, filepath.Join(root, "created", "config"), "operation post-state\n", 0o600)
+	expected, err := SnapshotDirectoryWithin(root, "created")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setDirectoryHooks(t, func(hooks *directoryHooks) {
+		hooks.afterRemoveMove = func(_ int, _, recovery string) error {
+			return os.WriteFile(filepath.Join(root, recovery, "config"), []byte("external edit after staging\n"), 0o600)
+		}
+	})
+	err = RemoveDirectoryWithinSnapshot(root, "created", expected)
+	if !errors.Is(err, ErrDirectoryChanged) {
+		t.Fatalf("RemoveDirectoryWithinSnapshot error = %v, want ErrDirectoryChanged", err)
+	}
+	assertContent(t, filepath.Join(root, "created", "config"), "external edit after staging\n")
+}
+
 func TestRestoreDirectoryWithinRefusesRecreatedTargetAndPreservesRecovery(t *testing.T) {
 	root := t.TempDir()
 	mustMkdir(t, filepath.Join(root, "source"), 0o700)

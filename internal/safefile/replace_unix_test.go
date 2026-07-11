@@ -218,6 +218,45 @@ func TestReplaceWithinPrecommitFailurePreservesOldAndCleansTemporary(t *testing.
 	assertDirectoryEntries(t, root, []string{"config"})
 }
 
+func TestReplaceWithinRevisionRefusesExternalEditAfterRollbackStaging(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "config")
+	mustWrite(t, target, "operation post-state", 0o600)
+	_, expected, err := ReadWithin(root, "config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReplaceHooks(t, func(hooks *replaceHooks) {
+		hooks.beforeCommit = func(_, _ int, _, _ string) error {
+			return os.WriteFile(target, []byte("external edit after staging"), 0o600)
+		}
+	})
+	err = ReplaceWithinRevision(root, "config", expected, []byte("backup bytes"), 0o600)
+	if !errors.Is(err, ErrRevisionChanged) {
+		t.Fatalf("ReplaceWithinRevision error = %v, want ErrRevisionChanged", err)
+	}
+	assertContent(t, target, "external edit after staging")
+	assertDirectoryEntries(t, root, []string{"config"})
+}
+
+func TestReplaceWithinRevisionRequiresExpectedAbsenceThroughCommit(t *testing.T) {
+	root := t.TempDir()
+	_, expected, err := ReadWithin(root, "created")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReplaceHooks(t, func(hooks *replaceHooks) {
+		hooks.beforeCommit = func(_, _ int, _, _ string) error {
+			return os.WriteFile(filepath.Join(root, "created"), []byte("external creation"), 0o600)
+		}
+	})
+	err = ReplaceWithinRevision(root, "created", expected, []byte("backup bytes"), 0o600)
+	if !errors.Is(err, ErrRevisionChanged) {
+		t.Fatalf("ReplaceWithinRevision error = %v, want ErrRevisionChanged", err)
+	}
+	assertContent(t, filepath.Join(root, "created"), "external creation")
+}
+
 func TestReplaceWithinDetectsStagedNamespaceSubstitution(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "config")

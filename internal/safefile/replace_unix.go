@@ -96,6 +96,21 @@ func EnsureDirectoryWithin(root, rel string, mode fs.FileMode) error {
 //
 // If a failure is found after rename, the returned error is a *CommittedError.
 func ReplaceWithin(root, rel string, data []byte, mode fs.FileMode) (returnErr error) {
+	return replaceWithinRevision(root, rel, data, mode, nil)
+}
+
+// ReplaceWithinRevision atomically replaces rel only when its exact current
+// descriptor revision still matches expected. A tracked missing revision is a
+// valid expectation and requires the target to remain absent through the
+// staging commit boundary.
+func ReplaceWithinRevision(root, rel string, expected Revision, data []byte, mode fs.FileMode) error {
+	if !expected.Tracked() {
+		return fmt.Errorf("%w: expected replacement revision is untracked", ErrRevisionChanged)
+	}
+	return replaceWithinRevision(root, rel, data, mode, &expected)
+}
+
+func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expected *Revision) (returnErr error) {
 	if mode != mode.Perm() {
 		return fmt.Errorf("%w: %v", ErrInvalidMode, mode)
 	}
@@ -169,6 +184,11 @@ func ReplaceWithin(root, rel string, data []byte, mode fs.FileMode) (returnErr e
 	if err := verifyStagedEntry(parentFD, staged.name, staged.identity); err != nil {
 		return fmt.Errorf("pre-commit staging verification: %w", err)
 	}
+	if expected != nil {
+		if err := verifyTargetRevisionAtCommit(parentFD, target, *expected); err != nil {
+			return fmt.Errorf("replacement revision check: %w", err)
+		}
+	}
 
 	if err := unix.Renameat(parentFD, staged.name, parentFD, target); err != nil {
 		return fmt.Errorf("commit replacement: %w", err)
@@ -206,6 +226,41 @@ func ReplaceWithin(root, rel string, data []byte, mode fs.FileMode) (returnErr e
 			Operation: strings.Join(operations, "; "),
 			Err:       errors.Join(postCommit...),
 		}
+	}
+	return nil
+}
+
+func verifyTargetRevisionAtCommit(parentFD int, target string, expected Revision) error {
+	identity, fileType, err := identityAt(parentFD, target)
+	if !expected.Exists() {
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("%w: inspect expected-absent target: %w", ErrRevisionChanged, err)
+		}
+		return fmt.Errorf("%w: expected target %q to remain absent", ErrRevisionChanged, target)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: inspect expected target: %w", ErrRevisionChanged, err)
+	}
+	if fileType != unix.S_IFREG || identity != (fileIdentity{device: expected.device, inode: expected.inode}) {
+		return fmt.Errorf("%w: target %q identity changed", ErrRevisionChanged, target)
+	}
+	fd, err := unix.Openat(parentFD, target, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("%w: open expected target: %w", ErrRevisionChanged, err)
+	}
+	defer func() { _ = unix.Close(fd) }()
+	if err := verifyDescriptorRevision(fd, expected); err != nil {
+		return err
+	}
+	actual, actualType, err := identityAt(parentFD, target)
+	if err != nil {
+		return fmt.Errorf("%w: reinspect target %q namespace: %w", ErrRevisionChanged, target, err)
+	}
+	if actualType != unix.S_IFREG || actual != identity {
+		return fmt.Errorf("%w: target %q namespace changed at commit", ErrRevisionChanged, target)
 	}
 	return nil
 }
@@ -430,7 +485,7 @@ func identityFromStat(stat *unix.Stat_t) fileIdentity {
 func verifyStagedEntry(parentFD int, name string, expected fileIdentity) error {
 	actual, fileType, err := identityAt(parentFD, name)
 	if err != nil {
-		return fmt.Errorf("%w: inspect %q: %v", ErrStagedChanged, name, err)
+		return fmt.Errorf("%w: inspect %q: %w", ErrStagedChanged, name, err)
 	}
 	if fileType != unix.S_IFREG {
 		return fmt.Errorf("%w: %q is no longer a regular file", ErrStagedChanged, name)
@@ -444,12 +499,12 @@ func verifyStagedEntry(parentFD int, name string, expected fileIdentity) error {
 func verifyParent(rootFD int, directories []string, expected fileIdentity) error {
 	current, err := openParent(rootFD, directories, false)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrParentChanged, err)
+		return fmt.Errorf("%w: %w", ErrParentChanged, err)
 	}
 	defer func() { _ = unix.Close(current) }()
 	actual, err := identityOf(current)
 	if err != nil {
-		return fmt.Errorf("%w: identify current parent: %v", ErrParentChanged, err)
+		return fmt.Errorf("%w: identify current parent: %w", ErrParentChanged, err)
 	}
 	if actual != expected {
 		return fmt.Errorf("%w: expected device/inode %d/%d, got %d/%d", ErrParentChanged, expected.device, expected.inode, actual.device, actual.inode)

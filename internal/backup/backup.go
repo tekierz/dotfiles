@@ -213,6 +213,43 @@ type RestoreResult struct {
 	Warnings map[string]string
 }
 
+// ExpectedState is the exact post-mutation state a rollback is permitted to
+// replace or remove. Missing captures are intentionally not representable as a
+// zero-value permission grant: callers must set Captured after a successful
+// descriptor-anchored observation.
+type ExpectedState struct {
+	Captured          bool
+	Kind              TargetKind
+	Exists            bool
+	FileRevision      safefile.Revision
+	DirectorySnapshot *safefile.DirectorySnapshot
+}
+
+// CaptureExpectedState captures one exact post-write state for conditional
+// rollback. It never follows symlinks or creates missing parents.
+func CaptureExpectedState(home string, target Target) (ExpectedState, error) {
+	rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.RelPath)))
+	switch target.Kind {
+	case TargetFile:
+		_, revision, err := safefile.ReadWithin(home, rel)
+		if err != nil {
+			return ExpectedState{}, err
+		}
+		return ExpectedState{Captured: true, Kind: TargetFile, Exists: revision.Exists(), FileRevision: revision}, nil
+	case TargetDirectory:
+		snapshot, err := safefile.SnapshotDirectoryWithin(home, rel)
+		if errors.Is(err, os.ErrNotExist) {
+			return ExpectedState{Captured: true, Kind: TargetDirectory}, nil
+		}
+		if err != nil {
+			return ExpectedState{}, err
+		}
+		return ExpectedState{Captured: true, Kind: TargetDirectory, Exists: true, DirectorySnapshot: snapshot}, nil
+	default:
+		return ExpectedState{}, fmt.Errorf("invalid expected-state target kind %q", target.Kind)
+	}
+}
+
 // Count returns the number of files successfully restored.
 func (r RestoreResult) Count() int { return len(r.Restored) }
 
@@ -233,24 +270,39 @@ func Restore(backupDir, home string) (RestoreResult, error) {
 	return restoreWithOperations(backupDir, home, defaultRestoreOperations())
 }
 
+// RestoreExpected restores only targets whose live state still exactly matches
+// a captured post-mutation state. Changed or uncaptured targets are skipped and
+// therefore make the rollback incomplete instead of overwriting external work.
+func RestoreExpected(backupDir, home string, expected map[string]ExpectedState) (RestoreResult, error) {
+	return restoreWithExpectedOperations(backupDir, home, defaultRestoreOperations(), expected)
+}
+
 func defaultRestoreOperations() restoreOperations {
 	return restoreOperations{
-		replaceFile:       safefile.ReplaceWithin,
-		snapshotDirectory: safefile.SnapshotDirectoryWithin,
-		restoreDirectory:  safefile.RestoreDirectoryWithin,
-		removeFile:        safefile.RemoveWithin,
-		removeDirectory:   safefile.RemoveDirectoryWithin,
+		replaceFile:              safefile.ReplaceWithin,
+		snapshotDirectory:        safefile.SnapshotDirectoryWithin,
+		restoreDirectory:         safefile.RestoreDirectoryWithin,
+		removeFile:               safefile.RemoveWithin,
+		removeDirectory:          safefile.RemoveDirectoryWithin,
+		replaceFileRevision:      safefile.ReplaceWithinRevision,
+		removeFileRevision:       safefile.RemoveWithinRevision,
+		restoreDirectorySnapshot: safefile.RestoreDirectoryWithinSnapshot,
+		removeDirectorySnapshot:  safefile.RemoveDirectoryWithinSnapshot,
 	}
 }
 
 type restoreReplaceFunc func(root, rel string, data []byte, mode os.FileMode) error
 
 type restoreOperations struct {
-	replaceFile       restoreReplaceFunc
-	snapshotDirectory func(root, rel string) (*safefile.DirectorySnapshot, error)
-	restoreDirectory  func(root, rel string, snapshot *safefile.DirectorySnapshot) error
-	removeFile        func(root, rel string) error
-	removeDirectory   func(root, rel string) error
+	replaceFile              restoreReplaceFunc
+	snapshotDirectory        func(root, rel string) (*safefile.DirectorySnapshot, error)
+	restoreDirectory         func(root, rel string, snapshot *safefile.DirectorySnapshot) error
+	removeFile               func(root, rel string) error
+	removeDirectory          func(root, rel string) error
+	replaceFileRevision      func(root, rel string, expected safefile.Revision, data []byte, mode os.FileMode) error
+	removeFileRevision       func(root, rel string, expected safefile.Revision) error
+	restoreDirectorySnapshot func(root, rel string, snapshot, expected *safefile.DirectorySnapshot) error
+	removeDirectorySnapshot  func(root, rel string, expected *safefile.DirectorySnapshot) error
 }
 
 func restoreWithReplace(backupDir, home string, replace restoreReplaceFunc) (RestoreResult, error) {
@@ -264,6 +316,10 @@ func restoreWithReplace(backupDir, home string, replace restoreReplaceFunc) (Res
 }
 
 func restoreWithOperations(backupDir, home string, operations restoreOperations) (RestoreResult, error) {
+	return restoreWithExpectedOperations(backupDir, home, operations, nil)
+}
+
+func restoreWithExpectedOperations(backupDir, home string, operations restoreOperations, expected map[string]ExpectedState) (RestoreResult, error) {
 	result := RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}
 
 	items, err := restoreItems(backupDir, home)
@@ -275,6 +331,25 @@ func restoreWithOperations(backupDir, home string, operations restoreOperations)
 		if it.skipReason != "" {
 			result.Skipped[it.key()] = it.skipReason
 			continue
+		}
+		conditional := expected != nil
+		relKey := filepath.ToSlash(filepath.Clean(filepath.FromSlash(it.relPath)))
+		postState := ExpectedState{}
+		if conditional {
+			var ok bool
+			postState, ok = expected[relKey]
+			if !ok || !postState.Captured {
+				result.Skipped[it.key()] = "conditional rollback has no proven post-write state"
+				continue
+			}
+			wantKind := TargetFile
+			if it.isDir {
+				wantKind = TargetDirectory
+			}
+			if postState.Kind != wantKind {
+				result.Skipped[it.key()] = "conditional rollback post-write kind mismatch"
+				continue
+			}
 		}
 
 		dstPath := it.dstPath
@@ -294,13 +369,18 @@ func restoreWithOperations(backupDir, home string, operations restoreOperations)
 		}
 
 		if !it.existed {
-			remove := operations.removeFile
-			if it.isDir {
-				remove = operations.removeDirectory
+			var err error
+			if conditional {
+				err = removeExpectedTarget(home, relKey, postState, operations)
+			} else if it.isDir {
+				err = operations.removeDirectory(home, relKey)
+			} else {
+				err = operations.removeFile(home, relKey)
 			}
-			err := remove(home, filepath.ToSlash(it.relPath))
 			if err == nil || errors.Is(err, os.ErrNotExist) {
-				result.Removed = append(result.Removed, it.relPath)
+				if !conditional || postState.Exists {
+					result.Removed = append(result.Removed, it.relPath)
+				}
 				continue
 			}
 			var committed *safefile.CommittedError
@@ -328,14 +408,20 @@ func restoreWithOperations(backupDir, home string, operations restoreOperations)
 				result.Skipped[it.key()] = fmt.Sprintf("snapshot backup directory: %v", err)
 				continue
 			}
-			if err := operations.restoreDirectory(home, filepath.ToSlash(it.relPath), snapshot); err != nil {
+			var restoreErr error
+			if conditional {
+				restoreErr = operations.restoreDirectorySnapshot(home, relKey, snapshot, postState.DirectorySnapshot)
+			} else {
+				restoreErr = operations.restoreDirectory(home, relKey, snapshot)
+			}
+			if restoreErr != nil {
 				var committed *safefile.CommittedError
-				if errors.As(err, &committed) {
+				if errors.As(restoreErr, &committed) {
 					result.Restored = append(result.Restored, it.relPath)
-					result.Warnings[it.key()] = fmt.Sprintf("directory restore committed with a durability/cleanup warning: %v", err)
+					result.Warnings[it.key()] = fmt.Sprintf("directory restore committed with a durability/cleanup warning: %v", restoreErr)
 					continue
 				}
-				result.Skipped[it.key()] = fmt.Sprintf("restore directory: %v", err)
+				result.Skipped[it.key()] = fmt.Sprintf("restore directory: %v", restoreErr)
 				continue
 			}
 			result.Restored = append(result.Restored, it.relPath)
@@ -361,14 +447,20 @@ func restoreWithOperations(backupDir, home string, operations restoreOperations)
 		// the trusted HOME anchor is traversed with O_NOFOLLOW, missing parents
 		// are created owner-only, the recorded mode is set before commit, and a
 		// failed precommit write leaves the old destination intact.
-		if err := operations.replaceFile(home, filepath.ToSlash(it.relPath), data, it.mode.Perm()); err != nil {
+		var replaceErr error
+		if conditional {
+			replaceErr = operations.replaceFileRevision(home, relKey, postState.FileRevision, data, it.mode.Perm())
+		} else {
+			replaceErr = operations.replaceFile(home, relKey, data, it.mode.Perm())
+		}
+		if replaceErr != nil {
 			var committed *safefile.CommittedError
-			if errors.As(err, &committed) {
+			if errors.As(replaceErr, &committed) {
 				result.Restored = append(result.Restored, it.relPath)
-				result.Warnings[it.key()] = fmt.Sprintf("restore committed with a durability/verification warning: %v", err)
+				result.Warnings[it.key()] = fmt.Sprintf("restore committed with a durability/verification warning: %v", replaceErr)
 				continue
 			}
-			result.Skipped[it.key()] = fmt.Sprintf("write: %v", err)
+			result.Skipped[it.key()] = fmt.Sprintf("write: %v", replaceErr)
 			continue
 		}
 
@@ -376,6 +468,35 @@ func restoreWithOperations(backupDir, home string, operations restoreOperations)
 	}
 
 	return result, nil
+}
+
+func removeExpectedTarget(home, rel string, expected ExpectedState, operations restoreOperations) error {
+	if !expected.Exists {
+		switch expected.Kind {
+		case TargetFile:
+			_, current, err := safefile.ReadWithin(home, rel)
+			if err != nil {
+				return err
+			}
+			if current != expected.FileRevision {
+				return safefile.ErrRevisionChanged
+			}
+			return nil
+		case TargetDirectory:
+			_, err := safefile.SnapshotDirectoryWithin(home, rel)
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return safefile.ErrDirectoryChanged
+		}
+	}
+	if expected.Kind == TargetDirectory {
+		return operations.removeDirectorySnapshot(home, rel, expected.DirectorySnapshot)
+	}
+	return operations.removeFileRevision(home, rel, expected.FileRevision)
 }
 
 type restoreItem struct {

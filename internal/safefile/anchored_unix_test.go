@@ -518,6 +518,23 @@ func TestRevisionIsComparable(t *testing.T) {
 	_ = a == b
 }
 
+func TestReadWithinReportsHardlinkCount(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "candidate"), []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(root, "candidate"), filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	_, revision, err := ReadWithin(root, "candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision.LinkCount() != 2 {
+		t.Fatalf("LinkCount() = %d, want 2", revision.LinkCount())
+	}
+}
+
 func TestRemoveWithinDeletesOnlyNamedRegularLinkAndClosesDescriptor(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "nested", "profile.json")
@@ -548,6 +565,64 @@ func TestRemoveWithinDeletesOnlyNamedRegularLinkAndClosesDescriptor(t *testing.T
 	if err := unix.Fstat(openedFD, &stat); !errors.Is(err, unix.EBADF) {
 		t.Fatalf("removed descriptor still open: %v", err)
 	}
+}
+
+func TestRemoveWithinRevisionRefusesContentChangeAtCommitBoundary(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "candidate")
+	mustWrite(t, target, "original", 0o700)
+	_, revision, err := ReadWithin(root, "candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReplaceHooks(t, func(hooks *replaceHooks) {
+		hooks.beforeRemove = func(_, _ int, _ string) error {
+			return os.WriteFile(target, []byte("changed!"), 0o700)
+		}
+	})
+	if err := RemoveWithinRevision(root, "candidate", revision); !errors.Is(err, ErrRevisionChanged) {
+		t.Fatalf("RemoveWithinRevision error = %v, want ErrRevisionChanged", err)
+	}
+	if got := readSafefileString(t, target); got != "changed!" {
+		t.Fatalf("replacement content = %q, want changed!", got)
+	}
+}
+
+func TestRemoveWithinRevisionRefusesNamespaceSwapAtCommitBoundary(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "candidate")
+	displaced := filepath.Join(root, "displaced")
+	mustWrite(t, target, "original", 0o700)
+	_, revision, err := ReadWithin(root, "candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReplaceHooks(t, func(hooks *replaceHooks) {
+		hooks.beforeRemove = func(_, _ int, _ string) error {
+			if err := os.Rename(target, displaced); err != nil {
+				return err
+			}
+			return os.WriteFile(target, []byte("replacement"), 0o700)
+		}
+	})
+	if err := RemoveWithinRevision(root, "candidate", revision); !errors.Is(err, ErrTargetChanged) {
+		t.Fatalf("RemoveWithinRevision error = %v, want ErrTargetChanged", err)
+	}
+	if got := readSafefileString(t, target); got != "replacement" {
+		t.Fatalf("replacement content = %q, want replacement", got)
+	}
+	if got := readSafefileString(t, displaced); got != "original" {
+		t.Fatalf("displaced content = %q, want original", got)
+	}
+}
+
+func readSafefileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestRemoveWithinRejectsInvalidSymlinkAndNonRegularTargets(t *testing.T) {
@@ -790,7 +865,7 @@ func TestRemoveWithinRefusesUnixSocketBeforeRemoval(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	err = RemoveWithin(root, "service.sock")
 	if !errors.Is(err, ErrNonRegular) {
