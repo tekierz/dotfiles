@@ -35,6 +35,7 @@ make build
 | `dotfiles hotkeys` | View keybindings cheatsheet |
 | `dotfiles update` | Check for package updates |
 | `dotfiles status` | Show current configuration |
+| `dotfiles doctor [--json]` | Diagnose which build is running, PATH collisions, Homebrew ownership, and stale legacy binaries |
 | `dotfiles theme list` | List available themes |
 | `dotfiles theme set <name>` | Set theme (run `dotfiles install` to apply) |
 | `dotfiles config <tool>` | Configure a specific tool |
@@ -43,7 +44,18 @@ make build
 | `dotfiles backups` | List configuration backups |
 | `dotfiles restore [name]` | Restore a backup (opens TUI picker if no name) |
 | `dotfiles version` / `dotfiles --version` | Show version information |
-| `dotfiles uninstall` | Remove dotfiles and restore original config |
+| `dotfiles uninstall` | Restore backups and show conservative manual uninstall guidance; automatic deletion is disabled |
+
+### Diagnosing stale local builds
+
+If `dotfiles` behaves differently across terminals or appears to be missing newer features, run:
+
+```bash
+dotfiles doctor
+dotfiles doctor --json
+```
+
+Doctor reports the executable currently running, every `dotfiles` match reachable through `PATH`, safe static version/build hints, Homebrew's managed executable, and stale `dotfiles-tui` or `dotfiles-setup` candidates. It is read-only and does not execute discovered `dotfiles` binaries or modify files. JSON output uses a stable schema and omits timestamps so repeated runs against unchanged state are deterministic.
 
 ## What It Installs & Configures
 
@@ -78,34 +90,19 @@ make build
 
 ### macOS Quality-of-Life Apps (optional, macOS only)
 
-> The Go TUI's app picker offers **Rectangle, Raycast, IINA, and AppCleaner**. The remaining apps below are installed only by the legacy bash script.
-
 | App | Description |
 |-----|-------------|
 | **Rectangle** | Window snapping & management |
 | **Raycast** | Spotlight replacement with superpowers |
-| **Stats** | System monitor in menu bar |
-| **AltTab** | Windows-style alt-tab switcher |
-| **MonitorControl** | Control external monitor brightness |
-| **Mos** | Smooth scrolling for external mouse |
-| **Karabiner-Elements** | Keyboard customization |
 | **IINA** | Modern video player |
-| **The Unarchiver** | Archive extraction |
 | **AppCleaner** | Clean app uninstallation |
-| **mas** | Mac App Store CLI |
-| **trash** | Move files to trash from CLI |
 
 ### Raspberry Pi Support
 
-Optimized configurations for different Pi models:
-
-| Model | Flag | Notes |
-|-------|------|-------|
-| **Pi 5** | `--raspi5` | Full toolset, all features |
-| **Pi 4** | `--raspi` | Full toolset |
-| **Pi Zero 2** | `--raspizero2` | Lightweight (skips yazi, btop) |
-
-Raspberry Pi installs via apt + manual builds for modern tools not in repos.
+The Go application detects Debian-family Raspberry Pi systems through the same
+platform layer used for Debian and Ubuntu. Systems with less than 1 GiB of memory
+automatically omit tools marked as heavy. Package availability still varies by
+architecture, so review the immutable install plan before applying it.
 
 ## Features
 
@@ -215,7 +212,7 @@ Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
 | `caff` | Toggle system sleep (like Caffeine) |
 | `y` | Yazi file manager (cd on exit) |
 
-`sshh` (Quick SSH connection manager) is bundled with dotfiles and installed to `~/.local/bin/sshh` by default; it is tracked by `dotfiles manage` and removed on `dotfiles uninstall`.
+`sshh` (Quick SSH connection manager) is bundled with dotfiles and installed to `~/.local/bin/sshh` by default. The fail-closed uninstall command retains helpers until ownership manifests and anchored removal are implemented.
 
 ### Shell Aliases
 
@@ -249,27 +246,25 @@ After running, configs are placed in:
 |------|---------|
 | `~/.zshrc` | Zsh configuration |
 | `~/.tmux.conf` | Tmux configuration |
-| `~/.config/ghostty/config` | Ghostty terminal |
+| `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` (and legacy `config`) | Ghostty terminal; existing settings are preserved outside a managed block |
+| `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` (and legacy `config`) | Higher-precedence Ghostty sources on macOS; the latest existing source is updated |
 | `~/.config/yazi/` | Yazi file manager |
-| `~/.gitconfig` | Git with delta |
+| `~/.gitconfig` | Native Git configuration, preserved with one bounded managed include |
+| `~/.config/dotfiles/git/config` | Product-owned Git/delta settings loaded by that include |
 | `~/.config/dotfiles/settings` | Theme, navigation, and active user |
 | `~/.config/dotfiles/users/` | User profile settings |
 | `~/.sshh` | SSH hosts for sshh |
 
-## Legacy Bash Script
+On first Git or Ghostty adoption, the existing native file is copied byte-for-byte
+to a sibling `*.dotfiles.bak` file. An existing different backup is never overwritten.
 
-The original bash setup script is still available for direct installation:
+## Migrating from `dotfiles-setup`
 
-```bash
-# Quick install via curl
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash
-
-# With all macOS apps
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --macos-apps
-
-# Raspberry Pi
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --raspi
-```
+The former Bash installer has been retired and removed from active distribution.
+It is unsupported, is not installed by `make install`, and must not be executed
+from historical raw URLs. Existing users should install the Go application, run
+`dotfiles doctor`, and follow the conservative migration guidance in
+[docs/legacy-migration.md](docs/legacy-migration.md).
 
 ## Post-Install
 
@@ -283,7 +278,7 @@ curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-
 
 ## Requirements
 
-- **macOS**: Homebrew (installed automatically)
+- **macOS**: Homebrew
 - **Arch Linux**: pacman, paru (for AUR)
 - **Debian/Ubuntu**: apt (some tools need Homebrew)
 

@@ -21,15 +21,11 @@ These repos are interconnected and may need updates together:
 
 ### Integration Flow
 ```
-PRIMARY (current): Go TUI binary `dotfiles`
-homebrew-tap/Formula/dotfiles.rb ──> installs Go binary via: brew install tekierz/tap/dotfiles
-
-MIGRATION-ONLY LEGACY: dotfiles-setup (bash script; no new features)
-    └── on macOS installs sshh via: brew install tekierz/tap/sshh
-                                    │
-homebrew-tap/Formula/sshh.rb ───────┘
-    └── SHA256 hash points to: github.com/tekierz/sshh/archive/refs/tags/v*.tar.gz
+dotfiles: homebrew-tap/Formula/dotfiles.rb -> Go `dotfiles` binary
+sshh:     homebrew-tap/Formula/sshh.rb     -> independent `sshh` utility
 ```
+
+Both formulas must use immutable release sources and verified SHA256 hashes.
 
 ---
 
@@ -101,9 +97,9 @@ echo -e "\n[10/15] Running govulncheck..."
 govulncheck ./...
 echo "GOVULNCHECK: PASS"
 
-# 11. Shell analysis (the setup script is migration-only but still supported)
+# 11. Shell analysis (repository-maintained development scripts)
 echo -e "\n[11/15] Running shellcheck..."
-shellcheck bin/dotfiles-setup scripts/install-hooks.sh
+shellcheck scripts/install-hooks.sh
 echo "SHELLCHECK: PASS"
 
 # 12. Security: Check for hardcoded secrets
@@ -323,7 +319,7 @@ echo "=== CROSS-REPO COMPATIBILITY CHECK ==="
 cd ~/Desktop/Projects || exit 1
 
 # 1. Check all repos exist
-echo -e "\n[1/6] Checking repositories..."
+echo -e "\n[1/5] Checking repositories..."
 for repo in dotfiles sshh homebrew-tap; do
     if [ -d "$repo" ]; then
         echo "  $repo: EXISTS"
@@ -334,7 +330,7 @@ for repo in dotfiles sshh homebrew-tap; do
 done
 
 # 2. Check git status of all repos
-echo -e "\n[2/6] Git status..."
+echo -e "\n[2/5] Git status..."
 for repo in dotfiles sshh homebrew-tap; do
     DIRTY=$(git -C $repo status --porcelain 2>/dev/null | wc -l)
     BRANCH=$(git -C $repo branch --show-current 2>/dev/null)
@@ -346,38 +342,24 @@ for repo in dotfiles sshh homebrew-tap; do
 done
 
 # 3. Version check
-echo -e "\n[3/6] Version numbers..."
-# Migration-only compatibility version; the Go binary version comes from its release tag.
-DOTFILES_SETUP_VER=$(grep -m1 'VERSION=' dotfiles/bin/dotfiles-setup 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+echo -e "\n[3/5] Version numbers..."
 SSHH_VER=$(grep -m1 'VERSION=' sshh/bin/sshh 2>/dev/null | cut -d'"' -f2 || echo "unknown")
 # Primary distribution: the Go-binary 'dotfiles' formula (brew install dotfiles)
 TAP_DOTFILES_VER=$(grep -m1 'version' homebrew-tap/Formula/dotfiles.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-# Migration-only legacy formula (if still present in the tap)
-TAP_DOTFILES_SETUP_VER=$(grep -m1 'version' homebrew-tap/Formula/dotfiles-setup.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "n/a")
 TAP_SSHH_VER=$(grep -m1 'version' homebrew-tap/Formula/sshh.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-echo "  dotfiles-setup migration script: v$DOTFILES_SETUP_VER"
 echo "  sshh script: v$SSHH_VER"
 echo "  homebrew-tap dotfiles (Go binary) formula: v$TAP_DOTFILES_VER"
-echo "  homebrew-tap dotfiles-setup (migration-only) formula: v$TAP_DOTFILES_SETUP_VER"
 echo "  homebrew-tap sshh formula: v$TAP_SSHH_VER"
 
-# 4. Check the migration-only setup script's sshh integration
-echo -e "\n[4/6] Migration-script integration references..."
-if grep -q "tekierz/tap/sshh" dotfiles/bin/dotfiles-setup 2>/dev/null; then
-    echo "  dotfiles -> sshh tap reference: FOUND"
-else
-    echo "  dotfiles -> sshh tap reference: MISSING"
-fi
-
-# 5. Check SHA256 hashes are present (can't verify without release)
-echo -e "\n[5/6] Homebrew formula SHA256 hashes..."
+# 4. Check SHA256 hashes are present (can't verify without release)
+echo -e "\n[4/5] Homebrew formula SHA256 hashes..."
 DOTFILES_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/dotfiles.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
 SSHH_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/sshh.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
 echo "  dotfiles (Go binary): ${DOTFILES_SHA:0:16}..."
 echo "  sshh: ${SSHH_SHA:0:16}..."
 
-# 6. Check for breaking changes in sshh config format
-echo -e "\n[6/6] sshh config format compatibility..."
+# 5. Check for breaking changes in sshh config format
+echo -e "\n[5/5] sshh config format compatibility..."
 if grep -q "pipe-delimited" sshh/README.md 2>/dev/null || grep -q '|' sshh/bin/sshh 2>/dev/null; then
     echo "  Config format: pipe-delimited (Name|user@host|port|key)"
 fi
@@ -389,7 +371,6 @@ echo -e "\n=== CROSS-REPO CHECK COMPLETE ==="
 
 **When updating dotfiles:**
 
-- [ ] If the migration-only setup script changed, check whether its sshh installation command changed
 - [ ] Verify `brew install tekierz/tap/sshh` still works
 - [ ] Check DeepDive utilities screen includes sshh toggle
 - [ ] Verify sshh appears in `dotfiles status` output
@@ -416,7 +397,6 @@ curl -sL "https://github.com/tekierz/sshh/archive/refs/tags/${SSHH_TAG}.tar.gz" 
 
 # 3. Update formulas in homebrew-tap
 # Edit: ~/Desktop/Projects/homebrew-tap/Formula/dotfiles.rb       # primary Go-binary formula
-# Edit: ~/Desktop/Projects/homebrew-tap/Formula/dotfiles-setup.rb # migration-only; only for a migration fix
 # Edit: ~/Desktop/Projects/homebrew-tap/Formula/sshh.rb
 
 # 4. Commit and push
@@ -431,8 +411,6 @@ git push
 |-------------|-----------------|
 | sshh version bump | `sshh/bin/sshh`, `homebrew-tap/Formula/sshh.rb` |
 | dotfiles version bump (Go binary) | `homebrew-tap/Formula/dotfiles.rb` (primary, `brew install dotfiles`) |
-| dotfiles migration fix (legacy bash) | `dotfiles/bin/dotfiles-setup`, `homebrew-tap/Formula/dotfiles-setup.rb` (migration-only; no new features) |
-| sshh install method in migration path | `dotfiles/bin/dotfiles-setup` (grep for "sshh") |
 | Tool registry | `dotfiles/internal/tools/registry.go`, `dotfiles/internal/ui/deepdive.go` |
 
 ### Breaking Change Detection
@@ -442,7 +420,7 @@ Watch for these breaking changes:
 | Component | Breaking Change | Impact |
 |-----------|-----------------|--------|
 | sshh config format | Change from pipe-delimited | Users lose saved hosts |
-| sshh CLI flags | Changed/removed flags | Migration-only setup integration breaks |
+| sshh CLI flags | Changed/removed flags | `dotfiles` utility workflows may break |
 | Homebrew formula URL | Changed repo structure | `brew install` fails |
 | dotfiles utilities | Removed sshh reference | sshh not installed on macOS |
 
@@ -457,7 +435,7 @@ Before creating PR:
 - [ ] `make lint` (golangci-lint) passes
 - [ ] `staticcheck ./...` passes with no allowlist
 - [ ] `go test ./...` and `go test -race ./...` pass
-- [ ] `govulncheck ./...` and `shellcheck bin/dotfiles-setup scripts/install-hooks.sh` pass
+- [ ] `govulncheck ./...` and `shellcheck scripts/install-hooks.sh` pass
 - [ ] Pre-commit hooks installed (`bash scripts/install-hooks.sh`)
 - [ ] CI workflow (`.github/workflows/ci.yml`) is green on the branch
 - [ ] Manual TUI tests pass
@@ -502,7 +480,7 @@ staticcheck ./...
 go test ./...
 go test -race ./...
 govulncheck ./...
-shellcheck bin/dotfiles-setup scripts/install-hooks.sh
+shellcheck scripts/install-hooks.sh
 
 # Security Grep
 grep -rn "password" --include="*.go" ./internal ./cmd
@@ -514,9 +492,7 @@ git -C dotfiles status
 git -C sshh status
 git -C homebrew-tap status
 
-# Check versions
-# dotfiles-setup is migration-only; the primary Go binary version is tag-derived.
-grep VERSION dotfiles/bin/dotfiles-setup
+# Check versions (the primary Go binary version is tag-derived)
 grep VERSION sshh/bin/sshh
 grep version homebrew-tap/Formula/*.rb
 

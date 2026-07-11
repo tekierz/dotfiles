@@ -4,10 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is **dotfiles**: a cross-platform terminal environment management platform that creates a consistent terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. It includes:
-
-- **Go TUI Application** (`cmd/dotfiles/`) - Interactive installer and management platform using Bubble Tea
-- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,700 lines of bash)
+This is **dotfiles**: a cross-platform terminal environment management platform
+that creates a consistent terminal experience across macOS, Linux (Arch/Debian),
+and Raspberry Pi. Its supported product is the **Go TUI application**
+(`cmd/dotfiles/`), an interactive installer and management platform using Bubble
+Tea. The former `bin/dotfiles-setup` Bash product was retired from active
+distribution; Git history is the historical record and migration guidance lives
+in `docs/legacy-migration.md`.
 
 The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 25+ other terminal tools with unified theming. v2.1 added Tailscale (VPN), Sunshine/Moonlight (game streaming), and Claude Code (MCP configuration).
 
@@ -26,9 +29,9 @@ internal/
   ui/                    # Bubble Tea TUI (~15,700 lines)
 bin/
   dotfiles               # Built Go binary (gitignored build output)
-  dotfiles-setup         # Legacy bash script
 docs/
   tools.md               # Detailed tool reference
+  legacy-migration.md    # Migration from the retired Bash product
   security-scanning.md   # Security scanning reference
   archive/               # Completed/superseded planning docs (historical)
 tasks/
@@ -124,7 +127,8 @@ dotfiles uninstall        # Remove dotfiles and restore config
 - **Platform detection**: macOS (Homebrew), Arch (pacman/paru), Debian (apt)
 - **Tool registry**: Interface-based tool definitions with platform-specific packages
 - **Backup & restore**: Timestamped backups in `~/.config/dotfiles/backups/`
-- **Legacy cleanup**: `cleanupOldInstallations()` removes old dotfiles-tui/dotfiles-setup binaries
+- **Legacy diagnostics**: `dotfiles doctor` reports stale `dotfiles-tui` and
+  `dotfiles-setup` binaries without executing or deleting them
 
 ## Development
 
