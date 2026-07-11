@@ -95,6 +95,8 @@ observability land before new integrations or broad UI work.
 - Tmux now owns one exact managed section instead of the complete `~/.tmux.conf`; native
   settings and comments remain byte-for-byte intact, legacy product-owned files migrate to
   the bounded form, and ambiguous marker layouts fail closed.
+- Manage now exposes tmux split-binding style instead of silently restoring the hidden
+  compiled default whenever another tmux field is saved.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 

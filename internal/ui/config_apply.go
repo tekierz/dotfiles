@@ -430,6 +430,7 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 
 	// Tmux (prefix vocabulary reconciled for the generator).
 	dd.TmuxPrefix = tmuxPrefixToGenerator(mc.TmuxPrefix)
+	dd.TmuxSplitBinds = mc.TmuxSplitBinds
 	dd.TmuxMouseMode = mc.TmuxMouseMode
 	dd.TmuxStatusBar = mc.TmuxStatusPosition
 	dd.TmuxHistoryLimit = mc.TmuxHistoryLimit

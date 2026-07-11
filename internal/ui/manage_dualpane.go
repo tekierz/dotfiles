@@ -512,6 +512,7 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 	case "tmux":
 		return []manageField{
 			{key: "prefix", label: "Prefix Key", description: "Leader key for tmux commands", kind: manageFieldOption, str: &cfg.TmuxPrefix, options: []string{"C-a", "C-b", "C-Space"}},
+			{key: "split_binds", label: "Split Bindings", description: "Keys used for horizontal and vertical splits", kind: manageFieldOption, str: &cfg.TmuxSplitBinds, options: []string{"percent", "pipes"}},
 			{key: "base", label: "Base Index", description: "Start window/pane numbering at", kind: manageFieldNumber, n: &cfg.TmuxBaseIndex, min: 0, max: 10, step: 1},
 			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.TmuxMouseMode},
 			{key: "status_pos", label: "Status Position", description: "Status bar placement", kind: manageFieldOption, str: &cfg.TmuxStatusPosition, options: []string{"top", "bottom"}},

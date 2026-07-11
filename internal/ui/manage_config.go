@@ -18,6 +18,7 @@ type ManageConfig struct {
 
 	// Tmux detailed settings
 	TmuxPrefix           string
+	TmuxSplitBinds       string
 	TmuxBaseIndex        int
 	TmuxMouseMode        bool
 	TmuxStatusPosition   string
@@ -137,6 +138,7 @@ func NewManageConfig() *ManageConfig {
 
 		// Tmux
 		TmuxPrefix:           "C-a",
+		TmuxSplitBinds:       "percent",
 		TmuxBaseIndex:        1,
 		TmuxMouseMode:        true,
 		TmuxStatusPosition:   "bottom",

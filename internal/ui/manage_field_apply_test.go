@@ -70,6 +70,7 @@ var manageAppliedRoundTrips = map[string]manageFieldRoundTrip{
 
 	// Tmux
 	"tmux/prefix":            {func(mc *ManageConfig) { mc.TmuxPrefix = "C-b" }, ".tmux.conf", "set -g prefix C-b"},
+	"tmux/split_binds":       {func(mc *ManageConfig) { mc.TmuxSplitBinds = "pipes" }, ".tmux.conf", "bind | split-window -h"},
 	"tmux/base":              {func(mc *ManageConfig) { mc.TmuxBaseIndex = 0 }, ".tmux.conf", "set -g base-index 0"},
 	"tmux/mouse":             {func(mc *ManageConfig) { mc.TmuxMouseMode = false }, ".tmux.conf", "set -g mouse off"},
 	"tmux/status_pos":        {func(mc *ManageConfig) { mc.TmuxStatusPosition = "top" }, ".tmux.conf", "set -g status-position top"},
