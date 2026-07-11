@@ -30,7 +30,7 @@ import (
 // entered. The cache result (installCacheDoneMsg) is applied globally in
 // App.Update before delegation, so it is intentionally NOT handled here.
 //
-// Async handling: manageSavedMsg is handled here while this screen is active.
+// Save results are handled by the reviewed Manage confirmation screen.
 // The streaming/terminal install messages (manageInstallDoneMsg,
 // manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg) are
 // instead handled GLOBALLY in App.Update before delegation (see streaming.go),
@@ -101,18 +101,6 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
-
-	// --- Async results (delegated here while this screen is active) ---
-	case manageSavedMsg:
-		if msg.err != nil {
-			a.manageStatus = fmt.Sprintf("Save failed: %v", msg.err)
-		} else {
-			a.manageStatus = "Saved ✓"
-			// Refresh the diff baseline so the next save only applies tools changed
-			// since THIS save (otherwise a second save would re-apply the same tools).
-			a.snapshotManageBaseline()
-		}
-		return s, nil
 
 		// The streaming/terminal install messages (manageInstallDoneMsg,
 		// manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg)
@@ -360,8 +348,8 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Save (persist to config).
 	case "s", "ctrl+s":
-		a.manageStatus = "Saving…"
-		return a.saveManageConfigCmd()
+		a.manageStatus = ""
+		return a.prepareManageSave()
 
 	case "i":
 		// Install selected tool/app (settings pane only).

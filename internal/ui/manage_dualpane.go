@@ -83,66 +83,10 @@ type manageItem struct {
 	configurable bool
 }
 
-// manageSavedMsg is emitted after a save attempt.
-type manageSavedMsg struct{ err error }
-
 // manageInstallDoneMsg is emitted after attempting to install a tool/app.
 type manageInstallDoneMsg struct {
 	toolID string
 	err    error
-}
-
-func (a *App) saveManageConfigCmd() tea.Cmd {
-	// Capture a value snapshot before returning the async command. ManageConfig is
-	// a flat value struct; the UI goroutine may keep mutating a.manageConfig via
-	// manageField pointers while this command saves on a worker goroutine.
-	snapshot := *a.manageConfig
-	cfg := &snapshot
-	theme := a.theme
-	nav := a.navStyle
-	animationsEnabled := a.animationsEnabled
-
-	// Compute the set of tools to apply BEFORE the async closure runs, by diffing
-	// the live config against the baseline captured at load / last save. Scoping
-	// the apply to only the changed tools is the data-loss fix (P1-A2): a
-	// Ghostty-only edit must not rewrite ~/.tmux.conf, ~/.zshrc, ~/.gitconfig, etc.
-	// from manage.json defaults (overwriting any hand edits). A theme-only change
-	// persists desired state but writes no tool config; the reviewed install plan
-	// is the only path that may apply it across explicitly selected tools.
-	baseline := a.manageConfigBaseline
-	changed := changedManageTools(&baseline, cfg, a.manageConfigBaselineTheme, theme)
-
-	return func() tea.Msg {
-		// Load the global config before making any save-side mutation. A parse or
-		// future-schema error means this binary cannot safely update the file; using
-		// defaults here would silently replace settings it does not understand.
-		g, err := config.LoadGlobalConfig()
-		if err != nil {
-			return manageSavedMsg{err: fmt.Errorf("failed to load global config: %w", err)}
-		}
-
-		// Also persist global theme/nav so installer + CLI stay in sync.
-		g.Theme = theme
-		g.NavStyle = nav
-		g.DisableAnimations = !animationsEnabled
-
-		// Reserve the loaded global revision before mutating manage.json. Without
-		// this ordering, another process can update global.json between our load and
-		// save, leaving manage.json changed even though the global save conflicts.
-		if err := config.SaveGlobalConfigWithReservedRevision(g, func() error {
-			// Apply native tool files before advancing the durable desired
-			// preference. A refused ownership boundary or malformed native config
-			// must leave manage.json at its last successfully applied value.
-			if errs := applyChangedManageTools(changed, manageConfigToDeepDive(cfg), theme); len(errs) > 0 {
-				return firstErrorSummary(errs)
-			}
-			return config.SaveToolConfig("manage", cfg)
-		}); err != nil {
-			return manageSavedMsg{err: err}
-		}
-
-		return manageSavedMsg{err: nil}
-	}
 }
 
 // checkSudoAndInstallCmd checks if sudo is needed and either prompts or starts install

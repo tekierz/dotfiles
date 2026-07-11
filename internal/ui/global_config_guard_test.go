@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tekierz/dotfiles/internal/config"
 )
@@ -59,13 +60,9 @@ func TestSaveManageConfigDoesNotOverwriteFutureGlobalSchema(t *testing.T) {
 		manageConfigBaselineTheme: "dracula",
 	}
 
-	msg := a.saveManageConfigCmd()()
-	saved, ok := msg.(manageSavedMsg)
-	if !ok {
-		t.Fatalf("saveManageConfigCmd returned %T, want manageSavedMsg", msg)
-	}
-	if saved.err == nil || !strings.Contains(saved.err.Error(), "unsupported global config schema_version 999") {
-		t.Fatalf("saveManageConfigCmd error = %v, want future-schema error", saved.err)
+	_, err := buildManageSavePlan(a, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "unsupported global config schema_version 999") {
+		t.Fatalf("buildManageSavePlan error = %v, want future-schema error", err)
 	}
 	assertFileBytes(t, path, original)
 	if _, err := os.Stat(filepath.Join(config.ToolsDir(), "manage.json")); !os.IsNotExist(err) {
@@ -100,13 +97,9 @@ func TestSaveCallsitesDoNotOverwriteMalformedGlobalConfig(t *testing.T) {
 		manageConfigBaseline:      *NewManageConfig(),
 		manageConfigBaselineTheme: "dracula",
 	}
-	msg := manager.saveManageConfigCmd()()
-	saved, ok := msg.(manageSavedMsg)
-	if !ok {
-		t.Fatalf("saveManageConfigCmd returned %T, want manageSavedMsg", msg)
-	}
-	if saved.err == nil || !strings.Contains(saved.err.Error(), "failed to parse global config") {
-		t.Fatalf("saveManageConfigCmd error = %v, want parse error", saved.err)
+	_, err := buildManageSavePlan(manager, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "failed to parse global config") {
+		t.Fatalf("buildManageSavePlan error = %v, want parse error", err)
 	}
 	assertFileBytes(t, path, original)
 }

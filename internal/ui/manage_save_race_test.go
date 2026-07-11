@@ -4,26 +4,24 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/config"
 )
 
 func TestManageSaveUsesSnapshotDuringConcurrentMutation(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-
-	a := NewApp(true)
-	a.manageConfig = NewManageConfig()
-	a.manageConfigBaseline = *a.manageConfig
-	a.manageConfigBaselineTheme = a.theme
-
-	cmd := a.saveManageConfigCmd()
+	a, _, _ := newPlanTestApp(t)
+	a.manageConfig.GhosttyFontSize++
+	want := a.manageConfig.GhosttyFontSize
+	_ = a.prepareManageSave()
+	cmd := a.executeManageSavePlanCmd()
 	if cmd == nil {
-		t.Fatal("saveManageConfigCmd returned nil")
+		t.Fatal("executeManageSavePlanCmd returned nil")
 	}
 
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	var msg any
-	var saved manageSavedMsg
+	var saved manageSaveDoneMsg
 	var ok bool
 
 	wg.Add(1)
@@ -31,7 +29,7 @@ func TestManageSaveUsesSnapshotDuringConcurrentMutation(t *testing.T) {
 		defer wg.Done()
 		<-start
 		msg = cmd()
-		saved, ok = msg.(manageSavedMsg)
+		saved, ok = msg.(manageSaveDoneMsg)
 	}()
 
 	close(start)
@@ -57,10 +55,17 @@ func TestManageSaveUsesSnapshotDuringConcurrentMutation(t *testing.T) {
 	wg.Wait()
 
 	if !ok {
-		t.Fatalf("saveManageConfigCmd returned %T, want manageSavedMsg", msg)
+		t.Fatalf("executeManageSavePlanCmd returned %T, want manageSaveDoneMsg", msg)
 	}
 	if saved.err != nil {
-		t.Fatalf("saveManageConfigCmd returned error: %v", saved.err)
+		t.Fatalf("executeManageSavePlanCmd returned error: %v", saved.err)
+	}
+	persisted, err := config.LoadToolConfig("manage", NewManageConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.GhosttyFontSize != want {
+		t.Fatalf("persisted accepted font size=%d, want %d", persisted.GhosttyFontSize, want)
 	}
 }
 

@@ -31,6 +31,12 @@ var ErrGlobalConfigLockUnsupported = errors.New("global config locking is unsupp
 
 var errConfigPathOutsideTrustedRoots = errors.New("config path is outside HOME and XDG_CONFIG_HOME")
 
+var toolConfigSaveMu sync.Mutex
+
+// toolConfigAfterWriteHook is package-private test instrumentation for failures
+// discovered after a reviewed tool-state file has committed.
+var toolConfigAfterWriteHook func(path string) error
+
 // GlobalConfigCommittedError reports a failure discovered after global.json
 // was atomically replaced. Callers must not blindly retry because the requested
 // bytes may already have been committed.
@@ -379,6 +385,75 @@ func SaveToolConfig[T any](toolName string, cfg *T) error {
 	}
 
 	return nil
+}
+
+// SaveToolConfigAtBoundAuthorityTracked atomically saves product-owned tool
+// state only while both the reviewed file revision and complete parent chain
+// remain current. Parent creation is deliberately out of scope: callers must
+// create only plan-accepted parents before invoking this no-create writer.
+func SaveToolConfigAtBoundAuthorityTracked[T any](toolName string, cfg *T, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (committed safefile.Revision, returnErr error) {
+	if ConfigDir() == "" {
+		return safefile.Revision{}, ErrNoConfigDir
+	}
+	if err := validateToolConfigName(toolName); err != nil {
+		return safefile.Revision{}, err
+	}
+	if !accepted.Tracked() {
+		return safefile.Revision{}, fmt.Errorf("%w: accepted tool-state revision is untracked", safefile.ErrRevisionChanged)
+	}
+	if !parents.Tracked() || locker == nil {
+		return safefile.Revision{}, fmt.Errorf("%w: tool-state authority is incomplete", safefile.ErrParentChanged)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("failed to marshal config: %w", err)
+	}
+	path := filepath.Join(ToolsDir(), toolName+".json")
+	root, rel, err := anchoredFilePath(path)
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("resolve tool-state path: %w", err)
+	}
+
+	toolConfigSaveMu.Lock()
+	defer toolConfigSaveMu.Unlock()
+	release, err := locker("tool-state-config", path)
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("lock tool-state config: %w", err)
+	}
+	didCommit := false
+	defer func() {
+		if err := release(); err != nil {
+			releaseErr := fmt.Errorf("release tool-state config lock: %w", err)
+			if didCommit {
+				returnErr = &safefile.CommittedError{Operation: "release tool-state config lock", Err: errors.Join(returnErr, releaseErr)}
+			} else {
+				returnErr = errors.Join(returnErr, releaseErr)
+			}
+		}
+	}()
+	_, current, err := safefile.ReadWithinAuthorized(root, rel, parents)
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("read accepted tool-state config: %w", err)
+	}
+	if current != accepted {
+		return safefile.Revision{}, fmt.Errorf("%w: tool-state config changed after plan acceptance", safefile.ErrRevisionChanged)
+	}
+	committed, err = safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, rel, accepted, parents, data, 0o600)
+	if err != nil {
+		var committedErr interface{ Committed() bool }
+		if errors.As(err, &committedErr) && committedErr.Committed() {
+			didCommit = true
+			return committed, err
+		}
+		return safefile.Revision{}, err
+	}
+	didCommit = true
+	if toolConfigAfterWriteHook != nil {
+		if err := toolConfigAfterWriteHook(path); err != nil {
+			return committed, &safefile.CommittedError{Operation: "tool-state post-write validation", Err: err}
+		}
+	}
+	return committed, nil
 }
 
 func validateToolConfigName(name string) error {
@@ -769,22 +844,25 @@ func saveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted *safefile.Rev
 		var committed interface{ Committed() bool }
 		if errors.As(err, &committed) && committed.Committed() {
 			didCommit = true
-			return safefile.Revision{}, &GlobalConfigCommittedError{Operation: "replace global.json", Err: err}
+			// Some tracked replace implementations can still return the committed
+			// revision with a post-rename operational error. Preserve it so a
+			// reviewed transaction can conditionally roll the write back.
+			return revision, &GlobalConfigCommittedError{Operation: "replace global.json", Err: err}
 		}
 		return safefile.Revision{}, fmt.Errorf("failed to write global config: %w", err)
 	}
 	didCommit = true
 	if globalConfigAfterWriteHook != nil {
 		if err := globalConfigAfterWriteHook(path); err != nil {
-			return safefile.Revision{}, &GlobalConfigCommittedError{Operation: "post-write test hook", Err: err}
+			return revision, &GlobalConfigCommittedError{Operation: "post-write test hook", Err: err}
 		}
 	}
 	committedData, verifiedRevision, err := readGlobalConfigRevision(root, rel)
 	if err != nil {
-		return safefile.Revision{}, &GlobalConfigCommittedError{Operation: "read committed revision", Err: errors.Join(ErrGlobalConfigConflict, err)}
+		return revision, &GlobalConfigCommittedError{Operation: "read committed revision", Err: errors.Join(ErrGlobalConfigConflict, err)}
 	}
 	if verifiedRevision != revision || !revision.Exists() || !bytes.Equal(committedData, data) || revision.Permissions() != 0600 {
-		return safefile.Revision{}, &GlobalConfigCommittedError{
+		return revision, &GlobalConfigCommittedError{
 			Operation: "verify committed revision",
 			Err:       fmt.Errorf("%w: global.json no longer contains the intended bytes and mode", ErrGlobalConfigConflict),
 		}

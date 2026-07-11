@@ -697,6 +697,33 @@ func TestGlobalConfigDetectsNonCooperatingPostWriteReplacement(t *testing.T) {
 	}
 }
 
+func TestGlobalConfigCommittedHookReturnsRollbackRevision(t *testing.T) {
+	cleanup := setupTestConfigDir(t)
+	defer cleanup()
+
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, tracked := GlobalConfigRevision(cfg)
+	if !tracked {
+		t.Fatal("loaded global config has no tracked revision")
+	}
+	cfg.Theme = "nord"
+	hookErr := errors.New("injected post-commit failure")
+	globalConfigAfterWriteHook = func(string) error { return hookErr }
+	defer func() { globalConfigAfterWriteHook = nil }()
+
+	revision, err := SaveGlobalConfigAtRevisionTracked(cfg, accepted)
+	if !errors.Is(err, hookErr) || !revision.Tracked() || !revision.Exists() {
+		t.Fatalf("revision=%+v err=%v, want committed rollback evidence", revision, err)
+	}
+	var committed interface{ Committed() bool }
+	if !errors.As(err, &committed) || !committed.Committed() {
+		t.Fatalf("error=%T %v, want committed error", err, err)
+	}
+}
+
 func TestGlobalConfigCASRejectsFutureSchemaCreatedAfterMissingLoad(t *testing.T) {
 	cleanup := setupTestConfigDir(t)
 	defer cleanup()

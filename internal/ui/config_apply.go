@@ -70,7 +70,7 @@ func applyStandaloneSnapshot(startScreen Screen, cfg DeepDiveConfig, theme strin
 // read/write. Deep-copying here, on the UI goroutine before the worker starts,
 // hands the worker fully-owned data.
 //
-// This is the DeepDiveConfig analogue of the value snapshot saveManageConfigCmd
+// This is the DeepDiveConfig analogue of the immutable reviewed Manage snapshot
 // takes: ManageConfig is flat so a shallow copy suffices there, whereas
 // DeepDiveConfig owns reference types and needs the per-field clone below. maps/
 // slices.Clone preserve nil, so gating checks like applyClaudeCodeConfig's
@@ -97,9 +97,10 @@ func snapshotDeepDiveConfig(cfg *DeepDiveConfig) DeepDiveConfig {
 // config struct (the config-apply generators here AND the install worker in
 // installation.go) calls the same builder, so the mapping cannot drift.
 //
-// Manage calls applyOneToolConfig through applyChangedManageTools. Production
-// standalone saves and the install worker use their authority-aware writers
-// directly, while sharing the same *ConfigFrom translation builders below.
+// Production Manage, standalone saves, and the install worker use their
+// authority-aware writers directly while sharing the same *ConfigFrom
+// translation builders below. applyOneToolConfig remains only for direct
+// compatibility and mapping tests.
 
 // ghosttyConfigFrom is the single mapping of DeepDiveConfig to tools.GhosttyConfig,
 // shared by the config-apply generator and the install worker.

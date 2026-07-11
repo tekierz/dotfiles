@@ -50,7 +50,7 @@ type manageFieldRoundTrip struct {
 // manageAppliedRoundTrips is the round-trip proof table: every Manage field
 // classified as APPLIED (i.e. NOT in manageNotAppliedFields) must have an entry
 // here, keyed "toolID/fieldKey". Running the entry through the real scoped Manage
-// save path (manageConfigToDeepDive -> changedManageTools -> applyChangedManageTools)
+// legacy direct-generator mapping path (manageConfigToDeepDive -> changedManageTools)
 // and finding `want` in `file` proves the field is wired end-to-end:
 // struct -> manageConfigToDeepDive -> toolDeepDiveFields (so the scoped diff
 // detects it) -> generator (so the file actually changes). The guardrail test

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -140,28 +139,4 @@ func changedManageTools(baseline, current *ManageConfig, _, _ string) []string {
 		changed = append(changed, "claude-code")
 	}
 	return changed
-}
-
-// applyChangedManageTools writes ONLY the config files for the given tool IDs,
-// reusing the scoped applyOneToolConfig writer so the Manage save shares the exact
-// generator-calling logic as the standalone `dotfiles config <tool>` path. It is
-// best-effort: every tool is attempted and ALL errors are collected (consistent
-// with the T2 silent-failure work).
-func applyChangedManageTools(toolIDs []string, cfg DeepDiveConfig, theme string) []error {
-	var errs []error
-	for _, id := range toolIDs {
-		if e := applyOneToolConfig(id, cfg, theme); len(e) > 0 {
-			errs = append(errs, e...)
-		}
-	}
-	if len(errs) == 0 {
-		return nil
-	}
-	return errs
-}
-
-// firstErrorSummary builds the "saved but failed to apply N file(s)" message used
-// when a scoped Manage save persists prefs but one or more generators fail.
-func firstErrorSummary(errs []error) error {
-	return fmt.Errorf("saved preferences but failed to apply %d config file(s); first: %w", len(errs), errs[0])
 }

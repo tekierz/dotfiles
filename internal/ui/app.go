@@ -75,6 +75,7 @@ const (
 	ScreenConfigGlow
 	ScreenConfigClaudeCode
 	ScreenConfigSaveConfirm
+	ScreenManageSaveConfirm
 )
 
 // Available themes
@@ -253,12 +254,19 @@ type App struct {
 	manageToolsScroll  int
 	manageFieldsScroll int
 	// Inline editing state (used by ScreenManage)
-	manageEditing      bool
-	manageEditValue    string
-	manageEditCursor   int
-	manageEditField    *string
-	manageEditFieldKey string // human label for the field being edited
-	manageStatus       string // transient status line (save result, etc.)
+	manageEditing         bool
+	manageEditValue       string
+	manageEditCursor      int
+	manageEditField       *string
+	manageEditFieldKey    string // human label for the field being edited
+	manageStatus          string // transient status line (save result, etc.)
+	pendingManageSavePlan *manageSavePlan
+	manageSavePlanErr     error
+	manageSaveScroll      int
+	manageSaveRunning     bool
+	manageSaveDone        bool
+	manageSaveManual      bool
+	manageSaveWarning     string
 
 	// Installation state
 	installStep         int

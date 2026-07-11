@@ -88,18 +88,35 @@ func executeStandaloneConfigPlanResult(ctx context.Context, plan *installPlan, r
 	if plan == nil || plan.hasBlocked() || len(plan.configTools) != 1 {
 		return standaloneConfigExecutionResult{err: fmt.Errorf("standalone config plan is blocked or has no applicable write")}
 	}
-	if runtime.backup == nil || runtime.acquire == nil || runtime.ensureParent == nil || runtime.write == nil {
-		return standaloneConfigExecutionResult{err: fmt.Errorf("standalone config transaction runtime is incomplete")}
+	if runtime.write == nil {
+		return standaloneConfigExecutionResult{err: fmt.Errorf("standalone config writer is unavailable")}
+	}
+	return executeConfigTransactionResult(ctx, plan, runtime, "standalone-config-operation", func(home string, plan *installPlan, bound map[string]map[string]acceptedTarget, locker operation.Locker, expected map[string]backup.ExpectedState) (bool, bool, error) {
+		toolID := plan.configTools[0]
+		return executeConfigTransactionAction(home, plan, "config:"+toolID, expected, func() ([]tools.MutationEvidence, error) {
+			return runtime.write(toolID, plan.config, plan.theme, bound["config:"+toolID], locker)
+		})
+	})
+}
+
+type configTransactionActionRunner func(home string, plan *installPlan, bound map[string]map[string]acceptedTarget, locker operation.Locker, expected map[string]backup.ExpectedState) (mutationStarted bool, manualRecovery bool, err error)
+
+func executeConfigTransactionResult(ctx context.Context, plan *installPlan, runtime standaloneConfigRuntime, lockScope string, runActions configTransactionActionRunner) standaloneConfigExecutionResult {
+	if plan == nil || plan.hasBlocked() {
+		return standaloneConfigExecutionResult{err: fmt.Errorf("config transaction plan is blocked or unavailable")}
+	}
+	if runtime.backup == nil || runtime.acquire == nil || runtime.ensureParent == nil || runActions == nil {
+		return standaloneConfigExecutionResult{err: fmt.Errorf("config transaction runtime is incomplete")}
 	}
 	if err := ctx.Err(); err != nil {
 		return standaloneConfigExecutionResult{err: err}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return standaloneConfigExecutionResult{err: fmt.Errorf("determine HOME for standalone config save: %w", err)}
+		return standaloneConfigExecutionResult{err: fmt.Errorf("determine HOME for config transaction: %w", err)}
 	}
 	if home == "" || !filepath.IsAbs(home) {
-		return standaloneConfigExecutionResult{err: fmt.Errorf("determine HOME for standalone config save: %q is not absolute", home)}
+		return standaloneConfigExecutionResult{err: fmt.Errorf("determine HOME for config transaction: %q is not absolute", home)}
 	}
 	if err := revalidateInstallPlan(plan); err != nil {
 		return standaloneConfigExecutionResult{err: fmt.Errorf("configuration changed after preview: %w", err)}
@@ -109,13 +126,13 @@ func executeStandaloneConfigPlanResult(ctx context.Context, plan *installPlan, r
 		return standaloneConfigExecutionResult{err: fmt.Errorf("bootstrap reviewed operation state: %w", err)}
 	}
 	stateCreated := state.CreatedDirectoriesWithin(home)
-	release, err := runtime.acquire(state, "standalone-config-operation", home)
+	release, err := runtime.acquire(state, lockScope, home)
 	if err != nil {
-		return standaloneConfigExecutionResult{err: fmt.Errorf("serialize standalone config save: %w", err)}
+		return standaloneConfigExecutionResult{err: fmt.Errorf("serialize config transaction: %w", err)}
 	}
-	result := executeStandaloneConfigLocked(ctx, plan, runtime, state, stateCreated, home)
+	result := executeConfigTransactionLocked(ctx, plan, runtime, state, stateCreated, home, runActions)
 	if releaseErr := release(); releaseErr != nil {
-		releaseErr = fmt.Errorf("release standalone config operation lock: %w", releaseErr)
+		releaseErr = fmt.Errorf("release config transaction lock: %w", releaseErr)
 		if result.err == nil {
 			result.err = &standaloneConfigAppliedError{err: releaseErr}
 			result.applied = true
@@ -126,7 +143,7 @@ func executeStandaloneConfigPlanResult(ctx context.Context, plan *installPlan, r
 	return result
 }
 
-func executeStandaloneConfigLocked(ctx context.Context, plan *installPlan, runtime standaloneConfigRuntime, state *operation.StateAuthority, stateCreated map[string]*safefile.DirectorySnapshot, home string) standaloneConfigExecutionResult {
+func executeConfigTransactionLocked(ctx context.Context, plan *installPlan, runtime standaloneConfigRuntime, state *operation.StateAuthority, stateCreated map[string]*safefile.DirectorySnapshot, home string, runActions configTransactionActionRunner) standaloneConfigExecutionResult {
 	if err := revalidateInstallPlanWithCreated(plan, stateCreated); err != nil {
 		return standaloneConfigExecutionResult{err: fmt.Errorf("configuration changed before backup: %w", err)}
 	}
@@ -196,15 +213,27 @@ func executeStandaloneConfigLocked(ctx context.Context, plan *installPlan, runti
 	}
 	bound, err := bindInstallPlanAuthority(home, plan, createdParents)
 	if err != nil {
-		return rollbackFailure(fmt.Errorf("bind standalone config authority: %w", err), false)
+		return rollbackFailure(fmt.Errorf("bind config transaction authority: %w", err), false)
 	}
 
-	toolID := plan.configTools[0]
-	actionID := "config:" + toolID
+	actionMutation, actionManual, actionErr := runActions(home, plan, bound, operation.BoundLocker(state), expected)
+	mutationStarted = mutationStarted || actionMutation
+	if actionErr != nil {
+		return rollbackFailure(actionErr, actionManual)
+	}
+	if err := ctx.Err(); err != nil {
+		mutationStarted = true
+		return rollbackFailure(err, false)
+	}
+	return standaloneConfigExecutionResult{applied: true, warning: warning}
+}
+
+func executeConfigTransactionAction(home string, plan *installPlan, actionID string, expected map[string]backup.ExpectedState, write func() ([]tools.MutationEvidence, error)) (bool, bool, error) {
 	invalidateRollbackAction(plan, actionID, expected)
-	evidence, writeErr := runtime.write(toolID, plan.config, plan.theme, bound[actionID], operation.BoundLocker(state))
-	manual := false
+	evidence, writeErr := write()
 	if writeErr != nil {
+		manual := false
+		mutationStarted := false
 		var partial interface {
 			CommittedEvidence() []tools.MutationEvidence
 		}
@@ -224,17 +253,12 @@ func executeStandaloneConfigLocked(ctx context.Context, plan *installPlan, runti
 				removeRollbackActionState(plan, actionID, expected)
 			}
 		}
-		return rollbackFailure(fmt.Errorf("apply %s configuration: %w", toolID, writeErr), manual)
+		return mutationStarted, manual, fmt.Errorf("apply %s: %w", actionID, writeErr)
 	}
 	if err := authorizeMutationEvidenceSet(home, plan, actionID, evidence, expected); err != nil {
-		mutationStarted = true
-		return rollbackFailure(fmt.Errorf("authorize %s mutation evidence: %w", toolID, err), true)
+		return true, true, fmt.Errorf("authorize %s mutation evidence: %w", actionID, err)
 	}
-	if err := ctx.Err(); err != nil {
-		mutationStarted = true
-		return rollbackFailure(err, false)
-	}
-	return standaloneConfigExecutionResult{applied: true, warning: warning}
+	return true, false, nil
 }
 
 func buildStandaloneConfigPlan(a *App, now time.Time) (*installPlan, error) {

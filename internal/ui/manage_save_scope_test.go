@@ -1,13 +1,26 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tekierz/dotfiles/internal/config"
 )
+
+// applyChangedManageTools is retained in test code only to exercise the old
+// direct generators and their mapping/no-clone guarantees. Production Manage
+// saves use the reviewed authority-aware transaction executor.
+func applyChangedManageTools(toolIDs []string, cfg DeepDiveConfig, theme string) []error {
+	var errs []error
+	for _, id := range toolIDs {
+		errs = append(errs, applyOneToolConfig(id, cfg, theme)...)
+	}
+	return errs
+}
 
 // TestManageSaveScopedToChangedTool is the data-loss regression guard for P1-A2:
 // saving the Manage editor after changing ONE tool's setting must rewrite ONLY
@@ -68,10 +81,9 @@ func TestManageSaveDoesNotPersistPreferenceWhenNativeApplyFails(t *testing.T) {
 	app := NewApp(true)
 	app.manageConfig.GitDefaultBranch = "develop"
 
-	msg := app.saveManageConfigCmd()()
-	saved, ok := msg.(manageSavedMsg)
-	if !ok || saved.err == nil {
-		t.Fatalf("save result = %#v, want native apply error", msg)
+	plan, err := buildManageSavePlan(app, time.Now())
+	if err != nil || plan == nil || !plan.plan.hasBlocked() {
+		t.Fatalf("Manage plan blocked=%v err=%v, want unsafe native target blocked", plan != nil && plan.plan.hasBlocked(), err)
 	}
 	if _, err := os.Lstat(filepath.Join(config.ToolsDir(), "manage.json")); !os.IsNotExist(err) {
 		t.Fatalf("failed native apply persisted manage preference: %v", err)
@@ -108,10 +120,13 @@ func TestManageSaveThemeChangeCreatesNoToolConfigs(t *testing.T) {
 	app := NewApp(true)
 	app.theme = "nord"
 
-	msg := app.saveManageConfigCmd()()
-	saved, ok := msg.(manageSavedMsg)
-	if !ok || saved.err != nil {
-		t.Fatalf("save result = %#v", msg)
+	plan, err := buildManageSavePlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := executeManageSavePlanResult(context.Background(), plan, defaultManageSaveRuntime())
+	if result.err != nil || !result.applied {
+		t.Fatalf("save result = %+v", result)
 	}
 
 	for _, rel := range []string{
