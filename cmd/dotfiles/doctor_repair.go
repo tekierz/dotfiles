@@ -116,63 +116,79 @@ For deterministic automation, first run with --json, then repeat with --yes
 and --plan-hash set to that exact preview hash. --json never prompts.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			plan, err := buildDoctorRepairPlan(cmd.Context(), deps)
-			if err != nil {
-				return err
-			}
-			if !yes {
-				if jsonOutput {
-					return writeDoctorRepairJSON(cmd.OutOrStdout(), plan)
-				}
-				if err := writeDoctorRepairHuman(cmd.OutOrStdout(), plan); err != nil {
-					return err
-				}
-				if !plan.Eligible {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No repair is available; no files were changed.")
-					return err
-				}
-				confirmed, err := confirmDoctorRepair(cmd.InOrStdin(), cmd.OutOrStdout())
-				if err != nil {
-					return err
-				}
-				if !confirmed {
-					result := cancelledDoctorRepairResult(plan)
-					return writeDoctorRepairResultHuman(cmd.OutOrStdout(), result)
-				}
-			} else {
-				if acceptedPlanHash == "" {
-					return errors.New("--yes requires --plan-hash from a fresh preview")
-				}
-				if acceptedPlanHash != plan.PlanHash {
-					return fmt.Errorf("plan hash does not match current state; preview again before repair")
-				}
-				if !plan.Eligible {
-					return fmt.Errorf("repair is blocked: %s", plan.DecisionCode)
-				}
-				if !jsonOutput {
-					if err := writeDoctorRepairHuman(cmd.OutOrStdout(), plan); err != nil {
-						return err
-					}
-				}
-			}
-
-			result, err := applyDoctorRepairPlan(plan, deps)
-			if err != nil {
-				return err
-			}
-			if jsonOutput {
-				return writeDoctorRepairJSON(cmd.OutOrStdout(), struct {
-					Plan   doctorRepairPlan   `json:"plan"`
-					Result doctorRepairResult `json:"result"`
-				}{Plan: plan, Result: result})
-			}
-			return writeDoctorRepairResultHuman(cmd.OutOrStdout(), result)
+			return runDoctorRepairCommand(cmd, deps, jsonOutput, yes, acceptedPlanHash)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print deterministic structured output; never prompt")
 	cmd.Flags().BoolVar(&yes, "yes", false, "Apply noninteractively; requires an exact --plan-hash")
 	cmd.Flags().StringVar(&acceptedPlanHash, "plan-hash", "", "Bind noninteractive repair to an exact preview hash")
 	return cmd
+}
+
+func runDoctorRepairCommand(cmd *cobra.Command, deps doctorRepairDependencies, jsonOutput, yes bool, acceptedPlanHash string) error {
+	plan, err := buildDoctorRepairPlan(cmd.Context(), deps)
+	if err != nil {
+		return err
+	}
+	if yes {
+		if err := validateAcceptedDoctorRepairPlan(cmd, plan, jsonOutput, acceptedPlanHash); err != nil {
+			return err
+		}
+	} else {
+		proceed, err := previewDoctorRepair(cmd, plan, jsonOutput)
+		if err != nil || !proceed {
+			return err
+		}
+	}
+
+	result, err := applyDoctorRepairPlan(plan, deps)
+	if err != nil {
+		return err
+	}
+	if jsonOutput {
+		return writeDoctorRepairJSON(cmd.OutOrStdout(), struct {
+			Plan   doctorRepairPlan   `json:"plan"`
+			Result doctorRepairResult `json:"result"`
+		}{Plan: plan, Result: result})
+	}
+	return writeDoctorRepairResultHuman(cmd.OutOrStdout(), result)
+}
+
+func previewDoctorRepair(cmd *cobra.Command, plan doctorRepairPlan, jsonOutput bool) (bool, error) {
+	if jsonOutput {
+		return false, writeDoctorRepairJSON(cmd.OutOrStdout(), plan)
+	}
+	if err := writeDoctorRepairHuman(cmd.OutOrStdout(), plan); err != nil {
+		return false, err
+	}
+	if !plan.Eligible {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "No repair is available; no files were changed.")
+		return false, err
+	}
+	confirmed, err := confirmDoctorRepair(cmd.InOrStdin(), cmd.OutOrStdout())
+	if err != nil {
+		return false, err
+	}
+	if !confirmed {
+		return false, writeDoctorRepairResultHuman(cmd.OutOrStdout(), cancelledDoctorRepairResult(plan))
+	}
+	return true, nil
+}
+
+func validateAcceptedDoctorRepairPlan(cmd *cobra.Command, plan doctorRepairPlan, jsonOutput bool, acceptedPlanHash string) error {
+	if acceptedPlanHash == "" {
+		return errors.New("--yes requires --plan-hash from a fresh preview")
+	}
+	if acceptedPlanHash != plan.PlanHash {
+		return errors.New("plan hash does not match current state; preview again before repair")
+	}
+	if !plan.Eligible {
+		return fmt.Errorf("repair is blocked: %s", plan.DecisionCode)
+	}
+	if jsonOutput {
+		return nil
+	}
+	return writeDoctorRepairHuman(cmd.OutOrStdout(), plan)
 }
 
 var doctorRepairCmd = newDoctorRepairCommand(systemDoctorRepairDependencies())

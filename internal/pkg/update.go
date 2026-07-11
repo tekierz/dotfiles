@@ -144,10 +144,10 @@ func CheckDotfilesUpdates() ([]Package, error) {
 	// Debian-renamed packages (fd-find etc.) are recognised correctly.
 	var allowList []string
 	switch DetectPlatform() {
+	case PlatformMacOS, PlatformArch, PlatformUnknown:
+		allowList = DotfilesPackages
 	case PlatformDebian, PlatformPi:
 		allowList = DotfilesDebianPackages
-	default:
-		allowList = DotfilesPackages
 	}
 
 	dotfilesSet := make(map[string]bool, len(allowList))

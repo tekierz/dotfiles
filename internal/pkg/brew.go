@@ -36,7 +36,8 @@ func (b *BrewManager) Install(packages ...string) error {
 	}
 
 	args := append([]string{"install"}, packages...)
-	cmd := exec.Command(b.brewPath, args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, b.brewPath, args...)
+	defer cancel()
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run()
@@ -48,17 +49,20 @@ func (b *BrewManager) Uninstall(packages ...string) error {
 	}
 
 	args := append([]string{"uninstall"}, packages...)
-	cmd := exec.Command(b.brewPath, args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, b.brewPath, args...)
+	defer cancel()
 	return cmd.Run()
 }
 
 func (b *BrewManager) IsInstalled(pkg string) bool {
-	cmd := exec.Command(b.brewPath, "list", pkg)
+	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "list", pkg)
+	defer cancel()
 	return cmd.Run() == nil
 }
 
 func (b *BrewManager) GetVersion(pkg string) (string, error) {
-	cmd := exec.Command(b.brewPath, "info", "--json=v2", pkg)
+	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "info", "--json=v2", pkg)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -100,7 +104,8 @@ func (b *BrewManager) GetVersion(pkg string) (string, error) {
 func (b *BrewManager) CheckOutdated() ([]Package, error) {
 	// --greedy includes auto-updating casks that would otherwise be skipped
 	// by `brew outdated` (they report as up-to-date without this flag).
-	cmd := exec.Command(b.brewPath, "outdated", "--json=v2", "--greedy")
+	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "outdated", "--json=v2", "--greedy")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -122,7 +127,8 @@ func (b *BrewManager) CheckOutdated() ([]Package, error) {
 // casks) honest while not falsely marking the auto-updaters brew cannot judge.
 // Parsing/filtering is shared with CheckOutdated via parseBrewOutdated.
 func (b *BrewManager) CheckOutdatedNonGreedy() ([]Package, error) {
-	cmd := exec.Command(b.brewPath, "outdated", "--json=v2")
+	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "outdated", "--json=v2")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -210,7 +216,8 @@ func (b *BrewManager) Update(packages ...string) error {
 	}
 
 	args := append([]string{"upgrade"}, packages...)
-	cmd := exec.Command(b.brewPath, args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, b.brewPath, args...)
+	defer cancel()
 	return cmd.Run()
 }
 
@@ -244,12 +251,14 @@ func (b *BrewManager) UpdateAll() error {
 	}
 
 	args := append([]string{"upgrade"}, names...)
-	cmd := exec.Command(b.brewPath, args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, b.brewPath, args...)
+	defer cancel()
 	return cmd.Run()
 }
 
 func (b *BrewManager) Search(query string) ([]Package, error) {
-	cmd := exec.Command(b.brewPath, "search", query)
+	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "search", query)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -272,7 +281,8 @@ func (b *BrewManager) Search(query string) ([]Package, error) {
 }
 
 func (b *BrewManager) ListInstalled() ([]Package, error) {
-	cmd := exec.Command(b.brewPath, "list", "--versions")
+	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "list", "--versions")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -300,7 +310,8 @@ func (b *BrewManager) ListInstalled() ([]Package, error) {
 // This is a single `brew list --cask` call, used to batch cask detection so that
 // cask-backed tools (e.g. sunshine, tailscale) don't each shell out individually.
 func (b *BrewManager) ListInstalledCasks() ([]string, error) {
-	cmd := exec.Command(b.brewPath, "list", "--cask")
+	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "list", "--cask")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 // OutputLine represents a line of output from the bash script
@@ -33,6 +34,8 @@ const (
 // Runner executes bash functions and captures output
 type Runner struct{}
 
+const probeTimeout = 5 * time.Second
+
 // NewRunner creates a new bash runner
 func NewRunner() *Runner {
 	return &Runner{}
@@ -41,7 +44,9 @@ func NewRunner() *Runner {
 // NeedsSudo returns true if the current OS requires sudo for package installation
 func NeedsSudo() bool {
 	// Check if we're on Linux (macOS uses Homebrew which doesn't need sudo)
-	cmd := exec.Command("uname", "-s")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "uname", "-s")
 	output, err := cmd.Output()
 	if err != nil {
 		return false
@@ -51,7 +56,9 @@ func NeedsSudo() bool {
 
 // CheckSudoCached returns true if sudo credentials are already cached
 func CheckSudoCached() bool {
-	cmd := exec.Command("sudo", "-n", "true")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sudo", "-n", "true")
 	return cmd.Run() == nil
 }
 
@@ -62,7 +69,9 @@ func CheckSudoCached() bool {
 // sudo timestamp mid-run (C16). stdin is left detached so it can never block
 // waiting for a password.
 func RefreshSudo() error {
-	cmd := exec.Command("sudo", "-n", "-v")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sudo", "-n", "-v")
 	cmd.Stdin = nil
 	return cmd.Run()
 }
@@ -104,14 +113,14 @@ func RunStreaming(ctx context.Context, name string, args ...string) (*StreamingC
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		stdout.Close()
+		_ = stdout.Close()
 		cancel()
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		stdout.Close()
-		stderr.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
 		cancel()
 		return nil, fmt.Errorf("start command: %w", err)
 	}
@@ -125,7 +134,7 @@ func RunStreaming(ctx context.Context, name string, args ...string) (*StreamingC
 
 	streamPipe := func(pipe io.ReadCloser) {
 		defer wg.Done()
-		defer pipe.Close()
+		defer func() { _ = pipe.Close() }()
 		scanner := bufio.NewScanner(pipe)
 		// Increase buffer size for long lines (package manager output can be verbose)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)

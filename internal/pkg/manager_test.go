@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -244,19 +245,19 @@ func TestMockPackageManager_Errors(t *testing.T) {
 	mock.CheckOutdatedErr = ErrMockCheckFailed
 	mock.SearchErr = ErrMockSearchFailed
 
-	if err := mock.Install("vim"); err != ErrMockInstallFailed {
+	if err := mock.Install("vim"); !errors.Is(err, ErrMockInstallFailed) {
 		t.Errorf("Install should return ErrMockInstallFailed")
 	}
-	if err := mock.Uninstall("vim"); err != ErrMockUninstallFailed {
+	if err := mock.Uninstall("vim"); !errors.Is(err, ErrMockUninstallFailed) {
 		t.Errorf("Uninstall should return ErrMockUninstallFailed")
 	}
-	if err := mock.Update("vim"); err != ErrMockUpdateFailed {
+	if err := mock.Update("vim"); !errors.Is(err, ErrMockUpdateFailed) {
 		t.Errorf("Update should return ErrMockUpdateFailed")
 	}
-	if _, err := mock.CheckOutdated(); err != ErrMockCheckFailed {
+	if _, err := mock.CheckOutdated(); !errors.Is(err, ErrMockCheckFailed) {
 		t.Errorf("CheckOutdated should return ErrMockCheckFailed")
 	}
-	if _, err := mock.Search("vim"); err != ErrMockSearchFailed {
+	if _, err := mock.Search("vim"); !errors.Is(err, ErrMockSearchFailed) {
 		t.Errorf("Search should return ErrMockSearchFailed")
 	}
 }

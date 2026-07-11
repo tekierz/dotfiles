@@ -36,7 +36,8 @@ func (a *AptManager) Install(packages ...string) error {
 
 	args := []string{"apt", "install", "-y"}
 	args = append(args, packages...)
-	cmd := exec.Command("sudo", args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", args...)
+	defer cancel()
 	return cmd.Run()
 }
 
@@ -47,7 +48,8 @@ func (a *AptManager) Uninstall(packages ...string) error {
 
 	args := []string{"apt", "remove", "-y"}
 	args = append(args, packages...)
-	cmd := exec.Command("sudo", args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", args...)
+	defer cancel()
 	return cmd.Run()
 }
 
@@ -56,7 +58,8 @@ func (a *AptManager) IsInstalled(pkg string) bool {
 	// "deinstall ok config-files"), which would falsely report it installed.
 	// Query the Status field directly and require "install ok installed",
 	// matching the filter ListInstalled uses (C11).
-	cmd := exec.Command("dpkg-query", "-W", "-f=${Status}", pkg)
+	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg-query", "-W", "-f=${Status}", pkg)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -71,7 +74,8 @@ func (a *AptManager) GetVersion(pkg string) (string, error) {
 	// IsInstalled. Query Status and Version together and only report a version
 	// when the package is actually installed ("install ok installed"), matching
 	// IsInstalled's filter exactly.
-	cmd := exec.Command("dpkg-query", "-W", "-f=${Status}\t${Version}", pkg)
+	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg-query", "-W", "-f=${Status}\t${Version}", pkg)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -98,7 +102,8 @@ func (a *AptManager) CheckOutdated() ([]Package, error) {
 	// blocks on the controlling terminal. The repo index is refreshed inside
 	// Update/UpdateAll/UpdateAllStreaming, which is where the network side effect
 	// belongs. We report against the already-synced local cache.
-	cmd := exec.Command("apt", "list", "--upgradable")
+	cmd, cancel := packageCommand(packageQueryTimeout, "apt", "list", "--upgradable")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -152,29 +157,35 @@ func (a *AptManager) Update(packages ...string) error {
 	// device: this can run while the TUI owns the terminal, so writing to
 	// os.Stderr would splatter the alt-screen, and any genuine failure surfaces
 	// through the install below.
-	_ = exec.Command("sudo", "-n", "apt", "update").Run()
+	refreshCmd, refreshCancel := packageCommand(packageRefreshTimeout, "sudo", "-n", "apt", "update")
+	_ = refreshCmd.Run()
+	refreshCancel()
 
 	// Install specific packages (will upgrade if already installed)
 	args := []string{"apt", "install", "-y"}
 	args = append(args, packages...)
-	cmd := exec.Command("sudo", args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", args...)
+	defer cancel()
 	return cmd.Run()
 }
 
 func (a *AptManager) UpdateAll() error {
 	// Update package lists
-	updateCmd := exec.Command("sudo", "apt", "update")
+	updateCmd, updateCancel := packageCommand(packageRefreshTimeout, "sudo", "apt", "update")
+	defer updateCancel()
 	if err := updateCmd.Run(); err != nil {
 		return err
 	}
 
 	// Upgrade all packages
-	upgradeCmd := exec.Command("sudo", "apt", "upgrade", "-y")
+	upgradeCmd, upgradeCancel := packageCommand(packageMutationTimeout, "sudo", "apt", "upgrade", "-y")
+	defer upgradeCancel()
 	return upgradeCmd.Run()
 }
 
 func (a *AptManager) Search(query string) ([]Package, error) {
-	cmd := exec.Command("apt", "search", query)
+	cmd, cancel := packageCommand(packageQueryTimeout, "apt", "search", query)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -217,7 +228,8 @@ func (a *AptManager) Search(query string) ([]Package, error) {
 // using a single dpkg-query command instead of individual dpkg -s calls per package.
 // This eliminates the N+1 query problem that caused 5-25 second startup delays.
 func (a *AptManager) getInstalledVersions() (map[string]string, error) {
-	cmd := exec.Command("dpkg-query", "-W", "-f=${Package}\t${Version}\n")
+	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg-query", "-W", "-f=${Package}\t${Version}\n")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -245,7 +257,8 @@ func (a *AptManager) ListInstalled() ([]Package, error) {
 	}
 
 	// Get list of installed packages
-	cmd := exec.Command("dpkg", "--get-selections")
+	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg", "--get-selections")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 

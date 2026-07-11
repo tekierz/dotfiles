@@ -1,6 +1,8 @@
 package scripts
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -130,10 +133,10 @@ func extractFunc(t *testing.T, src, fn string) string {
 }
 
 func TestReadPidValidation(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("bash harness not applicable on Windows")
 	}
-	t.Parallel()
 
 	cases := []struct {
 		name        string
@@ -173,7 +176,8 @@ func TestReadPidValidation(t *testing.T) {
 			out := string(outBytes)
 			rc := 0
 			if err != nil {
-				if ee, ok := err.(*exec.ExitError); ok {
+				var ee *exec.ExitError
+				if errors.As(err, &ee) {
 					rc = ee.ExitCode()
 				} else {
 					t.Fatalf("harness error: %v", err)
@@ -207,7 +211,10 @@ func buildHarness(t *testing.T, pidfile, fakeBinDir, body string) *exec.Cmd {
 	readPid := extractFunc(t, CaffScript, "read_pid")
 	isCaffeine := extractFunc(t, CaffScript, "is_caffeine")
 	script := "PIDFILE=\"" + pidfile + "\"\n" + readPid + "\n" + isCaffeine + "\n" + body
-	cmd := exec.Command("bash", "-c", script)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+	// #nosec G204 -- script consists of embedded functions plus test-owned temp paths and fixed test cases.
+	cmd := exec.CommandContext(ctx, "bash", "-c", script)
 	cmd.Env = os.Environ()
 	if fakeBinDir != "" {
 		cmd.Env = append(cmd.Env, "PATH="+fakeBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -238,10 +245,10 @@ func shellSingleQuote(s string) string {
 }
 
 func TestIsCaffeineRefusesUnrelatedProcess(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("bash harness not applicable on Windows")
 	}
-	t.Parallel()
 
 	cases := []struct {
 		name   string
@@ -286,7 +293,8 @@ func runCaffHarnessWithBin(t *testing.T, fakeBinDir, body string) int {
 	if err == nil {
 		return 0
 	}
-	if ee, ok := err.(*exec.ExitError); ok {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
 		return ee.ExitCode()
 	}
 	t.Fatalf("harness error: %v", err)

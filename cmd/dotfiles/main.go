@@ -735,9 +735,21 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) error {
 
 	configDir := config.ConfigDir()
 
-	deletionRequested := !keepConfig || !keepBinaries
+	printUninstallPreview(!keepConfig || !keepBinaries, noRestore)
+	confirmed, err := confirmUninstall(force)
+	if err != nil || !confirmed {
+		return err
+	}
 
-	// Show what will be done.
+	var restoreErr error
+	if !noRestore {
+		restoreErr = restoreLatestUninstallBackup(configDir)
+	}
+	printUninstallGuidance(home, configDir)
+	return restoreErr
+}
+
+func printUninstallPreview(deletionRequested, noRestore bool) {
 	fmt.Println("Safe Dotfiles Uninstall")
 	fmt.Println("=======================")
 	fmt.Println()
@@ -751,72 +763,80 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) error {
 		fmt.Println("  • Decline automatic deletion because ownership and anchored-removal safeguards are not implemented")
 	}
 	fmt.Println()
+}
 
-	// Prompt for confirmation unless --force
-	if !force {
-		fmt.Print("Continue with restore and manual uninstall guidance? [y/N]: ")
-		reader := bufio.NewReader(os.Stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("read uninstall confirmation: %w", err)
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
-			fmt.Println("Uninstall cancelled.")
-			return nil
-		}
-		fmt.Println()
+func confirmUninstall(force bool) (bool, error) {
+	if force {
+		return true, nil
 	}
+	fmt.Print("Continue with restore and manual uninstall guidance? [y/N]: ")
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("read uninstall confirmation: %w", err)
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response != "y" && response != "yes" {
+		fmt.Println("Uninstall cancelled.")
+		return false, nil
+	}
+	fmt.Println()
+	return true, nil
+}
 
+func restoreLatestUninstallBackup(configDir string) error {
 	// Restore from latest backup.
 	//
 	// The backups directory lives inside configDir. If restore is incomplete,
 	// report the preserved safety net explicitly. Cleanup below is disabled in
 	// every case, so the backups survive even after a successful restore.
-	var problems []error
-	if !noRestore {
-		fmt.Println("Checking for backups...")
-		backupDir := filepath.Join(configDir, "backups")
-		entries, readErr := readUninstallBackupDir(backupDir)
-		switch {
-		case errors.Is(readErr, os.ErrNotExist):
-			fmt.Println("No backup directory found; nothing was restored.")
-			fmt.Println()
-		case readErr != nil:
-			problem := fmt.Errorf("read backup directory %s: %w", backupDir, readErr)
-			problems = append(problems, problem)
-			fmt.Fprintf(os.Stderr, "Could not inspect backups: %v\n", problem)
-			fmt.Fprintf(os.Stderr, "Backup state was left untouched at: %s\n\n", backupDir)
-		default:
-			// Find most recent backup (directories sorted by timestamp)
-			var latestBackup string
-			for _, e := range entries {
-				if e.IsDir() {
-					if latestBackup == "" || e.Name() > latestBackup {
-						latestBackup = e.Name()
-					}
-				}
-			}
-			if latestBackup != "" {
-				count, skipped, err := restoreBackup(latestBackup)
-				fmt.Println()
-				if err != nil || skipped > 0 || count == 0 {
-					if err == nil {
-						err = fmt.Errorf("restore produced %d restored and %d skipped entries", count, skipped)
-					}
-					problems = append(problems, fmt.Errorf("restore backup %s: %w", latestBackup, err))
-					fmt.Fprintln(os.Stderr, "Restore did not complete successfully; keeping configuration directory so backups are preserved.")
-					fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
-					fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")
-					fmt.Fprintln(os.Stderr)
-				}
-			} else {
-				fmt.Println("No backup session directories found; nothing was restored.")
-				fmt.Println()
-			}
-		}
+	fmt.Println("Checking for backups...")
+	backupDir := filepath.Join(configDir, "backups")
+	entries, readErr := readUninstallBackupDir(backupDir)
+	switch {
+	case errors.Is(readErr, os.ErrNotExist):
+		fmt.Println("No backup directory found; nothing was restored.")
+		fmt.Println()
+		return nil
+	case readErr != nil:
+		problem := fmt.Errorf("read backup directory %s: %w", backupDir, readErr)
+		fmt.Fprintf(os.Stderr, "Could not inspect backups: %v\n", problem)
+		fmt.Fprintf(os.Stderr, "Backup state was left untouched at: %s\n\n", backupDir)
+		return problem
 	}
 
+	latestBackup := latestBackupDirectory(entries)
+	if latestBackup == "" {
+		fmt.Println("No backup session directories found; nothing was restored.")
+		fmt.Println()
+		return nil
+	}
+	count, skipped, restoreErr := restoreBackup(latestBackup)
+	fmt.Println()
+	if restoreErr == nil && skipped == 0 && count > 0 {
+		return nil
+	}
+	if restoreErr == nil {
+		restoreErr = fmt.Errorf("restore produced %d restored and %d skipped entries", count, skipped)
+	}
+	fmt.Fprintln(os.Stderr, "Restore did not complete successfully; keeping configuration directory so backups are preserved.")
+	fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
+	fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")
+	fmt.Fprintln(os.Stderr)
+	return fmt.Errorf("restore backup %s: %w", latestBackup, restoreErr)
+}
+
+func latestBackupDirectory(entries []os.DirEntry) string {
+	var latest string
+	for _, entry := range entries {
+		if entry.IsDir() && (latest == "" || entry.Name() > latest) {
+			latest = entry.Name()
+		}
+	}
+	return latest
+}
+
+func printUninstallGuidance(home, configDir string) {
 	// Gate 0: do not infer ownership from a basename or recursively remove a
 	// path-resolved config directory. Re-enable cleanup only after installation
 	// records exact owned artifacts and recursive deletion is descriptor-anchored.
@@ -850,8 +870,6 @@ func runUninstall(keepConfig, keepBinaries, noRestore, force bool) error {
 		}
 	}
 	fmt.Println("Package-managed tools and external helpers such as sshh were retained; use their owning package manager.")
-
-	return errors.Join(problems...)
 }
 
 // showCurrentUser displays the current active user

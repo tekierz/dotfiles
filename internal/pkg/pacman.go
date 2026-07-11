@@ -3,6 +3,7 @@ package pkg
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -55,11 +56,13 @@ func (p *PacmanManager) Install(packages ...string) error {
 	args = append(args, packages...)
 
 	var cmd *exec.Cmd
+	var cancel context.CancelFunc
 	if p.useParu {
-		cmd = exec.Command(p.pacmanPath, args...)
+		cmd, cancel = packageCommand(packageMutationTimeout, p.pacmanPath, args...)
 	} else {
-		cmd = exec.Command("sudo", append([]string{p.pacmanPath}, args...)...)
+		cmd, cancel = packageCommand(packageMutationTimeout, "sudo", append([]string{p.pacmanPath}, args...)...)
 	}
+	defer cancel()
 
 	return cmd.Run()
 }
@@ -71,17 +74,20 @@ func (p *PacmanManager) Uninstall(packages ...string) error {
 
 	args := []string{"-R", "--noconfirm"}
 	args = append(args, packages...)
-	cmd := exec.Command("sudo", append([]string{p.pacmanPath}, args...)...)
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{p.pacmanPath}, args...)...)
+	defer cancel()
 	return cmd.Run()
 }
 
 func (p *PacmanManager) IsInstalled(pkg string) bool {
-	cmd := exec.Command(p.pacmanPath, "-Q", pkg)
+	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Q", pkg)
+	defer cancel()
 	return cmd.Run() == nil
 }
 
 func (p *PacmanManager) GetVersion(pkg string) (string, error) {
-	cmd := exec.Command(p.pacmanPath, "-Q", pkg)
+	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Q", pkg)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -111,7 +117,8 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 
 	// Check AUR updates if using paru
 	if p.useParu {
-		aurCmd := exec.Command(p.pacmanPath, "-Qua")
+		aurCmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Qua")
+		defer cancel()
 		var aurOut bytes.Buffer
 		aurCmd.Stdout = &aurOut
 		// `pacman -Qua` exits non-zero when there are no foreign updates, so
@@ -131,7 +138,8 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 // missing optional dependency does not silently report "up to date".
 func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 	if _, err := exec.LookPath("checkupdates"); err == nil {
-		cmd := exec.Command("checkupdates")
+		cmd, cancel := packageCommand(packageRefreshTimeout, "checkupdates")
+		defer cancel()
 		var out bytes.Buffer
 		cmd.Stdout = &out
 
@@ -140,7 +148,8 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 		// failure (e.g. a stale temp DB) that should be surfaced.
 		err := cmd.Run()
 		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
 				return "", nil
 			}
 			return "", fmt.Errorf("checkupdates failed: %w", err)
@@ -155,14 +164,15 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 	// diagnostics to stderr and/or use a different exit code. Distinguish the
 	// genuine no-updates case from a real error so failures aren't silently
 	// reported as "up to date".
-	cmd := exec.Command(p.pacmanPath, "-Qu")
+	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Qu")
+	defer cancel()
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
 		exitCode := -1
-		exitErr, ok := err.(*exec.ExitError)
-		if ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		}
 		return classifyPacmanQuResult(exitCode, out.String(), errBuf.String(), err)
@@ -296,11 +306,13 @@ func (p *PacmanManager) Update(packages ...string) error {
 	args := pacmanUpdateArgs(nil, packages)
 
 	var cmd *exec.Cmd
+	var cancel context.CancelFunc
 	if p.useParu {
-		cmd = exec.Command(p.pacmanPath, args...)
+		cmd, cancel = packageCommand(packageMutationTimeout, p.pacmanPath, args...)
 	} else {
-		cmd = exec.Command("sudo", append([]string{p.pacmanPath}, args...)...)
+		cmd, cancel = packageCommand(packageMutationTimeout, "sudo", append([]string{p.pacmanPath}, args...)...)
 	}
+	defer cancel()
 
 	return cmd.Run()
 }
@@ -315,16 +327,19 @@ func pacmanUpdateArgs(extraFlags []string, packages []string) []string {
 
 func (p *PacmanManager) UpdateAll() error {
 	var cmd *exec.Cmd
+	var cancel context.CancelFunc
 	if p.useParu {
-		cmd = exec.Command(p.pacmanPath, "-Syu", "--noconfirm")
+		cmd, cancel = packageCommand(packageMutationTimeout, p.pacmanPath, "-Syu", "--noconfirm")
 	} else {
-		cmd = exec.Command("sudo", p.pacmanPath, "-Syu", "--noconfirm")
+		cmd, cancel = packageCommand(packageMutationTimeout, "sudo", p.pacmanPath, "-Syu", "--noconfirm")
 	}
+	defer cancel()
 	return cmd.Run()
 }
 
 func (p *PacmanManager) Search(query string) ([]Package, error) {
-	cmd := exec.Command(p.pacmanPath, "-Ss", query)
+	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Ss", query)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -392,7 +407,8 @@ func parsePacmanSearch(output string) []Package {
 }
 
 func (p *PacmanManager) ListInstalled() ([]Package, error) {
-	cmd := exec.Command(p.pacmanPath, "-Q")
+	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Q")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 

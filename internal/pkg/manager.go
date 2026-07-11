@@ -152,6 +152,8 @@ func detectManagerImpl() PackageManager {
 		if apt := NewAptManager(); apt.IsAvailable() {
 			return apt
 		}
+	case PlatformUnknown:
+		// No supported package manager can be inferred for an unknown platform.
 	}
 
 	return nil
@@ -199,7 +201,7 @@ func isRaspberryPi() bool {
 
 	// Fallback: check /proc/cpuinfo for Raspberry Pi
 	if f, err := os.Open("/proc/cpuinfo"); err == nil {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			line := strings.ToLower(scanner.Text())
@@ -236,7 +238,7 @@ func getTotalMemoryMBImpl() int {
 	if err != nil {
 		return 0
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {

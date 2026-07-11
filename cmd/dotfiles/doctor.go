@@ -227,6 +227,8 @@ func probeHomebrewPrefix(ctx context.Context, formula string) (string, string, e
 	if err != nil {
 		return "", "", errors.New("brew was not found on PATH")
 	}
+	// #nosec G204 -- brewPath is resolved by exec.LookPath and formula is the
+	// product's fixed Homebrew identifier; no shell is involved.
 	command := exec.CommandContext(ctx, brewPath, "--prefix", formula)
 	command.Env = append(os.Environ(), "HOMEBREW_NO_AUTO_UPDATE=1")
 	output, err := command.CombinedOutput()
@@ -357,6 +359,8 @@ func inspectDoctorExecutable(path, name string, pathIndex int) doctorExecutable 
 }
 
 func readStaticScriptVersion(path string) (string, error) {
+	// #nosec G304 -- doctor opens only a discovered candidate for a bounded,
+	// read-only static inspection and never executes it.
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -489,27 +493,48 @@ func writeDoctorHuman(writer io.Writer, report doctorReport) error {
 	if _, err := fmt.Fprintln(writer, "==============="); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "Running executable: %s\n", report.RunningExecutable.Path); err != nil {
+	if err := writeDoctorExecutableHuman(writer, report.RunningExecutable); err != nil {
 		return err
 	}
-	if report.RunningExecutable.ResolvedPath != "" && report.RunningExecutable.ResolvedPath != report.RunningExecutable.Path {
-		if _, err := fmt.Fprintf(writer, "Resolved executable: %s\n", report.RunningExecutable.ResolvedPath); err != nil {
+	if err := writeDoctorPATHMatchesHuman(writer, report.PATHMatches); err != nil {
+		return err
+	}
+	if err := writeDoctorHomebrewHuman(writer, report.Homebrew); err != nil {
+		return err
+	}
+	if err := writeDoctorLegacyHuman(writer, report.LegacyBinaries); err != nil {
+		return err
+	}
+	if err := writeDoctorFindingsHuman(writer, report.Findings); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(writer, "\nRead-only check complete; no files were changed.")
+	return err
+}
+
+func writeDoctorExecutableHuman(writer io.Writer, executable doctorExecutable) error {
+	if _, err := fmt.Fprintf(writer, "Running executable: %s\n", executable.Path); err != nil {
+		return err
+	}
+	if executable.ResolvedPath != "" && executable.ResolvedPath != executable.Path {
+		if _, err := fmt.Fprintf(writer, "Resolved executable: %s\n", executable.ResolvedPath); err != nil {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(writer, "Running version: %s (%s)\n\n", report.RunningExecutable.VersionHint, report.RunningExecutable.VersionSource); err != nil {
-		return err
-	}
+	_, err := fmt.Fprintf(writer, "Running version: %s (%s)\n\n", executable.VersionHint, executable.VersionSource)
+	return err
+}
 
+func writeDoctorPATHMatchesHuman(writer io.Writer, matches []doctorExecutable) error {
 	if _, err := fmt.Fprintln(writer, "PATH matches:"); err != nil {
 		return err
 	}
-	if len(report.PATHMatches) == 0 {
+	if len(matches) == 0 {
 		if _, err := fmt.Fprintln(writer, "  none"); err != nil {
 			return err
 		}
 	}
-	for _, match := range report.PATHMatches {
+	for _, match := range matches {
 		selected := ""
 		if match.SelectedByPATH {
 			selected = " [selected by PATH]"
@@ -528,46 +553,55 @@ func writeDoctorHuman(writer io.Writer, report doctorReport) error {
 			}
 		}
 	}
+	return nil
+}
 
+func writeDoctorHomebrewHuman(writer io.Writer, homebrew doctorHomebrew) error {
 	if _, err := fmt.Fprintln(writer, "\nHomebrew:"); err != nil {
 		return err
 	}
-	if report.Homebrew.Installed {
-		if _, err := fmt.Fprintf(writer, "  formula: %s\n  managed executable: %s\n", report.Homebrew.Formula, report.Homebrew.ManagedExecutable); err != nil {
+	if homebrew.Installed {
+		if _, err := fmt.Fprintf(writer, "  formula: %s\n  managed executable: %s\n", homebrew.Formula, homebrew.ManagedExecutable); err != nil {
 			return err
 		}
-		if report.Homebrew.VersionHint != "" {
-			if _, err := fmt.Fprintf(writer, "  version hint: %s (from resolved Cellar path)\n", report.Homebrew.VersionHint); err != nil {
+		if homebrew.VersionHint != "" {
+			if _, err := fmt.Fprintf(writer, "  version hint: %s (from resolved Cellar path)\n", homebrew.VersionHint); err != nil {
 				return err
 			}
 		}
-	} else if _, err := fmt.Fprintf(writer, "  unavailable: %s\n", report.Homebrew.ProbeError); err != nil {
+	} else if _, err := fmt.Fprintf(writer, "  unavailable: %s\n", homebrew.ProbeError); err != nil {
 		return err
 	}
+	return nil
+}
 
+func writeDoctorLegacyHuman(writer io.Writer, legacyBinaries []doctorExecutable) error {
 	if _, err := fmt.Fprintln(writer, "\nLegacy executable candidates:"); err != nil {
 		return err
 	}
-	if len(report.LegacyBinaries) == 0 {
+	if len(legacyBinaries) == 0 {
 		if _, err := fmt.Fprintln(writer, "  none"); err != nil {
 			return err
 		}
 	}
-	for _, legacy := range report.LegacyBinaries {
+	for _, legacy := range legacyBinaries {
 		if _, err := fmt.Fprintf(writer, "  %s (%s; %s)\n", legacy.Path, legacy.VersionHint, legacy.OwnershipHint); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
+func writeDoctorFindingsHuman(writer io.Writer, findings []doctorFinding) error {
 	if _, err := fmt.Fprintln(writer, "\nFindings:"); err != nil {
 		return err
 	}
-	if len(report.Findings) == 0 {
+	if len(findings) == 0 {
 		if _, err := fmt.Fprintln(writer, "  OK: no PATH collisions or stale legacy executable names were detected"); err != nil {
 			return err
 		}
 	}
-	for _, finding := range report.Findings {
+	for _, finding := range findings {
 		path := ""
 		if finding.Path != "" {
 			path = " (" + finding.Path + ")"
@@ -576,8 +610,7 @@ func writeDoctorHuman(writer io.Writer, report doctorReport) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(writer, "\nRead-only check complete; no files were changed.")
-	return err
+	return nil
 }
 
 func sameFile(first, second string) bool {

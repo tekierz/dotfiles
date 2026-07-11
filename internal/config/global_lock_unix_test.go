@@ -136,6 +136,7 @@ func TestGlobalConfigLockSerializesCooperatingProcesses(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// #nosec G204 -- os.Args[0] re-runs this test binary with a fixed helper selector.
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestGlobalConfigLockHelperProcess$")
 	cmd.Env = append(os.Environ(),
 		"GO_GLOBAL_CONFIG_LOCK_HELPER=1",
@@ -223,6 +224,7 @@ func TestGlobalConfigFirstCreationKeepsExternalXDGLockAnchorStable(t *testing.T)
 	acquiredPath := filepath.Join(workspace, "helper-acquired")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// #nosec G204 -- os.Args[0] re-runs this test binary with a fixed helper selector.
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestGlobalConfigLockHelperProcess$")
 	cmd.Env = append(os.Environ(),
 		"GO_GLOBAL_CONFIG_LOCK_HELPER=1",
