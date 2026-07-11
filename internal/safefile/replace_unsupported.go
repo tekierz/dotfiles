@@ -2,7 +2,10 @@
 
 package safefile
 
-import "io/fs"
+import (
+	"io/fs"
+	"os"
+)
 
 // SnapshotDirectoryWithin is unavailable on platforms without the required
 // descriptor-relative directory operations.
@@ -129,6 +132,26 @@ func ReadWithin(_ string, _ string) ([]byte, Revision, error) {
 // AcquireLockWithin is unavailable on platforms without descriptor-relative
 // no-follow operations and flock.
 func AcquireLockWithin(_ string, _ string, _ fs.FileMode) (func() error, error) {
+	return nil, ErrUnsupported
+}
+
+func AcquireLockWithinAuthorized(_ string, _ string, _ fs.FileMode, _ *ParentChain) (func() error, error) {
+	return nil, ErrUnsupported
+}
+
+func CaptureDirectoryRootWithin(_ string, _ string) (*DirectorySnapshot, *ParentChain, error) {
+	return nil, nil, ErrUnsupported
+}
+
+func BindParentChainPrefixWithin(_ string, _, _ string, _ *ParentChain, _ map[string]*DirectorySnapshot) (*ParentChain, error) {
+	return nil, ErrUnsupported
+}
+
+func ValidateParentChainWithin(_ string, _ string, _ *ParentChain, _ map[string]*DirectorySnapshot) (*ParentChain, error) {
+	return nil, ErrUnsupported
+}
+
+func OpenDirectoryWithinAuthorized(_ string, _ string, _ *ParentChain, _ *DirectorySnapshot) (*os.File, error) {
 	return nil, ErrUnsupported
 }
 

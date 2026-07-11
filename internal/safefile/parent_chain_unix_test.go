@@ -32,6 +32,54 @@ func TestAuthorizedReplaceRejectsImmediateParentReplacement(t *testing.T) {
 	}
 }
 
+func TestAuthorizedLockReleaseRejectsUnlinkedRecreatedLeaf(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "locks"), 0o700)
+	parents, err := CaptureParentChainWithin(root, "locks/config.lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := AcquireLockWithinAuthorized(root, "locks/config.lock", 0o600, parents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(root, "locks", "config.lock")
+	if err := os.Rename(lockPath, lockPath+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := release(); !errors.Is(err, ErrLockChanged) {
+		t.Fatalf("release error = %v, want ErrLockChanged", err)
+	}
+}
+
+func TestValidateParentChainPermitsOnlyExactAcceptedCreationEvidence(t *testing.T) {
+	root := t.TempDir()
+	accepted, err := CaptureParentChainWithin(root, "parent/child/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootParents, err := BindParentChainPrefixWithin(root, "parent/child/file", "parent", accepted, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := EnsureShallowDirectoryWithinParentChainTracked(root, "parent", nil, rootParents, 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateParentChainWithin(root, "parent/child/file", accepted, map[string]*DirectorySnapshot{"parent": parent}); err != nil {
+		t.Fatalf("exact creation evidence rejected: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "parent", "child"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateParentChainWithin(root, "parent/child/file", accepted, map[string]*DirectorySnapshot{"parent": parent}); !errors.Is(err, ErrParentChanged) {
+		t.Fatalf("unaccepted deeper appearance error = %v, want ErrParentChanged", err)
+	}
+}
+
 func TestAuthorizedReplaceRejectsParentModeChange(t *testing.T) {
 	root := t.TempDir()
 	parent := filepath.Join(root, "parent")
@@ -460,5 +508,64 @@ func TestAuthorizedDirectoryRemovalDetectsRootReplacementAfterCleanup(t *testing
 	}
 	if _, err := os.Lstat(filepath.Join(moved, "target")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("removed tree remains in original root: %v", err)
+	}
+}
+
+func TestRootOnlyDirectoryAuthorityCannotAuthorizeRecursiveOperations(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "target"), 0o700)
+	mustWrite(t, filepath.Join(root, "target", "config"), "value", 0o600)
+	rootOnly, parents, err := CaptureDirectoryRootWithin(root, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootOnly.Digest() != ([32]byte{}) {
+		t.Fatal("root-only authority exposed a recursive digest")
+	}
+	opened, err := OpenDirectoryWithinAuthorized(root, "target", parents, rootOnly)
+	if err != nil {
+		t.Fatalf("root-only authority should open its exact directory: %v", err)
+	}
+	if err := opened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	mustMkdir(t, filepath.Join(root, "source"), 0o700)
+	mustWrite(t, filepath.Join(root, "source", "config"), "replacement", 0o600)
+	source, err := SnapshotDirectoryWithin(root, "source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertChanged := func(name string, err error) {
+		t.Helper()
+		if !errors.Is(err, ErrDirectoryChanged) {
+			t.Fatalf("%s error = %v, want ErrDirectoryChanged", name, err)
+		}
+	}
+	assertChanged("verify", VerifyDirectoryWithinSnapshot(root, "target", rootOnly))
+	assertChanged("restore source", RestoreDirectoryWithin(root, "target", rootOnly))
+	assertChanged("restore expected", RestoreDirectoryWithinSnapshot(root, "target", source, rootOnly))
+	_, err = RestoreDirectoryWithinSnapshotNoCreateTracked(root, "target", source, rootOnly)
+	assertChanged("restore no-create expected", err)
+	_, err = EnsureShallowDirectoryWithinSnapshotTracked(root, "target", rootOnly, 0o700)
+	assertChanged("shallow expected", err)
+	assertChanged("empty removal", RemoveEmptyDirectoryWithinSnapshot(root, "target", rootOnly))
+	assertChanged("recursive removal", RemoveDirectoryWithinSnapshot(root, "target", rootOnly))
+	assertContent(t, filepath.Join(root, "target", "config"), "value")
+}
+
+func TestRootOnlyDirectoryAuthorityCannotBindCreatedParent(t *testing.T) {
+	root := t.TempDir()
+	accepted, err := CaptureParentChainWithin(root, "parent/config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(root, "parent"), 0o700)
+	rootOnly, _, err := CaptureDirectoryRootWithin(root, "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BindParentChainWithin(root, "parent/config", accepted, map[string]*DirectorySnapshot{"parent": rootOnly}); !errors.Is(err, ErrParentChanged) {
+		t.Fatalf("bind error = %v, want ErrParentChanged", err)
 	}
 }

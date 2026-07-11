@@ -10,23 +10,47 @@ import (
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
+type Locker func(scope, target string) (func() error, error)
+
+func DefaultLocker(scope, target string) (func() error, error) {
+	return AcquireStateLock(scope, target)
+}
+
+func BoundLocker(authority *StateAuthority) Locker {
+	if authority == nil {
+		return nil
+	}
+	return func(scope, target string) (func() error, error) {
+		return AcquireStateLockWithAuthority(authority, scope, target)
+	}
+}
+
 // AcquireStateLock acquires a per-target advisory lock below dotfiles' private
 // operational-state root. Product writers use this instead of persistent lock
 // files beside user configuration, keeping the reviewed config action scope
 // free of hidden side effects. scope separates independent lock protocols;
 // target should be the canonical absolute mutation destination.
 func AcquireStateLock(scope, target string) (func() error, error) {
-	if scope == "" || target == "" {
-		return nil, fmt.Errorf("operation lock scope and target are required")
-	}
-	root, stateRel, err := stateAnchor()
+	plan, err := CaptureStatePlan()
 	if err != nil {
 		return nil, err
 	}
-	locksRel := filepath.ToSlash(filepath.Join(stateRel, "locks"))
-	if err := safefile.EnsureDirectoryWithin(root, locksRel, 0o700); err != nil {
-		return nil, fmt.Errorf("create private operation lock directory: %w", err)
+	authority, err := BootstrapStateNamespaceTracked(plan)
+	if err != nil {
+		return nil, err
 	}
+	return AcquireStateLockWithAuthority(authority, scope, target)
+}
+
+func AcquireStateLockWithAuthority(authority *StateAuthority, scope, target string) (func() error, error) {
+	if scope == "" || target == "" {
+		return nil, fmt.Errorf("operation lock scope and target are required")
+	}
+	if authority == nil {
+		return nil, fmt.Errorf("operation state authority is unavailable")
+	}
+	root := authority.root
+	locksRel := filepath.ToSlash(filepath.Join(authority.stateRel, "locks"))
 	info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(locksRel)))
 	if err != nil {
 		return nil, fmt.Errorf("verify private operation lock directory: %w", err)
@@ -44,7 +68,11 @@ func AcquireStateLock(scope, target string) (func() error, error) {
 	}
 	digest := sha256.Sum256([]byte(scope + "\x00" + canonical))
 	lockRel := filepath.ToSlash(filepath.Join(locksRel, fmt.Sprintf("%x.lock", digest)))
-	release, err := safefile.AcquireLockWithin(root, lockRel, 0o600)
+	_, parents, err := stateChildDescendantAuthority(authority, "locks", lockRel)
+	if err != nil {
+		return nil, fmt.Errorf("capture private operation lock authority: %w", err)
+	}
+	release, err := safefile.AcquireLockWithinAuthorized(root, lockRel, 0o600, parents)
 	if err != nil {
 		if errors.Is(err, safefile.ErrUnsupported) {
 			return nil, fmt.Errorf("operation locking is unsupported: %w", err)

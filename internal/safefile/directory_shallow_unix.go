@@ -32,8 +32,8 @@ func ensureShallowDirectoryWithinSnapshotTracked(root, rel string, expected *Dir
 	if mode != directoryMode {
 		return nil, fmt.Errorf("%w: directory mode must be %04o, got %v", ErrInvalidMode, directoryMode, mode)
 	}
-	if expected != nil && !expected.tracked {
-		return nil, fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	if expected != nil && !recursiveDirectorySnapshot(expected) {
+		return nil, fmt.Errorf("%w: expected directory snapshot is not recursive", ErrDirectoryChanged)
 	}
 	directories, target, err := splitRelativePath(rel)
 	if err != nil {
@@ -166,7 +166,7 @@ func RemoveEmptyDirectoryWithinSnapshotAuthorized(root, rel string, expected *Di
 }
 
 func removeEmptyDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot, parents *ParentChain) error {
-	if expected == nil || !expected.tracked || len(expected.root.entries) != 0 {
+	if !recursiveDirectorySnapshot(expected) || len(expected.root.entries) != 0 {
 		return fmt.Errorf("%w: expected snapshot must describe an empty directory", ErrDirectoryChanged)
 	}
 	directories, target, err := splitRelativePath(rel)

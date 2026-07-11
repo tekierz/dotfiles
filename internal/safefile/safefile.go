@@ -54,20 +54,24 @@ var (
 	ErrUnsupported = errors.New("safe file operation is unsupported on this platform")
 )
 
-// DirectorySnapshot is an immutable, opaque recursive capture produced by
-// SnapshotDirectoryWithin. It binds root identity/owner plus recursive names,
-// node types, modes, and file bytes. Nested uid/gid values are not serialized;
-// capture fails closed unless every node is owned by the process euid/egid, the
-// only ownership the unprivileged restore path can reproduce. Its unexported
-// representation prevents callers from injecting snapshot data.
+// DirectorySnapshot is an immutable, opaque capture produced by this package.
+// SnapshotDirectoryWithin returns a recursive capture that binds root
+// identity/owner plus recursive names, node types, modes, and file bytes.
+// CaptureDirectoryRootWithin returns a root-only namespace token that cannot
+// be used by recursive verify, restore, or removal APIs. Nested uid/gid values
+// are not serialized; recursive capture fails closed unless every node is
+// owned by the process euid/egid, the only ownership the unprivileged restore
+// path can reproduce. Its unexported representation prevents callers from
+// injecting snapshot data.
 type DirectorySnapshot struct {
-	tracked bool
-	device  uint64
-	inode   uint64
-	uid     uint32
-	gid     uint32
-	root    directorySnapshotNode
-	digest  [32]byte
+	tracked  bool
+	rootOnly bool
+	device   uint64
+	inode    uint64
+	uid      uint32
+	gid      uint32
+	root     directorySnapshotNode
+	digest   [32]byte
 }
 
 // ParentChain is an immutable, opaque, non-recursive identity capture from a
@@ -124,12 +128,17 @@ type directorySnapshotEntry struct {
 // uid/gid participates in exact CAS comparisons but not this public digest;
 // nested nodes are accepted only under the restorable-owner policy described
 // above. The digest is intended for change detection, not authentication or
-// secret handling. A nil or untracked snapshot returns the zero digest.
+// secret handling. A nil, untracked, or root-only snapshot returns the zero
+// digest; root-only tokens intentionally do not describe recursive contents.
 func (s *DirectorySnapshot) Digest() [32]byte {
-	if s == nil || !s.tracked {
+	if s == nil || !s.tracked || s.rootOnly {
 		return [32]byte{}
 	}
 	return s.digest
+}
+
+func recursiveDirectorySnapshot(snapshot *DirectorySnapshot) bool {
+	return snapshot != nil && snapshot.tracked && !snapshot.rootOnly
 }
 
 // Permissions returns the captured root directory permission bits. A nil or

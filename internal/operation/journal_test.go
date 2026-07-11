@@ -108,10 +108,9 @@ func TestJournalRefusesSymlinkedStateDescendant(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal, err := DefaultJournal()
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		err = journal.Write(record)
 	}
-	err = journal.Write(record)
 	if !errors.Is(err, safefile.ErrSymlink) {
 		t.Fatalf("journal symlink error = %v, want ErrSymlink", err)
 	}

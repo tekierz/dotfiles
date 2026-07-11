@@ -17,6 +17,18 @@ func TestDescriptorAnchoredOperationsAreTypedUnsupported(t *testing.T) {
 	if _, err := BindParentChainWithin(".", "directory/file", &ParentChain{}, nil); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("BindParentChainWithin error = %v, want ErrUnsupported", err)
 	}
+	if _, err := BindParentChainPrefixWithin(".", "directory/file", "directory", &ParentChain{}, nil); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("BindParentChainPrefixWithin error = %v, want ErrUnsupported", err)
+	}
+	if _, err := ValidateParentChainWithin(".", "directory/file", &ParentChain{}, nil); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("ValidateParentChainWithin error = %v, want ErrUnsupported", err)
+	}
+	if _, _, err := CaptureDirectoryRootWithin(".", "directory"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("CaptureDirectoryRootWithin error = %v, want ErrUnsupported", err)
+	}
+	if _, err := OpenDirectoryWithinAuthorized(".", "directory", &ParentChain{}, &DirectorySnapshot{}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("OpenDirectoryWithinAuthorized error = %v, want ErrUnsupported", err)
+	}
 	if _, err := ExtendParentChainWithinDirectory(".", "directory/file", "directory", &ParentChain{}, &DirectorySnapshot{}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("ExtendParentChainWithinDirectory error = %v, want ErrUnsupported", err)
 	}
@@ -70,6 +82,9 @@ func TestDescriptorAnchoredOperationsAreTypedUnsupported(t *testing.T) {
 	}
 	if _, err := AcquireLockWithin(".", "lock", 0o600); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("AcquireLockWithin error = %v, want ErrUnsupported", err)
+	}
+	if _, err := AcquireLockWithinAuthorized(".", "lock", 0o600, &ParentChain{}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("AcquireLockWithinAuthorized error = %v, want ErrUnsupported", err)
 	}
 	if err := RemoveWithin(".", "file"); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("RemoveWithin error = %v, want ErrUnsupported", err)

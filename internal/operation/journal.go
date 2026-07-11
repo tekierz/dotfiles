@@ -218,16 +218,28 @@ func validateRecord(record Record) error {
 // anchor. It never appends to a shared log file, avoiding torn interleaved
 // records between CLI/TUI processes.
 type Journal struct {
-	root string
-	rel  string
+	root  string
+	rel   string
+	state *StateAuthority
 }
 
 func DefaultJournal() (Journal, error) {
-	root, rel, err := stateAnchor()
+	plan, err := CaptureStatePlan()
 	if err != nil {
 		return Journal{}, err
 	}
-	return Journal{root: root, rel: filepath.ToSlash(filepath.Join(rel, "operations"))}, nil
+	authority, err := BootstrapStateNamespaceTracked(plan)
+	if err != nil {
+		return Journal{}, err
+	}
+	return DefaultJournalWithAuthority(authority)
+}
+
+func DefaultJournalWithAuthority(authority *StateAuthority) (Journal, error) {
+	if authority == nil {
+		return Journal{}, fmt.Errorf("operation state authority is unavailable")
+	}
+	return Journal{root: authority.root, rel: filepath.ToSlash(filepath.Join(authority.stateRel, "operations")), state: authority}, nil
 }
 
 func stateAnchor() (root, rel string, err error) {
@@ -270,6 +282,12 @@ func stateAnchor() (root, rel string, err error) {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" || !filepath.IsAbs(home) {
+		if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdgConfig) {
+			xdgConfig = filepath.Clean(xdgConfig)
+			if info, statErr := os.Lstat(xdgConfig); statErr == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+				return xdgConfig, ".dotfiles-state", nil
+			}
+		}
 		return "", "", fmt.Errorf("determine home for state: %w", err)
 	}
 	return filepath.Clean(home), filepath.ToSlash(filepath.Join(".local", "state", "dotfiles")), nil
@@ -282,11 +300,10 @@ func (j Journal) Write(record Record) (returnErr error) {
 	if j.root == "" || j.rel == "" {
 		return fmt.Errorf("%w: journal has no state anchor", ErrInvalidRecord)
 	}
-	if err := safefile.EnsureDirectoryWithin(j.root, j.rel, 0o700); err != nil {
-		return fmt.Errorf("create operation journal directory: %w", err)
+	if j.state == nil {
+		return fmt.Errorf("operation journal has no bound state authority")
 	}
-	lockRel := filepath.ToSlash(filepath.Join(j.rel, ".journal.lock"))
-	release, err := safefile.AcquireLockWithin(j.root, lockRel, 0o600)
+	release, err := AcquireStateLockWithAuthority(j.state, "operation-journal", j.root)
 	if err != nil {
 		return fmt.Errorf("lock operation journal: %w", err)
 	}
@@ -302,7 +319,15 @@ func (j Journal) Write(record Record) (returnErr error) {
 	}
 	data = append(data, '\n')
 	recordRel := filepath.ToSlash(filepath.Join(j.rel, record.OperationID+".json"))
-	if err := safefile.ReplaceWithin(j.root, recordRel, data, 0o600); err != nil {
+	_, parents, err := stateChildDescendantAuthority(j.state, "operations", recordRel)
+	if err != nil {
+		return fmt.Errorf("bind operation record parent authority: %w", err)
+	}
+	_, revision, err := safefile.ReadWithinAuthorized(j.root, recordRel, parents)
+	if err != nil {
+		return fmt.Errorf("read operation record before write: %w", err)
+	}
+	if _, err := safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(j.root, recordRel, revision, parents, data, 0o600); err != nil {
 		return fmt.Errorf("write operation record: %w", err)
 	}
 	return nil
@@ -313,7 +338,14 @@ func (j Journal) Read(operationID string) (Record, error) {
 		return Record{}, fmt.Errorf("%w: invalid operation id", ErrInvalidRecord)
 	}
 	recordRel := filepath.ToSlash(filepath.Join(j.rel, operationID+".json"))
-	data, revision, err := safefile.ReadWithin(j.root, recordRel)
+	if j.state == nil {
+		return Record{}, fmt.Errorf("operation journal has no bound state authority")
+	}
+	_, parents, err := stateChildDescendantAuthority(j.state, "operations", recordRel)
+	if err != nil {
+		return Record{}, fmt.Errorf("bind operation record read authority: %w", err)
+	}
+	data, revision, err := safefile.ReadWithinAuthorized(j.root, recordRel, parents)
 	if err != nil {
 		return Record{}, fmt.Errorf("read operation record: %w", err)
 	}

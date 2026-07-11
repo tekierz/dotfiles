@@ -471,6 +471,20 @@ func verifyRemovalEntry(parentFD int, target string, expected fileIdentity) erro
 // path-based advisory lock, a malicious same-UID process can replace the lock
 // entry after AcquireLockWithin returns; keep the trusted root private.
 func AcquireLockWithin(root, rel string, mode fs.FileMode) (func() error, error) {
+	return acquireLockWithin(root, rel, mode, nil)
+}
+
+// AcquireLockWithinAuthorized binds the complete lock namespace chain both at
+// acquisition and release, preventing a replaced private lock directory from
+// splitting cooperating writers across different lock inodes.
+func AcquireLockWithinAuthorized(root, rel string, mode fs.FileMode, parents *ParentChain) (func() error, error) {
+	if !parents.Tracked() {
+		return nil, fmt.Errorf("%w: lock parent authority is untracked", ErrParentChanged)
+	}
+	return acquireLockWithin(root, rel, mode, parents)
+}
+
+func acquireLockWithin(root, rel string, mode fs.FileMode, parents *ParentChain) (func() error, error) {
 	if mode != mode.Perm() {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidMode, mode)
 	}
@@ -485,7 +499,12 @@ func AcquireLockWithin(root, rel string, mode fs.FileMode) (func() error, error)
 	}
 	defer func() { _ = unix.Close(rootFD) }()
 
-	parentFD, err := openParent(rootFD, directories, false)
+	var parentFD int
+	if parents != nil {
+		parentFD, err = openAuthorizedParent(rootFD, directories, parents)
+	} else {
+		parentFD, err = openParent(rootFD, directories, false)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -533,7 +552,7 @@ func AcquireLockWithin(root, rel string, mode fs.FileMode) (func() error, error)
 			return nil, fmt.Errorf("after locking %q: %w", target, err)
 		}
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		return nil, fmt.Errorf("lock parent verification: %w", err)
 	}
 	if err := verifyLockDescriptor(fd, wantedLock, uint32(mode.Perm())); err != nil {
@@ -549,6 +568,28 @@ func AcquireLockWithin(root, rel string, mode fs.FileMode) (func() error, error)
 	var releaseErr error
 	release := func() error {
 		once.Do(func() {
+			var namespaceErr error
+			releaseRootFD, openErr := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+			if openErr != nil {
+				namespaceErr = fmt.Errorf("open lock root before release: %w", openErr)
+			} else {
+				var releaseParentFD int
+				if parents != nil {
+					releaseParentFD, openErr = openAuthorizedParent(releaseRootFD, directories, parents)
+				} else {
+					releaseParentFD, openErr = openParent(releaseRootFD, directories, false)
+				}
+				if openErr != nil {
+					namespaceErr = fmt.Errorf("open lock parent before release: %w", openErr)
+				} else {
+					namespaceErr = errors.Join(
+						verifyLockDescriptor(fd, wantedLock, uint32(mode.Perm())),
+						verifyLockEntry(releaseParentFD, target, wantedLock, uint32(mode.Perm())),
+					)
+					_ = unix.Close(releaseParentFD)
+				}
+				_ = unix.Close(releaseRootFD)
+			}
 			unlockErr := unix.Flock(fd, unix.LOCK_UN)
 			closeErr := unix.Close(fd)
 			if unlockErr != nil {
@@ -557,7 +598,7 @@ func AcquireLockWithin(root, rel string, mode fs.FileMode) (func() error, error)
 			if closeErr != nil {
 				closeErr = fmt.Errorf("close lock %q: %w", target, closeErr)
 			}
-			releaseErr = errors.Join(unlockErr, closeErr)
+			releaseErr = errors.Join(namespaceErr, unlockErr, closeErr)
 		})
 		return releaseErr
 	}

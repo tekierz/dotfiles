@@ -83,6 +83,9 @@ func SnapshotDirectoryWithin(root, rel string) (*DirectorySnapshot, error) {
 // represents an accepted missing directory and therefore succeeds only while
 // rel remains absent. The check is read-only and never creates parents.
 func VerifyDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot) error {
+	if expected != nil && !recursiveDirectorySnapshot(expected) {
+		return fmt.Errorf("%w: expected directory snapshot is not recursive", ErrDirectoryChanged)
+	}
 	directories, target, err := splitRelativePath(rel)
 	if err != nil {
 		return err
@@ -375,6 +378,9 @@ func directoryDescriptorState(fd int) (fileIdentity, uint32, fs.FileMode, error)
 // installing the staged tree rolls the original name back; failures after the
 // staged rename return *CommittedError and leave the restored tree in place.
 func RestoreDirectoryWithin(root, rel string, snapshot *DirectorySnapshot) (returnErr error) {
+	if !recursiveDirectorySnapshot(snapshot) {
+		return fmt.Errorf("%w: restore snapshot is not recursive", ErrDirectoryChanged)
+	}
 	return restoreDirectoryWithinSnapshot(root, rel, snapshot, nil, false, nil, true, nil)
 }
 
@@ -382,8 +388,8 @@ func RestoreDirectoryWithin(root, rel string, snapshot *DirectorySnapshot) (retu
 // post-write snapshot still matches expected. A nil expected snapshot requires
 // the target to remain absent through the commit boundary.
 func RestoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *DirectorySnapshot) error {
-	if expected != nil && !expected.tracked {
-		return fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	if !recursiveDirectorySnapshot(snapshot) || (expected != nil && !recursiveDirectorySnapshot(expected)) {
+		return fmt.Errorf("%w: directory snapshot is not recursive", ErrDirectoryChanged)
 	}
 	return restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, nil, true, nil)
 }
@@ -392,8 +398,8 @@ func RestoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 // snapshot captured from the installed namespace entry before the transaction
 // returns. It never derives rollback authority from a later path re-read.
 func RestoreDirectoryWithinSnapshotTracked(root, rel string, snapshot, expected *DirectorySnapshot) (*DirectorySnapshot, error) {
-	if expected != nil && !expected.tracked {
-		return nil, fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	if !recursiveDirectorySnapshot(snapshot) || (expected != nil && !recursiveDirectorySnapshot(expected)) {
+		return nil, fmt.Errorf("%w: directory snapshot is not recursive", ErrDirectoryChanged)
 	}
 	var evidence *DirectorySnapshot
 	err := restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, &evidence, true, nil)
@@ -406,8 +412,8 @@ func RestoreDirectoryWithinSnapshotTracked(root, rel string, snapshot, expected 
 // the Authorized variant below because this compatibility surface does not
 // bind ancestor identity.
 func RestoreDirectoryWithinSnapshotNoCreateTracked(root, rel string, snapshot, expected *DirectorySnapshot) (*DirectorySnapshot, error) {
-	if expected != nil && !expected.tracked {
-		return nil, fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	if !recursiveDirectorySnapshot(snapshot) || (expected != nil && !recursiveDirectorySnapshot(expected)) {
+		return nil, fmt.Errorf("%w: directory snapshot is not recursive", ErrDirectoryChanged)
 	}
 	var evidence *DirectorySnapshot
 	err := restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, &evidence, false, nil)
@@ -417,8 +423,8 @@ func RestoreDirectoryWithinSnapshotNoCreateTracked(root, rel string, snapshot, e
 // RestoreDirectoryWithinSnapshotNoCreateAuthorizedTracked also requires the
 // complete accepted root-to-parent identity chain.
 func RestoreDirectoryWithinSnapshotNoCreateAuthorizedTracked(root, rel string, snapshot, expected *DirectorySnapshot, parents *ParentChain) (*DirectorySnapshot, error) {
-	if expected != nil && !expected.tracked {
-		return nil, fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	if !recursiveDirectorySnapshot(snapshot) || (expected != nil && !recursiveDirectorySnapshot(expected)) {
+		return nil, fmt.Errorf("%w: directory snapshot is not recursive", ErrDirectoryChanged)
 	}
 	if !parents.Tracked() {
 		return nil, fmt.Errorf("%w: expected parent chain is untracked", ErrParentChanged)
@@ -429,8 +435,8 @@ func RestoreDirectoryWithinSnapshotNoCreateAuthorizedTracked(root, rel string, s
 }
 
 func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *DirectorySnapshot, conditional bool, evidence **DirectorySnapshot, createParents bool, parents *ParentChain) (returnErr error) {
-	if snapshot == nil || !snapshot.tracked {
-		return fmt.Errorf("directory snapshot is nil or untracked")
+	if !recursiveDirectorySnapshot(snapshot) {
+		return fmt.Errorf("directory snapshot is nil, untracked, or root-only")
 	}
 	if err := validateDirectorySnapshotNode(&snapshot.root); err != nil {
 		return err
@@ -711,8 +717,8 @@ func RemoveDirectoryWithin(root, rel string) error {
 // RemoveDirectoryWithinSnapshot removes rel only while its exact recursive
 // snapshot still matches expected at the move-aside commit boundary.
 func RemoveDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot) error {
-	if expected == nil || !expected.tracked {
-		return fmt.Errorf("%w: expected removal snapshot is nil or untracked", ErrDirectoryChanged)
+	if !recursiveDirectorySnapshot(expected) {
+		return fmt.Errorf("%w: expected removal snapshot is nil, untracked, or root-only", ErrDirectoryChanged)
 	}
 	return removeDirectoryWithinSnapshot(root, rel, expected, nil)
 }
@@ -720,8 +726,8 @@ func RemoveDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 // RemoveDirectoryWithinSnapshotAuthorized removes the exact accepted tree only
 // while the bound root-to-parent namespace chain still matches.
 func RemoveDirectoryWithinSnapshotAuthorized(root, rel string, expected *DirectorySnapshot, parents *ParentChain) error {
-	if expected == nil || !expected.tracked {
-		return fmt.Errorf("%w: expected removal snapshot is nil or untracked", ErrDirectoryChanged)
+	if !recursiveDirectorySnapshot(expected) {
+		return fmt.Errorf("%w: expected removal snapshot is nil, untracked, or root-only", ErrDirectoryChanged)
 	}
 	if !parents.Tracked() {
 		return fmt.Errorf("%w: expected parent chain is untracked", ErrParentChanged)

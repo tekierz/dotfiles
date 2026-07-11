@@ -6,9 +6,177 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
+
+func TestCaptureStatePlanIsReadOnlyAndTrackedBootstrapCreatesFreshNamespace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	plan, err := CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".local")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state preview mutated fresh HOME: %v", err)
+	}
+	authority, err := BootstrapStateNamespaceTracked(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".local", ".local/state", ".local/state/dotfiles", ".local/state/dotfiles/locks", ".local/state/dotfiles/operations", ".local/state/dotfiles/backups", ".local/state/dotfiles/staging"} {
+		info, err := os.Lstat(filepath.Join(home, filepath.FromSlash(rel)))
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf("%s: %v", rel, err)
+		}
+	}
+	if len(authority.CreatedDirectoriesWithin(home)) != 7 {
+		t.Fatalf("created evidence count = %d, want 7", len(authority.CreatedDirectoriesWithin(home)))
+	}
+}
+
+func TestStatePlanAcceptsSafeSharedPrefixesWithoutWalkingUnrelatedSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".local", "state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(home, ".local", "bin", "unrelated")); err != nil {
+		t.Skip(err)
+	}
+	plan, err := CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BootstrapStateNamespaceTracked(plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStatePlanRejectsSameOwnerReplacementBeforeBootstrap(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".local", "state", "dotfiles"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(home, ".local", "state", "dotfiles")
+	old := state + ".old"
+	if err := os.Rename(state, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BootstrapStateNamespaceTracked(plan); !errors.Is(err, safefile.ErrParentChanged) {
+		t.Fatalf("replacement bootstrap error = %v, want ErrParentChanged", err)
+	}
+}
+
+func TestStatePlanRejectsUnacceptedMissingPrefixAppearance(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	plan, err := CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(home, ".local"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BootstrapStateNamespaceTracked(plan); !errors.Is(err, safefile.ErrDirectoryChanged) {
+		t.Fatalf("appearance bootstrap error = %v, want ErrDirectoryChanged", err)
+	}
+}
+
+func TestBoundStateAuthorityRejectsChildReplacement(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	plan, err := CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := BootstrapStateNamespaceTracked(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locks := filepath.Join(home, ".local", "state", "dotfiles", "locks")
+	if err := os.Rename(locks, locks+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(locks, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AcquireStateLockWithAuthority(authority, "test", filepath.Join(home, "target")); !errors.Is(err, safefile.ErrParentChanged) && !errors.Is(err, safefile.ErrDirectoryChanged) {
+		t.Fatalf("replacement lock error = %v", err)
+	}
+}
+
+func TestCreatedStateEvidenceMatchesSymlinkedHomeIdentity(t *testing.T) {
+	realHome := t.TempDir()
+	linkParent := t.TempDir()
+	linkedHome := filepath.Join(linkParent, "home")
+	if err := os.Symlink(realHome, linkedHome); err != nil {
+		t.Skip(err)
+	}
+	t.Setenv("HOME", linkedHome)
+	t.Setenv("XDG_STATE_HOME", "")
+	plan, err := CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := BootstrapStateNamespaceTracked(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(authority.CreatedDirectoriesWithin(realHome)) == 0 {
+		t.Fatal("state evidence did not recognize real-path HOME identity")
+	}
+}
+
+func TestJournalWithAcceptedStateRejectsOperationsGraft(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	plan, err := CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := BootstrapStateNamespaceTracked(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := DefaultJournalWithAuthority(authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := filepath.Join(home, ".local", "state", "dotfiles", "operations")
+	if err := os.Rename(operations, operations+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(operations, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	record, err := StartRecord(testPlan(t, now), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Write(record); !errors.Is(err, safefile.ErrParentChanged) && !errors.Is(err, safefile.ErrDirectoryChanged) {
+		t.Fatalf("grafted journal error = %v", err)
+	}
+}
 
 func TestStateSubdirectoryReturnsPrivateChildWithoutCreatingIt(t *testing.T) {
 	home := t.TempDir()

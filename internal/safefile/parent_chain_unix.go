@@ -5,11 +5,153 @@ package safefile
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/unix"
 )
+
+// CaptureDirectoryRootWithin captures only one directory leaf's root identity,
+// ownership, and mode. It deliberately does not walk recursive contents and is
+// used for private namespace authority where unrelated descendants may be
+// large or contain symlinks.
+func CaptureDirectoryRootWithin(root, rel string) (*DirectorySnapshot, *ParentChain, error) {
+	parents, err := CaptureParentChainWithin(root, rel)
+	if err != nil {
+		return nil, nil, err
+	}
+	directories, target, err := splitRelativePath(rel)
+	if err != nil {
+		return nil, nil, err
+	}
+	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = unix.Close(rootFD) }()
+	parentFD, err := openAuthorizedParent(rootFD, directories, parents)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = unix.Close(parentFD) }()
+	directoryFD, err := openDirectoryAt(parentFD, target)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = unix.Close(directoryFD) }()
+	var stat unix.Stat_t
+	if err := unix.Fstat(directoryFD, &stat); err != nil {
+		return nil, nil, err
+	}
+	wanted := identityFromStat(&stat)
+	if !restorableOwner(stat.Uid, stat.Gid, os.Geteuid(), os.Getegid()) {
+		return nil, nil, fmt.Errorf("%w: directory owner is not the process owner", ErrDirectoryChanged)
+	}
+	snapshot := &DirectorySnapshot{
+		tracked:  true,
+		rootOnly: true,
+		device:   uint64(stat.Dev),
+		inode:    uint64(stat.Ino),
+		uid:      stat.Uid,
+		gid:      stat.Gid,
+		root:     directorySnapshotNode{mode: fs.FileMode(uint32(stat.Mode) & 0o777)},
+	}
+	verifyLeaf := func() error {
+		entry, err := statDirectoryEntryAt(parentFD, target)
+		if err != nil || entry.identity != wanted || entry.fileType != unix.S_IFDIR || entry.uid != stat.Uid || entry.gid != stat.Gid || entry.mode.Perm() != snapshot.Permissions() {
+			return fmt.Errorf("%w: directory root namespace entry changed", ErrDirectoryChanged)
+		}
+		return nil
+	}
+	if err := verifyLeaf(); err != nil {
+		return nil, nil, err
+	}
+	if _, err := BindParentChainWithin(root, rel, parents, nil); err != nil {
+		return nil, nil, err
+	}
+	if err := verifyLeaf(); err != nil {
+		return nil, nil, err
+	}
+	return snapshot, parents, nil
+}
+
+// BindParentChainPrefixWithin derives and binds authority for one directory
+// prefix from a single accepted full-target chain. It never recaptures the
+// namespace; plan-created prefixes are accepted only through exact created
+// snapshots supplied by the executor.
+func BindParentChainPrefixWithin(root, fullTargetRel, prefixTargetRel string, acceptedFull *ParentChain, created map[string]*DirectorySnapshot) (*ParentChain, error) {
+	if !acceptedFull.Tracked() {
+		return nil, fmt.Errorf("%w: accepted full parent chain is untracked", ErrParentChanged)
+	}
+	fullTargetRel = strings.TrimSuffix(filepath.ToSlash(filepath.Clean(filepath.FromSlash(fullTargetRel))), "/")
+	prefixTargetRel = strings.TrimSuffix(filepath.ToSlash(filepath.Clean(filepath.FromSlash(prefixTargetRel))), "/")
+	if fullTargetRel != prefixTargetRel && !strings.HasPrefix(fullTargetRel, prefixTargetRel+"/") {
+		return nil, fmt.Errorf("%w: prefix %s is outside full target %s", ErrInvalidPath, prefixTargetRel, fullTargetRel)
+	}
+	directories, _, err := splitRelativePath(prefixTargetRel)
+	if err != nil {
+		return nil, err
+	}
+	wantEntries := len(directories) + 1
+	if len(acceptedFull.entries) < wantEntries {
+		return nil, fmt.Errorf("%w: accepted full chain is shorter than prefix", ErrParentChanged)
+	}
+	prefix := &ParentChain{tracked: true, entries: append([]parentChainEntry(nil), acceptedFull.entries[:wantEntries]...)}
+	return BindParentChainWithin(root, prefixTargetRel, prefix, created)
+}
+
+// OpenDirectoryWithinAuthorized returns a held descriptor for one exact
+// directory leaf after validating both its complete parent chain and expected
+// root identity/state. The caller owns the returned file.
+func OpenDirectoryWithinAuthorized(root, rel string, parents *ParentChain, expected *DirectorySnapshot) (*os.File, error) {
+	if !parents.Tracked() || expected == nil || !expected.tracked {
+		return nil, fmt.Errorf("%w: directory open authority is incomplete", ErrParentChanged)
+	}
+	directories, target, err := splitRelativePath(rel)
+	if err != nil {
+		return nil, err
+	}
+	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unix.Close(rootFD) }()
+	parentFD, err := openAuthorizedParent(rootFD, directories, parents)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unix.Close(parentFD) }()
+	fd, err := openDirectoryAt(parentFD, target)
+	if err != nil {
+		return nil, err
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		_ = unix.Close(fd)
+		return nil, err
+	}
+	if uint64(stat.Dev) != expected.device || uint64(stat.Ino) != expected.inode || stat.Uid != expected.uid || stat.Gid != expected.gid || fs.FileMode(uint32(stat.Mode)&0o777).Perm() != expected.Permissions() {
+		_ = unix.Close(fd)
+		return nil, fmt.Errorf("%w: authorized directory leaf changed", ErrDirectoryChanged)
+	}
+	if _, err := BindParentChainWithin(root, rel, parents, nil); err != nil {
+		_ = unix.Close(fd)
+		return nil, err
+	}
+	entry, err := statDirectoryEntryAt(parentFD, target)
+	if err != nil || entry.identity != (fileIdentity{device: expected.device, inode: expected.inode}) || entry.fileType != unix.S_IFDIR ||
+		entry.uid != expected.uid || entry.gid != expected.gid || entry.mode.Perm() != expected.Permissions() {
+		_ = unix.Close(fd)
+		return nil, fmt.Errorf("%w: authorized directory leaf changed during validation", ErrDirectoryChanged)
+	}
+	if _, err := BindParentChainWithin(root, rel, parents, nil); err != nil {
+		_ = unix.Close(fd)
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), target), nil
+}
 
 // CaptureParentChainWithin captures root plus every target-parent component.
 // Once a component is absent, every deeper component is recorded absent
@@ -190,6 +332,18 @@ func parentChainEntryForFD(fd int, rel string) (parentChainEntry, error) {
 // each newly present component only when its exact creation snapshot appears
 // in created. The returned chain requires every target parent to exist.
 func BindParentChainWithin(root, rel string, accepted *ParentChain, created map[string]*DirectorySnapshot) (*ParentChain, error) {
+	current, err := validateParentChainWithin(root, rel, accepted, created, true)
+	return current, err
+}
+
+// ValidateParentChainWithin validates plan-time existing identities and exact
+// created evidence while permitting other plan-accepted missing descendants to
+// remain absent. It is used before reviewed product-parent creation.
+func ValidateParentChainWithin(root, rel string, accepted *ParentChain, created map[string]*DirectorySnapshot) (*ParentChain, error) {
+	return validateParentChainWithin(root, rel, accepted, created, false)
+}
+
+func validateParentChainWithin(root, rel string, accepted *ParentChain, created map[string]*DirectorySnapshot, requireAll bool) (*ParentChain, error) {
 	if !accepted.Tracked() {
 		return nil, fmt.Errorf("%w: accepted parent chain is untracked", ErrParentChanged)
 	}
@@ -202,17 +356,26 @@ func BindParentChainWithin(root, rel string, accepted *ParentChain, created map[
 	}
 	for index, expected := range accepted.entries {
 		actual := current.entries[index]
-		if expected.rel != actual.rel || !actual.exists {
+		if expected.rel != actual.rel {
 			return nil, fmt.Errorf("%w: parent-chain component %q is missing", ErrParentChanged, expected.rel)
 		}
 		if expected.exists {
-			if expected != actual {
+			if !actual.exists || expected != actual {
 				return nil, fmt.Errorf("%w: parent-chain component %q was replaced", ErrParentChanged, expected.rel)
 			}
 			continue
 		}
 		createdSnapshot := created[expected.rel]
-		if createdSnapshot == nil || !createdSnapshot.tracked || createdSnapshot.device != actual.device || createdSnapshot.inode != actual.inode ||
+		if createdSnapshot == nil && !requireAll {
+			if actual.exists {
+				return nil, fmt.Errorf("%w: parent-chain component %q appeared without accepted creation evidence", ErrParentChanged, expected.rel)
+			}
+			continue
+		}
+		if !actual.exists {
+			return nil, fmt.Errorf("%w: parent-chain component %q is missing", ErrParentChanged, expected.rel)
+		}
+		if !recursiveDirectorySnapshot(createdSnapshot) || createdSnapshot.device != actual.device || createdSnapshot.inode != actual.inode ||
 			createdSnapshot.uid != actual.uid || createdSnapshot.gid != actual.gid || uint32(createdSnapshot.Permissions()) != actual.mode {
 			return nil, fmt.Errorf("%w: parent-chain component %q lacks exact creation evidence", ErrParentChanged, expected.rel)
 		}
