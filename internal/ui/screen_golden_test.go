@@ -795,7 +795,8 @@ func TestConfigLazyGitScreenGolden(t *testing.T) {
 
 	wantSubstrings := []string{
 		"LazyGit",
-		"Side-by-Side Diff",
+		"Wide Side Panel",
+		"Paging",
 		"Mouse Mode",
 		"Theme",
 		"navigate",
@@ -815,7 +816,7 @@ func TestConfigLazyGitScreenGolden(t *testing.T) {
 // toggles the focused boolean field and esc navigates back, resetting the index.
 func TestConfigLazyGitToggleAndBack(t *testing.T) {
 	ctx := newDeepDiveContext(t)
-	ctx.app.configFieldIndex = 0 // Side-by-Side Diff
+	ctx.app.configFieldIndex = 0 // Wide Side Panel
 	before := ctx.app.deepDiveConfig.LazyGitSideBySide
 
 	screen := NewConfigLazyGitScreen(ctx)

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -9,7 +11,8 @@ import (
 // configYaziScreen is the migrated ScreenHandler for the Yazi config screen.
 // Navigation + back are inherited from configFieldNav.
 //
-// Fields: 0=keymap, 1=show hidden (toggle), 2=preview mode.
+// Fields: 0=keymap, 1=show hidden, 2=preview mode, 3=sort order,
+// 4=reverse sort, 5=line metadata, 6=scroll offset.
 type configYaziScreen struct {
 	configFieldNav
 }
@@ -18,7 +21,7 @@ type configYaziScreen struct {
 func NewConfigYaziScreen(ctx *ScreenContext) *configYaziScreen {
 	s := &configYaziScreen{}
 	s.id = ScreenConfigYazi
-	s.maxField = func(*App) int { return 2 }
+	s.maxField = func(*App) int { return 6 }
 	s.adjust = yaziAdjust
 	s.SetContext(ctx)
 	return s
@@ -38,10 +41,25 @@ func yaziAdjust(a *App, key string, fwd bool) {
 		case 2:
 			opts := []string{"auto", "always", "never"}
 			cfg.YaziPreviewMode = cycleOption(opts, cfg.YaziPreviewMode, fwd)
+		case 3:
+			opts := []string{"alphabetical", "modified", "size", "natural"}
+			cfg.YaziSortBy = cycleOption(opts, cfg.YaziSortBy, fwd)
+		case 5:
+			opts := []string{"size", "permissions", "mtime", "none"}
+			cfg.YaziLineMode = cycleOption(opts, cfg.YaziLineMode, fwd)
+		case 6:
+			if fwd && cfg.YaziScrollOff < 20 {
+				cfg.YaziScrollOff++
+			} else if !fwd && cfg.YaziScrollOff > 0 {
+				cfg.YaziScrollOff--
+			}
 		}
 	case " ":
-		if a.configFieldIndex == 1 {
+		switch a.configFieldIndex {
+		case 1:
 			cfg.YaziShowHidden = !cfg.YaziShowHidden
+		case 4:
+			cfg.YaziSortReverse = !cfg.YaziSortReverse
 		}
 	}
 }
@@ -85,6 +103,40 @@ func (s *configYaziScreen) View(width, height int) string {
 		cfg.YaziPreviewMode,
 		previewFocused,
 	))
+	rec.write("\n\n")
+
+	rec.field(3)
+	rec.write(renderFieldLabel("Sort By", a.configFieldIndex == 3))
+	rec.write(renderOptionSelector(
+		[]string{"alphabetical", "modified", "size", "natural"},
+		[]string{"Alphabetical", "Modified", "Size", "Natural"},
+		cfg.YaziSortBy,
+		a.configFieldIndex == 3,
+	))
+	rec.write("\n\n")
+
+	rec.field(4)
+	rec.write(renderFieldLabel("Reverse Sort", a.configFieldIndex == 4))
+	rec.write(renderToggle(cfg.YaziSortReverse, a.configFieldIndex == 4))
+	rec.write("\n\n")
+
+	rec.field(5)
+	rec.write(renderFieldLabel("Line Metadata", a.configFieldIndex == 5))
+	rec.write(renderOptionSelector(
+		[]string{"size", "permissions", "mtime", "none"},
+		[]string{"Size", "Permissions", "Modified", "None"},
+		cfg.YaziLineMode,
+		a.configFieldIndex == 5,
+	))
+	rec.write("\n\n")
+
+	rec.field(6)
+	rec.write(renderFieldLabel("Scroll Offset", a.configFieldIndex == 6))
+	offsetStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	if a.configFieldIndex == 6 {
+		offsetStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	}
+	rec.write(fmt.Sprintf("    ◀ %s ▶", offsetStyle.Render(fmt.Sprintf("%d lines", cfg.YaziScrollOff))))
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := s.footer()

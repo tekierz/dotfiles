@@ -112,6 +112,9 @@ observability land before new integrations or broad UI work.
 - Btop and Glow now validate persisted values at the writer boundary before any filesystem
   mutation, blocking directive/YAML injection and invalid ranges/enums. Btop per-tool theme
   overrides now plan, create, and reference the same exact theme artifact.
+- Existing Yazi, LazyGit, btop, and Glow generator settings are now exposed consistently in
+  both Manage and standalone editors, eliminating cross-surface resets from hidden modeled
+  fields; LazyGit's width control is labeled for what it actually changes.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 

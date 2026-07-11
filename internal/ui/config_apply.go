@@ -502,7 +502,9 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	}
 
 	// Yazi
+	dd.YaziKeymap = mc.YaziKeymap
 	dd.YaziShowHidden = mc.YaziShowHidden
+	dd.YaziPreviewMode = mc.YaziPreviewMode
 	dd.YaziSortBy = mc.YaziSortBy
 	dd.YaziSortReverse = mc.YaziSortReverse
 	dd.YaziLineMode = mc.YaziLineMode

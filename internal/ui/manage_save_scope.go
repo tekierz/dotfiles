@@ -61,7 +61,7 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 		}
 	case "yazi":
 		return []any{
-			cfg.YaziShowHidden, cfg.YaziSortBy, cfg.YaziSortReverse,
+			cfg.YaziKeymap, cfg.YaziShowHidden, cfg.YaziPreviewMode, cfg.YaziSortBy, cfg.YaziSortReverse,
 			cfg.YaziLineMode, cfg.YaziScrollOff,
 		}
 	case "fzf":

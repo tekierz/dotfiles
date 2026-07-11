@@ -11,7 +11,8 @@ import (
 // configFieldNav; only the field layout (View) and value adjustment (adjust)
 // are screen-specific.
 //
-// Fields: 0=side-by-side diff (toggle), 1=mouse mode (toggle), 2=theme (option).
+// Fields: 0=wide side panel (toggle), 1=mouse mode (toggle), 2=theme,
+// 3=paging backend.
 type configLazyGitScreen struct {
 	configFieldNav
 }
@@ -20,7 +21,7 @@ type configLazyGitScreen struct {
 func NewConfigLazyGitScreen(ctx *ScreenContext) *configLazyGitScreen {
 	s := &configLazyGitScreen{}
 	s.id = ScreenConfigLazyGit
-	s.maxField = func(*App) int { return 2 }
+	s.maxField = func(*App) int { return 3 }
 	s.adjust = lazyGitAdjust
 	s.SetContext(ctx)
 	return s
@@ -33,9 +34,13 @@ func lazyGitAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
 	case "left", "right", "h", "l":
-		if a.configFieldIndex == 2 {
+		switch a.configFieldIndex {
+		case 2:
 			opts := []string{"auto", "dark", "light"}
 			cfg.LazyGitTheme = cycleOption(opts, cfg.LazyGitTheme, fwd)
+		case 3:
+			opts := []string{"delta", "diff-so-fancy", "never"}
+			cfg.LazyGitPaging = cycleOption(opts, cfg.LazyGitPaging, fwd)
 		}
 	case " ":
 		switch a.configFieldIndex {
@@ -60,9 +65,9 @@ func (s *configLazyGitScreen) View(width, height int) string {
 	cfg := a.deepDiveConfig
 	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(50))
 
-	// Side-by-side diff
+	// Side panel width
 	rec.field(0)
-	rec.write(renderFieldLabel("Side-by-Side Diff", a.configFieldIndex == 0))
+	rec.write(renderFieldLabel("Wide Side Panel", a.configFieldIndex == 0))
 	rec.write(renderToggle(cfg.LazyGitSideBySide, a.configFieldIndex == 0))
 	rec.write("\n\n")
 
@@ -80,6 +85,17 @@ func (s *configLazyGitScreen) View(width, height int) string {
 		[]string{"Auto", "Dark", "Light"},
 		cfg.LazyGitTheme,
 		a.configFieldIndex == 2,
+	))
+	rec.write("\n\n")
+
+	// Paging backend
+	rec.field(3)
+	rec.write(renderFieldLabel("Paging", a.configFieldIndex == 3))
+	rec.write(renderOptionSelector(
+		[]string{"delta", "diff-so-fancy", "never"},
+		[]string{"Delta", "diff-so-fancy", "Disabled"},
+		cfg.LazyGitPaging,
+		a.configFieldIndex == 3,
 	))
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())

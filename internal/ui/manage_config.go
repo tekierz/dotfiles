@@ -72,7 +72,9 @@ type ManageConfig struct {
 	GitAliasLogGraph    bool
 
 	// Yazi detailed settings
+	YaziKeymap      string
 	YaziShowHidden  bool
+	YaziPreviewMode string
 	YaziSortBy      string
 	YaziSortReverse bool
 	YaziLineMode    string
@@ -195,7 +197,9 @@ func NewManageConfig() *ManageConfig {
 		GitAliasLogGraph:    true,
 
 		// Yazi
+		YaziKeymap:      "vim",
 		YaziShowHidden:  false,
+		YaziPreviewMode: "auto",
 		YaziSortBy:      "alphabetical",
 		YaziSortReverse: false,
 		YaziLineMode:    "size",

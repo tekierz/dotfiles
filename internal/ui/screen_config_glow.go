@@ -13,7 +13,7 @@ import (
 // only the field layout (View) and value adjustment (adjust) are
 // screen-specific.
 //
-// Fields: 0=style (option), 1=pager (option), 2=width (stepper).
+// Fields: 0=style (option), 1=pager (option), 2=width (stepper), 3=mouse.
 type configGlowScreen struct {
 	configFieldNav
 }
@@ -22,7 +22,7 @@ type configGlowScreen struct {
 func NewConfigGlowScreen(ctx *ScreenContext) *configGlowScreen {
 	s := &configGlowScreen{}
 	s.id = ScreenConfigGlow
-	s.maxField = func(*App) int { return 2 }
+	s.maxField = func(*App) int { return 3 }
 	s.adjust = glowAdjust
 	s.SetContext(ctx)
 	return s
@@ -40,7 +40,7 @@ func glowAdjust(a *App, key string, fwd bool) {
 			opts := []string{"auto", "dark", "light", "notty"}
 			cfg.GlowStyle = cycleOption(opts, cfg.GlowStyle, fwd)
 		case 1:
-			opts := []string{"auto", "less", "more", "none"}
+			opts := []string{"auto", "less", "never"}
 			cfg.GlowPager = cycleOption(opts, cfg.GlowPager, fwd)
 		case 2:
 			if fwd {
@@ -50,6 +50,10 @@ func glowAdjust(a *App, key string, fwd bool) {
 			} else if cfg.GlowWidth > 40 {
 				cfg.GlowWidth -= 10
 			}
+		}
+	case " ":
+		if a.configFieldIndex == 3 {
+			cfg.GlowMouse = !cfg.GlowMouse
 		}
 	}
 }
@@ -97,6 +101,12 @@ func (s *configGlowScreen) View(width, height int) string {
 		widthStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 	}
 	rec.write(fmt.Sprintf("    ◀ %s ▶", widthStyle.Render(fmt.Sprintf("%d chars", cfg.GlowWidth))))
+	rec.write("\n\n")
+
+	// Mouse
+	rec.field(3)
+	rec.write(renderFieldLabel("Mouse", a.configFieldIndex == 3))
+	rec.write(renderToggle(cfg.GlowMouse, a.configFieldIndex == 3))
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := s.footer()

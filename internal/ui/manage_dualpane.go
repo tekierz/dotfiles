@@ -572,7 +572,9 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 
 	case "yazi":
 		return []manageField{
+			{key: "keymap", label: "Keymap", description: "Keyboard navigation style", kind: manageFieldOption, str: &cfg.YaziKeymap, options: []string{"vim", "emacs"}},
 			{key: "hidden", label: "Show Hidden", description: "Show dotfiles by default", kind: manageFieldToggle, b: &cfg.YaziShowHidden},
+			{key: "preview_mode", label: "Preview Mode", description: "File preview behavior", kind: manageFieldOption, str: &cfg.YaziPreviewMode, options: []string{"auto", "always", "never"}},
 			{key: "sort_by", label: "Sort By", description: "Sort order", kind: manageFieldOption, str: &cfg.YaziSortBy, options: []string{"alphabetical", "modified", "size", "natural"}},
 			{key: "sort_rev", label: "Sort Reverse", description: "Reverse sort direction", kind: manageFieldToggle, b: &cfg.YaziSortReverse},
 			{key: "linemode", label: "Line Mode", description: "Line metadata style", kind: manageFieldOption, str: &cfg.YaziLineMode, options: []string{"size", "permissions", "mtime", "none"}},
@@ -591,7 +593,7 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 
 	case "lazygit":
 		return []manageField{
-			{key: "side", label: "Side-by-Side Diff", description: "Use side-by-side diffs", kind: manageFieldToggle, b: &cfg.LazyGitSideBySide},
+			{key: "side", label: "Wide Side Panel", description: "Use a wider LazyGit side panel", kind: manageFieldToggle, b: &cfg.LazyGitSideBySide},
 			{key: "paging", label: "Paging", description: "Paging backend", kind: manageFieldOption, str: &cfg.LazyGitPaging, options: []string{"delta", "diff-so-fancy", "never"}},
 			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.LazyGitMouseMode},
 			{key: "gui_theme", label: "GUI Theme", description: "GUI theme selection", kind: manageFieldOption, str: &cfg.LazyGitGuiTheme, options: []string{"auto", "light", "dark"}},
