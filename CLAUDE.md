@@ -25,7 +25,7 @@ internal/
   pkg/                   # Package manager abstraction (brew/pacman/apt)
   runner/                # Bash script execution
   scripts/               # Embedded utility scripts (hk, caff, sshh)
-  tools/                 # Tool registry (30 tools)
+  tools/                 # Tool registry (33 tools)
   ui/                    # Bubble Tea TUI (~15,700 lines)
 bin/
   dotfiles               # Built Go binary (gitignored build output)
@@ -37,7 +37,7 @@ docs/
 tasks/
   todo.md                # Active plan (release readiness)
   release-audit-2026-07-03.md  # Full audit report backing the plan
-  new-tools-spec.md      # Open spec: six AI CLI tools (not yet implemented)
+  new-tools-spec.md      # Superseded AI-tool prototype (historical only)
   archive/               # Completed remediation plans (historical)
 ```
 
@@ -59,7 +59,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 | Package | Purpose |
 |---------|---------|
 | `internal/ui/` | Bubble Tea TUI (Model-Update-View pattern) |
-| `internal/tools/` | Tool registry with 30 tools |
+| `internal/tools/` | Tool registry with 33 tools |
 | `internal/pkg/` | Package manager abstraction |
 | `internal/config/` | JSON configuration management |
 | `internal/hotkeys/` | Hotkey definitions |

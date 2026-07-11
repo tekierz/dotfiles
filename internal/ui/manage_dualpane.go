@@ -426,11 +426,7 @@ func (a *App) manageItems() []manageItem {
 }
 
 func toolHasPackagesForPlatform(t tools.Tool, platform pkg.Platform) bool {
-	pkgs := t.Packages()[platform]
-	if len(pkgs) == 0 {
-		pkgs = t.Packages()["all"]
-	}
-	return len(pkgs) > 0
+	return len(tools.PackagesForPlatform(t.Packages(), platform)) > 0
 }
 
 func fallbackToolIcon(id string, cat tools.Category) string {

@@ -1,8 +1,10 @@
 # New AI Coding CLI Tools — Implementation Spec
 
-Status: ready-to-implement. Researched 2026-06-18. Install info for these tools
-changes fast — re-verify the exact npm package / cask name at implementation time
-with `npm view <pkg> version` or `brew info --cask <name>`.
+Status: **superseded prototype — do not implement from this document**. Its
+default-on policy, mutable-script examples, OpenCode lineage, and execution model
+predate the immutable reviewed-recipe boundary. Current authority is
+`tasks/ai-integrations-source-verification-2026-07-10.md`, the release plan, and
+the typed recipes in source. This file remains only as historical design context.
 
 This spec adds six AI tools to the dotfiles installer. Five are CLI agents (one,
 `hermes`, is opt-in with a warning); one (`t3-code`) is a macOS GUI app modeled as

@@ -56,6 +56,12 @@ var expectedTools = map[string]toolSpec{
 		hasConfig: true, configPaths: 1,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"nodejs", "npm"}, pkg.PlatformDebian: {"nodejs", "npm"}, pkg.PlatformMacOS: {"node"}},
 	},
+	"codex": {
+		name: "Codex", description: "OpenAI coding agent for the terminal", category: CategoryUtility, icon: "\U000f06a9",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{pkg.PlatformMacOS: {"node"}},
+	},
 	"cursor": {
 		name: "Cursor", description: "AI-first code editor", category: CategoryApp, icon: "\U000f09a8",
 		uiGroup: UIGroupGUIApps, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
@@ -151,6 +157,18 @@ var expectedTools = map[string]toolSpec{
 		uiGroup: UIGroupGUIApps, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
 		hasConfig: false, configPaths: 0,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"obs-studio"}, pkg.PlatformDebian: {"obs-studio"}, pkg.PlatformMacOS: {"obs"}},
+	},
+	"opencode": {
+		name: "OpenCode", description: "Open-source coding agent for the terminal", category: CategoryUtility, icon: "\U000f06a9",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"opencode"}, pkg.PlatformMacOS: {"anomalyco/tap/opencode"}},
+	},
+	"pi": {
+		name: "Pi", description: "Minimal, extensible coding agent", category: CategoryUtility, icon: "π",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{pkg.PlatformMacOS: {"node"}},
 	},
 	"raycast": {
 		name: "Raycast", description: "Productivity launcher for macOS", category: CategoryApp, icon: "\U000f0238",

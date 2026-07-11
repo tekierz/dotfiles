@@ -41,3 +41,17 @@ file is the complete effective state. OpenCode enterprise-managed policy, projec
 config, environment overrides, Pi project trust/extensions, and agent authentication
 are health/provenance facts, not ordinary booleans. Credentials remain application-
 owned and must never be copied into dotfiles-managed JSON or operation journals.
+
+## Implementation status
+
+- Codex, Pi, and OpenCode are registered as install-only integrations. Their
+  non-secret recipes are displayed and hash-bound in the immutable plan, and
+  direct Manage/Tool installation fails closed outside that reviewed executor.
+- Codex pins `@openai/codex@0.144.1`. Pi pins
+  `@earendil-works/pi-coding-agent@0.80.3` and includes `--ignore-scripts`.
+  Both npm integrations are macOS-only until Linux has a reviewed user-owned
+  npm prefix/PATH flow and Pi's Node 22.19+ preflight. OpenCode uses the reviewed Homebrew tap or Arch
+  package route; Debian/Pi are unsupported rather than silently falling back.
+- Cursor Agent and Hermes remain blocked because a mutable shell installer is
+  not an accepted recipe kind. T3 Code remains blocked until the executor has a
+  narrow Homebrew-cask action that can bind `brew install --cask t3-code`.

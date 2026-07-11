@@ -8,7 +8,7 @@ import (
 )
 
 // Global singleton registry with sync.Once for thread-safe lazy initialization.
-// This avoids creating new registries and registering all 30 tools each time
+// This avoids creating new registries and registering all 33 tools each time
 // NewRegistry() would otherwise be called (15+ times across the codebase).
 var (
 	globalRegistry     *Registry
@@ -66,6 +66,9 @@ func NewRegistry() *Registry {
 	r.Register(NewBtopTool())
 	r.Register(NewGlowTool())
 	r.Register(NewClaudeCodeTool())
+	r.Register(NewCodexTool())
+	r.Register(NewPiTool())
+	r.Register(NewOpenCodeTool())
 	r.Register(NewTailscaleTool())
 	r.Register(NewSunshineTool())
 	r.Register(NewMoonlightTool())

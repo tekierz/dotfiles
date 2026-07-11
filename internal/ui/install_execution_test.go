@@ -257,6 +257,26 @@ func TestUnsupportedOptionalToolsDefaultOffOnDebianAndPi(t *testing.T) {
 	}
 }
 
+func TestAIInstallRowsExposeOnlyReviewedPlatformRoutes(t *testing.T) {
+	for _, test := range []struct {
+		id       string
+		platform pkg.Platform
+		want     bool
+	}{
+		{"codex", pkg.PlatformMacOS, true},
+		{"codex", pkg.PlatformDebian, false},
+		{"pi", pkg.PlatformMacOS, true},
+		{"pi", pkg.PlatformPi, false},
+		{"opencode", pkg.PlatformMacOS, true},
+		{"opencode", pkg.PlatformArch, true},
+		{"opencode", pkg.PlatformDebian, false},
+	} {
+		if got := cliToolAvailableForPlatform(test.id, test.platform); got != test.want {
+			t.Errorf("%s availability on %s = %v, want %v", test.id, test.platform, got, test.want)
+		}
+	}
+}
+
 func TestSupportedInstallerDoesNotAuthorizeConfigWithoutFinalIdentity(t *testing.T) {
 	runtime := registryRuntime(pkg.PlatformMacOS, map[string]bool{})
 	for _, id := range []string{"ghostty", "tmux", "zsh", "neovim", "git", "yazi", "fzf", "lazygit", "btop", "glow", "claude-code"} {

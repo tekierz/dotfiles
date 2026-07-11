@@ -6,24 +6,23 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 // configCLIToolsScreen is the migrated ScreenHandler for the CLI tools selection
 // screen. Navigation + back + toggle-guarded-by-install are inherited from
 // configListNav (it uses a.cliToolIndex for the cursor).
 //
-// Note: the navigable/toggleable item list (cliToolItems) is the four
-// homebrew-installable tools. The Claude Code row is rendered for context but is
-// configured on its own screen (ScreenConfigClaudeCode), so it is intentionally
-// not part of itemIDs — this matches the legacy handleDeepDiveKey, which only
-// navigated/toggled lazygit/lazydocker/btop/glow.
+// Claude Code is rendered for context but configured on its dedicated MCP
+// screen. Every install-only row is navigable and opt-in.
 type configCLIToolsScreen struct {
 	configListNav
 }
 
 // cliToolItems is the ordered list of CLI tool rows rendered on this screen.
-// Only the first four (NavigableCLITools) participate in cursor navigation and
-// toggling; claude-code is shown for context only.
+// Every row except the trailing claude-code context row participates in cursor
+// navigation and toggling.
 var cliToolItems = []struct {
 	id   string
 	name string
@@ -33,12 +32,15 @@ var cliToolItems = []struct {
 	{"lazydocker", "LazyDocker", "Simple terminal UI for Docker"},
 	{"btop", "btop", "Resource monitor with TUI"},
 	{"glow", "Glow", "Render markdown on the CLI"},
+	{"codex", "Codex", "OpenAI coding agent (reviewed npm install)"},
+	{"opencode", "OpenCode", "Open-source coding agent (package manager)"},
+	{"pi", "Pi", "Extensible coding agent (npm, scripts disabled)"},
 	{"claude-code", "Claude Code", "AI-powered coding assistant (npm)"},
 }
 
 // navigableCLIToolCount is the number of cliToolItems rows the cursor can reach
 // (excludes the trailing claude-code context row).
-const navigableCLIToolCount = 4
+const navigableCLIToolCount = 7
 
 // NewConfigCLIToolsScreen creates a new CLI tools config screen handler.
 func NewConfigCLIToolsScreen(ctx *ScreenContext) *configCLIToolsScreen {
@@ -52,7 +54,7 @@ func NewConfigCLIToolsScreen(ctx *ScreenContext) *configCLIToolsScreen {
 	s.setIndex = func(a *App, v int) { a.cliToolIndex = v }
 	s.toggle = func(a *App, id string) {
 		// Don't allow toggling if already installed.
-		if !a.manageInstalled[id] {
+		if !a.manageInstalled[id] && cliToolAvailableForPlatform(id, pkg.DetectPlatform()) {
 			a.deepDiveConfig.CLITools[id] = !a.deepDiveConfig.CLITools[id]
 		}
 	}
@@ -90,11 +92,12 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 		focused := a.cliToolIndex == i
 		enabled := cfg.CLITools[tool.id]
 		installed := a.manageInstalled[tool.id]
+		available := cliToolAvailableForPlatform(tool.id, pkg.DetectPlatform())
 
 		cursor := "  "
-		if focused && !installed {
+		if focused && !installed && available {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
-		} else if focused && installed {
+		} else if focused {
 			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
@@ -105,7 +108,7 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 		if installed {
 			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
 			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
-		} else if focused {
+		} else if focused && available {
 			nameStyle = focusedStyle
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
@@ -113,6 +116,8 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 		suffix := ""
 		if installed {
 			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
+		} else if !available && tool.id != "claude-code" {
+			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (unavailable on " + string(pkg.DetectPlatform()) + ")")
 		}
 
 		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
@@ -133,4 +138,9 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 		lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
+}
+
+func cliToolAvailableForPlatform(id string, platform pkg.Platform) bool {
+	tool, ok := tools.GetRegistry().Get(id)
+	return ok && installerAvailable(tool, platform)
 }
