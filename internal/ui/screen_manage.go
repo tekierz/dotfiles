@@ -403,7 +403,6 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.hotkeysReturn = ScreenManage
 		// ScreenHotkeys is migrated; route through the ScreenManager.
 		return NavigateTo(ScreenHotkeys)
-
 	}
 
 	// Pane-specific navigation.

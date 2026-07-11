@@ -452,6 +452,7 @@ func hasDesktopEntryInDirs(searchPaths []string, names ...string) bool {
 // hasDesktopEntryExec reads a .desktop file and checks if its Exec= line
 // contains any of the given names.
 func hasDesktopEntryExec(path string, names ...string) bool {
+	// #nosec G304 -- path comes from fixed desktop-entry roots and a ReadDir name.
 	file, err := os.Open(path)
 	if err != nil {
 		return false

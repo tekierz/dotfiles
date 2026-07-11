@@ -149,17 +149,6 @@ func (p *installPlan) acceptedDirectorySnapshot(actionID, rel string) (*safefile
 	return target.directory, nil
 }
 
-func (p *installPlan) acceptedFileAuthority(actionID, rel string) (safefile.Revision, *safefile.ParentChain, error) {
-	target, err := p.acceptedTarget(actionID, rel)
-	if err != nil {
-		return safefile.Revision{}, nil, err
-	}
-	if target.kind != acceptedFileTarget || !target.file.Tracked() || !target.parents.Tracked() {
-		return safefile.Revision{}, nil, fmt.Errorf("accepted target %s for %s has incomplete file authority", rel, actionID)
-	}
-	return target.file, target.parents, nil
-}
-
 func (p *installPlan) acceptedDirectoryAuthority(actionID, rel string) (*safefile.DirectorySnapshot, *safefile.ParentChain, error) {
 	target, err := p.acceptedTarget(actionID, rel)
 	if err != nil {
@@ -720,7 +709,7 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig) ([]configPlanS
 	if cfg.CLITools["glow"] {
 		paths := tools.NewGlowTool().ConfigPaths()
 		if len(paths) != 1 {
-			return nil, fmt.Errorf("Glow registry returned %d config paths", len(paths))
+			return nil, fmt.Errorf("glow registry returned %d config paths", len(paths))
 		}
 		specs = append(specs, configPlanSpec{"glow", []string{planTargetPath(home, paths[0])}, operation.OwnershipManagedFile, "write managed Glow configuration", true})
 	}
@@ -747,7 +736,6 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 		external := filepath.IsAbs(rel)
 		absolute := filepath.Join(home, filepath.FromSlash(rel))
 		if external {
-			absolute = filepath.Clean(rel)
 			disposition = operation.DispositionBlocked
 			reason = "configuration outside HOME cannot yet receive a verified rollback point"
 			continue

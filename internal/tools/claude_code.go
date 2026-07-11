@@ -198,5 +198,4 @@ func applyMCPSelection(cfg *config.ClaudeConfig, enabledMCPs map[string]bool) {
 			delete(cfg.MCPServers, name)
 		}
 	}
-
 }

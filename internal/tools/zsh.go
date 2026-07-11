@@ -329,7 +329,7 @@ func writeSavedAliases(sb *strings.Builder, aliases map[string]string) {
 		if !validAliasName(name) || strings.ContainsAny(command, "\x00\n\r") {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("alias -- %s\n", shellQuote(name+"="+command)))
+		_, _ = fmt.Fprintf(sb, "alias -- %s\n", shellQuote(name+"="+command))
 	}
 }
 

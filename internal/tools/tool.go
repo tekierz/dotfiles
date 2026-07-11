@@ -386,14 +386,6 @@ func writeToolConfigAtAuthorityTracked(path string, content []byte, accepted saf
 	return evidence, err
 }
 
-func preflightToolConfigAtRevision(path string, accepted safefile.Revision, allowLegacy func([]byte) bool) error {
-	parents, err := compatibilityToolConfigParents(path)
-	if err != nil {
-		return err
-	}
-	return preflightToolConfigAtAuthority(path, accepted, parents, operation.DefaultLocker, allowLegacy)
-}
-
 func preflightToolConfigAtAuthority(path string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker, allowLegacy func([]byte) bool) error {
 	if !accepted.Tracked() {
 		return fmt.Errorf("%w: accepted revision for %s is untracked", safefile.ErrRevisionChanged, path)

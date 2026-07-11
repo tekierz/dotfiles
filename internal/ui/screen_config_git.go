@@ -105,7 +105,6 @@ func (s *configGitScreen) View(width, height int) string {
 		credFocused,
 	))
 	rec.write("\n\n")
-	fieldIdx++
 
 	// Trailing reference section (non-field content): excluded from hit extents.
 	rec.write(sectionHeaderStyle.Render("Included Aliases"))

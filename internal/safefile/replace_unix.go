@@ -546,6 +546,7 @@ func identityAt(parentFD int, name string) (fileIdentity, uint32, error) {
 }
 
 func identityFromStat(stat *unix.Stat_t) fileIdentity {
+	// #nosec G115 -- kernel device identifiers are non-negative.
 	return fileIdentity{device: uint64(stat.Dev), inode: stat.Ino}
 }
 

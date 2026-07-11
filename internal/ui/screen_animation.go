@@ -154,11 +154,13 @@ func (s *animationScreen) View(width, height int) string {
 	}
 	drops := make([]drop, contentW)
 	for x := 0; x < contentW; x++ {
+		// #nosec G115 -- intentional modular conversion for a visual hash.
 		h := hash32(uint32(x*1337 + 42))
 		speed := 1 + int(h%3) // 1..3
 		length := 6 + int((h>>8)%10)
 		gap := 8 + int((h>>16)%10)
 		cycle := rainH + length + gap
+		// #nosec G115 -- cycle is a small positive animation period.
 		head := (a.animFrame*speed + int(h%uint32(cycle))) % cycle
 		head -= length // allow entering from above
 
@@ -186,6 +188,7 @@ func (s *animationScreen) View(width, height int) string {
 			}
 
 			// Pick a stable-ish character for this cell.
+			// #nosec G115 -- intentional modular conversion for a visual hash.
 			sv := hash32(uint32(x*31 + y*97 + ((a.animFrame - dist) * 7)))
 			ch := chars[int(sv)%len(chars)]
 

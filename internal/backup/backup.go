@@ -351,7 +351,7 @@ func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) 
 	manifestRel := filepath.ToSlash(filepath.Join(filepath.FromSlash(plan.rel), ManifestName))
 	_, currentManifest, err := safefile.ReadWithinAuthorized(plan.anchor, manifestRel, manifest.parents)
 	if err != nil || currentManifest != manifest.file {
-		return nil, fmt.Errorf("%w: plan manifest changed before rollback: %v", safefile.ErrRevisionChanged, err)
+		return nil, fmt.Errorf("plan manifest changed before rollback: %w", errors.Join(safefile.ErrRevisionChanged, err))
 	}
 
 	result := make(map[string]ExpectedState, len(expected))
@@ -383,7 +383,7 @@ func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) 
 		case TargetFile:
 			data, revision, readErr := safefile.ReadWithinAuthorized(plan.anchor, fullRel, source.parents)
 			if readErr != nil || revision != source.file || !revision.Exists() {
-				return nil, fmt.Errorf("%w: plan backup file %s changed before rollback: %v", safefile.ErrRevisionChanged, rel, readErr)
+				return nil, fmt.Errorf("plan backup file %s changed before rollback: %w", rel, errors.Join(safefile.ErrRevisionChanged, readErr))
 			}
 			if state.OriginalCaptured && (!state.OriginalExists || state.OriginalMode.Perm() != revision.Permissions() || !bytes.Equal(state.OriginalData, data)) {
 				return nil, fmt.Errorf("accepted original file state for %s disagrees with its exact backup source", rel)
@@ -405,7 +405,7 @@ func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) 
 			after, afterErr := safefile.BindParentChainWithin(plan.anchor, fullRel, source.parents, nil)
 			if snapshotErr != nil || afterErr != nil || !safefile.SameParentChain(before, after) ||
 				!safefile.SameDirectoryRootState(snapshot, source.directory) || snapshot.Digest() != source.directory.Digest() {
-				return nil, fmt.Errorf("%w: plan backup directory %s changed before rollback: %v", safefile.ErrDirectoryChanged, rel, errors.Join(snapshotErr, afterErr))
+				return nil, fmt.Errorf("plan backup directory %s changed before rollback: %w", rel, errors.Join(safefile.ErrDirectoryChanged, snapshotErr, afterErr))
 			}
 			if state.OriginalCaptured && (!state.OriginalExists || state.OriginalDirectory == nil ||
 				state.OriginalDirectory.Permissions() != snapshot.Permissions() || state.OriginalDirectory.Digest() != snapshot.Digest()) {

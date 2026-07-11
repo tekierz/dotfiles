@@ -105,11 +105,11 @@ func ValidateCatalogEntry(entry CatalogEntry) error {
 	}
 	current, err := safefile.SnapshotDirectoryWithin(entry.authority.anchor, entry.authority.rel)
 	if err != nil || !safefile.SameDirectoryRootState(current, entry.authority.snapshot) || current.Digest() != entry.authority.snapshot.Digest() {
-		return fmt.Errorf("%w: selected backup changed after listing: %v", safefile.ErrDirectoryChanged, err)
+		return fmt.Errorf("selected backup changed after listing: %w", errors.Join(safefile.ErrDirectoryChanged, err))
 	}
 	bound, err := safefile.BindParentChainWithin(entry.authority.anchor, entry.authority.rel, entry.authority.parents, nil)
 	if err != nil || !safefile.SameParentChain(bound, entry.authority.parents) {
-		return fmt.Errorf("%w: selected backup parent changed after listing: %v", safefile.ErrParentChanged, err)
+		return fmt.Errorf("selected backup parent changed after listing: %w", errors.Join(safefile.ErrParentChanged, err))
 	}
 	return nil
 }

@@ -59,6 +59,7 @@ func inspectManagePreferencePresence() managePreferencePresence {
 		return managePreferencePresence{exists: true, err: config.ErrNoConfigDir}
 	}
 	path := filepath.Join(configDir, "tools", "manage.json")
+	// #nosec G304 -- callers provide a resolved tool config candidate below HOME/XDG.
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return managePreferencePresence{fields: map[string]bool{}}

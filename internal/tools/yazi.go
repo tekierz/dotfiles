@@ -382,14 +382,6 @@ func writeYaziThemeConfigTracked(path string, content []byte) (MutationEvidence,
 	return evidence, err
 }
 
-func writeYaziThemeConfigAtRevisionTracked(path string, content []byte, accepted safefile.Revision) (MutationEvidence, error) {
-	parents, err := compatibilityToolConfigParents(path)
-	if err != nil {
-		return MutationEvidence{}, err
-	}
-	return writeYaziThemeConfigAtAuthorityTracked(path, content, accepted, parents, operation.DefaultLocker)
-}
-
 func writeYaziThemeConfigAtAuthorityTracked(path string, content []byte, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
 	if !accepted.Tracked() {
 		return MutationEvidence{}, fmt.Errorf("%w: accepted Yazi theme revision is untracked", safefile.ErrRevisionChanged)
@@ -460,7 +452,6 @@ func hasLegacyGeneratedYaziThemeHeader(content []byte) bool {
 	if !bytes.HasPrefix(line, []byte(prefix)) || !bytes.HasSuffix(line, []byte(suffix)) {
 		return false
 	}
-	name := string(line[len(prefix) : len(line)-len(suffix)])
-	_, known := yaziThemePalettes[name]
+	_, known := yaziThemePalettes[string(line[len(prefix):len(line)-len(suffix)])]
 	return known
 }

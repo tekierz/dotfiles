@@ -67,7 +67,7 @@ func TestWriteGitConfigPreservesNativeConfigThroughManagedInclude(t *testing.T) 
 	// Verify the include with Git itself when available, rather than only
 	// asserting that the emitted text looks plausible.
 	if gitPath, err := exec.LookPath("git"); err == nil {
-		cmd := exec.Command(gitPath, "config", "--includes", "--file", path, "--get", "init.defaultBranch")
+		cmd := exec.CommandContext(t.Context(), gitPath, "config", "--includes", "--file", path, "--get", "init.defaultBranch")
 		cmd.Env = append(os.Environ(), "HOME="+home)
 		output, err := cmd.Output()
 		if err != nil {

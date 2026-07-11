@@ -78,7 +78,7 @@ func TestGeneratedOptionsAreAcceptedByInstalledFzf(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(zsh, "-dfc", `source "$1"; print -r -- $'alpha\nbeta' | "$2" --filter=alpha`, "zsh", path, fzf)
+	cmd := exec.CommandContext(t.Context(), zsh, "-dfc", `source "$1"; print -r -- $'alpha\nbeta' | "$2" --filter=alpha`, "zsh", path, fzf)
 	cmd.Env = []string{"HOME=" + dir, "PATH=" + filepath.Dir(fzf) + ":/usr/bin:/bin"}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -134,7 +134,7 @@ func TestGeneratedFzfConfigZshSyntaxForHostileValues(t *testing.T) {
 			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if output, err := exec.Command(zsh, "-n", path).CombinedOutput(); err != nil {
+			if output, err := exec.CommandContext(t.Context(), zsh, "-n", path).CombinedOutput(); err != nil {
 				t.Fatalf("zsh -n failed for %q: %v: %s", value, err, output)
 			}
 		})
@@ -162,10 +162,10 @@ func sourceFzfContent(t *testing.T, zsh, content string) string {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := exec.Command(zsh, "-n", path).CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(t.Context(), zsh, "-n", path).CombinedOutput(); err != nil {
 		t.Fatalf("zsh -n generated config: %v: %s", err, output)
 	}
-	cmd := exec.Command(zsh, "-dfc", `source "$1"; print -r -- "$FZF_DEFAULT_OPTS"`, "zsh", path)
+	cmd := exec.CommandContext(t.Context(), zsh, "-dfc", `source "$1"; print -r -- "$FZF_DEFAULT_OPTS"`, "zsh", path)
 	cmd.Env = []string{"HOME=" + dir, "PATH=/usr/bin:/bin"}
 	output, err := cmd.CombinedOutput()
 	if err != nil {

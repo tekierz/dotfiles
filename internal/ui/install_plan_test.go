@@ -801,7 +801,7 @@ func TestPostPackageRevalidationPreservesExternalEditWithoutRollback(t *testing.
 }
 
 func TestPostPackageRevalidationPreservesExternalConfigCollision(t *testing.T) {
-	app, home, runtime := newPlanTestApp(t)
+	app, home, _ := newPlanTestApp(t)
 	for _, tool := range tools.GetRegistry().All() {
 		app.manageInstalled[tool.ID()] = true
 	}
@@ -811,7 +811,7 @@ func TestPostPackageRevalidationPreservesExternalConfigCollision(t *testing.T) {
 	for id := range app.deepDiveConfig.CLITools {
 		app.deepDiveConfig.CLITools[id] = false
 	}
-	runtime = registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
+	runtime := registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
 	plan, err := buildInstallPlan(app, runtime, time.Now())
 	if err != nil || plan.hasBlocked() {
 		t.Fatalf("plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)

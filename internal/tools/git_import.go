@@ -13,7 +13,7 @@ const (
 	GitFieldDefaultBranch    = "default_branch"
 	GitFieldPullRebase       = "pull_rebase"
 	GitFieldSignCommits      = "sign_commits"
-	GitFieldCredentialHelper = "credential_helper"
+	GitFieldCredentialHelper = "credential_helper" // #nosec G101 -- field name, not a credential.
 	GitFieldAutoSetupRemote  = "auto_setup_remote"
 	GitFieldMergeTool        = "merge_tool"
 	GitFieldDiffTool         = "diff_tool"

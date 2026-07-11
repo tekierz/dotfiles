@@ -52,8 +52,8 @@ func CaptureDirectoryRootWithin(root, rel string) (*DirectorySnapshot, *ParentCh
 	snapshot := &DirectorySnapshot{
 		tracked:  true,
 		rootOnly: true,
-		device:   uint64(stat.Dev),
-		inode:    uint64(stat.Ino),
+		device:   uint64(stat.Dev), // #nosec G115 -- kernel device identifiers are non-negative.
+		inode:    stat.Ino,
 		uid:      stat.Uid,
 		gid:      stat.Gid,
 		root:     directorySnapshotNode{mode: fs.FileMode(uint32(stat.Mode) & 0o777)},
@@ -132,7 +132,8 @@ func OpenDirectoryWithinAuthorized(root, rel string, parents *ParentChain, expec
 		_ = unix.Close(fd)
 		return nil, err
 	}
-	if uint64(stat.Dev) != expected.device || uint64(stat.Ino) != expected.inode || stat.Uid != expected.uid || stat.Gid != expected.gid || fs.FileMode(uint32(stat.Mode)&0o777).Perm() != expected.Permissions() {
+	// #nosec G115 -- kernel device identifiers are non-negative.
+	if uint64(stat.Dev) != expected.device || stat.Ino != expected.inode || stat.Uid != expected.uid || stat.Gid != expected.gid || fs.FileMode(uint32(stat.Mode)&0o777).Perm() != expected.Permissions() {
 		_ = unix.Close(fd)
 		return nil, fmt.Errorf("%w: authorized directory leaf changed", ErrDirectoryChanged)
 	}
@@ -430,7 +431,7 @@ func verifyMutationParent(root string, rootFD int, directories []string, wanted 
 	if chain != nil {
 		pathFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 		if err != nil {
-			return fmt.Errorf("%w: reopen trusted root path: %v", ErrParentChanged, err)
+			return fmt.Errorf("reopen trusted root path: %w", errors.Join(ErrParentChanged, err))
 		}
 		pathEntry, identityErr := parentChainEntryForFD(pathFD, "")
 		_ = unix.Close(pathFD)

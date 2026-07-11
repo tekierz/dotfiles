@@ -378,7 +378,7 @@ func (j Journal) TerminalBackupPaths() (map[string]struct{}, error) {
 	}
 	leaf, parents, err := safefile.CaptureDirectoryRootWithin(j.root, base.rel)
 	if err != nil || !safefile.SameParentChain(parents, base.parents) || !safefile.SameDirectoryRootState(leaf, base.leaf) {
-		return nil, fmt.Errorf("%w: operation journal directory changed: %v", safefile.ErrParentChanged, err)
+		return nil, fmt.Errorf("operation journal directory changed: %w", errors.Join(safefile.ErrParentChanged, err))
 	}
 	entries, err := os.ReadDir(filepath.Join(j.root, filepath.FromSlash(j.rel)))
 	if err != nil {

@@ -313,18 +313,8 @@ func (a *App) listenInstallEventsCmd() tea.Cmd {
 	}
 }
 
-// runInstallWorker performs the entire install/configure sequence on a detached
-// goroutine, emitting progress as installEventMsg values. It MUST NOT touch any
-// App field. It closes the channel when finished.
-// savePrefsErr is retained as an optional test/compatibility guard for callers
-// that captured global-config validation before entering the worker. Any such
-// error is fatal before backup, package, utility, or application-config work.
-func runInstallWorker(ctx context.Context, events chan installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string, savePrefsErr ...error) {
-	runInstallWorkerWithRuntime(ctx, events, selectedTools, cfg, theme, defaultToolInstallRuntime(), savePrefsErr...)
-}
-
 // runInstallWorkerWithRuntime is the dependency-injected worker used by focused
-// install-dispatch tests. Production callers use runInstallWorker above.
+// install-dispatch tests for the legacy unreviewed harness.
 func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string, installRuntime toolInstallRuntime, savePrefsErr ...error) {
 	configTools := []string{"tmux", "ghostty", "zsh", "neovim", "git", "yazi", "fzf"}
 	for _, optional := range []string{"claude-code", "lazygit", "btop", "glow"} {
@@ -345,22 +335,6 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 
 func runInstallPlanWorker(ctx context.Context, events chan installEventMsg, plan *installPlan, installRuntime toolInstallRuntime) {
 	runInstallWorkerFromPlanWithRuntime(ctx, events, plan, installRuntime, true)
-}
-
-func captureRollbackExpectedStates(home string, files []string) (map[string]backup.ExpectedState, error) {
-	targets, err := plannedBackupTargets(home, files)
-	if err != nil {
-		return nil, err
-	}
-	expected := make(map[string]backup.ExpectedState, len(targets))
-	for _, target := range targets {
-		state, err := backup.CaptureExpectedState(home, target)
-		if err != nil {
-			return nil, fmt.Errorf("capture %s: %w", target.RelPath, err)
-		}
-		expected[filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.RelPath)))] = state
-	}
-	return expected, nil
 }
 
 func invalidateRollbackAction(plan *installPlan, actionID string, expected map[string]backup.ExpectedState) {
@@ -1447,14 +1421,6 @@ func aggregateFailures(failures []error) error {
 	}
 }
 
-// installUtilities installs selected helper scripts to ~/.local/bin. The main
-// dotfiles executable remains owned by its package manager/build installation;
-// copying the running executable here created a second, PATH-order-dependent
-// product installation that could shadow Homebrew upgrades.
-func installUtilities(utilities map[string]bool) error {
-	return installUtilitiesTracked(utilities).Err
-}
-
 type utilityInstallResult struct {
 	Evidence  []tools.MutationEvidence
 	Attempted []string
@@ -1517,15 +1483,6 @@ func installUtilitiesTrackedWithBefore(utilities map[string]bool, beforeAttempt 
 	}
 
 	return result
-}
-
-// installScriptFile writes one known helper below the trusted HOME descriptor.
-// The shared kernel refuses symlinks/non-regular files in every descendant,
-// creates missing directories 0700, commits atomically, and sets mode 0700
-// before the helper becomes visible.
-func installScriptFile(home, name string, content []byte) (returnErr error) {
-	_, err := installScriptFileTracked(home, name, content)
-	return err
 }
 
 func installScriptFileTracked(home, name string, content []byte) (evidence tools.MutationEvidence, returnErr error) {

@@ -15,26 +15,8 @@ func withTempHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	origHome, hadHome := os.LookupEnv("HOME")
-	origXDG, hadXDG := os.LookupEnv("XDG_CONFIG_HOME")
-
-	if err := os.Setenv("HOME", dir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	_ = os.Unsetenv("XDG_CONFIG_HOME")
-
-	t.Cleanup(func() {
-		if hadHome {
-			os.Setenv("HOME", origHome)
-		} else {
-			os.Unsetenv("HOME")
-		}
-		if hadXDG {
-			os.Setenv("XDG_CONFIG_HOME", origXDG)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	})
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	return dir
 }

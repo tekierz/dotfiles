@@ -122,7 +122,7 @@ func captureCreatedShallowDirectory(root string, rootFD, parentFD int, directori
 		if err == nil {
 			err = ErrDirectoryChanged
 		}
-		return nil, fmt.Errorf("%w: inspect created shallow directory: %v", ErrDirectoryChanged, err)
+		return nil, fmt.Errorf("inspect created shallow directory: %w", errors.Join(ErrDirectoryChanged, err))
 	}
 	if hook := directoryTestHooks.afterShallowMkdir; hook != nil {
 		if err := hook(parentFD, directoryFD, target); err != nil {
@@ -215,7 +215,7 @@ func removeEmptyDirectoryWithinSnapshot(root, rel string, expected *DirectorySna
 	}
 	if err := unix.Unlinkat(parentFD, target, unix.AT_REMOVEDIR); err != nil {
 		if errors.Is(err, unix.ENOTEMPTY) || errors.Is(err, unix.EEXIST) || errors.Is(err, unix.ENOENT) {
-			return fmt.Errorf("%w: empty-directory target changed at removal boundary: %v", ErrDirectoryChanged, err)
+			return fmt.Errorf("empty-directory target changed at removal boundary: %w", errors.Join(ErrDirectoryChanged, err))
 		}
 		return fmt.Errorf("remove empty directory %q: %w", target, err)
 	}
@@ -230,7 +230,7 @@ func removeEmptyDirectoryWithinSnapshot(root, rel string, expected *DirectorySna
 		if err == nil {
 			err = fmt.Errorf("target was recreated")
 		}
-		postCommit = append(postCommit, fmt.Errorf("%w: verify removed empty directory: %v", ErrDirectoryChanged, err))
+		postCommit = append(postCommit, fmt.Errorf("verify removed empty directory: %w", errors.Join(ErrDirectoryChanged, err)))
 	}
 	if len(postCommit) != 0 {
 		return &CommittedError{Operation: "complete empty-directory removal", Err: errors.Join(postCommit...)}

@@ -657,7 +657,7 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 	// makes those exceptions explicit and reviewable instead of silently ignoring
 	// every API other than os.WriteFile.
 	expectedWriters := map[string]int{
-		"neovim.go": 2,
+		"neovim.go": 1,
 	}
 	expectedLockedUpdates := map[string]int{
 		"ghostty.go": 1,
@@ -785,7 +785,6 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"tmux.go:writeToolConfigTracked":                                  1,
 		"tool.go:replaceToolConfigAtRevisionTracked":                      2,
 		"tool.go:replaceToolConfigAtRevisionNoCreateAuthorizedTracked":    1,
-		"tool.go:preflightToolConfigAtAuthority":                          1,
 		"tool.go:writeGeneratedConfigWith":                                1,
 		"tool.go:writeToolConfigAtAuthorityTracked":                       1,
 		"tool.go:writeToolConfigTracked":                                  1,

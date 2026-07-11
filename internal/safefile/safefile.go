@@ -13,6 +13,7 @@ import (
 // The unprivileged restore path can reproduce only the process effective uid
 // and gid; unknown/negative process identities and foreign owners fail closed.
 func restorableOwner(uid, gid uint32, euid, egid int) bool {
+	// #nosec G115 -- non-negative IDs are range-checked before narrowing.
 	return euid >= 0 && egid >= 0 && uint64(euid) <= uint64(^uint32(0)) && uint64(egid) <= uint64(^uint32(0)) &&
 		uid == uint32(euid) && gid == uint32(egid)
 }

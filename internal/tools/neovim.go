@@ -632,10 +632,3 @@ func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 		return nil
 	})
 }
-
-// writeMinimalNeovimConfig writes a minimal standalone neovim config
-func writeMinimalNeovimConfig(cfg NeovimConfig, theme, nvimDir string) error {
-	initPath := filepath.Join(nvimDir, "init.lua")
-	content := GenerateNeovimConfig(cfg, theme)
-	return writeToolConfig(initPath, []byte(content))
-}

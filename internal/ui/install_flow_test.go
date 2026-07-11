@@ -138,9 +138,7 @@ func TestConfigGating_SelectedToolWritesConfig(t *testing.T) {
 func TestFailureAggregation_NamesAllFailedSteps(t *testing.T) {
 	// Point HOME at a non-existent / read-only path to force all Write*Config
 	// calls to fail (they call os.MkdirAll / os.WriteFile on HOME).
-	origHome := os.Getenv("HOME")
-	t.Cleanup(func() { os.Setenv("HOME", origHome) })
-	_ = os.Setenv("HOME", "/nonexistent/bad/home")
+	t.Setenv("HOME", "/nonexistent/bad/home")
 
 	// Use a config where lazygit, btop, glow are all selected (they will fail
 	// because the config directories cannot be created under the bad HOME).
