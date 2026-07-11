@@ -1,13 +1,12 @@
-.PHONY: build install test clean run dev
+.PHONY: build install test clean run dev release release-check
 
 # Binary names
 DOTFILES_BIN = bin/dotfiles
-SETUP_SCRIPT = bin/dotfiles-setup
 
 # Go build flags
-# Release builds must be made from the v2.1.2 git tag; untagged builds report
-# the nearest tag-derived value, commit hash, or "dev" when git is unavailable.
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Tagged and local builds use the same version spelling as GoReleaser. Untagged
+# builds report the nearest tag-derived value, commit hash, or "dev".
+VERSION := $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null || echo dev))
 LDFLAGS = -s -w -X main.version=$(VERSION)
 
 # Build the main dotfiles CLI (new)
@@ -42,7 +41,6 @@ run-theme: dev
 install: build
 	@echo "Installing..."
 	install -m 755 $(DOTFILES_BIN) /usr/local/bin/dotfiles
-	install -m 755 $(SETUP_SCRIPT) /usr/local/bin/dotfiles-setup
 
 # Run tests
 test:
@@ -83,10 +81,17 @@ check-durdraw:
 # Install development dependencies
 dev-deps:
 	@echo "Installing development dependencies..."
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+	go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
 
-# Build for all platforms (requires goreleaser)
-release:
+# Validate the pinned GoReleaser v2 configuration and its SBOM dependency.
+release-check:
+	@command -v goreleaser >/dev/null || { echo "goreleaser is required (release workflow pins v2.17.0)"; exit 1; }
+	@command -v syft >/dev/null || { echo "syft is required (release workflow pins v1.44.0)"; exit 1; }
+	goreleaser check
+
+# Build an unpublished local snapshot for all supported release targets.
+release: release-check
 	@echo "Building releases..."
 	goreleaser release --snapshot --clean
 
@@ -106,4 +111,5 @@ help:
 	@echo "  tidy         - Tidy go modules"
 	@echo "  check-durdraw- Check if durdraw is installed"
 	@echo "  dev-deps     - Install development dependencies"
-	@echo "  release      - Build release binaries"
+	@echo "  release-check- Validate the release configuration and tooling"
+	@echo "  release      - Build an unpublished checksummed snapshot with SBOMs"
