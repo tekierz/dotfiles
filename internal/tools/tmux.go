@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,11 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	dotfilesTheme "github.com/tekierz/dotfiles/internal/theme"
+)
+
+const (
+	tmuxManagedStart = "# >>> dotfiles tmux (managed)"
+	tmuxManagedEnd   = "# <<< dotfiles tmux (managed)"
 )
 
 // TmuxTool represents tmux terminal multiplexer
@@ -360,32 +366,99 @@ func WriteTmuxConfig(cfg TmuxConfig, theme string) error {
 }
 
 func WriteTmuxConfigTracked(cfg TmuxConfig, theme string) (MutationEvidence, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	configPath := filepath.Join(home, ".tmux.conf")
-	content := GenerateTmuxConfig(cfg, theme)
-	return writeToolConfigTracked(configPath, []byte(content))
+	return writeTmuxConfigAtRevisionTracked(cfg, theme, nil, nil)
 }
 
 // WriteTmuxConfigAtRevisionTracked applies a plan-accepted tmux revision.
 func WriteTmuxConfigAtRevisionTracked(cfg TmuxConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return MutationEvidence{}, err
+	if !accepted.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted tmux revision is untracked", safefile.ErrRevisionChanged)
 	}
-	return writeToolConfigAtRevisionTracked(filepath.Join(home, ".tmux.conf"), []byte(GenerateTmuxConfig(cfg, theme)), accepted)
+	return writeTmuxConfigAtRevisionTracked(cfg, theme, &accepted, nil)
 }
 
 func WriteTmuxConfigAtAuthorityTracked(cfg TmuxConfig, theme string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	if !parents.Tracked() || locker == nil {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted tmux authority is incomplete", safefile.ErrParentChanged)
+	}
+	return writeTmuxConfigAtRevisionTracked(cfg, theme, &accepted, parents, locker)
+}
+
+func writeTmuxConfigAtRevisionTracked(cfg TmuxConfig, theme string, accepted *safefile.Revision, parents *safefile.ParentChain, lockers ...operation.Locker) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 	configPath := filepath.Join(home, ".tmux.conf")
-	return writeToolConfigAtAuthorityTracked(configPath, []byte(GenerateTmuxConfig(cfg, theme)), accepted, parents, locker)
+	managed := wrapManagedConfigSection(tmuxManagedStart, tmuxManagedEnd, GenerateTmuxConfig(cfg, theme))
+	lock := withToolConfigLock
+	if accepted != nil {
+		locker := operation.DefaultLocker
+		if len(lockers) != 0 && lockers[0] != nil {
+			locker = lockers[0]
+		}
+		lock = func(path string, mutate func(string, string) error) error {
+			return withToolConfigLockAuthorized(path, locker, mutate)
+		}
+	}
+
+	var evidence MutationEvidence
+	err = lock(configPath, func(root, rel string) error {
+		var existing []byte
+		var revision safefile.Revision
+		var readErr error
+		if parents != nil {
+			existing, revision, readErr = safefile.ReadWithinAuthorized(root, rel, parents)
+		} else {
+			existing, revision, readErr = readToolConfig(root, rel)
+		}
+		if readErr != nil {
+			return readErr
+		}
+		if accepted != nil && revision != *accepted {
+			return fmt.Errorf("%w: tmux config changed after plan acceptance", safefile.ErrRevisionChanged)
+		}
+
+		merged := managed
+		if revision.Exists() {
+			if hasGeneratedConfigHeader(existing) {
+				// Prototype builds owned the complete file. Migrate that exact
+				// ownership shape to the delimited fragment without retaining a
+				// second active copy of the old generated settings.
+				merged = managed
+			} else {
+				merged, _, readErr = mergeManagedConfigSection(existing, managed, tmuxManagedStart, tmuxManagedEnd, "tmux config")
+				if readErr != nil {
+					return readErr
+				}
+			}
+		}
+		if revision.Exists() && bytes.Equal(existing, merged) {
+			evidence = MutationEvidence{Path: configPath, Revision: revision, Parents: parents}
+			return nil
+		}
+
+		expected := revision
+		if accepted != nil {
+			expected = *accepted
+		}
+		var committed safefile.Revision
+		if accepted != nil {
+			if parents != nil {
+				committed, readErr = replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, rel, expected, parents, merged)
+			} else {
+				committed, readErr = replaceToolConfigAtRevisionNoCreateTracked(root, rel, expected, merged)
+			}
+		} else {
+			committed, readErr = replaceToolConfigAtRevisionTracked(root, rel, expected, merged)
+		}
+		if readErr != nil {
+			return fmt.Errorf("write managed tmux config: %w", readErr)
+		}
+		evidence = MutationEvidence{Path: configPath, Revision: committed, Parents: parents}
+		return nil
+	})
+	return evidence, err
 }
 
 // SetupTPM handles TPM installation and plugin setup

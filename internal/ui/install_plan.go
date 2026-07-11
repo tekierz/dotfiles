@@ -679,7 +679,7 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig) ([]configPlanS
 	if cfg.TmuxTPMEnabled {
 		tmuxTargets = append(tmuxTargets, ".tmux/plugins/tpm")
 	}
-	specs := []configPlanSpec{{"tmux", tmuxTargets, operation.OwnershipManagedFile, "write managed tmux configuration and selected TPM plugins", true}}
+	specs := []configPlanSpec{{"tmux", tmuxTargets, operation.OwnershipManagedFragment, "merge managed tmux settings and install selected TPM plugins", false}}
 	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
 		specs = append(specs, configPlanSpec{"claude-code", []string{".claude.json"}, operation.OwnershipManagedFragment, "merge selected Claude Code MCP servers", false})
 	}

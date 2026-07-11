@@ -92,6 +92,9 @@ observability land before new integrations or broad UI work.
 - Theme-only Manage saves now persist desired theme state without scheduling any tool
   generators. Cross-tool theme application remains confined to the reviewed installer plan,
   preventing absent or unadopted application configs from being synthesized from defaults.
+- Tmux now owns one exact managed section instead of the complete `~/.tmux.conf`; native
+  settings and comments remain byte-for-byte intact, legacy product-owned files migrate to
+  the bounded form, and ambiguous marker layouts fail closed.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 
