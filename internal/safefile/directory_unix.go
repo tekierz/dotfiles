@@ -25,18 +25,28 @@ type directoryHooks struct {
 	beforeRemove          func(parentFD int, target string) error
 	afterRemoveMove       func(parentFD int, target, recovery string) error
 	afterRemoveCommit     func(parentFD int, recovery string) error
+	afterRemoveCleanup    func(parentFD int) error
 	beforeRemoveEntry     func(parentFD int, name string) error
+	beforeShallowMkdir    func(parentFD int, name string) error
+	afterShallowMkdir     func(parentFD, directoryFD int, name string) error
+	beforeRemoveEmpty     func(parentFD, directoryFD int, name string) error
 }
 
 // directoryTestHooks is package-private so hostile-boundary and recovery tests
 // can inject mutations without expanding the production API.
 var directoryTestHooks directoryHooks
 
+func sameDirectorySnapshotTree(left, right *DirectorySnapshot) bool {
+	return left != nil && right != nil && left.uid == right.uid && left.gid == right.gid && reflect.DeepEqual(left.root, right.root)
+}
+
 type directoryEntryState struct {
 	name     string
 	identity fileIdentity
 	fileType uint32
 	mode     fs.FileMode
+	uid      uint32
+	gid      uint32
 }
 
 // SnapshotDirectoryWithin captures one directory tree below root through held,
@@ -107,7 +117,7 @@ func VerifyDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 	if !expected.tracked {
 		return fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
 	}
-	if identity != (fileIdentity{device: expected.device, inode: expected.inode}) || !reflect.DeepEqual(current.root, expected.root) {
+	if identity != (fileIdentity{device: expected.device, inode: expected.inode}) || !sameDirectorySnapshotTree(current, expected) {
 		return fmt.Errorf("%w: directory %q no longer matches accepted snapshot", ErrDirectoryChanged, target)
 	}
 	return nil
@@ -135,7 +145,11 @@ func snapshotDirectoryEntryAt(parentFD int, target string) (*DirectorySnapshot, 
 	if err != nil {
 		return nil, fileIdentity{}, fmt.Errorf("inspect opened directory target %q: %w", target, err)
 	}
-	if openedType != unix.S_IFDIR || openedIdentity != state.identity || openedMode != state.mode {
+	var openedStat unix.Stat_t
+	if err := unix.Fstat(directoryFD, &openedStat); err != nil {
+		return nil, fileIdentity{}, fmt.Errorf("inspect opened directory owner %q: %w", target, err)
+	}
+	if openedType != unix.S_IFDIR || openedIdentity != state.identity || openedMode != state.mode || openedStat.Uid != state.uid || openedStat.Gid != state.gid {
 		return nil, fileIdentity{}, fmt.Errorf("%w: directory target %q changed between inspection and open", ErrDirectoryChanged, target)
 	}
 	if hook := directoryTestHooks.afterSnapshotOpen; hook != nil {
@@ -155,17 +169,33 @@ func snapshotDirectoryEntryAt(parentFD int, target string) (*DirectorySnapshot, 
 	if !reflect.DeepEqual(first, second) {
 		return nil, fileIdentity{}, fmt.Errorf("%w: directory target %q produced different recursive captures", ErrDirectoryChanged, target)
 	}
-	actual, fileType, err := identityAt(parentFD, target)
-	if err != nil || fileType != unix.S_IFDIR || actual != state.identity {
+	finalState, err := statDirectoryEntryAt(parentFD, target)
+	if err != nil || finalState != state {
 		return nil, fileIdentity{}, fmt.Errorf("%w: directory target %q namespace entry changed", ErrDirectoryChanged, target)
 	}
 	snapshot := newDirectorySnapshot(first)
 	snapshot.device = state.identity.device
 	snapshot.inode = state.identity.inode
+	var descriptorStat unix.Stat_t
+	if err := unix.Fstat(directoryFD, &descriptorStat); err != nil {
+		return nil, fileIdentity{}, fmt.Errorf("inspect directory owner: %w", err)
+	}
+	if descriptorStat.Uid != openedStat.Uid || descriptorStat.Gid != openedStat.Gid || uint32(descriptorStat.Mode)&0o777 != uint32(openedStat.Mode)&0o777 {
+		return nil, fileIdentity{}, fmt.Errorf("%w: directory target %q metadata changed during capture", ErrDirectoryChanged, target)
+	}
+	snapshot.uid = descriptorStat.Uid
+	snapshot.gid = descriptorStat.Gid
 	return snapshot, state.identity, nil
 }
 
 func captureDirectoryNode(directoryFD int) (directorySnapshotNode, error) {
+	var ownerStat unix.Stat_t
+	if err := unix.Fstat(directoryFD, &ownerStat); err != nil {
+		return directorySnapshotNode{}, fmt.Errorf("inspect directory snapshot owner: %w", err)
+	}
+	if !restorableOwner(ownerStat.Uid, ownerStat.Gid, os.Geteuid(), os.Getegid()) {
+		return directorySnapshotNode{}, fmt.Errorf("%w: directory owner %d:%d cannot be restored by %d:%d", ErrDirectoryChanged, ownerStat.Uid, ownerStat.Gid, os.Geteuid(), os.Getegid())
+	}
 	identityBefore, fileTypeBefore, modeBefore, err := directoryDescriptorState(directoryFD)
 	if err != nil {
 		return directorySnapshotNode{}, fmt.Errorf("inspect directory snapshot descriptor: %w", err)
@@ -224,7 +254,12 @@ func captureDirectoryNode(directoryFD int) (directorySnapshotNode, error) {
 	if err != nil {
 		return directorySnapshotNode{}, fmt.Errorf("reinspect directory snapshot descriptor: %w", err)
 	}
-	if identityBefore != identityAfter || fileTypeAfter != unix.S_IFDIR || modeBefore != modeAfter || !reflect.DeepEqual(states, statesAfter) {
+	var ownerAfter unix.Stat_t
+	if err := unix.Fstat(directoryFD, &ownerAfter); err != nil {
+		return directorySnapshotNode{}, fmt.Errorf("reinspect directory snapshot owner: %w", err)
+	}
+	if identityBefore != identityAfter || fileTypeAfter != unix.S_IFDIR || modeBefore != modeAfter ||
+		ownerStat.Uid != ownerAfter.Uid || ownerStat.Gid != ownerAfter.Gid || !reflect.DeepEqual(states, statesAfter) {
 		return directorySnapshotNode{}, fmt.Errorf("%w: directory changed during recursive capture", ErrDirectoryChanged)
 	}
 	return node, nil
@@ -245,7 +280,12 @@ func captureRegularFileAt(parentFD int, expected directoryEntryState) ([]byte, f
 		_ = file.Close()
 		return nil, 0, fmt.Errorf("inspect snapshot file %q: %w", expected.name, err)
 	}
-	if before.identity != expected.identity || fs.FileMode(before.mode).Type() != 0 || fs.FileMode(before.mode).Perm() != expected.mode {
+	if !restorableOwner(before.uid, before.gid, os.Geteuid(), os.Getegid()) {
+		_ = file.Close()
+		return nil, 0, fmt.Errorf("%w: snapshot file %q owner %d:%d cannot be restored by %d:%d", ErrDirectoryChanged, expected.name, before.uid, before.gid, os.Geteuid(), os.Getegid())
+	}
+	if before.identity != expected.identity || fs.FileMode(before.mode).Type() != 0 || fs.FileMode(before.mode).Perm() != expected.mode ||
+		before.uid != expected.uid || before.gid != expected.gid {
 		_ = file.Close()
 		return nil, 0, fmt.Errorf("%w: snapshot file %q changed before read", ErrDirectoryChanged, expected.name)
 	}
@@ -315,6 +355,8 @@ func statDirectoryEntryAt(parentFD int, name string) (directoryEntryState, error
 		identity: identityFromStat(&stat),
 		fileType: uint32(stat.Mode) & unix.S_IFMT,
 		mode:     fs.FileMode(uint32(stat.Mode) & 0o777),
+		uid:      stat.Uid,
+		gid:      stat.Gid,
 	}, nil
 }
 
@@ -333,7 +375,7 @@ func directoryDescriptorState(fd int) (fileIdentity, uint32, fs.FileMode, error)
 // installing the staged tree rolls the original name back; failures after the
 // staged rename return *CommittedError and leave the restored tree in place.
 func RestoreDirectoryWithin(root, rel string, snapshot *DirectorySnapshot) (returnErr error) {
-	return restoreDirectoryWithinSnapshot(root, rel, snapshot, nil, false, nil)
+	return restoreDirectoryWithinSnapshot(root, rel, snapshot, nil, false, nil, true, nil)
 }
 
 // RestoreDirectoryWithinSnapshot replaces rel only if its exact recursive
@@ -343,7 +385,7 @@ func RestoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 	if expected != nil && !expected.tracked {
 		return fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
 	}
-	return restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, nil)
+	return restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, nil, true, nil)
 }
 
 // RestoreDirectoryWithinSnapshotTracked returns the identity-bound recursive
@@ -354,11 +396,39 @@ func RestoreDirectoryWithinSnapshotTracked(root, rel string, snapshot, expected 
 		return nil, fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
 	}
 	var evidence *DirectorySnapshot
-	err := restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, &evidence)
+	err := restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, &evidence, true, nil)
 	return evidence, err
 }
 
-func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *DirectorySnapshot, conditional bool, evidence **DirectorySnapshot) (returnErr error) {
+// RestoreDirectoryWithinSnapshotNoCreateTracked has the same exact directory
+// CAS and evidence semantics as RestoreDirectoryWithinSnapshotTracked, but it
+// refuses to create missing target parents. Reviewed operation plans must use
+// the Authorized variant below because this compatibility surface does not
+// bind ancestor identity.
+func RestoreDirectoryWithinSnapshotNoCreateTracked(root, rel string, snapshot, expected *DirectorySnapshot) (*DirectorySnapshot, error) {
+	if expected != nil && !expected.tracked {
+		return nil, fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	}
+	var evidence *DirectorySnapshot
+	err := restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, &evidence, false, nil)
+	return evidence, err
+}
+
+// RestoreDirectoryWithinSnapshotNoCreateAuthorizedTracked also requires the
+// complete accepted root-to-parent identity chain.
+func RestoreDirectoryWithinSnapshotNoCreateAuthorizedTracked(root, rel string, snapshot, expected *DirectorySnapshot, parents *ParentChain) (*DirectorySnapshot, error) {
+	if expected != nil && !expected.tracked {
+		return nil, fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	}
+	if !parents.Tracked() {
+		return nil, fmt.Errorf("%w: expected parent chain is untracked", ErrParentChanged)
+	}
+	var evidence *DirectorySnapshot
+	err := restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, &evidence, false, parents)
+	return evidence, err
+}
+
+func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *DirectorySnapshot, conditional bool, evidence **DirectorySnapshot, createParents bool, parents *ParentChain) (returnErr error) {
 	if snapshot == nil || !snapshot.tracked {
 		return fmt.Errorf("directory snapshot is nil or untracked")
 	}
@@ -374,7 +444,12 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 		return fmt.Errorf("open trusted root: %w", err)
 	}
 	defer func() { _ = unix.Close(rootFD) }()
-	parentFD, err := openParent(rootFD, directories, true)
+	var parentFD int
+	if parents != nil {
+		parentFD, err = openAuthorizedParent(rootFD, directories, parents)
+	} else {
+		parentFD, err = openParent(rootFD, directories, createParents)
+	}
 	if err != nil {
 		return err
 	}
@@ -402,7 +477,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 			return fmt.Errorf("%w: expected restore target %q to remain absent", ErrDirectoryChanged, target)
 		case expected != nil && !existing:
 			return fmt.Errorf("%w: expected restore target %q disappeared", ErrDirectoryChanged, target)
-		case expected != nil && (existingIdentity != (fileIdentity{device: expected.device, inode: expected.inode}) || !reflect.DeepEqual(existingSnapshot.root, expected.root)):
+		case expected != nil && (existingIdentity != (fileIdentity{device: expected.device, inode: expected.inode}) || !sameDirectorySnapshotTree(existingSnapshot, expected)):
 			return fmt.Errorf("%w: restore target %q no longer matches expected post-write tree", ErrDirectoryChanged, target)
 		}
 	}
@@ -436,7 +511,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 		}
 	}()
 
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		return fmt.Errorf("pre-restore parent verification: %w", err)
 	}
 	if err := verifyDirectoryEntry(parentFD, stagedName, stagedIdentity); err != nil {
@@ -447,7 +522,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 	}
 	if existing {
 		current, currentIdentity, err := snapshotDirectoryEntryAt(parentFD, target)
-		if err != nil || currentIdentity != existingIdentity || !reflect.DeepEqual(current.root, existingSnapshot.root) {
+		if err != nil || currentIdentity != existingIdentity || !sameDirectorySnapshotTree(current, existingSnapshot) {
 			return directoryChangedError("live directory changed while restore was staged", err)
 		}
 	} else if _, _, err := identityAt(parentFD, target); !errors.Is(err, unix.ENOENT) {
@@ -483,7 +558,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 				return rollback(fmt.Errorf("after moving live directory aside: %w", err))
 			}
 		}
-		if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+		if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 			return rollback(fmt.Errorf("moved-aside parent verification: %w", err))
 		}
 		if err := verifyDirectoryEntry(parentFD, recoveryName, existingIdentity); err != nil {
@@ -500,14 +575,14 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 				return rollback(fmt.Errorf("before installing staged directory: %w", err))
 			}
 		}
-		if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+		if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 			return rollback(fmt.Errorf("install-boundary parent verification: %w", err))
 		}
 		if err := verifyDirectoryEntry(parentFD, recoveryName, existingIdentity); err != nil {
 			return rollback(fmt.Errorf("install-boundary recovery verification: %w", err))
 		}
 		recoverySnapshot, recoveryIdentity, snapshotErr := snapshotDirectoryEntryAt(parentFD, recoveryName)
-		if snapshotErr != nil || recoveryIdentity != existingIdentity || !reflect.DeepEqual(recoverySnapshot.root, existingSnapshot.root) {
+		if snapshotErr != nil || recoveryIdentity != existingIdentity || !sameDirectorySnapshotTree(recoverySnapshot, existingSnapshot) {
 			return rollback(directoryChangedError("moved-aside directory changed before restore commit", snapshotErr))
 		}
 		if err := verifyDirectoryEntry(parentFD, stagedName, stagedIdentity); err != nil {
@@ -531,7 +606,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 				return fmt.Errorf("before installing staged directory: %w", err)
 			}
 		}
-		if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+		if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 			return fmt.Errorf("install-boundary parent verification: %w", err)
 		}
 		if err := verifyDirectoryEntry(parentFD, stagedName, stagedIdentity); err != nil {
@@ -565,7 +640,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 		operations = append(operations, "installed directory verification")
 	}
 	installedSnapshot, installedIdentity, installedErr := snapshotDirectoryEntryAt(parentFD, target)
-	if installedErr != nil || installedIdentity != stagedIdentity || !reflect.DeepEqual(installedSnapshot.root, snapshot.root) {
+	if installedErr != nil || installedIdentity != stagedIdentity || !sameDirectorySnapshotTree(installedSnapshot, snapshot) {
 		postCommit = append(postCommit, directoryChangedError("installed directory tree changed after restore commit", installedErr))
 		operations = append(operations, "installed directory tree verification")
 	}
@@ -578,7 +653,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 		postCommit = append(postCommit, err)
 		operations = append(operations, "restore parent fsync")
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		postCommit = append(postCommit, err)
 		operations = append(operations, "post-restore parent verification")
 	}
@@ -587,7 +662,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 	// committed warning into irreversible data loss.
 	if recoveryLive && len(postCommit) == 0 {
 		recoverySnapshot, recoveryIdentity, recoveryErr := snapshotDirectoryEntryAt(parentFD, recoveryName)
-		if recoveryErr != nil || recoveryIdentity != existingIdentity || !reflect.DeepEqual(recoverySnapshot.root, existingSnapshot.root) {
+		if recoveryErr != nil || recoveryIdentity != existingIdentity || !sameDirectorySnapshotTree(recoverySnapshot, existingSnapshot) {
 			postCommit = append(postCommit, directoryChangedError("recovery directory tree changed before cleanup", recoveryErr))
 			operations = append(operations, "recovery directory tree verification")
 		}
@@ -610,11 +685,14 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 			}
 		}
 		finalSnapshot, finalIdentity, finalErr := snapshotDirectoryEntryAt(parentFD, target)
-		if finalErr != nil || finalIdentity != installedIdentity || !reflect.DeepEqual(finalSnapshot.root, installedSnapshot.root) {
+		if finalErr != nil || finalIdentity != installedIdentity || !sameDirectorySnapshotTree(finalSnapshot, installedSnapshot) {
 			return &CommittedError{
 				Operation: "capture committed directory evidence",
 				Err:       directoryChangedError("installed directory changed before evidence capture", finalErr),
 			}
+		}
+		if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
+			return &CommittedError{Operation: "post-evidence parent-chain verification", Err: err}
 		}
 		*evidence = finalSnapshot
 	}
@@ -627,7 +705,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 // happens only after the removal name is durably committed; cleanup or later
 // durability failures therefore return *CommittedError.
 func RemoveDirectoryWithin(root, rel string) error {
-	return removeDirectoryWithinSnapshot(root, rel, nil)
+	return removeDirectoryWithinSnapshot(root, rel, nil, nil)
 }
 
 // RemoveDirectoryWithinSnapshot removes rel only while its exact recursive
@@ -636,10 +714,22 @@ func RemoveDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 	if expected == nil || !expected.tracked {
 		return fmt.Errorf("%w: expected removal snapshot is nil or untracked", ErrDirectoryChanged)
 	}
-	return removeDirectoryWithinSnapshot(root, rel, expected)
+	return removeDirectoryWithinSnapshot(root, rel, expected, nil)
 }
 
-func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot) error {
+// RemoveDirectoryWithinSnapshotAuthorized removes the exact accepted tree only
+// while the bound root-to-parent namespace chain still matches.
+func RemoveDirectoryWithinSnapshotAuthorized(root, rel string, expected *DirectorySnapshot, parents *ParentChain) error {
+	if expected == nil || !expected.tracked {
+		return fmt.Errorf("%w: expected removal snapshot is nil or untracked", ErrDirectoryChanged)
+	}
+	if !parents.Tracked() {
+		return fmt.Errorf("%w: expected parent chain is untracked", ErrParentChanged)
+	}
+	return removeDirectoryWithinSnapshot(root, rel, expected, parents)
+}
+
+func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot, parents *ParentChain) error {
 	directories, target, err := splitRelativePath(rel)
 	if err != nil {
 		return err
@@ -649,8 +739,16 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 		return fmt.Errorf("open trusted root: %w", err)
 	}
 	defer func() { _ = unix.Close(rootFD) }()
-	parentFD, err := openParent(rootFD, directories, false)
+	var parentFD int
+	if parents != nil {
+		parentFD, err = openAuthorizedParent(rootFD, directories, parents)
+	} else {
+		parentFD, err = openParent(rootFD, directories, false)
+	}
 	if errors.Is(err, unix.ENOENT) {
+		if parents != nil {
+			return fmt.Errorf("%w: authorized directory parent disappeared", ErrParentChanged)
+		}
 		return nil
 	}
 	if err != nil {
@@ -662,6 +760,9 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 		return fmt.Errorf("identify directory removal parent: %w", err)
 	}
 	if _, _, err := identityAt(parentFD, target); errors.Is(err, unix.ENOENT) {
+		if parents != nil {
+			return fmt.Errorf("%w: authorized directory target disappeared", ErrDirectoryChanged)
+		}
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("inspect directory removal target: %w", err)
@@ -670,7 +771,7 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 	if err != nil {
 		return fmt.Errorf("validate directory before removal: %w", err)
 	}
-	if expected != nil && (targetIdentity != (fileIdentity{device: expected.device, inode: expected.inode}) || !reflect.DeepEqual(targetSnapshot.root, expected.root)) {
+	if expected != nil && (targetIdentity != (fileIdentity{device: expected.device, inode: expected.inode}) || !sameDirectorySnapshotTree(targetSnapshot, expected)) {
 		return fmt.Errorf("%w: removal target no longer matches expected post-write tree", ErrDirectoryChanged)
 	}
 	if hook := directoryTestHooks.beforeRemove; hook != nil {
@@ -678,11 +779,11 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 			return fmt.Errorf("before directory removal: %w", err)
 		}
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		return fmt.Errorf("pre-remove parent verification: %w", err)
 	}
 	current, currentIdentity, err := snapshotDirectoryEntryAt(parentFD, target)
-	if err != nil || currentIdentity != targetIdentity || !reflect.DeepEqual(current.root, targetSnapshot.root) {
+	if err != nil || currentIdentity != targetIdentity || !sameDirectorySnapshotTree(current, targetSnapshot) {
 		return directoryChangedError("directory changed while removal was prepared", err)
 	}
 	recoveryName, err := unusedDirectoryName(parentFD, ".safefile-removed-")
@@ -707,14 +808,14 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 			return rollback(fmt.Errorf("after moving removed directory aside: %w", err))
 		}
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		return rollback(fmt.Errorf("removal commit-boundary parent verification: %w", err))
 	}
 	if err := verifyDirectoryEntry(parentFD, recoveryName, targetIdentity); err != nil {
 		return rollback(fmt.Errorf("removal commit-boundary recovery verification: %w", err))
 	}
 	recoverySnapshot, recoveryIdentity, snapshotErr := snapshotDirectoryEntryAt(parentFD, recoveryName)
-	if snapshotErr != nil || recoveryIdentity != targetIdentity || !reflect.DeepEqual(recoverySnapshot.root, targetSnapshot.root) {
+	if snapshotErr != nil || recoveryIdentity != targetIdentity || !sameDirectorySnapshotTree(recoverySnapshot, targetSnapshot) {
 		return rollback(directoryChangedError("moved-aside directory changed before removal commit", snapshotErr))
 	}
 	if _, _, err := identityAt(parentFD, target); !errors.Is(err, unix.ENOENT) {
@@ -726,7 +827,7 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 	if err := syncDirectory(parentFD, "directory removal parent"); err != nil {
 		return rollback(err)
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		return &CommittedError{Operation: "post-removal parent verification", Err: err}
 	}
 	if _, _, err := identityAt(parentFD, target); !errors.Is(err, unix.ENOENT) {
@@ -744,11 +845,19 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 		}
 	}
 	finalRecovery, finalRecoveryIdentity, finalRecoveryErr := snapshotDirectoryEntryAt(parentFD, recoveryName)
-	if finalRecoveryErr != nil || finalRecoveryIdentity != targetIdentity || !reflect.DeepEqual(finalRecovery.root, targetSnapshot.root) {
+	if finalRecoveryErr != nil || finalRecoveryIdentity != targetIdentity || !sameDirectorySnapshotTree(finalRecovery, targetSnapshot) {
 		return &CommittedError{Operation: "removed directory tree verification", Err: directoryChangedError("removed directory changed before cleanup", finalRecoveryErr)}
 	}
 	if err := removeDirectoryEntryAt(parentFD, recoveryName, targetIdentity); err != nil {
 		return &CommittedError{Operation: "removed directory cleanup", Err: err}
+	}
+	if hook := directoryTestHooks.afterRemoveCleanup; hook != nil {
+		if err := hook(parentFD); err != nil {
+			return &CommittedError{Operation: "post-cleanup hook", Err: err}
+		}
+	}
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
+		return &CommittedError{Operation: "post-cleanup parent-chain verification", Err: err}
 	}
 	return nil
 }

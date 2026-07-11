@@ -98,7 +98,7 @@ func EnsureDirectoryWithin(root, rel string, mode fs.FileMode) error {
 //
 // If a failure is found after rename, the returned error is a *CommittedError.
 func ReplaceWithin(root, rel string, data []byte, mode fs.FileMode) (returnErr error) {
-	return replaceWithinRevision(root, rel, data, mode, nil, nil)
+	return replaceWithinRevision(root, rel, data, mode, nil, nil, true, nil)
 }
 
 // ReplaceWithinTracked returns the exact descriptor revision committed by the
@@ -106,7 +106,7 @@ func ReplaceWithin(root, rel string, data []byte, mode fs.FileMode) (returnErr e
 // and mode at the return boundary, it returns a CommittedError and no evidence.
 func ReplaceWithinTracked(root, rel string, data []byte, mode fs.FileMode) (Revision, error) {
 	var revision Revision
-	err := replaceWithinRevision(root, rel, data, mode, nil, &revision)
+	err := replaceWithinRevision(root, rel, data, mode, nil, &revision, true, nil)
 	return revision, err
 }
 
@@ -118,7 +118,7 @@ func ReplaceWithinRevision(root, rel string, expected Revision, data []byte, mod
 	if !expected.Tracked() {
 		return fmt.Errorf("%w: expected replacement revision is untracked", ErrRevisionChanged)
 	}
-	return replaceWithinRevision(root, rel, data, mode, &expected, nil)
+	return replaceWithinRevision(root, rel, data, mode, &expected, nil, true, nil)
 }
 
 func ReplaceWithinRevisionTracked(root, rel string, expected Revision, data []byte, mode fs.FileMode) (Revision, error) {
@@ -126,11 +126,39 @@ func ReplaceWithinRevisionTracked(root, rel string, expected Revision, data []by
 		return Revision{}, fmt.Errorf("%w: expected replacement revision is untracked", ErrRevisionChanged)
 	}
 	var revision Revision
-	err := replaceWithinRevision(root, rel, data, mode, &expected, &revision)
+	err := replaceWithinRevision(root, rel, data, mode, &expected, &revision, true, nil)
 	return revision, err
 }
 
-func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expected *Revision, evidence *Revision) (returnErr error) {
+// ReplaceWithinRevisionNoCreateTracked has the same exact revision-CAS and
+// evidence semantics as ReplaceWithinRevisionTracked, but refuses to create a
+// missing target parent. Reviewed operation plans must use the Authorized
+// variant below; this compatibility surface does not bind ancestor identity.
+func ReplaceWithinRevisionNoCreateTracked(root, rel string, expected Revision, data []byte, mode fs.FileMode) (Revision, error) {
+	if !expected.Tracked() {
+		return Revision{}, fmt.Errorf("%w: expected replacement revision is untracked", ErrRevisionChanged)
+	}
+	var revision Revision
+	err := replaceWithinRevision(root, rel, data, mode, &expected, &revision, false, nil)
+	return revision, err
+}
+
+// ReplaceWithinRevisionNoCreateAuthorizedTracked additionally requires the
+// complete root-to-parent identity chain accepted by the operation plan. The
+// chain is re-opened and checked immediately before and after commit.
+func ReplaceWithinRevisionNoCreateAuthorizedTracked(root, rel string, expected Revision, parents *ParentChain, data []byte, mode fs.FileMode) (Revision, error) {
+	if !expected.Tracked() {
+		return Revision{}, fmt.Errorf("%w: expected replacement revision is untracked", ErrRevisionChanged)
+	}
+	if !parents.Tracked() {
+		return Revision{}, fmt.Errorf("%w: expected parent chain is untracked", ErrParentChanged)
+	}
+	var revision Revision
+	err := replaceWithinRevision(root, rel, data, mode, &expected, &revision, false, parents)
+	return revision, err
+}
+
+func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expected *Revision, evidence *Revision, createParents bool, parents *ParentChain) (returnErr error) {
 	if mode != mode.Perm() {
 		return fmt.Errorf("%w: %v", ErrInvalidMode, mode)
 	}
@@ -145,7 +173,12 @@ func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expe
 	}
 	defer func() { _ = unix.Close(rootFD) }() // Closing a read-only directory cannot change the result.
 
-	parentFD, err := openParent(rootFD, directories, true)
+	var parentFD int
+	if parents != nil {
+		parentFD, err = openAuthorizedParent(rootFD, directories, parents)
+	} else {
+		parentFD, err = openParent(rootFD, directories, createParents)
+	}
 	if err != nil {
 		return err
 	}
@@ -198,7 +231,7 @@ func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expe
 			return fmt.Errorf("before commit: %w", err)
 		}
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		return fmt.Errorf("pre-commit parent verification: %w", err)
 	}
 	if err := verifyStagedEntry(parentFD, staged.name, staged.identity); err != nil {
@@ -237,7 +270,7 @@ func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expe
 		postCommit = append(postCommit, err)
 		operations = append(operations, "parent fsync")
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		postCommit = append(postCommit, err)
 		operations = append(operations, "post-commit parent verification")
 	}
@@ -255,6 +288,9 @@ func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expe
 				err = ErrRevisionChanged
 			}
 			return &CommittedError{Operation: "capture committed replacement revision", Err: err}
+		}
+		if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
+			return &CommittedError{Operation: "post-evidence parent-chain verification", Err: err}
 		}
 		*evidence = revision
 	}

@@ -19,6 +19,8 @@ type descriptorSnapshot struct {
 	identity   fileIdentity
 	mode       uint32
 	links      uint64
+	uid        uint32
+	gid        uint32
 	size       int64
 	modifiedNS int64
 }
@@ -88,6 +90,10 @@ func ReadWithin(root, rel string) ([]byte, Revision, error) {
 		_ = file.Close()
 		return nil, Revision{}, fmt.Errorf("%w: opened target %q is not regular", ErrNonRegular, target)
 	}
+	if !restorableOwner(before.uid, before.gid, os.Geteuid(), os.Getegid()) {
+		_ = file.Close()
+		return nil, Revision{}, fmt.Errorf("%w: target %q owner %d:%d cannot be restored by %d:%d", ErrRevisionChanged, target, before.uid, before.gid, os.Geteuid(), os.Getegid())
+	}
 	if hook := replaceTestHooks.afterReadOpen; hook != nil {
 		if err := hook(parentFD, fd, target); err != nil {
 			_ = file.Close()
@@ -120,6 +126,8 @@ func ReadWithin(root, rel string) ([]byte, Revision, error) {
 		inode:      after.identity.inode,
 		mode:       after.mode,
 		links:      after.links,
+		uid:        after.uid,
+		gid:        after.gid,
 		size:       after.size,
 		modifiedNS: after.modifiedNS,
 		digest:     sha256.Sum256(data),
@@ -147,6 +155,8 @@ func snapshotDescriptor(fd int, file *os.File) (descriptorSnapshot, error) {
 		identity:   identity,
 		mode:       uint32(info.Mode()),
 		links:      uint64(stat.Nlink),
+		uid:        stat.Uid,
+		gid:        stat.Gid,
 		size:       info.Size(),
 		modifiedNS: info.ModTime().UnixNano(),
 	}, nil
@@ -180,7 +190,7 @@ func classifyLeafOpenError(parentFD int, target string, openErr error) error {
 // after unlink are returned as *CommittedError because the requested name was
 // removed.
 func RemoveWithin(root, rel string) (returnErr error) {
-	return removeWithin(root, rel, nil)
+	return removeWithin(root, rel, nil, nil)
 }
 
 // RemoveWithinRevision removes rel only if the opened regular file still has
@@ -191,10 +201,22 @@ func RemoveWithinRevision(root, rel string, expected Revision) error {
 	if !expected.Tracked() || !expected.Exists() {
 		return fmt.Errorf("%w: expected removal revision must describe an existing file", ErrRevisionChanged)
 	}
-	return removeWithin(root, rel, &expected)
+	return removeWithin(root, rel, &expected, nil)
 }
 
-func removeWithin(root, rel string, expected *Revision) (returnErr error) {
+// RemoveWithinRevisionAuthorized removes the exact accepted file only while
+// the bound root-to-parent namespace chain still matches.
+func RemoveWithinRevisionAuthorized(root, rel string, expected Revision, parents *ParentChain) error {
+	if !expected.Tracked() || !expected.Exists() {
+		return fmt.Errorf("%w: expected removal revision must describe an existing file", ErrRevisionChanged)
+	}
+	if !parents.Tracked() {
+		return fmt.Errorf("%w: expected parent chain is untracked", ErrParentChanged)
+	}
+	return removeWithin(root, rel, &expected, parents)
+}
+
+func removeWithin(root, rel string, expected *Revision, parents *ParentChain) (returnErr error) {
 	directories, target, err := splitRelativePath(rel)
 	if err != nil {
 		return err
@@ -206,7 +228,12 @@ func removeWithin(root, rel string, expected *Revision) (returnErr error) {
 	}
 	defer func() { _ = unix.Close(rootFD) }()
 
-	parentFD, err := openParent(rootFD, directories, false)
+	var parentFD int
+	if parents != nil {
+		parentFD, err = openAuthorizedParent(rootFD, directories, parents)
+	} else {
+		parentFD, err = openParent(rootFD, directories, false)
+	}
 	if err != nil {
 		return err
 	}
@@ -272,7 +299,7 @@ func removeWithin(root, rel string, expected *Revision) (returnErr error) {
 			return fmt.Errorf("before removing %q: %w", target, err)
 		}
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		return fmt.Errorf("pre-remove parent verification: %w", err)
 	}
 	if err := verifyRemovalEntry(parentFD, target, wantedTarget); err != nil {
@@ -318,7 +345,7 @@ func removeWithin(root, rel string, expected *Revision) (returnErr error) {
 		postRemove = append(postRemove, err)
 		operations = append(operations, "parent fsync")
 	}
-	if err := verifyParent(rootFD, directories, wantedParent); err != nil {
+	if err := verifyMutationParent(root, rootFD, directories, wantedParent, parents); err != nil {
 		postRemove = append(postRemove, err)
 		operations = append(operations, "post-remove parent verification")
 	}
@@ -329,6 +356,9 @@ func removeWithin(root, rel string, expected *Revision) (returnErr error) {
 }
 
 func verifyDescriptorRevision(fd int, expected Revision) error {
+	if !restorableOwner(expected.uid, expected.gid, os.Geteuid(), os.Getegid()) {
+		return fmt.Errorf("%w: expected file owner is not restorable", ErrRevisionChanged)
+	}
 	var before unix.Stat_t
 	if err := unix.Fstat(fd, &before); err != nil {
 		return fmt.Errorf("%w: inspect held descriptor: %w", ErrRevisionChanged, err)
@@ -336,6 +366,7 @@ func verifyDescriptorRevision(fd int, expected Revision) error {
 	if uint32(before.Mode)&unix.S_IFMT != unix.S_IFREG ||
 		identityFromStat(&before) != (fileIdentity{device: expected.device, inode: expected.inode}) ||
 		uint64(before.Nlink) != expected.links ||
+		before.Uid != expected.uid || before.Gid != expected.gid ||
 		uint32(before.Mode)&0o777 != expected.mode&0o777 ||
 		before.Size != expected.size || statModifiedNanoseconds(&before) != expected.modifiedNS {
 		return ErrRevisionChanged
@@ -379,7 +410,7 @@ func verifyDescriptorRevision(fd int, expected Revision) error {
 		return fmt.Errorf("%w: reinspect held descriptor: %w", ErrRevisionChanged, err)
 	}
 	if identityFromStat(&after) != identityFromStat(&before) || after.Nlink != before.Nlink ||
-		after.Mode != before.Mode || after.Size != before.Size ||
+		after.Mode != before.Mode || after.Uid != before.Uid || after.Gid != before.Gid || after.Size != before.Size ||
 		statModifiedNanoseconds(&after) != statModifiedNanoseconds(&before) {
 		return ErrRevisionChanged
 	}
