@@ -101,6 +101,43 @@ func TestInstallRecipeRejectsGenericOrAmbiguousExecution(t *testing.T) {
 	}
 }
 
+func TestHomebrewCaskRecipeIsNarrowAndDigestBound(t *testing.T) {
+	detected := false
+	recipe := InstallRecipe{
+		SchemaVersion: CurrentInstallRecipeSchemaVersion, ToolID: "t3-code", Platform: "macos", Manager: "brew",
+		Steps:    []InstallStep{{Kind: InstallStepHomebrewCask, Provider: "brew", Casks: []string{"t3-code"}}},
+		Detector: InstallDetector{Kind: InstallDetectorAppBundle, Values: []string{"T3 Code.app"}}, Risk: "reviewed cask",
+	}
+	digest, err := InstallRecipeDigest(recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := Action{ID: "install:t3-code", Kind: KindInstallTool, ToolID: "t3-code", Target: "t3-code", Description: "install T3 Code", Disposition: DispositionApply, DesiredDigest: digest, Ownership: OwnershipPackageManager, Reversibility: ReversibilityManual, InstallRecipe: &recipe, InstallDetected: &detected}
+	if _, err := NewPlan(time.Now(), []Action{action}); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "--formula", "../t3", "tap/t3", "t3 code", "t3\tcode", "t3\u202Ecode"} {
+		candidate := CloneInstallRecipe(recipe)
+		candidate.Steps[0].Casks = []string{bad}
+		if _, err := InstallRecipeDigest(candidate); err == nil {
+			t.Errorf("unsafe cask token %q was accepted", bad)
+		}
+	}
+	for _, mutate := range []func(*InstallRecipe){
+		func(r *InstallRecipe) { r.Manager = "apt" },
+		func(r *InstallRecipe) { r.Platform = "debian" },
+		func(r *InstallRecipe) { r.Steps[0].Provider = "apt" },
+		func(r *InstallRecipe) { r.Steps[0].Packages = []string{"t3-code"} },
+		func(r *InstallRecipe) { r.Steps[0].Args = []string{"--formula"} },
+	} {
+		candidate := CloneInstallRecipe(recipe)
+		mutate(&candidate)
+		if _, err := InstallRecipeDigest(candidate); err == nil {
+			t.Errorf("ambiguous cask recipe accepted: %#v", candidate)
+		}
+	}
+}
+
 func TestPlanIsImmutableAndHashIdentifiesExactDocument(t *testing.T) {
 	created := time.Date(2026, 7, 10, 12, 30, 0, 0, time.FixedZone("offset", -7*60*60))
 	actions := []Action{validConfigAction()}

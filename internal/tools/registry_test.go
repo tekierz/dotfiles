@@ -194,6 +194,12 @@ var expectedTools = map[string]toolSpec{
 		hasConfig: false, configPaths: 0,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"sunshine"}, pkg.PlatformDebian: {"sunshine"}, pkg.PlatformMacOS: {"sunshine"}},
 	},
+	"t3-code": {
+		name: "T3 Code", description: "Desktop frontend for coding agents", category: CategoryApp, icon: "󰚩",
+		uiGroup: UIGroupMacApps, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: pkg.PlatformMacOS,
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{},
+	},
 	"tailscale": {
 		name: "Tailscale", description: "Mesh VPN for secure networking", category: CategoryUtility, icon: "\U000f0582",
 		uiGroup: UIGroupCLIUtilities, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",

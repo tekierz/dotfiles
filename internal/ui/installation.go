@@ -1546,6 +1546,10 @@ func installRecipeDetected(recipe operation.InstallRecipe, mgr pkg.PackageManage
 		}
 		return true, nil
 	case operation.InstallDetectorAppBundle:
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return false, homeErr
+		}
 		for _, name := range recipe.Detector.Values {
 			if filepath.Base(name) != name || strings.TrimSuffix(name, ".app") == "" {
 				return false, fmt.Errorf("app detector must be an application name")
@@ -1554,11 +1558,22 @@ func installRecipeDetected(recipe operation.InstallRecipe, mgr pkg.PackageManage
 			if !strings.HasSuffix(bundle, ".app") {
 				bundle += ".app"
 			}
-			if _, err := os.Stat(filepath.Join("/Applications", bundle)); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					return false, nil
+			found := false
+			for _, root := range []string{"/Applications", filepath.Join(home, "Applications")} {
+				info, err := os.Stat(filepath.Join(root, bundle))
+				if err == nil {
+					if info.IsDir() {
+						found = true
+						break
+					}
+					continue
 				}
-				return false, err
+				if !errors.Is(err, os.ErrNotExist) {
+					return false, err
+				}
+			}
+			if !found {
+				return false, nil
 			}
 		}
 		return true, nil
@@ -1597,6 +1612,25 @@ func executeInstallRecipe(ctx context.Context, recipe operation.InstallRecipe, m
 			}
 			if err := cmd.Wait(); err != nil {
 				return err
+			}
+		case operation.InstallStepHomebrewCask:
+			caskManager, ok := mgr.(pkg.HomebrewCaskManager)
+			if !ok || mgr.Name() != "brew" {
+				return fmt.Errorf("reviewed Homebrew cask installer is unavailable")
+			}
+			cmd, err := caskManager.InstallCasksStreaming(ctx, step.Casks...)
+			if err != nil {
+				return err
+			}
+			if cmd != nil {
+				for line := range cmd.Output {
+					if emitLine != nil {
+						emitLine(line)
+					}
+				}
+				if err := cmd.Wait(); err != nil {
+					return err
+				}
 			}
 		default:
 			return fmt.Errorf("unsupported reviewed install step %q", step.Kind)

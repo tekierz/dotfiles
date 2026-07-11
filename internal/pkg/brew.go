@@ -346,6 +346,32 @@ func (b *BrewManager) InstallStreaming(ctx context.Context, packages ...string) 
 	return runner.RunStreaming(ctx, b.brewPath, args...)
 }
 
+func (b *BrewManager) InstallCasksStreaming(ctx context.Context, casks ...string) (*runner.StreamingCmd, error) {
+	if len(casks) == 0 {
+		return nil, fmt.Errorf("no casks specified")
+	}
+	for _, cask := range casks {
+		if !validCaskToken(cask) {
+			return nil, fmt.Errorf("invalid Homebrew cask token %q", cask)
+		}
+	}
+	args := append([]string{"install", "--cask"}, casks...)
+	return runner.RunStreaming(ctx, b.brewPath, args...)
+}
+
+func validCaskToken(value string) bool {
+	if value == "" || value[0] == '-' {
+		return false
+	}
+	for _, r := range value {
+		allowed := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("+._@-", r)
+		if !allowed {
+			return false
+		}
+	}
+	return true
+}
+
 // UpdateStreaming updates packages with real-time output streaming
 func (b *BrewManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {

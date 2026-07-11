@@ -52,6 +52,7 @@ owned and must never be copied into dotfiles-managed JSON or operation journals.
   Both npm integrations are macOS-only until Linux has a reviewed user-owned
   npm prefix/PATH flow and Pi's Node 22.19+ preflight. OpenCode uses the reviewed Homebrew tap or Arch
   package route; Debian/Pi are unsupported rather than silently falling back.
-- Cursor Agent and Hermes remain blocked because a mutable shell installer is
-  not an accepted recipe kind. T3 Code remains blocked until the executor has a
-  narrow Homebrew-cask action that can bind `brew install --cask t3-code`.
+- T3 Code is registered on macOS with a narrow cask-only action that binds
+  `brew install --cask t3-code` and verifies `T3 Code.app`; generic Homebrew
+  arguments remain unrepresentable. Cursor Agent and Hermes remain blocked
+  because a mutable shell installer is not an accepted recipe kind.

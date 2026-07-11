@@ -147,6 +147,9 @@ func (s *fileTreeScreen) View(width, height int) string {
 				lines = append(lines, mutedStyle.Render(fmt.Sprintf("      %s on %s · detector %s:%s", recipe.Manager, recipe.Platform, recipe.Detector.Kind, strings.Join(recipe.Detector.Values, ", "))))
 				for _, step := range recipe.Steps {
 					detail := strings.Join(step.Packages, " ")
+					if len(step.Casks) > 0 {
+						detail = strings.Join(step.Casks, " ")
+					}
 					if len(step.Args) > 0 {
 						detail = step.Provider + " " + strings.Join(step.Args, " ")
 					}

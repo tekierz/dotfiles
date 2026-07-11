@@ -134,6 +134,9 @@ observability land before new integrations or broad UI work.
   installation for recipe-backed tools and routes users to the reviewed installer flow.
 - Remaining provenance work includes binding exact package-manager/npm executable identity,
   a discoverable JSON export/noninteractive contract, and full Manage plan/preview parity.
+- Codex and Pi now use version-pinned, macOS-only npm recipes; OpenCode uses only
+  its reviewed Homebrew/Arch routes; T3 Code uses an exact typed Homebrew-cask
+  action. Unsupported platform rows are disabled instead of poisoning the plan.
 
 ## Comprehensive pre-deployment audit — 2026-07-09
 

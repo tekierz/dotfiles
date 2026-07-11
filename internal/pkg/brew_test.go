@@ -22,6 +22,19 @@ func TestBrewManager_NeedsSudo(t *testing.T) {
 	}
 }
 
+func TestHomebrewCaskTokenValidationRejectsArgumentSmuggling(t *testing.T) {
+	for _, valid := range []string{"t3-code", "font-fira-code@6", "app_1.2+beta"} {
+		if !validCaskToken(valid) {
+			t.Errorf("valid cask token rejected: %q", valid)
+		}
+	}
+	for _, invalid := range []string{"", "--formula", "../t3", "tap/t3", "t3 code", "t3\tcode", "t3\ncode"} {
+		if validCaskToken(invalid) {
+			t.Errorf("unsafe cask token accepted: %q", invalid)
+		}
+	}
+}
+
 // TestParseBrewOutdated exercises the real parseBrewOutdated helper with
 // sample `brew outdated --json=v2 --greedy` output to verify:
 //   - Pinned formulae are excluded from the actionable list.

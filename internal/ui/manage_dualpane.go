@@ -384,7 +384,7 @@ func (a *App) manageItems() []manageItem {
 		filtered := make([]tools.Tool, 0, len(all))
 		for _, t := range all {
 			installed := a.manageInstalled[t.ID()]
-			supported := toolHasPackagesForPlatform(t, platform)
+			supported := installerAvailable(t, platform)
 			if installed || supported {
 				filtered = append(filtered, t)
 			}
@@ -423,10 +423,6 @@ func (a *App) manageItems() []manageItem {
 	}
 
 	return items
-}
-
-func toolHasPackagesForPlatform(t tools.Tool, platform pkg.Platform) bool {
-	return len(tools.PackagesForPlatform(t.Packages(), platform)) > 0
 }
 
 func fallbackToolIcon(id string, cat tools.Category) string {

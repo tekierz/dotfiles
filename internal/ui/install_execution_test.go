@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -32,6 +34,20 @@ type customInstallSentinel struct {
 
 type recipeOnlySentinel struct{ *customInstallSentinel }
 
+type caskInstallManager struct {
+	*pkg.MockPackageManager
+	home  string
+	calls [][]string
+}
+
+func (m *caskInstallManager) InstallCasksStreaming(_ context.Context, casks ...string) (*runner.StreamingCmd, error) {
+	m.calls = append(m.calls, slices.Clone(casks))
+	if err := os.MkdirAll(filepath.Join(m.home, "Applications", "T3 Code.app"), 0o700); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
 func (t *recipeOnlySentinel) InstallRecipe(environment tools.InstallEnvironment) (operation.InstallRecipe, error) {
 	return operation.InstallRecipe{
 		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
@@ -40,6 +56,48 @@ func (t *recipeOnlySentinel) InstallRecipe(environment tools.InstallEnvironment)
 		Detector: operation.InstallDetector{Kind: operation.InstallDetectorPackageReceipt, Values: []string{"reviewed-package"}},
 		Risk:     "test fixture",
 	}, nil
+}
+
+func TestInstallRecipeDetectedAppBundleRequiresDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	applications := filepath.Join(home, "Applications")
+	if err := os.MkdirAll(applications, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(applications, "Dotfiles Detector Fixture.app")
+	if err := os.WriteFile(bundle, []byte("not an app bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recipe := operation.InstallRecipe{
+		Detector: operation.InstallDetector{
+			Kind:   operation.InstallDetectorAppBundle,
+			Values: []string{filepath.Base(bundle)},
+		},
+	}
+
+	detected, err := installRecipeDetected(recipe, nil)
+	if err != nil {
+		t.Fatalf("detect plain file: %v", err)
+	}
+	if detected {
+		t.Fatal("plain file with .app suffix was accepted as an application bundle")
+	}
+
+	if err := os.Remove(bundle); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(bundle, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	detected, err = installRecipeDetected(recipe, nil)
+	if err != nil {
+		t.Fatalf("detect app bundle directory: %v", err)
+	}
+	if !detected {
+		t.Fatal("application bundle directory was not detected")
+	}
 }
 
 func (t *customInstallSentinel) ID() string                   { return "custom-sentinel" }
@@ -484,6 +542,35 @@ func TestAcceptedRecipeRejectsOmittedAndDuplicateSelections(t *testing.T) {
 		if len(result.failures) == 0 || len(mgr.InstallCalls) != 0 {
 			t.Fatalf("selection %v was not rejected before mutation: %#v calls=%v", selected, result, mgr.InstallCalls)
 		}
+	}
+}
+
+func TestAcceptedT3RecipeUsesOnlyHomebrewCaskCapability(t *testing.T) {
+	home := withTempHome(t)
+	mgr := &caskInstallManager{MockPackageManager: pkg.NewMockPackageManager(), home: home}
+	mgr.ManagerName = "brew"
+	tool := tools.NewT3CodeTool()
+	runtime := toolInstallRuntime{
+		lookupTool:      func(id string) (tools.Tool, bool) { return tool, id == tool.ID() },
+		detectManager:   func() pkg.PackageManager { return mgr },
+		detectPlatform:  func() pkg.Platform { return pkg.PlatformMacOS },
+		isToolInstalled: func(tools.Tool) bool { return false },
+	}
+	recipe, err := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := operation.InstallRecipeDigest(recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := installExecutionSnapshot{platform: pkg.PlatformMacOS, manager: "brew", recipes: map[string]operation.InstallRecipe{tool.ID(): recipe}, detected: map[string]bool{tool.ID(): false}, digests: map[string]string{tool.ID(): digest}}
+	result := runSelectedToolInstalls(context.Background(), []string{tool.ID()}, runtime, func(string) {}, func(string) {}, snapshot)
+	if len(result.failures) != 0 || result.successCount != 1 || !reflect.DeepEqual(mgr.calls, [][]string{{"t3-code"}}) {
+		t.Fatalf("T3 execution result=%#v cask calls=%v", result, mgr.calls)
+	}
+	if len(mgr.InstallCalls) != 0 {
+		t.Fatalf("T3 escaped to generic package install: %v", mgr.InstallCalls)
 	}
 }
 

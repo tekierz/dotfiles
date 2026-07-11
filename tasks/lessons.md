@@ -1,5 +1,8 @@
 # Working Lessons
 
+- For this remediation program, use a Sol-named agent to orchestrate and review
+  each bounded slice and a Terra-named agent to implement it; the root agent
+  coordinates verification and logical commits rather than bypassing that split.
 - When the user asks for persistent multi-agent execution, keep at least one bounded
   reviewer or implementation agent visibly active whenever concurrency permits. Check
   agent state before reporting progress; an errored or completed thread is not active work.

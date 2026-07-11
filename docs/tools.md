@@ -11,7 +11,7 @@ if an older machine still resolves that command.
 
 ## Registered tools
 
-The registry currently contains 33 tools. Availability is determined from each
+The registry currently contains 34 tools. Availability is determined from each
 tool's platform package metadata; seeing a tool here does not promise that every
 package manager or CPU architecture provides it.
 
@@ -71,14 +71,15 @@ or service setup required by the vendor before applying changes.
 | Raycast | macOS launcher |
 | IINA | macOS media player |
 | AppCleaner | macOS application removal utility |
+| T3 Code | macOS install-only coding-agent frontend; exact Homebrew cask action |
 
 The Cursor desktop application is distinct from Cursor Agent CLI. Codex,
 OpenCode, and Pi are now available as opt-in, install-only integrations through
 the reviewed installer plan; the dashboard shows their exact source, arguments,
 detector, authentication expectation, and risk before execution. Their settings
-are not yet managed. Cursor Agent, T3 Code, and Hermes remain gated: Cursor and
-Hermes require a verified-artifact design for mutable vendor scripts, while T3
-requires an exact Homebrew-cask action.
+are not yet managed. T3 Code is available on macOS through the narrow reviewed
+Homebrew-cask action. Cursor Agent and Hermes remain gated because both require
+a verified-artifact design for mutable vendor scripts.
 
 Codex and Pi are currently offered only on macOS. Stock Linux global-npm
 permissions and Pi's Node 22.19+ requirement need an explicit user-owned runtime

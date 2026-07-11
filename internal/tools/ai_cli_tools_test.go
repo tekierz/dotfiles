@@ -132,3 +132,28 @@ func TestAICommandToolsAreRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestT3CodeDeclaresExactHomebrewCaskRecipe(t *testing.T) {
+	tool := NewT3CodeTool()
+	recipe, err := DescribeInstall(tool, InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recipe.Steps) != 1 || recipe.Steps[0].Kind != operation.InstallStepHomebrewCask || !reflect.DeepEqual(recipe.Steps[0].Casks, []string{"t3-code"}) {
+		t.Fatalf("T3 cask recipe = %#v", recipe)
+	}
+	if recipe.Detector.Kind != operation.InstallDetectorAppBundle || !reflect.DeepEqual(recipe.Detector.Values, []string{"T3 Code.app"}) {
+		t.Fatalf("T3 detector = %#v", recipe.Detector)
+	}
+	if tool.DefaultEnabled() || tool.HasConfig() {
+		t.Fatal("T3 must remain opt-in and install-only")
+	}
+	if err := tool.Install(pkg.NewMockPackageManager()); !errors.Is(err, ErrReviewedInstallRequired) {
+		t.Fatalf("T3 direct install error = %v", err)
+	}
+	for _, environment := range []InstallEnvironment{{Platform: pkg.PlatformDebian, Manager: "apt"}, {Platform: pkg.PlatformMacOS, Manager: "apt"}} {
+		if _, err := DescribeInstall(tool, environment); err == nil {
+			t.Fatalf("T3 accepted unsupported environment %#v", environment)
+		}
+	}
+}

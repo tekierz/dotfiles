@@ -62,6 +62,7 @@ type InstallStepKind string
 const (
 	InstallStepPackageManager InstallStepKind = "package_manager"
 	InstallStepNPMGlobal      InstallStepKind = "npm_global"
+	InstallStepHomebrewCask   InstallStepKind = "homebrew_cask"
 )
 
 type InstallDetectorKind string
@@ -78,6 +79,7 @@ type InstallStep struct {
 	Kind     InstallStepKind `json:"kind"`
 	Provider string          `json:"provider"`
 	Packages []string        `json:"packages,omitempty"`
+	Casks    []string        `json:"casks,omitempty"`
 	Args     []string        `json:"args,omitempty"`
 }
 
@@ -300,16 +302,26 @@ func validateInstallRecipe(recipe InstallRecipe) error {
 		if step.Provider == "" || hasUnsafeDisplayControl(step.Provider) {
 			return fmt.Errorf("step provider is invalid")
 		}
-		if step.Kind != InstallStepPackageManager && step.Kind != InstallStepNPMGlobal {
+		if step.Kind != InstallStepPackageManager && step.Kind != InstallStepNPMGlobal && step.Kind != InstallStepHomebrewCask {
 			return fmt.Errorf("unsupported install step %q", step.Kind)
 		}
-		if step.Kind == InstallStepPackageManager && (recipe.Manager == "" || step.Provider != recipe.Manager || len(step.Packages) == 0 || len(step.Args) != 0) {
+		if step.Kind == InstallStepPackageManager && (recipe.Manager == "" || step.Provider != recipe.Manager || len(step.Packages) == 0 || len(step.Casks) != 0 || len(step.Args) != 0) {
 			return fmt.Errorf("package-manager step does not match the accepted manager")
 		}
-		if step.Kind == InstallStepNPMGlobal && (step.Provider != "npm" || len(step.Args) == 0 || len(step.Packages) != 0) {
+		if step.Kind == InstallStepNPMGlobal && (step.Provider != "npm" || len(step.Args) == 0 || len(step.Packages) != 0 || len(step.Casks) != 0) {
 			return fmt.Errorf("npm step requires exact npm arguments")
 		}
-		for _, value := range append(slices.Clone(step.Packages), step.Args...) {
+		if step.Kind == InstallStepHomebrewCask {
+			if recipe.Platform != "macos" || recipe.Manager != "brew" || step.Provider != "brew" || len(step.Casks) == 0 || len(step.Packages) != 0 || len(step.Args) != 0 {
+				return fmt.Errorf("homebrew cask step requires a macOS brew recipe")
+			}
+			for _, cask := range step.Casks {
+				if !validHomebrewCaskToken(cask) {
+					return fmt.Errorf("invalid Homebrew cask token %q", cask)
+				}
+			}
+		}
+		for _, value := range append(append(slices.Clone(step.Packages), step.Casks...), step.Args...) {
 			if value == "" || hasUnsafeDisplayControl(value) {
 				return fmt.Errorf("step argument is invalid")
 			}
@@ -333,6 +345,19 @@ func validateInstallRecipe(recipe InstallRecipe) error {
 	return nil
 }
 
+func validHomebrewCaskToken(value string) bool {
+	if value == "" || value[0] == '-' {
+		return false
+	}
+	for _, r := range value {
+		allowed := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("+._@-", r)
+		if !allowed {
+			return false
+		}
+	}
+	return true
+}
+
 func hasUnsafeDisplayControl(value string) bool {
 	for _, r := range value {
 		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
@@ -347,6 +372,7 @@ func CloneInstallRecipe(recipe InstallRecipe) InstallRecipe {
 	recipe.Steps = slices.Clone(recipe.Steps)
 	for index := range recipe.Steps {
 		recipe.Steps[index].Packages = slices.Clone(recipe.Steps[index].Packages)
+		recipe.Steps[index].Casks = slices.Clone(recipe.Steps[index].Casks)
 		recipe.Steps[index].Args = slices.Clone(recipe.Steps[index].Args)
 	}
 	return recipe

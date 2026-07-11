@@ -81,6 +81,12 @@ type PackageManager interface {
 	UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error)
 }
 
+// HomebrewCaskManager is deliberately narrow: callers can request only fixed
+// cask tokens, never arbitrary Homebrew arguments.
+type HomebrewCaskManager interface {
+	InstallCasksStreaming(context.Context, ...string) (*runner.StreamingCmd, error)
+}
+
 // Platform represents the current operating system
 type Platform string
 

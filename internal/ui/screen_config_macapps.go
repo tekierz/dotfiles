@@ -25,6 +25,7 @@ var macAppItems = []struct {
 	{"raycast", "Raycast", "Spotlight replacement"},
 	{"iina", "IINA", "Media player"},
 	{"appcleaner", "AppCleaner", "App uninstaller"},
+	{"t3-code", "T3 Code", "Desktop frontend for coding agents (Homebrew cask)"},
 }
 
 // NewConfigMacAppsScreen creates a new macOS apps config screen handler.
