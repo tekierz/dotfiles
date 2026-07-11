@@ -266,7 +266,7 @@ After running, configs are placed in:
 | File | Purpose |
 |------|---------|
 | `~/.zshrc` | Zsh configuration |
-| `~/.tmux.conf` | Tmux configuration; existing native settings are preserved outside a managed block |
+| `~/.tmux.conf` or `${XDG_CONFIG_HOME:-~/.config}/tmux/tmux.conf` | Active Tmux configuration; existing native settings are preserved outside a managed block |
 | `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` (and legacy `config`) | Ghostty terminal; existing settings are preserved outside a managed block |
 | `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` (and legacy `config`) | Higher-precedence Ghostty sources on macOS; the latest existing source is updated |
 | `~/.config/yazi/` | Yazi file manager |

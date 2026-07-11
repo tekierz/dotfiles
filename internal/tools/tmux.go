@@ -54,6 +54,10 @@ type TmuxConfig struct {
 // NewTmuxTool creates a new Tmux tool
 func NewTmuxTool() *TmuxTool {
 	home, _ := os.UserHomeDir()
+	configPath := filepath.Join(home, ".tmux.conf")
+	if active, err := TmuxConfigMutationPath(); err == nil {
+		configPath = active
+	}
 	return &TmuxTool{
 		BaseTool: BaseTool{
 			id:          "tmux",
@@ -67,7 +71,7 @@ func NewTmuxTool() *TmuxTool {
 				pkg.PlatformDebian: {"tmux"},
 			},
 			configPaths: []string{
-				filepath.Join(home, ".tmux.conf"),
+				configPath,
 			},
 			// UI metadata
 			uiGroup:        UIGroupNone,
@@ -75,6 +79,64 @@ func NewTmuxTool() *TmuxTool {
 			defaultEnabled: true,
 		},
 	}
+}
+
+type tmuxConfigTarget struct {
+	path       string
+	reloadExpr string
+}
+
+// tmuxConfigCandidates mirrors tmux's user-config search order after the
+// system configuration: legacy HOME first, then explicit XDG_CONFIG_HOME, then
+// the default ~/.config location. The first existing candidate is active.
+func tmuxConfigCandidates(home string) ([]tmuxConfigTarget, error) {
+	if home == "" || !filepath.IsAbs(home) {
+		return nil, fmt.Errorf("tmux config discovery requires an absolute HOME")
+	}
+	candidates := []tmuxConfigTarget{{
+		path:       filepath.Join(home, ".tmux.conf"),
+		reloadExpr: "~/.tmux.conf",
+	}}
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		if !filepath.IsAbs(xdg) {
+			return nil, fmt.Errorf("XDG_CONFIG_HOME must be absolute: %q", xdg)
+		}
+		candidates = append(candidates, tmuxConfigTarget{
+			path:       filepath.Join(filepath.Clean(xdg), "tmux", "tmux.conf"),
+			reloadExpr: `"$XDG_CONFIG_HOME/tmux/tmux.conf"`,
+		})
+	}
+	defaultXDG := filepath.Join(home, ".config", "tmux", "tmux.conf")
+	if len(candidates) == 1 || filepath.Clean(candidates[len(candidates)-1].path) != filepath.Clean(defaultXDG) {
+		candidates = append(candidates, tmuxConfigTarget{path: defaultXDG, reloadExpr: "~/.config/tmux/tmux.conf"})
+	}
+	return candidates, nil
+}
+
+func tmuxConfigMutationTarget() (tmuxConfigTarget, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return tmuxConfigTarget{}, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	candidates, err := tmuxConfigCandidates(home)
+	if err != nil {
+		return tmuxConfigTarget{}, err
+	}
+	for _, candidate := range candidates {
+		if _, statErr := os.Lstat(candidate.path); statErr == nil {
+			return candidate, nil
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return tmuxConfigTarget{}, fmt.Errorf("inspect tmux config candidate %s: %w", candidate.path, statErr)
+		}
+	}
+	return candidates[0], nil
+}
+
+// TmuxConfigMutationPath returns the exact active user config path that tmux
+// itself will prefer. It is side-effect free and never creates missing parents.
+func TmuxConfigMutationPath() (string, error) {
+	target, err := tmuxConfigMutationTarget()
+	return target.path, err
 }
 
 // TPMPath returns the TPM installation directory
@@ -185,6 +247,10 @@ func RunTPMInstall() error {
 
 // GenerateTmuxConfig builds the tmux.conf content
 func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
+	return generateTmuxConfig(cfg, theme, "~/.tmux.conf")
+}
+
+func generateTmuxConfig(cfg TmuxConfig, theme, reloadExpr string) string {
 	var sb strings.Builder
 
 	// Header
@@ -257,7 +323,7 @@ func GenerateTmuxConfig(cfg TmuxConfig, theme string) string {
 
 	// Reload binding
 	sb.WriteString("# Reload config\n")
-	sb.WriteString("bind r source-file ~/.tmux.conf \\; display \"Config reloaded!\"\n\n")
+	sb.WriteString(fmt.Sprintf("bind r source-file %s \\; display \"Config reloaded!\"\n\n", reloadExpr))
 
 	// Quick window switching
 	sb.WriteString("# Quick window switching (Alt + number)\n")
@@ -385,12 +451,12 @@ func WriteTmuxConfigAtAuthorityTracked(cfg TmuxConfig, theme string, accepted sa
 }
 
 func writeTmuxConfigAtRevisionTracked(cfg TmuxConfig, theme string, accepted *safefile.Revision, parents *safefile.ParentChain, lockers ...operation.Locker) (MutationEvidence, error) {
-	home, err := os.UserHomeDir()
+	target, err := tmuxConfigMutationTarget()
 	if err != nil {
-		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
+		return MutationEvidence{}, err
 	}
-	configPath := filepath.Join(home, ".tmux.conf")
-	managed := wrapManagedConfigSection(tmuxManagedStart, tmuxManagedEnd, GenerateTmuxConfig(cfg, theme))
+	configPath := target.path
+	managed := wrapManagedConfigSection(tmuxManagedStart, tmuxManagedEnd, generateTmuxConfig(cfg, theme, target.reloadExpr))
 	lock := withToolConfigLock
 	if accepted != nil {
 		locker := operation.DefaultLocker

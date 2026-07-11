@@ -118,7 +118,7 @@ shown before apply is authoritative for a particular machine.
 | Path | Purpose |
 |------|---------|
 | `~/.zshrc` | Zsh integration |
-| `~/.tmux.conf` | Native tmux config preserved outside one bounded managed section |
+| `~/.tmux.conf` or `${XDG_CONFIG_HOME:-~/.config}/tmux/tmux.conf` | Active native tmux config preserved outside one bounded managed section |
 | `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` | XDG Ghostty settings |
 | `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` | macOS Ghostty settings |
 | `~/.config/yazi/` | Yazi settings |

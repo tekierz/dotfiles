@@ -675,7 +675,11 @@ func scriptsForPlan(name string) []byte {
 }
 
 func installerConfigSpecs(home, theme string, cfg DeepDiveConfig) ([]configPlanSpec, error) {
-	tmuxTargets := []string{".tmux.conf"}
+	tmuxPath, err := tools.TmuxConfigMutationPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve tmux mutation path: %w", err)
+	}
+	tmuxTargets := []string{planTargetPath(home, tmuxPath)}
 	if cfg.TmuxTPMEnabled {
 		tmuxTargets = append(tmuxTargets, ".tmux/plugins/tpm")
 	}

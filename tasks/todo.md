@@ -97,6 +97,9 @@ observability land before new integrations or broad UI work.
   the bounded form, and ambiguous marker layouts fail closed.
 - Manage now exposes tmux split-binding style instead of silently restoring the hidden
   compiled default whenever another tmux field is saved.
+- Tmux discovery now follows upstream's user-config precedence and binds both planning and
+  writing to the same active legacy/XDG source; the reload hotkey targets that source, and
+  unsafe relative XDG paths or symlinked candidates fail closed.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 
