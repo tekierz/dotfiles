@@ -47,15 +47,15 @@ func (s *configClaudeCodeScreen) ID() Screen { return ScreenConfigClaudeCode }
 // Init returns any initial commands (none on entry).
 func (s *configClaudeCodeScreen) Init() tea.Cmd { return nil }
 
-// back resets the focused field and returns to the deep-dive menu. When
-// launched standalone (`dotfiles config claude-code`) it persists the edits and
-// quits instead, mirroring configFieldNav.back() (C27).
+// back resets the focused field and returns to the deep-dive menu. In standalone
+// mode Enter instead freezes a reviewed config-save plan and opens confirmation;
+// standalone Esc/q cancel before this helper is called.
 func (s *configClaudeCodeScreen) back() tea.Cmd {
 	a := s.App()
 	if a != nil {
 		a.configFieldIndex = 0
 		if a.configStandalone {
-			return a.applyStandaloneConfigCmd()
+			return a.prepareStandaloneConfigSave()
 		}
 	}
 	return NavigateTo(ScreenDeepDiveMenu)
@@ -93,7 +93,12 @@ func (s *configClaudeCodeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			}
 		case " ":
 			s.toggle(a)
-		case "esc", "enter":
+		case "esc":
+			if a.configStandalone {
+				return s, tea.Quit
+			}
+			return s, s.back()
+		case "enter":
 			return s, s.back()
 		}
 	case tea.MouseMsg:
@@ -199,8 +204,11 @@ func (s *configClaudeCodeScreen) View(width, height int) string {
 	}
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
-	// Use the canonical list-nav footer text (matches configListNav.footer()).
-	help := HelpStyle.Render("↑↓ navigate • space toggle • enter/esc back")
+	helpText := "↑↓ navigate • space toggle • enter/esc back"
+	if a.configStandalone {
+		helpText = "↑↓ navigate • space toggle • enter preview • esc/q cancel"
+	}
+	help := HelpStyle.Render(helpText)
 	a.configFieldLayout = rec.finalize(width, height, title, box, help)
 
 	return lipgloss.Place(

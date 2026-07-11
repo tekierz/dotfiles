@@ -12,36 +12,17 @@ import (
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-// applyStandaloneConfigCmd persists the edits from a `dotfiles config <tool>`
-// session to the real config files and then quits (C27). It writes ONLY the tool
-// whose config screen was opened — NOT every generator — so a single-tool config
-// session can never clobber the other tools' config files with compiled-in
-// defaults (the data-loss regression FIX 1 closes). The opened tool is derived
-// from a.startScreen via the authoritative screen<->tool mapping.
-//
-// A failed apply is surfaced on stderr (instead of being silently swallowed) so a
-// failed `config <tool>` save is observable; the app is quitting so there is no
-// screen left to render the error to.
-func (a *App) applyStandaloneConfigCmd() tea.Cmd {
-	return tea.Sequence(
-		a.applyStandaloneConfigWorker(),
-		tea.Quit,
-	)
-}
-
 // applyStandaloneConfigWorker builds the tea.Cmd that performs the standalone
-// scoped write. The config data is DEEP-SNAPSHOTTED here — on the UI goroutine,
+// legacy scoped write used by direct compatibility tests. Production standalone
+// saves use the reviewed transaction in standalone_config_transaction.go. The
+// config data is DEEP-SNAPSHOTTED here — on the UI goroutine,
 // before the Cmd is returned — so the closure the tea runtime later runs on a
 // worker goroutine reads only fully-owned data and never touches a.deepDiveConfig.
 //
-// This is the crash fix: the screen that dispatched this Cmd (e.g. `dotfiles
-// config claude-code`) stays active until tea.Quit lands and keeps toggling
-// a.deepDiveConfig's maps (ClaudeCodeMCPs, CLITools) on the UI goroutine. Handing
-// the worker a shallow `*a.deepDiveConfig` — whose map/slice fields alias those
-// live maps — makes the worker read a map the UI goroutine is writing: a fatal
-// concurrent map read/write. snapshotDeepDiveConfig clones every reference field
-// so there is no shared mutable state. Mirrors saveManageConfigCmd's pre-return
-// snapshot in manage_dualpane.go.
+// The helper remains as a concurrency regression harness: tests may keep
+// mutating a.deepDiveConfig while its Cmd runs. snapshotDeepDiveConfig clones
+// every reference field so the worker owns its input. Live standalone saves do
+// not call this helper; they use the reviewed transaction kernel.
 func (a *App) applyStandaloneConfigWorker() tea.Cmd {
 	startScreen := a.startScreen
 	snapshot := snapshotDeepDiveConfig(a.deepDiveConfig)
@@ -54,20 +35,17 @@ func (a *App) applyStandaloneConfigWorker() tea.Cmd {
 	}
 }
 
-// applyStandaloneConfig writes ONLY the config file for the tool whose screen was
-// opened standalone (a.startScreen), using a deep snapshot of the current
-// in-memory deepDiveConfig. It returns any generator error(s). Splitting this out
-// from the Cmd keeps it directly testable (no tea.Quit).
+// applyStandaloneConfig is a direct compatibility-test helper for the legacy
+// scoped generator. Live standalone CLI saves use the reviewed transaction.
 func (a *App) applyStandaloneConfig() []error {
 	return applyStandaloneSnapshot(a.startScreen, snapshotDeepDiveConfig(a.deepDiveConfig), a.theme)
 }
 
 // applyStandaloneSnapshot writes ONLY the opened tool's config file from an
 // already-owned DeepDiveConfig snapshot. It is pure (no App or goroutine-shared
-// state), so it is safe to call on any goroutine and both standalone paths — the
-// synchronous applyStandaloneConfig and the async applyStandaloneConfigWorker —
-// funnel through it so they cannot drift. An unknown/non-config startScreen is a
-// no-op returning nil.
+// state), so compatibility tests may call it synchronously or through
+// applyStandaloneConfigWorker without aliasing editor state. It is not a live
+// CLI dispatch path. An unknown/non-config startScreen is a no-op returning nil.
 func applyStandaloneSnapshot(startScreen Screen, cfg DeepDiveConfig, theme string) []error {
 	toolID, ok := toolIDForScreen(startScreen)
 	if !ok {
@@ -119,14 +97,9 @@ func snapshotDeepDiveConfig(cfg *DeepDiveConfig) DeepDiveConfig {
 // config struct (the config-apply generators here AND the install worker in
 // installation.go) calls the same builder, so the mapping cannot drift.
 //
-// The per-tool generators live once in toolConfigGenerators; the standalone
-// `dotfiles config <tool>` editor (C27) and the Manage editor's save (C12) both
-// call applyOneToolConfig — Manage via applyChangedManageTools over the changed
-// tools — to write ONLY the relevant tool(s) so a save can never clobber the
-// others with defaults (FIX 1). The install worker uses the builders directly
-// with its install-only writers (SetupTPM / WriteNeovimConfig do the clones), so
-// only the WRITE action differs between install and config-apply; the
-// TRANSLATION is shared.
+// Manage calls applyOneToolConfig through applyChangedManageTools. Production
+// standalone saves and the install worker use their authority-aware writers
+// directly, while sharing the same *ConfigFrom translation builders below.
 
 // ghosttyConfigFrom is the single mapping of DeepDiveConfig to tools.GhosttyConfig,
 // shared by the config-apply generator and the install worker.
@@ -277,10 +250,10 @@ func glowConfigFrom(cfg DeepDiveConfig) tools.GlowConfig {
 
 // toolConfigGenerators maps a tool ID to the function that writes that one tool's
 // config file from a DeepDiveConfig, using the shared *ConfigFrom builder for the
-// translation. It is the SINGLE source of the generator invocations:
-// applyOneToolConfig runs exactly one entry (standalone `dotfiles config <tool>`,
-// and Manage save via applyChangedManageTools), so those paths can never drift.
-// Keys match the tool IDs in toolConfigScreens.
+// translation. applyOneToolConfig runs exactly one entry for Manage saves and
+// direct compatibility tests. Production standalone saves use the reviewed
+// authority dispatch in standalone_config_transaction.go. Keys match the tool
+// IDs in toolConfigScreens.
 //
 // claude-code is intentionally omitted here because its generator only runs when
 // MCP servers are configured; applyOneToolConfig handles that gated case
@@ -341,12 +314,9 @@ func applyClaudeCodeConfig(cfg DeepDiveConfig) error {
 	return tools.NewClaudeCodeTool().ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs)
 }
 
-// applyOneToolConfig writes ONLY the named tool's config file from a
-// DeepDiveConfig. It is the single scoped writer used by the standalone
-// `dotfiles config <tool>` exit and, one tool at a time via
-// applyChangedManageTools, by the Manage save — so editing one tool's settings can
-// never overwrite another tool's config file with defaults (FIX 1). An unknown
-// toolID (no generator) is a no-op returning nil.
+// applyOneToolConfig writes ONLY the named tool's config for Manage and direct
+// compatibility tests. Live standalone saves use the reviewed transaction and
+// cannot reach this legacy dispatcher. An unknown toolID is a no-op here.
 func applyOneToolConfig(toolID string, cfg DeepDiveConfig, theme string) []error {
 	if toolID == "claude-code" {
 		if err := applyClaudeCodeConfig(cfg); err != nil {

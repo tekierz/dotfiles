@@ -74,6 +74,7 @@ const (
 	ScreenConfigBtop
 	ScreenConfigGlow
 	ScreenConfigClaudeCode
+	ScreenConfigSaveConfirm
 )
 
 // Available themes
@@ -218,12 +219,19 @@ type App struct {
 	// install wizard). In that mode there is no later install step to apply the
 	// edits, so the config screen's back() persists the edits to the real config
 	// files itself and quits, instead of returning to the deep-dive menu (C27).
-	configStandalone bool
-	macAppIndex      int // Currently focused app in macOS screen
-	utilityIndex     int // Currently focused utility
-	cliToolIndex     int // Currently focused CLI tool
-	guiAppIndex      int // Currently focused GUI app
-	cliUtilityIndex  int // Currently focused CLI utility (bat, eza, etc.)
+	configStandalone               bool
+	standaloneConfigPlan           *installPlan
+	standaloneConfigErr            error
+	standaloneConfigStatus         string
+	standaloneConfigWarning        string
+	standaloneConfigRunning        bool
+	standaloneConfigDone           bool
+	standaloneConfigManualRecovery bool
+	macAppIndex                    int // Currently focused app in macOS screen
+	utilityIndex                   int // Currently focused utility
+	cliToolIndex                   int // Currently focused CLI tool
+	guiAppIndex                    int // Currently focused GUI app
+	cliUtilityIndex                int // Currently focused CLI utility (bat, eza, etc.)
 
 	// Management state (detailed config)
 	manageConfig *ManageConfig

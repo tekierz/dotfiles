@@ -96,6 +96,8 @@ func (f *Factory) Create(id Screen, ctx *ScreenContext) ScreenHandler {
 		return NewConfigGlowScreen(ctx)
 	case ScreenConfigClaudeCode:
 		return NewConfigClaudeCodeScreen(ctx)
+	case ScreenConfigSaveConfirm:
+		return NewConfigSaveConfirmScreen(ctx)
 	default:
 		panic(fmt.Sprintf("screen factory: no handler for screen %d — every live screen must be mapped", id))
 	}
