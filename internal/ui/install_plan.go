@@ -17,6 +17,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/operation"
+	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/scripts"
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -28,7 +29,10 @@ const gitManagedConfigRelForPlan = ".config/dotfiles/git/config"
 // execution, and summary. DeepDiveConfig is already deeply cloned before it is
 // stored here; all slice/map accessors return copies.
 type installPlan struct {
-	document      operation.Plan
+	document operation.Plan
+	// selectedTools is reserved for the explicitly unreviewed legacy test
+	// harness. Reviewed production plans leave it nil and derive installs from
+	// the hash-bound operation actions.
 	selectedTools []string
 	configTools   []string
 	config        DeepDiveConfig
@@ -118,7 +122,45 @@ func (p *installPlan) selectedToolIDs() []string {
 	if p == nil {
 		return nil
 	}
-	return slices.Clone(p.selectedTools)
+	if p.selectedTools != nil {
+		return slices.Clone(p.selectedTools)
+	}
+	var selected []string
+	for _, action := range p.actions() {
+		if action.Kind == operation.KindInstallTool && action.Disposition == operation.DispositionApply {
+			selected = append(selected, action.ToolID)
+		}
+	}
+	return selected
+}
+
+func (p *installPlan) installExecutionSnapshot() (installExecutionSnapshot, error) {
+	if p == nil {
+		return installExecutionSnapshot{}, fmt.Errorf("no accepted plan")
+	}
+	snapshot := installExecutionSnapshot{recipes: make(map[string]operation.InstallRecipe), detected: make(map[string]bool), digests: make(map[string]string)}
+	for _, action := range p.actions() {
+		if action.Kind != operation.KindInstallTool || action.Disposition != operation.DispositionApply {
+			continue
+		}
+		if action.InstallRecipe == nil || action.InstallDetected == nil {
+			return installExecutionSnapshot{}, fmt.Errorf("install action %s lacks accepted authority", action.ID)
+		}
+		if _, duplicate := snapshot.recipes[action.ToolID]; duplicate {
+			return installExecutionSnapshot{}, fmt.Errorf("duplicate install action for %s", action.ToolID)
+		}
+		recipe := operation.CloneInstallRecipe(*action.InstallRecipe)
+		if snapshot.platform == "" {
+			snapshot.platform = pkg.Platform(recipe.Platform)
+			snapshot.manager = recipe.Manager
+		} else if snapshot.platform != pkg.Platform(recipe.Platform) || snapshot.manager != recipe.Manager {
+			return installExecutionSnapshot{}, fmt.Errorf("install actions disagree on environment")
+		}
+		snapshot.recipes[action.ToolID] = recipe
+		snapshot.detected[action.ToolID] = *action.InstallDetected
+		snapshot.digests[action.ToolID] = action.DesiredDigest
+	}
+	return snapshot, nil
 }
 func (p *installPlan) configToolIDs() []string {
 	if p == nil {
@@ -254,6 +296,11 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 	selected := a.collectSelectedToolsWithRuntime(installRuntime)
 	sort.Strings(selected)
 	platform := installRuntime.detectPlatform()
+	manager := installRuntime.detectManager()
+	managerName := ""
+	if manager != nil {
+		managerName = manager.Name()
+	}
 
 	globalPath := filepath.Join(config.ConfigDir(), "global.json")
 	globalTarget := planTargetPath(home, globalPath)
@@ -310,20 +357,26 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		if !ok {
 			return nil, fmt.Errorf("selected tool %s disappeared while planning", toolID)
 		}
+		recipe, err := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: platform, Manager: managerName})
+		if err != nil {
+			return nil, fmt.Errorf("describe selected tool %s install: %w", toolID, err)
+		}
+		// collectSelectedToolsWithRuntime admits only tools observed missing by
+		// the install cache. Preserve that typed false observation without
+		// synchronously probing the package manager once per recipe in planning.
+		detected := false
 		actions = append(actions, operation.Action{
-			ID:          "install:" + toolID,
-			Kind:        operation.KindInstallTool,
-			ToolID:      toolID,
-			Target:      toolID,
-			Description: "install or verify " + toolID,
-			Disposition: operation.DispositionApply,
-			DesiredDigest: digestPlanValue(struct {
-				ToolID   string
-				Platform string
-				Packages []string
-			}{toolID, string(platform), tools.PackagesForPlatform(tool.Packages(), platform)}),
-			Ownership:     operation.OwnershipPackageManager,
-			Reversibility: operation.ReversibilityManual,
+			ID:              "install:" + toolID,
+			Kind:            operation.KindInstallTool,
+			ToolID:          toolID,
+			Target:          toolID,
+			Description:     "install or verify " + toolID,
+			Disposition:     operation.DispositionApply,
+			DesiredDigest:   installRecipeDigest(recipe),
+			Ownership:       operation.OwnershipPackageManager,
+			Reversibility:   operation.ReversibilityManual,
+			InstallRecipe:   &recipe,
+			InstallDetected: &detected,
 		})
 	}
 
@@ -466,7 +519,6 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 	}
 	return &installPlan{
 		document:            document,
-		selectedTools:       slices.Clone(selected),
 		configTools:         configTools,
 		config:              cfg,
 		theme:               a.theme,
@@ -478,6 +530,14 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		statePlan:           statePlan,
 		ghosttyConfigTarget: ghosttyConfigTarget,
 	}, nil
+}
+
+func installRecipeDigest(recipe operation.InstallRecipe) string {
+	digest, err := operation.InstallRecipeDigest(recipe)
+	if err != nil {
+		return ""
+	}
+	return digest
 }
 
 func validateStateProductSeparation(home string, actions []operation.Action) error {

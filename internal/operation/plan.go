@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const CurrentPlanSchemaVersion = 1
@@ -54,6 +55,50 @@ const (
 	ReversibilityManual     Reversibility = "manual"
 )
 
+const CurrentInstallRecipeSchemaVersion = 1
+
+type InstallStepKind string
+
+const (
+	InstallStepPackageManager InstallStepKind = "package_manager"
+	InstallStepNPMGlobal      InstallStepKind = "npm_global"
+)
+
+type InstallDetectorKind string
+
+const (
+	InstallDetectorBinary         InstallDetectorKind = "binary"
+	InstallDetectorAppBundle      InstallDetectorKind = "app_bundle"
+	InstallDetectorPackageReceipt InstallDetectorKind = "package_receipt"
+)
+
+// InstallStep intentionally has no generic shell-command or remote-script
+// variant. Mutable vendor scripts require a separate verified-artifact design.
+type InstallStep struct {
+	Kind     InstallStepKind `json:"kind"`
+	Provider string          `json:"provider"`
+	Packages []string        `json:"packages,omitempty"`
+	Args     []string        `json:"args,omitempty"`
+}
+
+type InstallDetector struct {
+	Kind   InstallDetectorKind `json:"kind"`
+	Values []string            `json:"values"`
+}
+
+// InstallRecipe is the complete, display-safe provenance and execution input
+// for an install action. It contains no environment values, tokens, or secrets.
+type InstallRecipe struct {
+	SchemaVersion  int             `json:"schema_version"`
+	ToolID         string          `json:"tool_id"`
+	Platform       string          `json:"platform"`
+	Manager        string          `json:"manager,omitempty"`
+	Steps          []InstallStep   `json:"steps"`
+	Detector       InstallDetector `json:"detector"`
+	Authentication string          `json:"authentication,omitempty"`
+	Risk           string          `json:"risk"`
+}
+
 // Observation is the planner's typed view of a target before mutation. Digest
 // is a content hash, never raw config data; Source identifies which precedence
 // path was observed.
@@ -68,20 +113,22 @@ type Observation struct {
 // Existing file mutations must carry a durable backup target and proven
 // ownership. Blocked actions remain in the plan so omissions are visible.
 type Action struct {
-	ID            string        `json:"id"`
-	Kind          Kind          `json:"kind"`
-	ToolID        string        `json:"tool_id,omitempty"`
-	Target        string        `json:"target"`
-	Description   string        `json:"description"`
-	Disposition   Disposition   `json:"disposition"`
-	Reason        string        `json:"reason,omitempty"`
-	DesiredDigest string        `json:"desired_digest"`
-	Ownership     Ownership     `json:"ownership"`
-	Reversibility Reversibility `json:"reversibility"`
-	BackupTarget  string        `json:"backup_target,omitempty"`
-	BackupTargets []string      `json:"backup_targets,omitempty"`
-	Observation   Observation   `json:"observation"`
-	Observations  []Observation `json:"observations,omitempty"`
+	ID              string         `json:"id"`
+	Kind            Kind           `json:"kind"`
+	ToolID          string         `json:"tool_id,omitempty"`
+	Target          string         `json:"target"`
+	Description     string         `json:"description"`
+	Disposition     Disposition    `json:"disposition"`
+	Reason          string         `json:"reason,omitempty"`
+	DesiredDigest   string         `json:"desired_digest"`
+	Ownership       Ownership      `json:"ownership"`
+	Reversibility   Reversibility  `json:"reversibility"`
+	BackupTarget    string         `json:"backup_target,omitempty"`
+	BackupTargets   []string       `json:"backup_targets,omitempty"`
+	Observation     Observation    `json:"observation"`
+	Observations    []Observation  `json:"observations,omitempty"`
+	InstallRecipe   *InstallRecipe `json:"install_recipe,omitempty"`
+	InstallDetected *bool          `json:"install_detected,omitempty"`
 }
 
 type planDocument struct {
@@ -159,6 +206,23 @@ func validateDocument(doc planDocument) error {
 				return fmt.Errorf("%w: %s mutates an existing config without a backup target", ErrInvalidPlan, prefix)
 			}
 		}
+		if action.Kind == KindInstallTool {
+			if action.InstallRecipe == nil || action.InstallDetected == nil {
+				return fmt.Errorf("%w: %s requires an install recipe and detector observation", ErrInvalidPlan, prefix)
+			}
+			if err := validateInstallRecipe(*action.InstallRecipe); err != nil {
+				return fmt.Errorf("%w: %s has invalid install recipe: %w", ErrInvalidPlan, prefix, err)
+			}
+			if action.InstallRecipe.ToolID != action.ToolID || action.Target != action.ToolID {
+				return fmt.Errorf("%w: %s install identity does not match its recipe", ErrInvalidPlan, prefix)
+			}
+			digest, err := InstallRecipeDigest(*action.InstallRecipe)
+			if err != nil || digest != action.DesiredDigest {
+				return fmt.Errorf("%w: %s desired digest does not match its install recipe", ErrInvalidPlan, prefix)
+			}
+		} else if action.InstallRecipe != nil || action.InstallDetected != nil {
+			return fmt.Errorf("%w: %s non-install action carries install authority", ErrInvalidPlan, prefix)
+		}
 		if action.Disposition == DispositionApply && (action.Kind == KindWriteConfig || action.Kind == KindInstallFile || action.Kind == KindUpdateState) {
 			if len(action.Observations) == 0 {
 				return fmt.Errorf("%w: %s requires per-target observations", ErrInvalidPlan, prefix)
@@ -214,6 +278,92 @@ func validDigest(value string) bool {
 	return err == nil
 }
 
+func validateInstallRecipe(recipe InstallRecipe) error {
+	if recipe.SchemaVersion != CurrentInstallRecipeSchemaVersion || recipe.ToolID == "" || recipe.Platform == "" || recipe.Risk == "" {
+		return fmt.Errorf("schema, tool, platform, and risk are required")
+	}
+	if len(recipe.Detector.Values) == 0 {
+		return fmt.Errorf("detector values are required")
+	}
+	for _, value := range append([]string{recipe.ToolID, recipe.Platform, recipe.Manager, recipe.Authentication, recipe.Risk}, recipe.Detector.Values...) {
+		if hasUnsafeDisplayControl(value) {
+			return fmt.Errorf("control characters are not allowed")
+		}
+	}
+	if recipe.Detector.Kind != InstallDetectorBinary && recipe.Detector.Kind != InstallDetectorAppBundle && recipe.Detector.Kind != InstallDetectorPackageReceipt {
+		return fmt.Errorf("unsupported detector %q", recipe.Detector.Kind)
+	}
+	if len(recipe.Steps) == 0 {
+		return fmt.Errorf("at least one install step is required")
+	}
+	for _, step := range recipe.Steps {
+		if step.Provider == "" || hasUnsafeDisplayControl(step.Provider) {
+			return fmt.Errorf("step provider is invalid")
+		}
+		if step.Kind != InstallStepPackageManager && step.Kind != InstallStepNPMGlobal {
+			return fmt.Errorf("unsupported install step %q", step.Kind)
+		}
+		if step.Kind == InstallStepPackageManager && (recipe.Manager == "" || step.Provider != recipe.Manager || len(step.Packages) == 0 || len(step.Args) != 0) {
+			return fmt.Errorf("package-manager step does not match the accepted manager")
+		}
+		if step.Kind == InstallStepNPMGlobal && (step.Provider != "npm" || len(step.Args) == 0 || len(step.Packages) != 0) {
+			return fmt.Errorf("npm step requires exact npm arguments")
+		}
+		for _, value := range append(slices.Clone(step.Packages), step.Args...) {
+			if value == "" || hasUnsafeDisplayControl(value) {
+				return fmt.Errorf("step argument is invalid")
+			}
+		}
+	}
+	if recipe.Detector.Kind == InstallDetectorPackageReceipt {
+		installed := make(map[string]struct{})
+		for _, step := range recipe.Steps {
+			if step.Kind == InstallStepPackageManager {
+				for _, name := range step.Packages {
+					installed[name] = struct{}{}
+				}
+			}
+		}
+		for _, value := range recipe.Detector.Values {
+			if _, ok := installed[value]; !ok {
+				return fmt.Errorf("package detector %q is not installed by this recipe", value)
+			}
+		}
+	}
+	return nil
+}
+
+func hasUnsafeDisplayControl(value string) bool {
+	for _, r := range value {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return true
+		}
+	}
+	return false
+}
+
+func CloneInstallRecipe(recipe InstallRecipe) InstallRecipe {
+	recipe.Detector.Values = slices.Clone(recipe.Detector.Values)
+	recipe.Steps = slices.Clone(recipe.Steps)
+	for index := range recipe.Steps {
+		recipe.Steps[index].Packages = slices.Clone(recipe.Steps[index].Packages)
+		recipe.Steps[index].Args = slices.Clone(recipe.Steps[index].Args)
+	}
+	return recipe
+}
+
+func InstallRecipeDigest(recipe InstallRecipe) (string, error) {
+	if err := validateInstallRecipe(recipe); err != nil {
+		return "", err
+	}
+	canonical, err := json.Marshal(recipe)
+	if err != nil {
+		return "", fmt.Errorf("marshal install recipe: %w", err)
+	}
+	digest := sha256.Sum256(canonical)
+	return hex.EncodeToString(digest[:]), nil
+}
+
 func validRelativeTarget(target string) bool {
 	if target == "" || filepath.IsAbs(target) || strings.ContainsAny(target, "\x00\r\n") {
 		return false
@@ -249,6 +399,14 @@ func cloneActions(actions []Action) []Action {
 	for index := range cloned {
 		cloned[index].BackupTargets = slices.Clone(actions[index].BackupTargets)
 		cloned[index].Observations = slices.Clone(actions[index].Observations)
+		if actions[index].InstallRecipe != nil {
+			recipe := CloneInstallRecipe(*actions[index].InstallRecipe)
+			cloned[index].InstallRecipe = &recipe
+		}
+		if actions[index].InstallDetected != nil {
+			detected := *actions[index].InstallDetected
+			cloned[index].InstallDetected = &detected
+		}
 	}
 	return cloned
 }

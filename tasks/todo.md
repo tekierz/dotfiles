@@ -118,6 +118,23 @@ observability land before new integrations or broad UI work.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 
+### Batch 3 progress
+
+- Install actions now publish a versioned, non-secret recipe in the immutable operation
+  plan: platform, package manager, exact package/npm arguments, typed detector,
+  authentication expectation, and risk are hash-bound and visible in the confirmation UI.
+- Reviewed wizard execution is derived only from the immutable plan actions. It rejects
+  missing/extra/duplicate selections, recipe digest drift, platform/manager drift, and
+  detector-state drift before mutation; recipe-backed tools never dispatch their legacy
+  arbitrary `Install` method.
+- Package, binary, and app-bundle detection now follows the accepted typed recipe instead
+  of decorative metadata or arbitrary `Tool.IsInstalled` behavior. Package-receipt
+  detectors must refer to packages installed by the same recipe.
+- Mutable vendor shell scripts are deliberately unrepresentable. Manage refuses direct
+  installation for recipe-backed tools and routes users to the reviewed installer flow.
+- Remaining provenance work includes binding exact package-manager/npm executable identity,
+  a discoverable JSON export/noninteractive contract, and full Manage plan/preview parity.
+
 ## Comprehensive pre-deployment audit — 2026-07-09
 
 - [x] Inventory every tracked file and record exact coverage.
@@ -299,8 +316,9 @@ Retired Bash installer (historical findings; source and execution docs removed):
 
 ## Post-release backlog (carried forward)
 
-- New AI CLI tools — `tasks/new-tools-spec.md` (researched, ready to implement; re-verify
-  package names first)
+- New AI CLI tools — the older `tasks/new-tools-spec.md` is stale and must not be treated as
+  implementation authority; current official-source verification and the reviewed recipe
+  boundary govern safe routes, while mutable-script-only tools remain blocked.
 - Features from archived beta.plan: config export/import, tool dependency graph,
   `dotfiles doctor`, plugin system, theme customization guide, user guide
 - Integration/E2E test suite for install/uninstall; UI snapshot tests; CI platform matrix

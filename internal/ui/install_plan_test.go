@@ -16,10 +16,24 @@ import (
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/scripts"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
+
+type installHookManager struct {
+	pkg.PackageManager
+	hook func()
+}
+
+func (m *installHookManager) InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
+	if m.hook != nil {
+		m.hook()
+		m.hook = nil
+	}
+	return m.PackageManager.InstallStreaming(ctx, packages...)
+}
 
 func planActionByID(t *testing.T, plan *installPlan, id string) operation.Action {
 	t.Helper()
@@ -146,7 +160,7 @@ func TestInstallExecutionUsesExactAcceptedGhosttyTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan.configTools = []string{"ghostty"}
-	plan.selectedTools = nil
+	plan.selectedTools = []string{}
 	installed := map[string]bool{"ghostty": true}
 	runtime = registryRuntime(pkg.PlatformMacOS, installed)
 	events := make(chan installEventMsg, 64)
@@ -659,6 +673,12 @@ func TestInstallPlanFailureAutomaticallyRestoresGlobalState(t *testing.T) {
 	if plan.hasBlocked() {
 		t.Fatalf("fresh rollback plan unexpectedly blocked: %+v", plan.actions())
 	}
+	mgr, ok := runtime.detectManager().(*pkg.MockPackageManager)
+	if !ok {
+		t.Fatal("fixture manager is not mutable")
+	}
+	mgr.InstallErr = errors.New("injected package failure")
+	runtime.detectManager = func() pkg.PackageManager { return mgr }
 	runtime.backupTargets = backupPlanTargets
 	events := make(chan installEventMsg, 256)
 	go runInstallPlanWorker(context.Background(), events, plan, runtime)
@@ -777,14 +797,14 @@ func TestPostPackageRevalidationPreservesExternalEditWithoutRollback(t *testing.
 	external := []byte("{\"schema_version\":1,\"theme\":\"nord\",\"nav_style\":\"vim\",\"external_edit\":true}\n")
 	edited := false
 	var injectionErr error
-	runtime.isToolInstalled = func(tools.Tool) bool {
-		if !edited {
-			edited = true
-			injectionErr = os.WriteFile(globalPath, external, 0o600)
-		}
-		// Force a package postcondition failure after the external edit. The
-		// post-package exact revalidation must refuse before global/config writes.
-		return false
+	originalManager := runtime.detectManager()
+	runtime.detectManager = func() pkg.PackageManager {
+		return &installHookManager{PackageManager: originalManager, hook: func() {
+			if !edited {
+				edited = true
+				injectionErr = os.WriteFile(globalPath, external, 0o600)
+			}
+		}}
 	}
 	events := make(chan installEventMsg, 256)
 	go runInstallPlanWorker(context.Background(), events, plan, runtime)
@@ -840,18 +860,20 @@ func TestPostPackageRevalidationPreservesExternalConfigCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 	injected := false
-	runtime.isToolInstalled = func(tools.Tool) bool {
-		if !injected {
-			injected = true
-			if err := os.MkdirAll(filepath.Dir(ghosttyTarget), 0o700); err != nil {
-				t.Errorf("create Ghostty parent: %v", err)
-				return true
+	originalManager := runtime.detectManager()
+	runtime.detectManager = func() pkg.PackageManager {
+		return &installHookManager{PackageManager: originalManager, hook: func() {
+			if !injected {
+				injected = true
+				if err := os.MkdirAll(filepath.Dir(ghosttyTarget), 0o700); err != nil {
+					t.Errorf("create Ghostty parent: %v", err)
+					return
+				}
+				if err := os.Symlink(victim, ghosttyTarget); err != nil {
+					t.Errorf("inject Ghostty collision: %v", err)
+				}
 			}
-			if err := os.Symlink(victim, ghosttyTarget); err != nil {
-				t.Errorf("inject Ghostty collision: %v", err)
-			}
-		}
-		return true
+		}}
 	}
 	events := make(chan installEventMsg, 256)
 	go runInstallPlanWorker(context.Background(), events, plan, runtime)

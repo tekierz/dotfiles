@@ -19,6 +19,25 @@ type ClaudeCodeTool struct {
 	BaseTool
 }
 
+func (t *ClaudeCodeTool) InstallRecipe(environment InstallEnvironment) (operation.InstallRecipe, error) {
+	if environment.Manager == "" {
+		return operation.InstallRecipe{}, fmt.Errorf("installing Claude Code requires a package manager for Node.js")
+	}
+	return operation.InstallRecipe{
+		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
+		ToolID:        t.ID(),
+		Platform:      string(environment.Platform),
+		Manager:       environment.Manager,
+		Steps: []operation.InstallStep{
+			{Kind: operation.InstallStepPackageManager, Provider: environment.Manager, Packages: PackagesForPlatform(t.Packages(), environment.Platform)},
+			{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: []string{"install", "-g", "@anthropic-ai/claude-code"}},
+		},
+		Detector:       operation.InstallDetector{Kind: operation.InstallDetectorBinary, Values: []string{"claude"}},
+		Authentication: "interactive provider login",
+		Risk:           "downloads and executes npm package lifecycle code",
+	}, nil
+}
+
 // NewClaudeCodeTool creates a new Claude Code tool
 func NewClaudeCodeTool() *ClaudeCodeTool {
 	home, _ := os.UserHomeDir()

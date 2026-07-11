@@ -142,6 +142,21 @@ func (s *fileTreeScreen) View(width, height int) string {
 				line = fmt.Sprintf("  %s %-14s %s", marker, "state", action.Description)
 			}
 			lines = append(lines, style.Render(line))
+			if action.InstallRecipe != nil {
+				recipe := action.InstallRecipe
+				lines = append(lines, mutedStyle.Render(fmt.Sprintf("      %s on %s · detector %s:%s", recipe.Manager, recipe.Platform, recipe.Detector.Kind, strings.Join(recipe.Detector.Values, ", "))))
+				for _, step := range recipe.Steps {
+					detail := strings.Join(step.Packages, " ")
+					if len(step.Args) > 0 {
+						detail = step.Provider + " " + strings.Join(step.Args, " ")
+					}
+					lines = append(lines, pkgStyle.Render(fmt.Sprintf("        → %s: %s", step.Kind, detail)))
+				}
+				if recipe.Authentication != "" {
+					lines = append(lines, mutedStyle.Render("        Auth: "+recipe.Authentication))
+				}
+				lines = append(lines, modStyle.Render("        Risk: "+recipe.Risk))
+			}
 			if action.Reason != "" {
 				lines = append(lines, blockedStyle.Render("      "+action.Reason))
 			}

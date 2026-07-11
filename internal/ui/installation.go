@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -561,6 +562,15 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	}
 	home, homeErr := os.UserHomeDir()
 	selectedTools := plan.selectedToolIDs()
+	var acceptedInstalls installExecutionSnapshot
+	if persistJournal {
+		var snapshotErr error
+		acceptedInstalls, snapshotErr = plan.installExecutionSnapshot()
+		if snapshotErr != nil {
+			events <- installEventMsg{done: true, err: fmt.Errorf("derive accepted install authority: %w", snapshotErr)}
+			return
+		}
+	}
 	cfg := snapshotDeepDiveConfig(&plan.config)
 	theme := plan.theme
 	configAllowed := make(map[string]bool, len(plan.configTools))
@@ -665,6 +675,13 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 					err = errors.Join(err, fmt.Errorf("record automatic rollback outcome: %w", rollbackErr))
 				}
 			}
+			if err == nil {
+				for _, result := range journalResults {
+					if result.Status == operation.ActionPending {
+						err = errors.Join(err, fmt.Errorf("accepted action %s has no terminal execution result", result.ActionID))
+					}
+				}
+			}
 			terminalStatus := operation.StatusSucceeded
 			if errors.Is(err, context.Canceled) {
 				terminalStatus = operation.StatusCancelled
@@ -675,13 +692,8 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 				if journalResults[index].Status != operation.ActionPending {
 					continue
 				}
-				if err == nil {
-					journalResults[index].Status = operation.ActionSucceeded
-					journalResults[index].Summary = "completed"
-				} else {
-					journalResults[index].Status = operation.ActionSkipped
-					journalResults[index].Summary = "not completed before operation ended"
-				}
+				journalResults[index].Status = operation.ActionSkipped
+				journalResults[index].Summary = "not completed before operation ended"
 			}
 			if finishErr := journalRecord.Finish(terminalStatus, time.Now(), journalResults, journalWarnings); finishErr != nil {
 				err = errors.Join(err, fmt.Errorf("finalize operation journal: %w", finishErr))
@@ -843,7 +855,12 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	if len(selectedTools) == 0 {
 		emitLine("No new tools to install; applying configuration...")
 	} else {
-		result := runSelectedToolInstalls(ctx, selectedTools, installRuntime, emitLine, stepLine)
+		var result selectedToolInstallResult
+		if persistJournal {
+			result = runSelectedToolInstalls(ctx, selectedTools, installRuntime, emitLine, stepLine, acceptedInstalls)
+		} else {
+			result = runSelectedToolInstalls(ctx, selectedTools, installRuntime, emitLine, stepLine)
+		}
 		for _, toolID := range selectedTools {
 			if result.installed[toolID] {
 				markAction("install:"+toolID, operation.ActionSucceeded, "installed and detected")
@@ -1321,6 +1338,14 @@ type selectedToolInstallResult struct {
 	failures     []error
 }
 
+type installExecutionSnapshot struct {
+	platform pkg.Platform
+	manager  string
+	recipes  map[string]operation.InstallRecipe
+	detected map[string]bool
+	digests  map[string]string
+}
+
 func wrapMutationError(prefix string, err error) error {
 	if err == nil {
 		return nil
@@ -1338,16 +1363,46 @@ func runSelectedToolInstalls(
 	installRuntime toolInstallRuntime,
 	emitLine func(string),
 	stepLine func(string),
+	acceptedSnapshots ...installExecutionSnapshot,
 ) selectedToolInstallResult {
 	result := selectedToolInstallResult{installed: make(map[string]bool, len(selectedTools))}
 	mgr := installRuntime.detectManager()
 	platform := installRuntime.detectPlatform()
+	managerName := ""
+	if mgr != nil {
+		managerName = mgr.Name()
+	}
+	var accepted *installExecutionSnapshot
+	if len(acceptedSnapshots) != 0 {
+		accepted = &acceptedSnapshots[0]
+		if accepted.platform != platform || accepted.manager != managerName {
+			result.failures = append(result.failures, fmt.Errorf("install environment changed after review: planned %s/%s, found %s/%s", accepted.platform, accepted.manager, platform, managerName))
+			return result
+		}
+		seen := make(map[string]struct{}, len(selectedTools))
+		for _, toolID := range selectedTools {
+			if _, duplicate := seen[toolID]; duplicate {
+				result.failures = append(result.failures, fmt.Errorf("duplicate selected install %s", toolID))
+				return result
+			}
+			seen[toolID] = struct{}{}
+			if _, ok := accepted.recipes[toolID]; !ok {
+				result.failures = append(result.failures, fmt.Errorf("selected install %s lacks accepted recipe", toolID))
+				return result
+			}
+		}
+		if len(seen) != len(accepted.recipes) {
+			result.failures = append(result.failures, fmt.Errorf("selected installs do not match accepted install actions"))
+			return result
+		}
+	}
 
 	if mgr != nil {
 		emitLine(fmt.Sprintf("Installing %d tools using %s...", len(selectedTools), mgr.Name()))
 	} else {
 		emitLine(fmt.Sprintf("Installing %d tools (no package manager detected; manager-independent installers only)...", len(selectedTools)))
 	}
+	installedByReviewedSteps := make(map[string]struct{})
 
 	for _, toolID := range selectedTools {
 		if err := ctx.Err(); err != nil {
@@ -1363,32 +1418,94 @@ func runSelectedToolInstalls(
 			continue
 		}
 
-		if installRuntime.isToolInstalled(t) {
+		var recipe operation.InstallRecipe
+		currentlyInstalled := false
+		if accepted != nil {
+			var recipeOK bool
+			recipe, recipeOK = accepted.recipes[toolID]
+			if !recipeOK {
+				emitLine(fmt.Sprintf("  ✗ Cannot install %s: reviewed installer provenance is missing", toolID))
+				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer provenance is missing", toolID))
+				continue
+			}
+			if recipe.ToolID != toolID || recipe.Platform != string(platform) || recipe.Manager != managerName {
+				emitLine(fmt.Sprintf("  ✗ Cannot install %s: reviewed installer provenance is inconsistent", toolID))
+				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer provenance is inconsistent", toolID))
+				continue
+			}
+			digest, digestErr := operation.InstallRecipeDigest(recipe)
+			if digestErr != nil || digest != accepted.digests[toolID] {
+				emitLine(fmt.Sprintf("  ✗ Cannot install %s: reviewed installer digest is invalid", toolID))
+				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer digest is invalid", toolID))
+				continue
+			}
+			var detectorErr error
+			currentlyInstalled, detectorErr = installRecipeDetected(recipe, mgr)
+			if detectorErr != nil {
+				result.failures = append(result.failures, fmt.Errorf("%s: evaluate reviewed detector: %w", toolID, detectorErr))
+				continue
+			}
+			observed, ok := accepted.detected[toolID]
+			authorizedTransition := !observed && currentlyInstalled && recipe.Detector.Kind == operation.InstallDetectorPackageReceipt
+			if authorizedTransition {
+				for _, name := range recipe.Detector.Values {
+					if _, installed := installedByReviewedSteps[name]; !installed {
+						authorizedTransition = false
+						break
+					}
+				}
+			}
+			if !ok || (observed != currentlyInstalled && !authorizedTransition) {
+				emitLine(fmt.Sprintf("  ✗ Cannot install %s: detector state changed after review", toolID))
+				result.failures = append(result.failures, fmt.Errorf("%s: detector state changed after review", toolID))
+				continue
+			}
+		} else {
+			currentlyInstalled = installRuntime.isToolInstalled(t)
+		}
+		if currentlyInstalled {
 			emitLine(fmt.Sprintf("  ✓ %s already installed", toolID))
 			result.successCount++
 			result.installed[toolID] = true
 			continue
 		}
-
-		if !installerAvailable(t, platform) {
-			emitLine(fmt.Sprintf("  ⚠ %s is not available through a supported installer on %s", toolID, platform))
-			result.failures = append(result.failures, fmt.Errorf("%s: no supported installer for %s", toolID, platform))
-			continue
+		if accepted != nil {
+			if err := executeInstallRecipe(ctx, recipe, mgr, func(line string) { emitLine("  " + line) }); err != nil {
+				emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
+				result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+				continue
+			}
+			for _, installedStep := range recipe.Steps {
+				if installedStep.Kind == operation.InstallStepPackageManager {
+					for _, name := range installedStep.Packages {
+						installedByReviewedSteps[name] = struct{}{}
+					}
+				}
+			}
+		} else {
+			if !installerAvailable(t, platform) {
+				emitLine(fmt.Sprintf("  ⚠ %s is not available through a supported installer on %s", toolID, platform))
+				result.failures = append(result.failures, fmt.Errorf("%s: no supported installer for %s", toolID, platform))
+				continue
+			}
+			if mgr == nil && requiresPackageManager(t) {
+				emitLine(fmt.Sprintf("  ✗ Cannot install %s: no package manager detected", toolID))
+				result.failures = append(result.failures, fmt.Errorf("%s: no package manager detected", toolID))
+				continue
+			}
+			if err := installTool(ctx, t, mgr, platform, func(line string) { emitLine("  " + line) }); err != nil {
+				emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
+				result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+				continue
+			}
 		}
-		if mgr == nil && requiresPackageManager(t) {
-			emitLine(fmt.Sprintf("  ✗ Cannot install %s: no package manager detected", toolID))
-			result.failures = append(result.failures, fmt.Errorf("%s: no package manager detected", toolID))
-			continue
+		postcondition := false
+		if accepted != nil {
+			postcondition, _ = installRecipeDetected(recipe, mgr)
+		} else {
+			postcondition = installRuntime.isToolInstalled(t)
 		}
-
-		if err := installTool(ctx, t, mgr, platform, func(line string) {
-			emitLine("  " + line)
-		}); err != nil {
-			emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
-			result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
-			continue
-		}
-		if !installRuntime.isToolInstalled(t) {
+		if !postcondition {
 			emitLine(fmt.Sprintf("  ✗ %s installer completed but the tool is still not detected", toolID))
 			result.failures = append(result.failures, fmt.Errorf("%s: install postcondition failed (tool not detected)", toolID))
 			continue
@@ -1400,6 +1517,92 @@ func runSelectedToolInstalls(
 	}
 
 	return result
+}
+
+func installRecipeDetected(recipe operation.InstallRecipe, mgr pkg.PackageManager) (bool, error) {
+	switch recipe.Detector.Kind {
+	case operation.InstallDetectorPackageReceipt:
+		if mgr == nil || mgr.Name() != recipe.Manager {
+			return false, fmt.Errorf("reviewed package manager %q is unavailable", recipe.Manager)
+		}
+		for _, name := range recipe.Detector.Values {
+			if !mgr.IsInstalled(name) {
+				return false, nil
+			}
+		}
+		return true, nil
+	case operation.InstallDetectorBinary:
+		for _, name := range recipe.Detector.Values {
+			if filepath.Base(name) != name {
+				return false, fmt.Errorf("binary detector must be a command name")
+			}
+			_, lookupErr := exec.LookPath(name)
+			if errors.Is(lookupErr, exec.ErrNotFound) {
+				return false, nil
+			}
+			if lookupErr != nil {
+				return false, lookupErr
+			}
+		}
+		return true, nil
+	case operation.InstallDetectorAppBundle:
+		for _, name := range recipe.Detector.Values {
+			if filepath.Base(name) != name || strings.TrimSuffix(name, ".app") == "" {
+				return false, fmt.Errorf("app detector must be an application name")
+			}
+			bundle := name
+			if !strings.HasSuffix(bundle, ".app") {
+				bundle += ".app"
+			}
+			if _, err := os.Stat(filepath.Join("/Applications", bundle)); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return false, nil
+				}
+				return false, err
+			}
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("unsupported reviewed detector %q", recipe.Detector.Kind)
+	}
+}
+
+func executeInstallRecipe(ctx context.Context, recipe operation.InstallRecipe, mgr pkg.PackageManager, emitLine func(string)) error {
+	for _, step := range recipe.Steps {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		switch step.Kind {
+		case operation.InstallStepPackageManager:
+			if mgr == nil || mgr.Name() != step.Provider {
+				return fmt.Errorf("reviewed package manager %q is unavailable", step.Provider)
+			}
+			adapted := &streamingInstallManager{PackageManager: mgr, ctx: ctx, emitLine: emitLine}
+			if err := adapted.Install(step.Packages...); err != nil {
+				return err
+			}
+		case operation.InstallStepNPMGlobal:
+			npmPath, err := exec.LookPath(step.Provider)
+			if err != nil {
+				return fmt.Errorf("reviewed npm executable is unavailable: %w", err)
+			}
+			cmd, err := runner.RunStreaming(ctx, npmPath, step.Args...)
+			if err != nil {
+				return err
+			}
+			for line := range cmd.Output {
+				if emitLine != nil {
+					emitLine(line)
+				}
+			}
+			if err := cmd.Wait(); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported reviewed install step %q", step.Kind)
+		}
+	}
+	return nil
 }
 
 // aggregateFailures builds the final installation error from a slice of per-step
@@ -1672,6 +1875,9 @@ func (a *App) streamingInstallToolCmdWithRuntime(ctx context.Context, toolID str
 		mgr := installRuntime.detectManager()
 		if installRuntime.isToolInstalled(t) {
 			return manageInstallWithLogsMsg{toolID: toolID, logs: []string{fmt.Sprintf("✓ %s is already installed", t.Name())}}
+		}
+		if _, reviewedOnly := t.(tools.InstallRecipeProvider); reviewedOnly {
+			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("%s requires a reviewed install plan; use the installer workflow", t.Name())}
 		}
 
 		// Resolve packages via the single source of truth (Pi -> Debian fallback),

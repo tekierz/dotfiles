@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
@@ -27,6 +28,18 @@ type customInstallSentinel struct {
 	emitLines          int
 	blockUntilCancel   bool
 	started            chan struct{}
+}
+
+type recipeOnlySentinel struct{ *customInstallSentinel }
+
+func (t *recipeOnlySentinel) InstallRecipe(environment tools.InstallEnvironment) (operation.InstallRecipe, error) {
+	return operation.InstallRecipe{
+		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
+		ToolID:        t.ID(), Platform: string(environment.Platform), Manager: environment.Manager,
+		Steps:    []operation.InstallStep{{Kind: operation.InstallStepPackageManager, Provider: environment.Manager, Packages: []string{"reviewed-package"}}},
+		Detector: operation.InstallDetector{Kind: operation.InstallDetectorPackageReceipt, Values: []string{"reviewed-package"}},
+		Risk:     "test fixture",
+	}, nil
 }
 
 func (t *customInstallSentinel) ID() string                   { return "custom-sentinel" }
@@ -357,6 +370,103 @@ func TestWizardInstallPhaseInvokesCustomToolAndReportsProgress(t *testing.T) {
 	}
 }
 
+func acceptedSentinelSnapshot(t *testing.T, runtime toolInstallRuntime, manager pkg.PackageManager) installExecutionSnapshot {
+	t.Helper()
+	platform := runtime.detectPlatform()
+	recipe := operation.InstallRecipe{
+		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
+		ToolID:        "custom-sentinel",
+		Platform:      string(platform),
+		Manager:       manager.Name(),
+		Steps: []operation.InstallStep{{
+			Kind: operation.InstallStepPackageManager, Provider: manager.Name(), Packages: []string{"reviewed-package"},
+		}},
+		Detector: operation.InstallDetector{Kind: operation.InstallDetectorPackageReceipt, Values: []string{"reviewed-package"}},
+		Risk:     "test package-manager mutation",
+	}
+	digest, err := operation.InstallRecipeDigest(recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return installExecutionSnapshot{
+		platform: platform,
+		manager:  manager.Name(),
+		recipes:  map[string]operation.InstallRecipe{"custom-sentinel": recipe},
+		detected: map[string]bool{"custom-sentinel": false},
+		digests:  map[string]string{"custom-sentinel": digest},
+	}
+}
+
+func TestAcceptedRecipeExecutesExactStepsAndNeverLegacyInstaller(t *testing.T) {
+	sentinel := &customInstallSentinel{}
+	mgr := pkg.NewMockPackageManager()
+	runtime := sentinelRuntime(sentinel, mgr)
+	// A recipe-backed install must ignore arbitrary Tool.IsInstalled behavior and
+	// evaluate only the detector recorded in the accepted recipe.
+	runtime.isToolInstalled = func(tools.Tool) bool { return true }
+	snapshot := acceptedSentinelSnapshot(t, runtime, mgr)
+
+	result := runSelectedToolInstalls(context.Background(), []string{sentinel.ID()}, runtime, func(string) {}, func(string) {}, snapshot)
+	if len(result.failures) != 0 || result.successCount != 1 {
+		t.Fatalf("recipe execution result = %#v", result)
+	}
+	if sentinel.installCalls != 0 {
+		t.Fatalf("recipe-backed execution invoked legacy installer %d times", sentinel.installCalls)
+	}
+	if len(mgr.InstallCalls) != 1 || !reflect.DeepEqual(mgr.InstallCalls[0], []string{"reviewed-package"}) {
+		t.Fatalf("executed packages = %#v", mgr.InstallCalls)
+	}
+}
+
+func TestAcceptedRecipeFailsClosedOnEnvironmentOrDetectorDrift(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*installExecutionSnapshot, *toolInstallRuntime)
+	}{
+		{name: "platform", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
+			snapshot.platform = pkg.PlatformUnknown
+		}},
+		{name: "manager", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
+			snapshot.manager = "different-manager"
+		}},
+		{name: "detector", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
+			snapshot.detected["custom-sentinel"] = true
+		}},
+		{name: "missing recipe", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
+			delete(snapshot.recipes, "custom-sentinel")
+		}},
+		{name: "tampered recipe", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
+			snapshot.recipes["custom-sentinel"].Steps[0].Packages[0] = "unreviewed-package"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sentinel := &customInstallSentinel{}
+			mgr := pkg.NewMockPackageManager()
+			runtime := sentinelRuntime(sentinel, mgr)
+			runtime.isToolInstalled = func(tools.Tool) bool { return false }
+			snapshot := acceptedSentinelSnapshot(t, runtime, mgr)
+			test.mutate(&snapshot, &runtime)
+			result := runSelectedToolInstalls(context.Background(), []string{sentinel.ID()}, runtime, func(string) {}, func(string) {}, snapshot)
+			if len(result.failures) == 0 || len(mgr.InstallCalls) != 0 || sentinel.installCalls != 0 {
+				t.Fatalf("drift was not stopped before mutation: result=%#v calls=%#v legacy=%d", result, mgr.InstallCalls, sentinel.installCalls)
+			}
+		})
+	}
+}
+
+func TestAcceptedRecipeRejectsOmittedAndDuplicateSelections(t *testing.T) {
+	for _, selected := range [][]string{{}, {"custom-sentinel", "custom-sentinel"}} {
+		sentinel := &customInstallSentinel{}
+		mgr := pkg.NewMockPackageManager()
+		runtime := sentinelRuntime(sentinel, mgr)
+		snapshot := acceptedSentinelSnapshot(t, runtime, mgr)
+		result := runSelectedToolInstalls(context.Background(), selected, runtime, func(string) {}, func(string) {}, snapshot)
+		if len(result.failures) == 0 || len(mgr.InstallCalls) != 0 {
+			t.Fatalf("selection %v was not rejected before mutation: %#v calls=%v", selected, result, mgr.InstallCalls)
+		}
+	}
+}
+
 func TestWorkerGlobalConfigErrorStopsBeforeEveryAction(t *testing.T) {
 	sentinel := &customInstallSentinel{managerIndependent: true}
 	events := make(chan installEventMsg, 8)
@@ -521,6 +631,20 @@ func TestManageInstallInvokesCustomToolInstall(t *testing.T) {
 	}
 	if sentinel.installCalls != 1 || !sentinel.installed {
 		t.Fatalf("Manage custom install calls=%d installed=%v", sentinel.installCalls, sentinel.installed)
+	}
+}
+
+func TestManageRefusesRecipeBackedInstallWithoutReview(t *testing.T) {
+	sentinel := &recipeOnlySentinel{customInstallSentinel: &customInstallSentinel{}}
+	mgr := pkg.NewMockPackageManager()
+	runtime := sentinelRuntime(sentinel, mgr)
+	runtime.isToolInstalled = func(tools.Tool) bool { return false }
+	msg := (&App{}).streamingInstallToolCmdWithRuntime(context.Background(), sentinel.ID(), runtime)().(manageInstallWithLogsMsg)
+	if msg.err == nil || !strings.Contains(msg.err.Error(), "reviewed install plan") {
+		t.Fatalf("Manage recipe-backed result = %#v", msg)
+	}
+	if sentinel.installCalls != 0 || len(mgr.InstallCalls) != 0 {
+		t.Fatalf("Manage mutated before review: legacy=%d manager=%v", sentinel.installCalls, mgr.InstallCalls)
 	}
 }
 

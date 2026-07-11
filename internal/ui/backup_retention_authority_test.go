@@ -5,7 +5,6 @@ package ui
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -58,12 +57,25 @@ func TestPlanRetentionPrunesOnlyTerminalOperationBackups(t *testing.T) {
 	oldTerminal := create("old-terminal", now.Add(-3*time.Hour))
 	newTerminal := create("new-terminal", now.Add(-time.Hour))
 	running := create("running", now.Add(-4*time.Hour))
+	detected := false
+	recipe := operation.InstallRecipe{
+		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
+		ToolID:        "test", Platform: "macos", Manager: "brew",
+		Steps:    []operation.InstallStep{{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"test"}}},
+		Detector: operation.InstallDetector{Kind: operation.InstallDetectorPackageReceipt, Values: []string{"test"}},
+		Risk:     "test fixture",
+	}
+	digest, err := operation.InstallRecipeDigest(recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	plan, err := operation.NewPlan(now, []operation.Action{{
-		ID: "retention-test", Kind: operation.KindInstallTool, Target: "test",
+		ID: "retention-test", Kind: operation.KindInstallTool, ToolID: "test", Target: "test",
 		Description: "retention test", Disposition: operation.DispositionApply,
-		DesiredDigest: strings.Repeat("0", 64), Ownership: operation.OwnershipPackageManager,
+		DesiredDigest: digest, Ownership: operation.OwnershipPackageManager,
 		Reversibility: operation.ReversibilityBestEffort,
+		InstallRecipe: &recipe, InstallDetected: &detected,
 	}})
 	if err != nil {
 		t.Fatal(err)

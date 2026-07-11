@@ -26,6 +26,81 @@ func validConfigAction() Action {
 	}
 }
 
+func validInstallAction(t *testing.T) Action {
+	t.Helper()
+	detected := false
+	recipe := InstallRecipe{
+		SchemaVersion: CurrentInstallRecipeSchemaVersion,
+		ToolID:        "codex",
+		Platform:      "macos",
+		Manager:       "brew",
+		Steps: []InstallStep{
+			{Kind: InstallStepPackageManager, Provider: "brew", Packages: []string{"node"}},
+			{Kind: InstallStepNPMGlobal, Provider: "npm", Args: []string{"install", "-g", "@openai/codex"}},
+		},
+		Detector: InstallDetector{Kind: InstallDetectorBinary, Values: []string{"codex"}},
+		Risk:     "downloads package lifecycle code",
+	}
+	digest, err := InstallRecipeDigest(recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Action{
+		ID: "install:codex", Kind: KindInstallTool, ToolID: "codex", Target: "codex",
+		Description: "install Codex", Disposition: DispositionApply, DesiredDigest: digest,
+		Ownership: OwnershipPackageManager, Reversibility: ReversibilityManual,
+		InstallRecipe: &recipe, InstallDetected: &detected,
+	}
+}
+
+func TestInstallRecipeIsPublicImmutableAndDigestBound(t *testing.T) {
+	action := validInstallAction(t)
+	plan, err := NewPlan(time.Now(), []Action{action})
+	if err != nil {
+		t.Fatal(err)
+	}
+	action.InstallRecipe.Steps[1].Args[2] = "malicious-package"
+	copyOne := plan.Actions()
+	copyOne[0].InstallRecipe.Steps[0].Packages[0] = "malicious-package"
+	if got := plan.Actions()[0].InstallRecipe.Steps[1].Args[2]; got != "@openai/codex" {
+		t.Fatalf("accepted recipe was mutable: %q", got)
+	}
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"install_recipe", "@openai/codex", "downloads package lifecycle code", "install_detected"} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("public plan omitted %q: %s", want, encoded)
+		}
+	}
+
+	tampered := validInstallAction(t)
+	tampered.InstallRecipe.Steps[1].Args[2] = "malicious-package"
+	if _, err := NewPlan(time.Now(), []Action{tampered}); !errors.Is(err, ErrInvalidPlan) || !strings.Contains(err.Error(), "digest") {
+		t.Fatalf("tampered recipe error = %v", err)
+	}
+}
+
+func TestInstallRecipeRejectsGenericOrAmbiguousExecution(t *testing.T) {
+	for _, mutate := range []func(*Action){
+		func(a *Action) { a.InstallRecipe.Steps[0].Kind = "shell" },
+		func(a *Action) { a.InstallRecipe.Steps[0].Provider = "apt" },
+		func(a *Action) { a.InstallRecipe.Detector.Kind = "path" },
+		func(a *Action) { a.InstallRecipe.Risk = "unsafe\nsecret" },
+		func(a *Action) { a.InstallRecipe.Risk = "unsafe\tspoof" },
+		func(a *Action) { a.InstallRecipe.Risk = "unsafe\u202Espoof" },
+		func(a *Action) { a.InstallRecipe = nil },
+		func(a *Action) { a.InstallDetected = nil },
+	} {
+		action := validInstallAction(t)
+		mutate(&action)
+		if _, err := NewPlan(time.Now(), []Action{action}); !errors.Is(err, ErrInvalidPlan) {
+			t.Fatalf("unsafe recipe accepted: %#v err=%v", action, err)
+		}
+	}
+}
+
 func TestPlanIsImmutableAndHashIdentifiesExactDocument(t *testing.T) {
 	created := time.Date(2026, 7, 10, 12, 30, 0, 0, time.FixedZone("offset", -7*60*60))
 	actions := []Action{validConfigAction()}

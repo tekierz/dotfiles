@@ -284,6 +284,12 @@ func TestFileTreeScreenGolden(t *testing.T) {
 			t.Errorf("fileTreeScreen.View() missing %q\n---\n%s\n---", want, out)
 		}
 	}
+	detailed := screen.View(ctx.Width, 400)
+	for _, want := range []string{"package_manager:", "detector package_receipt:", "Risk:"} {
+		if !strings.Contains(detailed, want) {
+			t.Errorf("reviewed install provenance missing %q\n---\n%s\n---", want, detailed)
+		}
+	}
 
 	if screen.ID() != ScreenFileTree {
 		t.Errorf("fileTreeScreen.ID() = %v, want ScreenFileTree", screen.ID())
