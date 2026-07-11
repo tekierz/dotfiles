@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
@@ -138,7 +139,28 @@ func SaveClaudeConfig(cfg *ClaudeConfig) (returnErr error) {
 }
 
 func SaveClaudeConfigTracked(cfg *ClaudeConfig) (committedRevision safefile.Revision, returnErr error) {
-	if cfg == nil {
+	return saveClaudeConfigAtRevisionTracked(cfg, nil, nil)
+}
+
+// SaveClaudeConfigAtRevisionTracked applies the merge only while the source
+// still matches a reviewed plan's exact accepted revision.
+func SaveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted safefile.Revision) (safefile.Revision, error) {
+	return saveClaudeConfigAtRevisionTracked(cfg, &accepted, nil)
+}
+
+// ApplyClaudeMCPSelectionAtRevisionTracked performs the accepted read,
+// preservation merge, MCP selection update, and CAS while one lock is held.
+// Custom MCP definitions not owned by this product remain untouched.
+func ApplyClaudeMCPSelectionAtRevisionTracked(enabled map[string]bool, accepted safefile.Revision) (safefile.Revision, error) {
+	selection := make(map[string]bool, len(enabled))
+	for name, value := range enabled {
+		selection[name] = value
+	}
+	return saveClaudeConfigAtRevisionTracked(nil, &accepted, selection)
+}
+
+func saveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted *safefile.Revision, selection map[string]bool) (committedRevision safefile.Revision, returnErr error) {
+	if cfg == nil && selection == nil {
 		return safefile.Revision{}, errors.New("claude config is nil")
 	}
 	claudeConfigSaveMu.Lock()
@@ -152,8 +174,7 @@ func SaveClaudeConfigTracked(cfg *ClaudeConfig) (committedRevision safefile.Revi
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("resolve Claude config path: %w", err)
 	}
-	lockRel := ".dotfiles-claude-config.lock"
-	release, err := safefile.AcquireLockWithin(root, lockRel, 0600)
+	release, err := operation.AcquireStateLock("claude-config", path)
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("lock Claude config: %w", err)
 	}
@@ -176,6 +197,9 @@ func SaveClaudeConfigTracked(cfg *ClaudeConfig) (committedRevision safefile.Revi
 	if err != nil {
 		return safefile.Revision{}, err
 	}
+	if accepted != nil && revision != *accepted {
+		return safefile.Revision{}, fmt.Errorf("%w: Claude config changed after plan acceptance", safefile.ErrRevisionChanged)
+	}
 	if revision.Exists() {
 		raw, err = decodeJSONObject(existing)
 		if err != nil {
@@ -186,8 +210,26 @@ func SaveClaudeConfigTracked(cfg *ClaudeConfig) (committedRevision safefile.Revi
 		}
 	}
 
-	// Set only the key we own.
-	servers := cfg.MCPServers
+	// Set only the key we own. Accepted selection updates derive their source
+	// map from the exact bytes read above, after authority was proven under lock.
+	var servers map[string]MCPServer
+	if selection != nil {
+		servers = make(map[string]MCPServer)
+		if encodedServers, ok := raw["mcpServers"]; ok {
+			if err := json.Unmarshal(encodedServers, &servers); err != nil {
+				return safefile.Revision{}, fmt.Errorf("parse existing Claude config mcpServers: %w", err)
+			}
+		}
+		for name, enabled := range selection {
+			if server, owned := AllMCPServers()[name]; owned && enabled {
+				servers[name] = server
+			} else if owned {
+				delete(servers, name)
+			}
+		}
+	} else {
+		servers = cfg.MCPServers
+	}
 	if servers == nil {
 		servers = make(map[string]MCPServer)
 	}

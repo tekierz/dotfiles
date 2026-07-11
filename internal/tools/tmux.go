@@ -89,6 +89,10 @@ func InstallTPM() error {
 }
 
 func installTPMTracked() (result MutationEvidence, returnErr error) {
+	return installTPMAtSnapshotTracked(nil)
+}
+
+func installTPMAtSnapshotTracked(accepted *safefile.DirectorySnapshot) (result MutationEvidence, returnErr error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("determine HOME for TPM: %w", err)
@@ -119,9 +123,9 @@ func installTPMTracked() (result MutationEvidence, returnErr error) {
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("snapshot cloned TPM: %w", err)
 	}
-	live, err := safefile.RestoreDirectoryWithinSnapshotTracked(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), snapshot, nil)
+	live, err := safefile.RestoreDirectoryWithinSnapshotTracked(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), snapshot, accepted)
 	if err != nil {
-		return MutationEvidence{}, err
+		return MutationEvidence{Path: TPMPath(), Directory: live}, err
 	}
 	return MutationEvidence{Path: TPMPath(), Directory: live}, nil
 }
@@ -334,6 +338,16 @@ func WriteTmuxConfigTracked(cfg TmuxConfig, theme string) (MutationEvidence, err
 	return writeToolConfigTracked(configPath, []byte(content))
 }
 
+// WriteTmuxConfigAtRevisionTracked applies a plan-accepted tmux revision.
+func WriteTmuxConfigAtRevisionTracked(cfg TmuxConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	configPath := filepath.Join(home, ".tmux.conf")
+	return writeToolConfigAtRevisionTracked(configPath, []byte(GenerateTmuxConfig(cfg, theme)), accepted)
+}
+
 // SetupTPM handles TPM installation and plugin setup
 func SetupTPM(cfg TmuxConfig, theme string) error {
 	_, err := SetupTPMTracked(cfg, theme)
@@ -366,4 +380,40 @@ func SetupTPMTracked(cfg TmuxConfig, theme string) ([]MutationEvidence, error) {
 	// Plugin installation remains an explicit prefix+I user action. The third-
 	// party installer has a broader mutation surface than this reviewed plan.
 	return committed, nil
+}
+
+// SetupTPMAtAuthorityTracked applies plan-accepted tmux and TPM targets.
+func SetupTPMAtAuthorityTracked(cfg TmuxConfig, theme string, tmuxAccepted safefile.Revision, tpmAccepted *safefile.DirectorySnapshot) ([]MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("determine HOME for TPM: %w", err)
+	}
+	if !tmuxAccepted.Tracked() {
+		return nil, fmt.Errorf("%w: accepted tmux revision is untracked", safefile.ErrRevisionChanged)
+	}
+	// Preflight the complete accepted set before the first config mutation.
+	if cfg.TPMEnabled {
+		if err := safefile.VerifyDirectoryWithinSnapshot(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), tpmAccepted); err != nil {
+			return nil, fmt.Errorf("preflight accepted TPM target: %w", err)
+		}
+	}
+	configEvidence, err := WriteTmuxConfigAtRevisionTracked(cfg, theme, tmuxAccepted)
+	if err != nil {
+		return nil, err
+	}
+	var committed []MutationEvidence
+	if configEvidence.Revision != tmuxAccepted {
+		committed = append(committed, configEvidence)
+	}
+	if !cfg.TPMEnabled {
+		return []MutationEvidence{configEvidence}, nil
+	}
+	tpmEvidence, err := installTPMAtSnapshotTracked(tpmAccepted)
+	if err != nil {
+		if tpmEvidence.Directory != nil || tpmEvidence.Revision.Tracked() {
+			committed = append(committed, tpmEvidence)
+		}
+		return nil, partialMutationError(err, committed)
+	}
+	return []MutationEvidence{configEvidence, tpmEvidence}, nil
 }

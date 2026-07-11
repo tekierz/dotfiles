@@ -33,10 +33,29 @@ type installPlan struct {
 	theme         string
 	navStyle      string
 	animations    bool
+	globalConfig  *config.GlobalConfig
+	authority     map[string]map[string]acceptedTarget
 	// ghosttyConfigTarget is the exact absolute destination accepted during
 	// planning. Execution must not rediscover a different higher-precedence file
 	// after preview/revalidation.
 	ghosttyConfigTarget string
+}
+
+type acceptedTargetKind uint8
+
+const (
+	acceptedFileTarget acceptedTargetKind = iota + 1
+	acceptedDirectoryTarget
+)
+
+// acceptedTarget is private execution authority captured by the same stable
+// planning read that produced the public plan observation. File revisions are
+// copied values; directory snapshots are opaque immutable values. A nil
+// directory snapshot means the directory was accepted as absent.
+type acceptedTarget struct {
+	kind      acceptedTargetKind
+	file      safefile.Revision
+	directory *safefile.DirectorySnapshot
 }
 
 func (p *installPlan) hash() string {
@@ -72,6 +91,48 @@ func (p *installPlan) configToolIDs() []string {
 		return nil
 	}
 	return slices.Clone(p.configTools)
+}
+
+func (p *installPlan) acceptedFileRevision(actionID, rel string) (safefile.Revision, error) {
+	target, err := p.acceptedTarget(actionID, rel)
+	if err != nil {
+		return safefile.Revision{}, err
+	}
+	if target.kind != acceptedFileTarget || !target.file.Tracked() {
+		return safefile.Revision{}, fmt.Errorf("accepted target %s for %s is not a tracked file revision", rel, actionID)
+	}
+	return target.file, nil
+}
+
+func (p *installPlan) acceptedDirectorySnapshot(actionID, rel string) (*safefile.DirectorySnapshot, error) {
+	target, err := p.acceptedTarget(actionID, rel)
+	if err != nil {
+		return nil, err
+	}
+	if target.kind != acceptedDirectoryTarget {
+		return nil, fmt.Errorf("accepted target %s for %s is not a directory snapshot", rel, actionID)
+	}
+	return target.directory, nil
+}
+
+func (p *installPlan) acceptedTarget(actionID, rel string) (acceptedTarget, error) {
+	if p == nil {
+		return acceptedTarget{}, fmt.Errorf("no accepted plan")
+	}
+	rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+	byPath := p.authority[actionID]
+	target, ok := byPath[rel]
+	if !ok {
+		return acceptedTarget{}, fmt.Errorf("accepted plan has no authority for %s target %s", actionID, rel)
+	}
+	return target, nil
+}
+
+func (p *installPlan) plannedGlobalConfig() (*config.GlobalConfig, error) {
+	if p == nil || p.globalConfig == nil {
+		return nil, fmt.Errorf("accepted plan has no global config snapshot")
+	}
+	return config.CloneGlobalConfig(p.globalConfig), nil
 }
 
 func (p *installPlan) acceptedGhosttyConfigTarget() (string, error) {
@@ -125,7 +186,8 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 	if a == nil || a.deepDiveConfig == nil {
 		return nil, fmt.Errorf("cannot build install plan without installer state")
 	}
-	if _, err := config.LoadGlobalConfig(); err != nil {
+	globalConfig, err := config.LoadGlobalConfig()
+	if err != nil {
 		return nil, fmt.Errorf("validate global config before planning: %w", err)
 	}
 	home, err := os.UserHomeDir()
@@ -148,12 +210,22 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		globalDisposition = operation.DispositionBlocked
 		globalReason = "global settings outside HOME cannot yet receive a verified rollback point"
 	} else {
-		globalObservation, err = observeRelativeFile(home, globalTarget)
-		if err != nil {
-			return nil, fmt.Errorf("observe global settings: %w", err)
+		globalRevision, tracked := config.GlobalConfigRevision(globalConfig)
+		if !tracked {
+			return nil, fmt.Errorf("observe global settings: loaded config has no tracked revision")
 		}
+		globalObservation = observationFromFileRevision(globalTarget, globalRevision, false)
 		globalBackupTarget = globalTarget
 		globalObservations = []operation.Observation{globalObservation}
+	}
+	plannedGlobal := config.CloneGlobalConfig(globalConfig)
+	plannedGlobal.Theme = a.theme
+	plannedGlobal.NavStyle = a.navStyle
+	plannedGlobal.DisableAnimations = !a.animationsEnabled
+	authority := make(map[string]map[string]acceptedTarget)
+	if globalDisposition == operation.DispositionApply {
+		globalRevision, _ := config.GlobalConfigRevision(globalConfig)
+		authority["state:global"] = map[string]acceptedTarget{globalTarget: {kind: acceptedFileTarget, file: globalRevision}}
 	}
 	actions := []operation.Action{{
 		ID:          "state:global",
@@ -199,7 +271,7 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		rel := filepath.ToSlash(filepath.Join(".local", "bin", helper))
 		desiredContent := scriptsForPlan(helper)
 		desired := sha256.Sum256(desiredContent)
-		observation, err := observeRelativeFile(home, rel)
+		observation, revision, err := observeRelativeFile(home, rel)
 		if err != nil {
 			return nil, fmt.Errorf("observe helper %s: %w", helper, err)
 		}
@@ -226,6 +298,9 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 			Observation:   observation,
 			Observations:  []operation.Observation{observation},
 		})
+		if disposition == operation.DispositionApply {
+			authority["helper:"+helper] = map[string]acceptedTarget{rel: {kind: acceptedFileTarget, file: revision}}
+		}
 	}
 
 	configSpecs, err := installerConfigSpecs(home, a.theme, cfg)
@@ -235,7 +310,7 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 	configTools := make([]string, 0, len(configSpecs))
 	ghosttyConfigTarget := ""
 	for _, spec := range configSpecs {
-		action, err := planConfigAction(home, spec, digestPlanValue(struct {
+		action, actionAuthority, err := planConfigAction(home, spec, digestPlanValue(struct {
 			ToolID string
 			Theme  string
 			Config DeepDiveConfig
@@ -274,11 +349,15 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		actions = append(actions, action)
 		if action.Disposition == operation.DispositionApply {
 			configTools = append(configTools, spec.toolID)
+			authority[action.ID] = actionAuthority
 		}
 	}
 
 	document, err := operation.NewPlan(now, actions)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateInstallPlanAuthority(actions, authority); err != nil {
 		return nil, err
 	}
 	return &installPlan{
@@ -289,8 +368,56 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		theme:               a.theme,
 		navStyle:            a.navStyle,
 		animations:          a.animationsEnabled,
+		globalConfig:        plannedGlobal,
+		authority:           authority,
 		ghosttyConfigTarget: ghosttyConfigTarget,
 	}, nil
+}
+
+func validateInstallPlanAuthority(actions []operation.Action, authority map[string]map[string]acceptedTarget) error {
+	applicable := make(map[string]map[string]struct{})
+	for _, action := range actions {
+		if action.Disposition != operation.DispositionApply {
+			continue
+		}
+		targets := append([]string(nil), action.BackupTargets...)
+		if action.BackupTarget != "" {
+			targets = append(targets, action.BackupTarget)
+		}
+		if len(targets) == 0 {
+			continue
+		}
+		allowed := make(map[string]struct{}, len(targets))
+		for _, rel := range targets {
+			rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+			if filepath.IsAbs(rel) || rel == "." || strings.HasPrefix(rel, "../") {
+				return fmt.Errorf("action %s has invalid authority target %s", action.ID, rel)
+			}
+			allowed[rel] = struct{}{}
+			if _, ok := authority[action.ID][rel]; !ok {
+				return fmt.Errorf("action %s has no accepted authority for rollback target %s", action.ID, rel)
+			}
+		}
+		applicable[action.ID] = allowed
+	}
+	for actionID, byPath := range authority {
+		allowed, ok := applicable[actionID]
+		if !ok {
+			return fmt.Errorf("accepted authority exists outside applicable action %s", actionID)
+		}
+		for rel, target := range byPath {
+			if _, ok := allowed[rel]; !ok {
+				return fmt.Errorf("accepted authority for %s is outside rollback scope: %s", actionID, rel)
+			}
+			if target.kind == acceptedFileTarget && !target.file.Tracked() {
+				return fmt.Errorf("accepted file authority for %s target %s is untracked", actionID, rel)
+			}
+			if target.kind != acceptedFileTarget && target.kind != acceptedDirectoryTarget {
+				return fmt.Errorf("accepted authority for %s target %s has invalid kind", actionID, rel)
+			}
+		}
+	}
+	return nil
 }
 
 func enabledHelpers(values map[string]bool) []string {
@@ -359,8 +486,9 @@ func planTargetPath(home, absolute string) string {
 	return filepath.Clean(absolute)
 }
 
-func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (operation.Action, error) {
+func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (operation.Action, map[string]acceptedTarget, error) {
 	backups := make([]string, 0, len(spec.targets))
+	authority := make(map[string]acceptedTarget, len(spec.targets))
 	combined := operation.Observation{Source: strings.Join(spec.targets, ",")}
 	observations := make([]operation.Observation, 0, len(spec.targets))
 	allExistingManaged := true
@@ -379,16 +507,17 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 		info, statErr := os.Lstat(absolute)
 		if statErr == nil && info.IsDir() {
 			if external {
-				return operation.Action{}, fmt.Errorf("external directory config target is unsupported: %s", absolute)
+				return operation.Action{}, nil, fmt.Errorf("external directory config target is unsupported: %s", absolute)
 			}
 			snapshot, snapshotErr := safefile.SnapshotDirectoryWithin(home, filepath.ToSlash(rel))
 			if snapshotErr != nil {
-				return operation.Action{}, fmt.Errorf("snapshot %s target %s: %w", spec.toolID, rel, snapshotErr)
+				return operation.Action{}, nil, fmt.Errorf("snapshot %s target %s: %w", spec.toolID, rel, snapshotErr)
 			}
 			digest := snapshot.Digest()
 			combined.Exists = true
 			allExistingManaged = false
 			observations = append(observations, operation.Observation{Exists: true, Source: rel, Digest: hex.EncodeToString(digest[:])})
+			authority[rel] = acceptedTarget{kind: acceptedDirectoryTarget, directory: snapshot}
 			if spec.fullFilePolicy {
 				disposition = operation.DispositionBlocked
 				reason = "an existing managed-directory target has no ownership manifest"
@@ -396,15 +525,28 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			continue
 		}
 		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return operation.Action{}, fmt.Errorf("observe %s target %s: %w", spec.toolID, rel, statErr)
+			return operation.Action{}, nil, fmt.Errorf("observe %s target %s: %w", spec.toolID, rel, statErr)
 		}
 		if statErr == nil && !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
-			return operation.Action{}, fmt.Errorf("observe %s target %s: unsupported file type", spec.toolID, rel)
+			return operation.Action{}, nil, fmt.Errorf("observe %s target %s: unsupported file type", spec.toolID, rel)
 		}
-		observed, err := tools.ObserveGeneratedConfig(absolute)
+		if errors.Is(statErr, os.ErrNotExist) && plannedDirectoryConfigTarget(spec.toolID, rel) {
+			observations = append(observations, operation.Observation{Source: rel})
+			authority[rel] = acceptedTarget{kind: acceptedDirectoryTarget}
+			allExistingManaged = false
+			continue
+		}
+		content, revision, err := safefile.ReadWithin(home, filepath.ToSlash(rel))
 		if err != nil {
-			return operation.Action{}, fmt.Errorf("observe %s target %s: %w", spec.toolID, rel, err)
+			return operation.Action{}, nil, fmt.Errorf("observe %s target %s: %w", spec.toolID, rel, err)
 		}
+		observed := tools.ConfigOwnershipObservation{Exists: revision.Exists()}
+		if revision.Exists() {
+			digest := revision.Digest()
+			observed.Digest = hex.EncodeToString(digest[:])
+			observed.Managed = tools.IsManagedGeneratedConfigContent(content)
+		}
+		authority[rel] = acceptedTarget{kind: acceptedFileTarget, file: revision}
 		if observed.Exists {
 			combined.Exists = true
 			if !observed.Managed {
@@ -415,10 +557,7 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 		if spec.fullFilePolicy && observed.Exists && !observed.Managed {
 			migratable := false
 			if spec.toolID == "yazi" && filepath.Base(rel) == "theme.toml" {
-				migratable, err = tools.IsLegacyGeneratedYaziThemeConfig(absolute)
-				if err != nil {
-					return operation.Action{}, fmt.Errorf("inspect legacy Yazi theme %s: %w", rel, err)
-				}
+				migratable = tools.IsLegacyGeneratedYaziThemeContent(content)
 			}
 			if !migratable {
 				disposition = operation.DispositionBlocked
@@ -442,7 +581,12 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 		BackupTargets: backups,
 		Observation:   combined,
 		Observations:  observations,
-	}, nil
+	}, authority, nil
+}
+
+func plannedDirectoryConfigTarget(toolID, rel string) bool {
+	return (toolID == "neovim" && rel == ".config/nvim") ||
+		(toolID == "tmux" && filepath.ToSlash(rel) == ".tmux/plugins/tpm")
 }
 
 func digestPlanValue(value any) string {
@@ -454,16 +598,23 @@ func digestPlanValue(value any) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func observeRelativeFile(home, rel string) (operation.Observation, error) {
-	data, revision, err := safefile.ReadWithin(home, filepath.ToSlash(rel))
+func observeRelativeFile(home, rel string) (operation.Observation, safefile.Revision, error) {
+	_, revision, err := safefile.ReadWithin(home, filepath.ToSlash(rel))
 	if err != nil {
-		return operation.Observation{}, err
+		return operation.Observation{}, safefile.Revision{}, err
 	}
-	if !revision.Exists() {
-		return operation.Observation{Source: rel}, nil
+	return observationFromFileRevision(rel, revision, false), revision, nil
+}
+
+func observationFromFileRevision(rel string, revision safefile.Revision, managed bool) operation.Observation {
+	observation := operation.Observation{Source: rel}
+	if revision.Exists() {
+		digest := revision.Digest()
+		observation.Exists = true
+		observation.Digest = hex.EncodeToString(digest[:])
+		observation.Managed = managed
 	}
-	digest := sha256.Sum256(data)
-	return operation.Observation{Exists: true, Source: rel, Digest: hex.EncodeToString(digest[:])}, nil
+	return observation
 }
 
 func revalidateInstallPlan(plan *installPlan) error {
@@ -478,39 +629,25 @@ func revalidateInstallPlan(plan *installPlan) error {
 		if action.Disposition != operation.DispositionApply {
 			continue
 		}
-		for _, expected := range action.Observations {
-			if filepath.IsAbs(expected.Source) {
-				return fmt.Errorf("action %s targets unsupported external path %s", action.ID, expected.Source)
+		for rel, expected := range plan.authority[action.ID] {
+			var verifyErr error
+			switch expected.kind {
+			case acceptedFileTarget:
+				_, current, err := safefile.ReadWithin(home, rel)
+				if err != nil {
+					verifyErr = err
+				} else if current != expected.file {
+					verifyErr = safefile.ErrRevisionChanged
+				}
+			case acceptedDirectoryTarget:
+				verifyErr = safefile.VerifyDirectoryWithinSnapshot(home, rel, expected.directory)
+			default:
+				verifyErr = fmt.Errorf("invalid accepted authority kind")
 			}
-			current, err := observePlanTarget(home, expected.Source)
-			if err != nil {
-				return fmt.Errorf("revalidate action %s target %s: %w", action.ID, expected.Source, err)
-			}
-			if current != expected {
-				return fmt.Errorf("action %s target %s changed after preview", action.ID, expected.Source)
+			if verifyErr != nil {
+				return fmt.Errorf("action %s target %s changed after preview: %w", action.ID, rel, verifyErr)
 			}
 		}
 	}
 	return nil
-}
-
-func observePlanTarget(home, rel string) (operation.Observation, error) {
-	absolute := filepath.Join(home, filepath.FromSlash(rel))
-	info, err := os.Lstat(absolute)
-	if err == nil && info.IsDir() {
-		snapshot, err := safefile.SnapshotDirectoryWithin(home, filepath.ToSlash(rel))
-		if err != nil {
-			return operation.Observation{}, err
-		}
-		digest := snapshot.Digest()
-		return operation.Observation{Exists: true, Source: rel, Digest: hex.EncodeToString(digest[:])}, nil
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return operation.Observation{}, err
-	}
-	observed, err := tools.ObserveGeneratedConfig(absolute)
-	if err != nil {
-		return operation.Observation{}, err
-	}
-	return operation.Observation{Exists: observed.Exists, Source: rel, Digest: observed.Digest, Managed: observed.Managed}, nil
 }

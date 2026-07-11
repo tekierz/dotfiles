@@ -68,6 +68,51 @@ func SnapshotDirectoryWithin(root, rel string) (*DirectorySnapshot, error) {
 	return snapshot, nil
 }
 
+// VerifyDirectoryWithinSnapshot proves that rel still names the exact
+// identity-bound recursive state captured in expected. A nil expected value
+// represents an accepted missing directory and therefore succeeds only while
+// rel remains absent. The check is read-only and never creates parents.
+func VerifyDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot) error {
+	directories, target, err := splitRelativePath(rel)
+	if err != nil {
+		return err
+	}
+	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open trusted root: %w", err)
+	}
+	defer func() { _ = unix.Close(rootFD) }()
+	parentFD, err := openParent(rootFD, directories, false)
+	if err != nil {
+		if expected == nil && errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = unix.Close(parentFD) }()
+
+	current, identity, err := snapshotDirectoryEntryAt(parentFD, target)
+	if err != nil {
+		if expected == nil && errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		if expected != nil && errors.Is(err, unix.ENOENT) {
+			return fmt.Errorf("%w: expected directory %q disappeared", ErrDirectoryChanged, target)
+		}
+		return err
+	}
+	if expected == nil {
+		return fmt.Errorf("%w: expected directory %q to remain absent", ErrDirectoryChanged, target)
+	}
+	if !expected.tracked {
+		return fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	}
+	if identity != (fileIdentity{device: expected.device, inode: expected.inode}) || !reflect.DeepEqual(current.root, expected.root) {
+		return fmt.Errorf("%w: directory %q no longer matches accepted snapshot", ErrDirectoryChanged, target)
+	}
+	return nil
+}
+
 func snapshotDirectoryEntryAt(parentFD int, target string) (*DirectorySnapshot, fileIdentity, error) {
 	state, err := statDirectoryEntryAt(parentFD, target)
 	if err != nil {

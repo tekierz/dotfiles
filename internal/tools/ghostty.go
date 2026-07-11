@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/theme"
 )
 
@@ -286,6 +287,18 @@ func WriteGhosttyConfigAt(configPath string, cfg GhosttyConfig, themeName string
 }
 
 func WriteGhosttyConfigAtTracked(configPath string, cfg GhosttyConfig, themeName string) (MutationEvidence, error) {
+	return writeGhosttyConfigAtRevisionTracked(configPath, cfg, themeName, nil)
+}
+
+// WriteGhosttyConfigAtRevisionTracked applies a plan-accepted Ghostty revision.
+func WriteGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, themeName string, accepted safefile.Revision) (MutationEvidence, error) {
+	if !accepted.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Ghostty revision is untracked", safefile.ErrRevisionChanged)
+	}
+	return writeGhosttyConfigAtRevisionTracked(configPath, cfg, themeName, &accepted)
+}
+
+func writeGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, themeName string, accepted *safefile.Revision) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
@@ -313,6 +326,9 @@ func WriteGhosttyConfigAtTracked(configPath string, cfg GhosttyConfig, themeName
 		if err != nil {
 			return err
 		}
+		if accepted != nil && revision != *accepted {
+			return fmt.Errorf("%w: Ghostty config changed after plan acceptance", safefile.ErrRevisionChanged)
+		}
 		merged, _, err := mergeManagedConfigSection(
 			existing,
 			managed,
@@ -327,7 +343,11 @@ func WriteGhosttyConfigAtTracked(configPath string, cfg GhosttyConfig, themeName
 			evidence = MutationEvidence{Path: cleanTarget, Revision: revision}
 			return nil
 		}
-		committed, err := replaceToolConfigAtRevisionTracked(root, rel, revision, merged)
+		expected := revision
+		if accepted != nil {
+			expected = *accepted
+		}
+		committed, err := replaceToolConfigAtRevisionTracked(root, rel, expected, merged)
 		if err != nil {
 			return fmt.Errorf("write managed Ghostty config: %w", err)
 		}

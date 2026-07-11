@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // YaziConfig holds Yazi configuration settings
@@ -229,6 +230,54 @@ func WriteYaziConfigTracked(cfg YaziConfig, theme string) ([]MutationEvidence, e
 	return writeYaziConfigWithWriters(cfg, theme, writeToolConfigTracked, writeYaziThemeConfigTracked)
 }
 
+// WriteYaziConfigAtRevisionsTracked applies the complete plan-accepted Yazi set.
+func WriteYaziConfigAtRevisionsTracked(cfg YaziConfig, theme string, yaziAccepted, keymapAccepted, themeAccepted safefile.Revision) ([]MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	configDir := filepath.Join(home, ".config", "yazi")
+	yaziPath := filepath.Join(configDir, "yazi.toml")
+	keymapPath := filepath.Join(configDir, "keymap.toml")
+	themePath := filepath.Join(configDir, "theme.toml")
+	for _, target := range []struct {
+		path     string
+		accepted safefile.Revision
+		legacy   func([]byte) bool
+	}{
+		{yaziPath, yaziAccepted, nil},
+		{keymapPath, keymapAccepted, nil},
+		{themePath, themeAccepted, hasLegacyGeneratedYaziThemeHeader},
+	} {
+		if err := preflightToolConfigAtRevision(target.path, target.accepted, target.legacy); err != nil {
+			return nil, fmt.Errorf("preflight accepted Yazi config set: %w", err)
+		}
+	}
+
+	var results, committed []MutationEvidence
+	evidence, err := writeToolConfigAtRevisionTracked(yaziPath, []byte(GenerateYaziConfig(cfg, theme)), yaziAccepted)
+	if err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	results = append(results, evidence)
+	if evidence.Revision != yaziAccepted {
+		committed = append(committed, evidence)
+	}
+	evidence, err = writeToolConfigAtRevisionTracked(keymapPath, []byte(GenerateYaziKeymap(cfg, theme)), keymapAccepted)
+	if err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	results = append(results, evidence)
+	if evidence.Revision != keymapAccepted {
+		committed = append(committed, evidence)
+	}
+	evidence, err = writeYaziThemeConfigAtRevisionTracked(themePath, []byte(GenerateYaziTheme(theme)), themeAccepted)
+	if err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	return append(results, evidence), nil
+}
+
 func writeYaziConfigWithWriters(cfg YaziConfig, theme string, writeWhole, writeTheme func(string, []byte) (MutationEvidence, error)) ([]MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -302,6 +351,39 @@ func writeYaziThemeConfigTracked(path string, content []byte) (MutationEvidence,
 			return nil
 		}
 		committed, err := replaceToolConfigAtRevisionTracked(root, rel, revision, content)
+		if err == nil {
+			evidence = MutationEvidence{Path: path, Revision: committed}
+		}
+		return err
+	})
+	return evidence, err
+}
+
+func writeYaziThemeConfigAtRevisionTracked(path string, content []byte, accepted safefile.Revision) (MutationEvidence, error) {
+	if !accepted.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Yazi theme revision is untracked", safefile.ErrRevisionChanged)
+	}
+	if !hasGeneratedConfigHeader(content) {
+		return MutationEvidence{}, fmt.Errorf("%w: replacement for %s has no recognized ownership header", ErrUnmanagedConfig, path)
+	}
+	var evidence MutationEvidence
+	err := withToolConfigLock(path, func(root, rel string) error {
+		existing, current, err := readToolConfig(root, rel)
+		if err != nil {
+			return err
+		}
+		if current != accepted {
+			return fmt.Errorf("%w: Yazi theme changed after plan acceptance", safefile.ErrRevisionChanged)
+		}
+		legacy := current.Exists() && hasLegacyGeneratedYaziThemeHeader(existing)
+		if current.Exists() && !hasGeneratedConfigHeader(existing) && !legacy {
+			return fmt.Errorf("%w: %s", ErrUnmanagedConfig, path)
+		}
+		if current.Exists() && bytes.Equal(existing, content) {
+			evidence = MutationEvidence{Path: path, Revision: current}
+			return nil
+		}
+		committed, err := replaceToolConfigAtRevisionTracked(root, rel, accepted, content)
 		if err == nil {
 			evidence = MutationEvidence{Path: path, Revision: committed}
 		}

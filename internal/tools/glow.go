@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // GlowConfig holds Glow configuration settings
@@ -101,6 +102,15 @@ func WriteGlowConfigTracked(cfg GlowConfig, theme string) (MutationEvidence, err
 
 	content := GenerateGlowConfig(cfg, theme)
 	return writeToolConfigTracked(configPath, []byte(content))
+}
+
+// WriteGlowConfigAtRevisionTracked applies a plan-accepted Glow revision.
+func WriteGlowConfigAtRevisionTracked(cfg GlowConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
+	configPath, err := glowConfigPath()
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return writeToolConfigAtRevisionTracked(configPath, []byte(GenerateGlowConfig(cfg, theme)), accepted)
 }
 
 // glowConfigPath returns the config file glow itself loads. Glow resolves its

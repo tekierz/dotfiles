@@ -656,7 +656,22 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 // A beforeCommit failure leaves global.json unchanged. A later global.json
 // write failure cannot roll back side effects performed by beforeCommit, so the
 // callback should remain small and independently retryable.
-func SaveGlobalConfigWithReservedRevision(cfg *GlobalConfig, beforeCommit func() error) (returnErr error) {
+func SaveGlobalConfigWithReservedRevision(cfg *GlobalConfig, beforeCommit func() error) error {
+	_, err := saveGlobalConfigAtRevisionTracked(cfg, nil, beforeCommit)
+	return err
+}
+
+// SaveGlobalConfigAtRevisionTracked saves cfg only while global.json still
+// matches the exact revision accepted by a reviewed operation plan. The
+// accepted revision is checked while the global-config lock is held and is
+// passed to the descriptor-anchored replacement CAS. The returned revision is
+// captured by that transaction and can therefore authorize conditional
+// rollback without a later path re-read.
+func SaveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted safefile.Revision) (safefile.Revision, error) {
+	return saveGlobalConfigAtRevisionTracked(cfg, &accepted, nil)
+}
+
+func saveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted *safefile.Revision, beforeCommit func() error) (committedRevision safefile.Revision, returnErr error) {
 	// SaveGlobalConfig refreshes cfg.sourceRevision after a successful write.
 	// Lock before reading any cfg field so concurrent saves of the same pointer do
 	// not race with that refresh. This also protects unknownFields map reads made
@@ -666,31 +681,34 @@ func SaveGlobalConfigWithReservedRevision(cfg *GlobalConfig, beforeCommit func()
 
 	normalized, err := normalizeGlobalConfigForSave(cfg)
 	if err != nil {
-		return err
+		return safefile.Revision{}, err
 	}
 	data, err := marshalGlobalConfig(&normalized)
 	if err != nil {
-		return err
+		return safefile.Revision{}, err
 	}
+	if accepted != nil && cfg.sourceRevision != *accepted {
+		return safefile.Revision{}, fmt.Errorf("%w: accepted global config revision does not match planned source", ErrGlobalConfigConflict)
+	}
+	expectedRevision := cfg.sourceRevision
 
 	dir := ConfigDir()
 	if dir == "" {
-		return ErrNoConfigDir
+		return safefile.Revision{}, ErrNoConfigDir
 	}
 	path := filepath.Join(dir, "global.json")
 	if err := ensureConfiguredXDGRoot(path); err != nil {
-		return fmt.Errorf("prepare global config path: %w", err)
+		return safefile.Revision{}, fmt.Errorf("prepare global config path: %w", err)
 	}
 	root, rel, err := anchoredFilePath(path)
 	if err != nil {
-		return fmt.Errorf("resolve global config path: %w", err)
+		return safefile.Revision{}, fmt.Errorf("resolve global config path: %w", err)
 	}
 	lockRoot := root
 	lockRel := globalConfigLockRel(rel)
-
 	release, err := acquireGlobalConfigLock(lockRoot, lockRel)
 	if err != nil {
-		return fmt.Errorf("lock global config: %w", err)
+		return safefile.Revision{}, fmt.Errorf("lock global config: %w", err)
 	}
 	didCommit := false
 	defer func() {
@@ -705,48 +723,77 @@ func SaveGlobalConfigWithReservedRevision(cfg *GlobalConfig, beforeCommit func()
 	}()
 
 	if err := checkGlobalConfigRevision(root, rel, cfg.sourceRevision); err != nil {
-		return err
+		return safefile.Revision{}, err
 	}
 	if beforeCommit != nil {
 		if err := beforeCommit(); err != nil {
-			return fmt.Errorf("global config reserved callback failed: %w", err)
+			return safefile.Revision{}, fmt.Errorf("global config reserved callback failed: %w", err)
 		}
 		// The callback may be independently retryable, but it can be long enough
 		// for a non-cooperating writer to replace global.json while our advisory
 		// lock is held. Refuse to overwrite that edit. A portable optimistic CAS
 		// still cannot make this final check and rename one indivisible operation.
 		if err := checkGlobalConfigRevision(root, rel, cfg.sourceRevision); err != nil {
-			return err
+			return safefile.Revision{}, err
 		}
 	}
 
-	if err := safefile.ReplaceWithin(root, rel, data, 0600); err != nil {
+	var revision safefile.Revision
+	if expectedRevision.Tracked() {
+		revision, err = safefile.ReplaceWithinRevisionTracked(root, rel, expectedRevision, data, 0600)
+	} else {
+		// Preserve the documented compatibility path for a programmatically
+		// constructed config creating a missing global.json. Reviewed plans always
+		// carry a tracked missing revision and therefore take the exact CAS path.
+		revision, err = safefile.ReplaceWithinTracked(root, rel, data, 0600)
+	}
+	if err != nil {
 		var committed interface{ Committed() bool }
 		if errors.As(err, &committed) && committed.Committed() {
 			didCommit = true
-			return &GlobalConfigCommittedError{Operation: "replace global.json", Err: err}
+			return safefile.Revision{}, &GlobalConfigCommittedError{Operation: "replace global.json", Err: err}
 		}
-		return fmt.Errorf("failed to write global config: %w", err)
+		return safefile.Revision{}, fmt.Errorf("failed to write global config: %w", err)
 	}
 	didCommit = true
 	if globalConfigAfterWriteHook != nil {
 		if err := globalConfigAfterWriteHook(path); err != nil {
-			return &GlobalConfigCommittedError{Operation: "post-write test hook", Err: err}
+			return safefile.Revision{}, &GlobalConfigCommittedError{Operation: "post-write test hook", Err: err}
 		}
 	}
-	committedData, revision, err := readGlobalConfigRevision(root, rel)
+	committedData, verifiedRevision, err := readGlobalConfigRevision(root, rel)
 	if err != nil {
-		return &GlobalConfigCommittedError{Operation: "read committed revision", Err: errors.Join(ErrGlobalConfigConflict, err)}
+		return safefile.Revision{}, &GlobalConfigCommittedError{Operation: "read committed revision", Err: errors.Join(ErrGlobalConfigConflict, err)}
 	}
-	if !revision.Exists() || !bytes.Equal(committedData, data) || revision.Permissions() != 0600 {
-		return &GlobalConfigCommittedError{
+	if verifiedRevision != revision || !revision.Exists() || !bytes.Equal(committedData, data) || revision.Permissions() != 0600 {
+		return safefile.Revision{}, &GlobalConfigCommittedError{
 			Operation: "verify committed revision",
 			Err:       fmt.Errorf("%w: global.json no longer contains the intended bytes and mode", ErrGlobalConfigConflict),
 		}
 	}
 	cfg.sourceRevision = revision
 
-	return nil
+	return revision, nil
+}
+
+// CloneGlobalConfig returns an independent copy, including unknown additive
+// fields and the exact source revision. It lets immutable operation plans hand
+// a disposable value to a writer without allowing the successful save to
+// mutate the plan's retained snapshot.
+func CloneGlobalConfig(cfg *GlobalConfig) *GlobalConfig {
+	if cfg == nil {
+		return nil
+	}
+	globalConfigSaveMu.Lock()
+	defer globalConfigSaveMu.Unlock()
+	clone := *cfg
+	if cfg.unknownFields != nil {
+		clone.unknownFields = make(map[string]json.RawMessage, len(cfg.unknownFields))
+		for key, value := range cfg.unknownFields {
+			clone.unknownFields[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+	return &clone
 }
 
 // GlobalConfigRevision returns the exact descriptor revision proven by the

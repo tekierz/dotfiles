@@ -168,6 +168,46 @@ func TestSnapshotDirectoryWithinDetectsRootNamespaceReplacement(t *testing.T) {
 	assertContent(t, filepath.Join(moved, "config"), "original\n")
 }
 
+func TestVerifyDirectoryWithinSnapshotRejectsIdenticalReplacement(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "tree")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "config"), []byte("same\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expected, err := SnapshotDirectoryWithin(root, "tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, filepath.Join(root, "old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "config"), []byte("same\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDirectoryWithinSnapshot(root, "tree", expected); !errors.Is(err, ErrDirectoryChanged) {
+		t.Fatalf("VerifyDirectoryWithinSnapshot error = %v, want ErrDirectoryChanged", err)
+	}
+}
+
+func TestVerifyDirectoryWithinSnapshotTracksAcceptedAbsence(t *testing.T) {
+	root := t.TempDir()
+	if err := VerifyDirectoryWithinSnapshot(root, "missing/leaf", nil); err != nil {
+		t.Fatalf("accepted absence rejected: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "missing", "leaf"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDirectoryWithinSnapshot(root, "missing/leaf", nil); !errors.Is(err, ErrDirectoryChanged) {
+		t.Fatalf("created directory error = %v, want ErrDirectoryChanged", err)
+	}
+}
+
 func TestSnapshotDirectoryWithinDetectsFileReplacementDuringRead(t *testing.T) {
 	root := t.TempDir()
 	tree := filepath.Join(root, "tree")

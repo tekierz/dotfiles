@@ -9,6 +9,7 @@ import (
 
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // ZshConfig holds Zsh configuration settings
@@ -361,6 +362,18 @@ func WriteZshConfig(cfg ZshConfig, theme string) error {
 }
 
 func WriteZshConfigTracked(cfg ZshConfig, theme string) (MutationEvidence, error) {
+	return writeZshConfigAtRevisionTracked(cfg, theme, nil)
+}
+
+// WriteZshConfigAtRevisionTracked applies a plan-accepted Zsh revision.
+func WriteZshConfigAtRevisionTracked(cfg ZshConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
+	if !accepted.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Zsh revision is untracked", safefile.ErrRevisionChanged)
+	}
+	return writeZshConfigAtRevisionTracked(cfg, theme, &accepted)
+}
+
+func writeZshConfigAtRevisionTracked(cfg ZshConfig, theme string, accepted *safefile.Revision) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
@@ -374,6 +387,9 @@ func WriteZshConfigTracked(cfg ZshConfig, theme string) (MutationEvidence, error
 		if err != nil {
 			return err
 		}
+		if accepted != nil && revision != *accepted {
+			return fmt.Errorf("%w: Zsh config changed after plan acceptance", safefile.ErrRevisionChanged)
+		}
 		content := managed
 		if revision.Exists() {
 			content, err = mergeZshManagedSection(existing, managed)
@@ -381,7 +397,11 @@ func WriteZshConfigTracked(cfg ZshConfig, theme string) (MutationEvidence, error
 				return err
 			}
 		}
-		committed, err := replaceToolConfigAtRevisionTracked(root, rel, revision, content)
+		expected := revision
+		if accepted != nil {
+			expected = *accepted
+		}
+		committed, err := replaceToolConfigAtRevisionTracked(root, rel, expected, content)
 		if err == nil {
 			evidence = MutationEvidence{Path: configPath, Revision: committed}
 		}

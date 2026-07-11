@@ -10,6 +10,10 @@ func SnapshotDirectoryWithin(_ string, _ string) (*DirectorySnapshot, error) {
 	return nil, ErrUnsupported
 }
 
+func VerifyDirectoryWithinSnapshot(_ string, _ string, _ *DirectorySnapshot) error {
+	return ErrUnsupported
+}
+
 // RestoreDirectoryWithin is unavailable on platforms without the required
 // descriptor-relative directory and durability operations.
 func RestoreDirectoryWithin(_ string, _ string, _ *DirectorySnapshot) error {

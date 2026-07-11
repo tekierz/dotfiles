@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 	themepkg "github.com/tekierz/dotfiles/internal/theme"
 )
 
@@ -372,4 +373,80 @@ func WriteGitConfigTracked(cfg GitConfig, theme string) ([]MutationEvidence, err
 		return nil, partialMutationError(err, evidence)
 	}
 	return evidence, nil
+}
+
+// WriteGitConfigAtRevisionsTracked applies the complete plan-accepted Git set.
+func WriteGitConfigAtRevisionsTracked(cfg GitConfig, theme string, rootAccepted, managedAccepted safefile.Revision) ([]MutationEvidence, error) {
+	if !rootAccepted.Tracked() || !managedAccepted.Tracked() {
+		return nil, fmt.Errorf("%w: accepted Git revisions must be tracked", safefile.ErrRevisionChanged)
+	}
+	if override := os.Getenv("GIT_CONFIG_GLOBAL"); override != "" {
+		return nil, fmt.Errorf("refusing to write ~/.gitconfig while GIT_CONFIG_GLOBAL overrides the global source: %s", override)
+	}
+	if count := strings.TrimSpace(os.Getenv("GIT_CONFIG_COUNT")); count != "" && count != "0" {
+		return nil, fmt.Errorf("refusing to write Git config while GIT_CONFIG_COUNT command overrides are active")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	configPath := filepath.Join(home, ".gitconfig")
+	managedPath := filepath.Join(home, filepath.FromSlash(gitManagedConfigRel))
+	managedContent := []byte(GenerateGitConfig(cfg, theme))
+	includeSection := wrapManagedConfigSection(gitManagedIncludeStart, gitManagedIncludeEnd, "[include]\n\tpath = "+gitManagedIncludePath)
+
+	var results, committed []MutationEvidence
+	err = withToolConfigLock(configPath, func(root, rel string) error {
+		existing, rootCurrent, err := readToolConfig(root, rel)
+		if err != nil {
+			return err
+		}
+		existingManaged, managedCurrent, err := readToolConfig(root, gitManagedConfigRel)
+		if err != nil {
+			return fmt.Errorf("inspect managed Git config: %w", err)
+		}
+		// Validate the complete accepted set before parsing ownership or making
+		// the first mutation.
+		if rootCurrent != rootAccepted || managedCurrent != managedAccepted {
+			return fmt.Errorf("%w: Git config set changed after plan acceptance", safefile.ErrRevisionChanged)
+		}
+		merged, _, err := mergeManagedConfigSection(existing, includeSection, gitManagedIncludeStart, gitManagedIncludeEnd, ".gitconfig")
+		if err != nil {
+			return err
+		}
+		if managedCurrent.Exists() && !hasGeneratedConfigHeader(existingManaged) {
+			return fmt.Errorf("%w: %s", ErrUnmanagedConfig, managedPath)
+		}
+
+		managedResult := managedCurrent
+		if !managedCurrent.Exists() || !bytes.Equal(existingManaged, managedContent) {
+			managedResult, err = replaceToolConfigAtRevisionTracked(root, gitManagedConfigRel, managedAccepted, managedContent)
+			if err != nil {
+				return fmt.Errorf("write managed Git config: %w", err)
+			}
+		}
+		managedEvidence := MutationEvidence{Path: managedPath, Revision: managedResult}
+		results = append(results, managedEvidence)
+		if managedResult != managedAccepted {
+			committed = append(committed, managedEvidence)
+		}
+
+		rootResult := rootCurrent
+		if !rootCurrent.Exists() || !bytes.Equal(existing, merged) {
+			rootResult, err = replaceToolConfigAtRevisionTracked(root, rel, rootAccepted, merged)
+			if err != nil {
+				return fmt.Errorf("install managed Git include: %w", err)
+			}
+		}
+		rootEvidence := MutationEvidence{Path: configPath, Revision: rootResult}
+		results = append(results, rootEvidence)
+		if rootResult != rootAccepted {
+			committed = append(committed, rootEvidence)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	return results, nil
 }

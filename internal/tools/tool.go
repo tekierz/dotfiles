@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
@@ -306,6 +307,62 @@ func writeToolConfigTracked(path string, content []byte) (MutationEvidence, erro
 	return evidence, err
 }
 
+// writeToolConfigAtRevisionTracked is the install-plan variant of the whole-
+// file writer. The plan's private revision is authoritative: ownership and
+// same-content checks happen only after the locked live target has been proven
+// to be the exact namespace object accepted by the user.
+func writeToolConfigAtRevisionTracked(path string, content []byte, accepted safefile.Revision) (MutationEvidence, error) {
+	if !accepted.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted revision for %s is untracked", safefile.ErrRevisionChanged, path)
+	}
+	if !hasGeneratedConfigHeader(content) {
+		return MutationEvidence{}, fmt.Errorf("%w: replacement for %s has no recognized ownership header", ErrUnmanagedConfig, path)
+	}
+
+	var evidence MutationEvidence
+	err := withToolConfigLock(path, func(root, rel string) error {
+		existing, current, err := readToolConfig(root, rel)
+		if err != nil {
+			return err
+		}
+		if current != accepted {
+			return fmt.Errorf("%w: generated config %s changed after plan acceptance", safefile.ErrRevisionChanged, rel)
+		}
+		if current.Exists() && !hasGeneratedConfigHeader(existing) {
+			return fmt.Errorf("%w: %s", ErrUnmanagedConfig, path)
+		}
+		if current.Exists() && bytes.Equal(existing, content) {
+			evidence = MutationEvidence{Path: path, Revision: current}
+			return nil
+		}
+		committed, err := replaceToolConfigAtRevisionTracked(root, rel, accepted, content)
+		if err == nil {
+			evidence = MutationEvidence{Path: path, Revision: committed}
+		}
+		return err
+	})
+	return evidence, err
+}
+
+func preflightToolConfigAtRevision(path string, accepted safefile.Revision, allowLegacy func([]byte) bool) error {
+	if !accepted.Tracked() {
+		return fmt.Errorf("%w: accepted revision for %s is untracked", safefile.ErrRevisionChanged, path)
+	}
+	return withToolConfigLock(path, func(root, rel string) error {
+		existing, current, err := readToolConfig(root, rel)
+		if err != nil {
+			return err
+		}
+		if current != accepted {
+			return fmt.Errorf("%w: generated config %s changed after plan acceptance", safefile.ErrRevisionChanged, rel)
+		}
+		if current.Exists() && !hasGeneratedConfigHeader(existing) && (allowLegacy == nil || !allowLegacy(existing)) {
+			return fmt.Errorf("%w: %s", ErrUnmanagedConfig, path)
+		}
+		return nil
+	})
+}
+
 func hasGeneratedConfigHeader(content []byte) bool {
 	for _, header := range generatedConfigHeaders {
 		if bytes.HasPrefix(content, header) {
@@ -331,11 +388,20 @@ func writeGeneratedConfigWith(path string, content []byte, mode os.FileMode, rep
 }
 
 // withToolConfigLock serializes a read-modify-write operation on path with
-// other cooperating dotfiles processes. The lock lives beside the target. Its
-// missing private parents are created descriptor-relatively before locking;
-// symlinks in the untrusted portion of both the target and lock paths are
-// refused.
+// other cooperating dotfiles processes. The lock lives below dotfiles' private
+// operational-state root, so locking never creates an unplanned sidecar beside
+// user configuration. Target parents are created only after acquiring it.
 func withToolConfigLock(path string, mutate func(root, rel string) error) (returnErr error) {
+	release, err := operation.AcquireStateLock("tool-config", path)
+	if err != nil {
+		return fmt.Errorf("failed to lock generated config %s: %w", path, err)
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("failed to unlock generated config %s: %w", path, releaseErr))
+		}
+	}()
+
 	root, rel, err := prepareGeneratedConfigDestination(path)
 	if err != nil {
 		return err
@@ -346,15 +412,6 @@ func withToolConfigLock(path string, mutate func(root, rel string) error) (retur
 			return fmt.Errorf("failed to create generated config parent for %s: %w", path, err)
 		}
 	}
-	release, err := safefile.AcquireLockWithin(root, rel+".dotfiles.lock", 0600)
-	if err != nil {
-		return fmt.Errorf("failed to lock generated config %s: %w", path, err)
-	}
-	defer func() {
-		if releaseErr := release(); releaseErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("failed to unlock generated config %s: %w", path, releaseErr))
-		}
-	}()
 	return mutate(root, rel)
 }
 

@@ -342,6 +342,31 @@ func WriteNeovimConfigTracked(cfg NeovimConfig, theme string) (MutationEvidence,
 	}
 }
 
+// WriteNeovimConfigAtSnapshotTracked applies a plan-accepted Neovim tree.
+func WriteNeovimConfigAtSnapshotTracked(cfg NeovimConfig, theme string, accepted *safefile.DirectorySnapshot) (MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	nvimDir := filepath.Join(home, ".config", "nvim")
+	switch cfg.ConfigPreset {
+	case "kickstart", "lazyvim", "nvchad":
+		installed, err := setupNeovimPresetAtSnapshotTracked(cfg, theme, nvimDir, accepted)
+		if err != nil {
+			var committed []MutationEvidence
+			if installed != nil {
+				committed = append(committed, MutationEvidence{Path: nvimDir, Directory: installed})
+			}
+			return MutationEvidence{}, partialMutationError(err, committed)
+		}
+		return MutationEvidence{Path: nvimDir, Directory: installed}, nil
+	case "custom":
+		return MutationEvidence{}, nil
+	default:
+		return MutationEvidence{}, fmt.Errorf("refusing unknown Neovim preset %q", cfg.ConfigPreset)
+	}
+}
+
 // setupNeovimPreset clones a preset config and adds user customizations
 func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
 	_, err := setupNeovimPresetTracked(cfg, theme, nvimDir)
@@ -349,6 +374,20 @@ func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
 }
 
 func setupNeovimPresetTracked(cfg NeovimConfig, theme, nvimDir string) (result *safefile.DirectorySnapshot, returnErr error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	targetRel := filepath.ToSlash(filepath.Join(".config", "nvim"))
+	if _, err := safefile.SnapshotDirectoryWithin(home, targetRel); err == nil {
+		return nil, fmt.Errorf("refusing to install Neovim preset over existing directory %s", nvimDir)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect Neovim preset target: %w", err)
+	}
+	return setupNeovimPresetAtSnapshotTracked(cfg, theme, nvimDir, nil)
+}
+
+func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string, accepted *safefile.DirectorySnapshot) (result *safefile.DirectorySnapshot, returnErr error) {
 	repoURL, ok := neovimConfigRepos[cfg.ConfigPreset]
 	if !ok {
 		return nil, fmt.Errorf("refusing unknown Neovim preset %q", cfg.ConfigPreset)
@@ -359,10 +398,8 @@ func setupNeovimPresetTracked(cfg NeovimConfig, theme, nvimDir string) (result *
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 	targetRel := filepath.ToSlash(filepath.Join(".config", "nvim"))
-	if _, err := safefile.SnapshotDirectoryWithin(home, targetRel); err == nil {
-		return nil, fmt.Errorf("refusing to install Neovim preset over existing directory %s", nvimDir)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect Neovim preset target: %w", err)
+	if err := safefile.VerifyDirectoryWithinSnapshot(home, targetRel, accepted); err != nil {
+		return nil, fmt.Errorf("preflight accepted Neovim preset target: %w", err)
 	}
 
 	// Clone under the trusted home root, then copy the validated snapshot into
@@ -401,9 +438,9 @@ func setupNeovimPresetTracked(cfg NeovimConfig, theme, nvimDir string) (result *
 	if err != nil {
 		return nil, fmt.Errorf("capture staged Neovim preset: %w", err)
 	}
-	installed, err := safefile.RestoreDirectoryWithinSnapshotTracked(home, targetRel, presetSnapshot, nil)
+	installed, err := safefile.RestoreDirectoryWithinSnapshotTracked(home, targetRel, presetSnapshot, accepted)
 	if err != nil {
-		return nil, fmt.Errorf("install Neovim preset: %w", err)
+		return installed, fmt.Errorf("install Neovim preset: %w", err)
 	}
 	return installed, nil
 }

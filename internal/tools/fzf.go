@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/theme"
 )
 
@@ -265,4 +266,14 @@ func WriteFzfConfigTracked(cfg FzfConfig, theme string) (MutationEvidence, error
 	configPath := filepath.Join(home, ".config", "fzf", "fzf.zsh")
 	content := GenerateFzfConfig(cfg, theme)
 	return writeToolConfigTracked(configPath, []byte(content))
+}
+
+// WriteFzfConfigAtRevisionTracked applies a plan-accepted FZF revision.
+func WriteFzfConfigAtRevisionTracked(cfg FzfConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	configPath := filepath.Join(home, ".config", "fzf", "fzf.zsh")
+	return writeToolConfigAtRevisionTracked(configPath, []byte(GenerateFzfConfig(cfg, theme)), accepted)
 }

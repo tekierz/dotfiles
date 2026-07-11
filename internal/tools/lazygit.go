@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // LazyGitConfig holds LazyGit configuration settings
@@ -175,4 +176,14 @@ func WriteLazyGitConfigTracked(cfg LazyGitConfig, theme string) (MutationEvidenc
 	configPath := filepath.Join(home, ".config", "lazygit", "config.yml")
 	content := GenerateLazyGitConfig(cfg, theme)
 	return writeToolConfigTracked(configPath, []byte(content))
+}
+
+// WriteLazyGitConfigAtRevisionTracked applies a plan-accepted LazyGit revision.
+func WriteLazyGitConfigAtRevisionTracked(cfg LazyGitConfig, theme string, accepted safefile.Revision) (MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	configPath := filepath.Join(home, ".config", "lazygit", "config.yml")
+	return writeToolConfigAtRevisionTracked(configPath, []byte(GenerateLazyGitConfig(cfg, theme)), accepted)
 }

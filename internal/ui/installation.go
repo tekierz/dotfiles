@@ -754,20 +754,6 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			finish(fmt.Errorf("installation plan changed while creating rollback point: %w", err))
 			return
 		}
-		rollbackExpected = make(map[string]backup.ExpectedState)
-		// From this point onward failures may require restoring the mandatory
-		// rollback point. Pre-mutation journal/backup/revalidation failures must
-		// never restore over an external edit that caused the refusal.
-		mutationStarted = true
-		globalEvidence, saveErr := saveInstallerPreferencesTracked(plan.theme, plan.navStyle, plan.animations)
-		if saveErr != nil {
-			captureErr := recordFailedActionRollbackState(home, plan, "state:global", saveErr, rollbackExpected)
-			markAction("state:global", operation.ActionFailed, "global preferences could not be persisted")
-			finish(errors.Join(fmt.Errorf("installation blocked by global config error: %w", saveErr), captureErr))
-			return
-		}
-		rollbackExpected[filepath.ToSlash(filepath.Join(".config", "dotfiles", "global.json"))] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetFile, Exists: true, FileRevision: globalEvidence.Revision}
-		markAction("state:global", operation.ActionSucceeded, "global preferences persisted")
 	}
 
 	// failures aggregates every failed step so the final error reports how many
@@ -802,6 +788,32 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		} else {
 			emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", result.successCount, len(selectedTools)))
 		}
+	}
+
+	if persistJournal {
+		// Package/custom installers are allowed to run for minutes and may create
+		// their own defaults. Revalidate the complete accepted config authority
+		// again before the first reviewed user-config mutation; individual writers
+		// still consume exact authority under their lock/transaction afterward.
+		if err := revalidateInstallPlan(plan); err != nil {
+			finish(fmt.Errorf("installation plan changed during package installation: %w", err))
+			return
+		}
+		rollbackExpected = make(map[string]backup.ExpectedState)
+		mutationStarted = true
+		globalEvidence, saveErr := savePlannedInstallerPreferencesTracked(plan)
+		if saveErr != nil {
+			captureErr := recordFailedActionRollbackState(home, plan, "state:global", saveErr, rollbackExpected)
+			markAction("state:global", operation.ActionFailed, "global preferences could not be persisted")
+			finish(errors.Join(fmt.Errorf("installation blocked by global config error: %w", saveErr), captureErr))
+			return
+		}
+		if err := authorizeMutationEvidenceSet(home, plan, "state:global", []tools.MutationEvidence{globalEvidence}, rollbackExpected); err != nil {
+			markAction("state:global", operation.ActionFailed, "global preference evidence was rejected")
+			finish(fmt.Errorf("authorize global preference mutation evidence: %w", err))
+			return
+		}
+		markAction("state:global", operation.ActionSucceeded, "global preferences persisted")
 	}
 
 	// configPhase runs a single configuration step, emitting a header line,
@@ -865,7 +877,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	if len(enabledHelpers(cfg.Utilities)) > 0 {
 		var helperResult utilityInstallResult
 		_ = configPhase("\n▶ Installing dotfiles utilities...", func() error {
-			helperResult = installUtilitiesTracked(cfg.Utilities)
+			if persistJournal {
+				helperResult = installUtilitiesAtPlanTracked(plan, cfg.Utilities)
+			} else {
+				helperResult = installUtilitiesTracked(cfg.Utilities)
+			}
 			if helperResult.Err != nil {
 				return fmt.Errorf("failed to install utilities: %w", helperResult.Err)
 			}
@@ -913,6 +929,21 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// TPM (SetupTPM), which is an install-only side-effect.
 	tmuxCfg := tmuxConfigFrom(cfg)
 	tmuxConfigured := toolConfigPhase("tmux", "\n▶ Configuring tmux...", func() ([]tools.MutationEvidence, error) {
+		if persistJournal {
+			tmuxAccepted, err := plan.acceptedFileRevision("config:tmux", ".tmux.conf")
+			if err != nil {
+				return nil, err
+			}
+			var tpmAccepted *safefile.DirectorySnapshot
+			if tmuxCfg.TPMEnabled {
+				tpmAccepted, err = plan.acceptedDirectorySnapshot("config:tmux", ".tmux/plugins/tpm")
+				if err != nil {
+					return nil, err
+				}
+			}
+			evidence, err := tools.SetupTPMAtAuthorityTracked(tmuxCfg, theme, tmuxAccepted, tpmAccepted)
+			return evidence, wrapMutationError("failed to configure tmux", err)
+		}
 		evidence, err := tools.SetupTPMTracked(tmuxCfg, theme)
 		return evidence, wrapMutationError("failed to configure tmux", err)
 	}, "  ✓ Tmux configured with ~/.tmux.conf")
@@ -936,6 +967,14 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		}
 		toolConfigPhase("claude-code", "\n▶ Configuring Claude Code MCP servers...", func() ([]tools.MutationEvidence, error) {
 			claudeTool := tools.NewClaudeCodeTool()
+			if persistJournal {
+				accepted, err := plan.acceptedFileRevision("config:claude-code", ".claude.json")
+				if err != nil {
+					return nil, err
+				}
+				evidence, err := claudeTool.ApplyConfigWithMCPsAtRevisionTracked(cfg.ClaudeCodeMCPs, accepted)
+				return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Claude MCP", err)
+			}
 			evidence, err := claudeTool.ApplyConfigWithMCPsTracked(cfg.ClaudeCodeMCPs)
 			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Claude MCP", err)
 		}, fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
@@ -945,7 +984,17 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	toolConfigPhase("ghostty", "\n▶ Configuring Ghostty...", func() ([]tools.MutationEvidence, error) {
 		var evidence tools.MutationEvidence
 		var err error
-		if ghosttyConfigTarget != "" {
+		if persistJournal {
+			rel, relErr := filepath.Rel(home, ghosttyConfigTarget)
+			if relErr != nil {
+				return nil, relErr
+			}
+			accepted, acceptedErr := plan.acceptedFileRevision("config:ghostty", filepath.ToSlash(rel))
+			if acceptedErr != nil {
+				return nil, acceptedErr
+			}
+			evidence, err = tools.WriteGhosttyConfigAtRevisionTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme, accepted)
+		} else if ghosttyConfigTarget != "" {
 			evidence, err = tools.WriteGhosttyConfigAtTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme)
 		} else {
 			// Compatibility-only workers created without an accepted production plan
@@ -957,6 +1006,14 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 
 	// Configure Zsh
 	toolConfigPhase("zsh", "\n▶ Configuring Zsh...", func() ([]tools.MutationEvidence, error) {
+		if persistJournal {
+			accepted, err := plan.acceptedFileRevision("config:zsh", ".zshrc")
+			if err != nil {
+				return nil, err
+			}
+			evidence, err := tools.WriteZshConfigAtRevisionTracked(zshConfigFrom(cfg), theme, accepted)
+			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Zsh", err)
+		}
 		evidence, err := tools.WriteZshConfigTracked(zshConfigFrom(cfg), theme)
 		return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Zsh", err)
 	}, "  ✓ Zsh configured with ~/.zshrc")
@@ -971,24 +1028,68 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		neovimSuccessMsg = "  ✓ Neovim: using existing config (unchanged)"
 	}
 	toolConfigPhase("neovim", "\n▶ Configuring Neovim...", func() ([]tools.MutationEvidence, error) {
+		if persistJournal {
+			accepted, err := plan.acceptedDirectorySnapshot("config:neovim", ".config/nvim")
+			if err != nil {
+				return nil, err
+			}
+			evidence, err := tools.WriteNeovimConfigAtSnapshotTracked(neovimCfg, theme, accepted)
+			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Neovim", err)
+		}
 		evidence, err := tools.WriteNeovimConfigTracked(neovimCfg, theme)
 		return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Neovim", err)
 	}, neovimSuccessMsg)
 
 	// Configure Git
 	toolConfigPhase("git", "\n▶ Configuring Git...", func() ([]tools.MutationEvidence, error) {
+		if persistJournal {
+			rootAccepted, err := plan.acceptedFileRevision("config:git", ".gitconfig")
+			if err != nil {
+				return nil, err
+			}
+			managedAccepted, err := plan.acceptedFileRevision("config:git", gitManagedConfigRelForPlan)
+			if err != nil {
+				return nil, err
+			}
+			evidence, err := tools.WriteGitConfigAtRevisionsTracked(gitConfigFrom(cfg), theme, rootAccepted, managedAccepted)
+			return evidence, wrapMutationError("failed to configure Git", err)
+		}
 		evidence, err := tools.WriteGitConfigTracked(gitConfigFrom(cfg), theme)
 		return evidence, wrapMutationError("failed to configure Git", err)
 	}, "  ✓ Git configured with ~/.gitconfig")
 
 	// Configure Yazi
 	toolConfigPhase("yazi", "\n▶ Configuring Yazi...", func() ([]tools.MutationEvidence, error) {
+		if persistJournal {
+			yaziAccepted, err := plan.acceptedFileRevision("config:yazi", ".config/yazi/yazi.toml")
+			if err != nil {
+				return nil, err
+			}
+			keymapAccepted, err := plan.acceptedFileRevision("config:yazi", ".config/yazi/keymap.toml")
+			if err != nil {
+				return nil, err
+			}
+			themeAccepted, err := plan.acceptedFileRevision("config:yazi", ".config/yazi/theme.toml")
+			if err != nil {
+				return nil, err
+			}
+			evidence, err := tools.WriteYaziConfigAtRevisionsTracked(yaziConfigFrom(cfg), theme, yaziAccepted, keymapAccepted, themeAccepted)
+			return evidence, wrapMutationError("failed to configure Yazi", err)
+		}
 		evidence, err := tools.WriteYaziConfigTracked(yaziConfigFrom(cfg), theme)
 		return evidence, wrapMutationError("failed to configure Yazi", err)
 	}, "  ✓ Yazi configured")
 
 	// Configure FZF
 	toolConfigPhase("fzf", "\n▶ Configuring FZF...", func() ([]tools.MutationEvidence, error) {
+		if persistJournal {
+			accepted, err := plan.acceptedFileRevision("config:fzf", ".config/fzf/fzf.zsh")
+			if err != nil {
+				return nil, err
+			}
+			evidence, err := tools.WriteFzfConfigAtRevisionTracked(fzfConfigFrom(cfg), theme, accepted)
+			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure FZF", err)
+		}
 		evidence, err := tools.WriteFzfConfigTracked(fzfConfigFrom(cfg), theme)
 		return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure FZF", err)
 	}, "  ✓ FZF configured")
@@ -998,6 +1099,14 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// selection flag; skipping its config when deselected matches user intent.
 	if cfg.CLITools["lazygit"] {
 		toolConfigPhase("lazygit", "\n▶ Configuring LazyGit...", func() ([]tools.MutationEvidence, error) {
+			if persistJournal {
+				accepted, err := plan.acceptedFileRevision("config:lazygit", ".config/lazygit/config.yml")
+				if err != nil {
+					return nil, err
+				}
+				evidence, err := tools.WriteLazyGitConfigAtRevisionTracked(lazygitConfigFrom(cfg), theme, accepted)
+				return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure LazyGit", err)
+			}
 			evidence, err := tools.WriteLazyGitConfigTracked(lazygitConfigFrom(cfg), theme)
 			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure LazyGit", err)
 		}, "  ✓ LazyGit configured")
@@ -1007,6 +1116,19 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// btop is in CLITools (UIGroupCLITools) and has an explicit selection flag.
 	if cfg.CLITools["btop"] {
 		toolConfigPhase("btop", "\n▶ Configuring Btop...", func() ([]tools.MutationEvidence, error) {
+			if persistJournal {
+				themeRel := filepath.ToSlash(filepath.Join(".config", "btop", "themes", theme+".theme"))
+				themeAccepted, err := plan.acceptedFileRevision("config:btop", themeRel)
+				if err != nil {
+					return nil, err
+				}
+				configAccepted, err := plan.acceptedFileRevision("config:btop", ".config/btop/btop.conf")
+				if err != nil {
+					return nil, err
+				}
+				evidence, err := tools.WriteBtopConfigAtRevisionsTracked(btopConfigFrom(cfg), theme, themeAccepted, configAccepted)
+				return evidence, wrapMutationError("failed to configure Btop", err)
+			}
 			evidence, err := tools.WriteBtopConfigTracked(btopConfigFrom(cfg), theme)
 			return evidence, wrapMutationError("failed to configure Btop", err)
 		}, "  ✓ Btop configured")
@@ -1016,6 +1138,21 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// glow is in CLITools (UIGroupCLITools) and has an explicit selection flag.
 	if cfg.CLITools["glow"] {
 		toolConfigPhase("glow", "\n▶ Configuring Glow...", func() ([]tools.MutationEvidence, error) {
+			if persistJournal {
+				targets, err := rollbackTargetsForAction(plan, "config:glow")
+				if err != nil {
+					return nil, fmt.Errorf("resolve accepted Glow target: %w", err)
+				}
+				if len(targets) != 1 {
+					return nil, fmt.Errorf("resolve accepted Glow target: got %d targets", len(targets))
+				}
+				accepted, err := plan.acceptedFileRevision("config:glow", targets[0])
+				if err != nil {
+					return nil, err
+				}
+				evidence, err := tools.WriteGlowConfigAtRevisionTracked(glowConfigFrom(cfg), theme, accepted)
+				return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Glow", err)
+			}
 			evidence, err := tools.WriteGlowConfigTracked(glowConfigFrom(cfg), theme)
 			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Glow", err)
 		}, "  ✓ Glow configured")
@@ -1154,6 +1291,17 @@ func installUtilitiesTracked(utilities map[string]bool) utilityInstallResult {
 	return installUtilitiesTrackedWith(utilities, installScriptFileTracked)
 }
 
+func installUtilitiesAtPlanTracked(plan *installPlan, utilities map[string]bool) utilityInstallResult {
+	return installUtilitiesTrackedWith(utilities, func(home, name string, content []byte) (tools.MutationEvidence, error) {
+		rel := filepath.ToSlash(filepath.Join(".local", "bin", name))
+		accepted, err := plan.acceptedFileRevision("helper:"+name, rel)
+		if err != nil {
+			return tools.MutationEvidence{}, err
+		}
+		return installScriptFileAtRevisionTracked(home, name, content, accepted)
+	})
+}
+
 func installUtilitiesTrackedWith(utilities map[string]bool, install utilityInstaller) utilityInstallResult {
 	var result utilityInstallResult
 	home := os.Getenv("HOME")
@@ -1197,15 +1345,20 @@ func installScriptFile(home, name string, content []byte) (returnErr error) {
 }
 
 func installScriptFileTracked(home, name string, content []byte) (evidence tools.MutationEvidence, returnErr error) {
+	return installScriptFileWithAuthority(home, name, content, nil)
+}
+
+func installScriptFileAtRevisionTracked(home, name string, content []byte, accepted safefile.Revision) (tools.MutationEvidence, error) {
+	return installScriptFileWithAuthority(home, name, content, &accepted)
+}
+
+func installScriptFileWithAuthority(home, name string, content []byte, accepted *safefile.Revision) (evidence tools.MutationEvidence, returnErr error) {
 	if name == "" || name == "." || filepath.Base(name) != name {
 		return tools.MutationEvidence{}, fmt.Errorf("invalid utility name %q", name)
 	}
 	rel := filepath.ToSlash(filepath.Join(".local", "bin", name))
-	parent := filepath.ToSlash(filepath.Dir(rel))
-	if err := safefile.EnsureDirectoryWithin(home, parent, 0o700); err != nil {
-		return tools.MutationEvidence{}, fmt.Errorf("create utility directory: %w", err)
-	}
-	release, err := safefile.AcquireLockWithin(home, rel+".dotfiles.lock", 0o600)
+	targetPath := filepath.Join(home, filepath.FromSlash(rel))
+	release, err := operation.AcquireStateLock("helper", targetPath)
 	if err != nil {
 		return tools.MutationEvidence{}, fmt.Errorf("lock utility %s: %w", name, err)
 	}
@@ -1214,14 +1367,25 @@ func installScriptFileTracked(home, name string, content []byte) (evidence tools
 			returnErr = errors.Join(returnErr, fmt.Errorf("unlock utility %s: %w", name, releaseErr))
 		}
 	}()
+	parent := filepath.ToSlash(filepath.Dir(rel))
+	if err := safefile.EnsureDirectoryWithin(home, parent, 0o700); err != nil {
+		return tools.MutationEvidence{}, fmt.Errorf("create utility directory: %w", err)
+	}
 	existing, revision, err := safefile.ReadWithin(home, rel)
 	if err != nil {
 		return tools.MutationEvidence{}, fmt.Errorf("inspect utility %s: %w", name, err)
 	}
+	if accepted != nil && revision != *accepted {
+		return tools.MutationEvidence{}, fmt.Errorf("%w: utility %s changed after plan acceptance", safefile.ErrRevisionChanged, name)
+	}
 	if revision.Exists() && !bytes.Equal(existing, content) {
 		return tools.MutationEvidence{}, fmt.Errorf("refusing to replace existing unowned utility %s at ~/%s", name, rel)
 	}
-	committed, err := safefile.ReplaceWithinRevisionTracked(home, rel, revision, content, 0o700)
+	expected := revision
+	if accepted != nil {
+		expected = *accepted
+	}
+	committed, err := safefile.ReplaceWithinRevisionTracked(home, rel, expected, content, 0o700)
 	if err != nil {
 		return tools.MutationEvidence{}, err
 	}
@@ -1688,6 +1852,29 @@ func saveInstallerPreferencesTracked(theme, navStyle string, animationsEnabled b
 	revision, ok := config.GlobalConfigRevision(g)
 	if !ok || !revision.Exists() {
 		return tools.MutationEvidence{}, fmt.Errorf("global config save returned no tracked revision")
+	}
+	return tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision}, nil
+}
+
+func savePlannedInstallerPreferencesTracked(plan *installPlan) (tools.MutationEvidence, error) {
+	planned, err := plan.plannedGlobalConfig()
+	if err != nil {
+		return tools.MutationEvidence{}, err
+	}
+	actionTargets, err := rollbackTargetsForAction(plan, "state:global")
+	if err != nil {
+		return tools.MutationEvidence{}, fmt.Errorf("resolve accepted global target: %w", err)
+	}
+	if len(actionTargets) != 1 {
+		return tools.MutationEvidence{}, fmt.Errorf("resolve accepted global target: got %d targets", len(actionTargets))
+	}
+	accepted, err := plan.acceptedFileRevision("state:global", actionTargets[0])
+	if err != nil {
+		return tools.MutationEvidence{}, err
+	}
+	revision, err := config.SaveGlobalConfigAtRevisionTracked(planned, accepted)
+	if err != nil {
+		return tools.MutationEvidence{}, err
 	}
 	return tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision}, nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/theme"
 )
 
@@ -247,4 +248,40 @@ func WriteBtopConfigTracked(cfg BtopConfig, theme string) ([]MutationEvidence, e
 		return nil, partialMutationError(err, committed)
 	}
 	return append(committed, evidence), nil
+}
+
+// WriteBtopConfigAtRevisionsTracked applies the complete plan-accepted btop set.
+func WriteBtopConfigAtRevisionsTracked(cfg BtopConfig, theme string, themeAccepted, configAccepted safefile.Revision) ([]MutationEvidence, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	themePath := filepath.Join(home, ".config", "btop", "themes", theme+".theme")
+	configPath := filepath.Join(home, ".config", "btop", "btop.conf")
+	for _, target := range []struct {
+		path     string
+		accepted safefile.Revision
+	}{{themePath, themeAccepted}, {configPath, configAccepted}} {
+		if err := preflightToolConfigAtRevision(target.path, target.accepted, nil); err != nil {
+			if target.path == themePath && errors.Is(err, ErrUnmanagedConfig) {
+				return nil, fmt.Errorf("%w; legacy btop theme files carried no verifiable ownership marker and require explicit adoption", err)
+			}
+			return nil, fmt.Errorf("preflight accepted btop config set: %w", err)
+		}
+	}
+
+	var results, committed []MutationEvidence
+	evidence, err := writeToolConfigAtRevisionTracked(themePath, []byte(GenerateBtopTheme(theme)), themeAccepted)
+	if err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	results = append(results, evidence)
+	if evidence.Revision != themeAccepted {
+		committed = append(committed, evidence)
+	}
+	evidence, err = writeToolConfigAtRevisionTracked(configPath, []byte(GenerateBtopConfig(cfg, theme)), configAccepted)
+	if err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	return append(results, evidence), nil
 }
