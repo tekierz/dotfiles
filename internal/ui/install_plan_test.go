@@ -201,6 +201,19 @@ func TestBuildInstallPlanAcceptsNativeTmuxFragmentTarget(t *testing.T) {
 	}
 }
 
+func TestBuildInstallPlanBlocksAmbiguousNativeTmuxImport(t *testing.T) {
+	app, _, runtime := newPlanTestApp(t)
+	app.nativeConfigState.TmuxError = "line 2 can change effective settings through indirection"
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := planActionByID(t, plan, "config:tmux")
+	if action.Disposition != operation.DispositionBlocked || !strings.Contains(action.Reason, "could not be imported safely") {
+		t.Fatalf("ambiguous tmux action = %+v", action)
+	}
+}
+
 func TestBuildInstallPlanBacksUpExistingManagedTmuxFile(t *testing.T) {
 	app, home, runtime := newPlanTestApp(t)
 	path := filepath.Join(home, ".tmux.conf")

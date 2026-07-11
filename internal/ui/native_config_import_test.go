@@ -55,6 +55,44 @@ func TestNewAppAdoptsRepresentableNativeGitAndGhosttyValuesBeforeFirstSave(t *te
 	}
 }
 
+func TestNewAppAdoptsRepresentableNativeTmuxValuesBeforeFirstSave(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	tmux := `set -g prefix C-b
+bind | split-window -h
+bind - split-window -v
+set -g mouse off
+set -g base-index 0
+setw -g pane-base-index 0
+set -g status-position top
+setw -g pane-border-lines double
+set -g history-limit 12000
+set -sg escape-time 25
+setw -g aggressive-resize off
+`
+	path := filepath.Join(home, ".tmux.conf")
+	if err := os.WriteFile(path, []byte(tmux), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(true)
+	got := app.manageConfig
+	if got.TmuxPrefix != "C-b" || got.TmuxSplitBinds != "pipes" || got.TmuxMouseMode || got.TmuxBaseIndex != 0 || got.TmuxStatusPosition != "top" || got.TmuxPaneBorderStyle != "double" || got.TmuxHistoryLimit != 12000 || got.TmuxEscapeTime != 25 || got.TmuxAggressiveResize || got.TmuxTPMEnabled || got.TmuxPluginSensible || got.TmuxPluginResurrect || got.TmuxPluginContinuum || got.TmuxPluginYank {
+		t.Fatalf("native tmux values were not adopted safely: %+v", got)
+	}
+	state := app.NativeConfigState()
+	if state.TmuxError != "" || !state.Applied {
+		t.Fatalf("tmux native state = %+v", state)
+	}
+	if source := state.Tmux.Fields[tools.TmuxFieldPrefix]; source.Path != path || source.Scope != tools.ConfigValueNative {
+		t.Fatalf("tmux UI provenance = %+v", source)
+	}
+	if badge := app.nativeImportBadge("tmux"); !strings.Contains(badge, "NATIVE SOURCE") {
+		t.Fatalf("tmux provenance badge = %q", badge)
+	}
+}
+
 func TestNewAppExplicitManagePreferencesOutrankNativeImports(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -262,6 +300,29 @@ func TestNewAppNativeImportErrorsFailClosedAndRemainVisible(t *testing.T) {
 	state := app.NativeConfigState()
 	if state.GitError == "" || !strings.Contains(state.GitError, "modified dotfiles Git include") {
 		t.Fatalf("Git import error was not exposed: %+v", state)
+	}
+}
+
+func TestNewAppTmuxIndirectionFailsClosedAndRemainsVisible(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if err := os.WriteFile(filepath.Join(home, ".tmux.conf"), []byte("set -g prefix C-b\nsource-file ~/.tmux-extra.conf\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(true)
+	if app.manageConfig.TmuxPrefix != NewManageConfig().TmuxPrefix {
+		t.Fatalf("ambiguous tmux import changed defaults: %+v", app.manageConfig)
+	}
+	state := app.NativeConfigState()
+	if state.TmuxError == "" || !strings.Contains(state.TmuxError, "indirection") {
+		t.Fatalf("tmux import error was not exposed: %+v", state)
+	}
+	if badge := app.nativeImportBadge("tmux"); !strings.Contains(badge, "IMPORT BLOCKED") {
+		t.Fatalf("blocked tmux badge = %q", badge)
+	}
+	if errs := applyOneToolConfig("tmux", manageConfigToDeepDive(app.manageConfig), app.theme); len(errs) == 0 {
+		t.Fatal("standalone tmux apply ignored ambiguous native import")
 	}
 }
 

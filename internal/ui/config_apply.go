@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/config"
@@ -296,6 +297,13 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 		return tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme)
 	},
 	"tmux": func(cfg DeepDiveConfig, theme string) error {
+		imported, err := tools.ImportTmuxConfig()
+		if err != nil {
+			return fmt.Errorf("validate native tmux config: %w", err)
+		}
+		if len(imported.Warnings) != 0 {
+			return fmt.Errorf("validate native tmux config: %s", strings.Join(imported.Warnings, "; "))
+		}
 		return tools.WriteTmuxConfig(tmuxConfigFrom(cfg), theme)
 	},
 	"zsh": func(cfg DeepDiveConfig, theme string) error {

@@ -406,6 +406,15 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 				}
 			}
 		}
+		if spec.toolID == "tmux" {
+			if a.nativeConfigState.PreferenceError != "" {
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
+			} else if a.nativeConfigState.TmuxError != "" {
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "native tmux configuration could not be imported safely: " + a.nativeConfigState.TmuxError
+			}
+		}
 		actions = append(actions, action)
 		if action.Disposition == operation.DispositionApply {
 			configTools = append(configTools, spec.toolID)

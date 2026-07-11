@@ -945,6 +945,8 @@ func (a *App) nativeImportBadge(toolID string) string {
 		sources, fields, errText = a.nativeConfigState.Git.Sources, len(a.nativeConfigState.Git.Fields), a.nativeConfigState.GitError
 	case "ghostty":
 		sources, fields, errText = a.nativeConfigState.Ghostty.Sources, len(a.nativeConfigState.Ghostty.Fields), a.nativeConfigState.GhosttyError
+	case "tmux":
+		sources, fields, errText = a.nativeConfigState.Tmux.Sources, len(a.nativeConfigState.Tmux.Fields), a.nativeConfigState.TmuxError
 	default:
 		return ""
 	}

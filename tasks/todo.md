@@ -105,6 +105,10 @@ observability land before new integrations or broad UI work.
 - Native preference schema v2 now has explicit ordered migration semantics: v1 retains
   Git/Ghostty intent while permitting first tmux hydration, prototype files permit one-time
   adoption, and malformed or future versions fail closed.
+- Tmux now has read-only native/XDG import with line-level native-vs-managed provenance for
+  every representable generator field. Dynamic/conditional/targeted syntax, conflicting
+  composite settings, and malformed markers block installer and direct saves; native files
+  without plugin declarations no longer inherit compiled TPM defaults.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 

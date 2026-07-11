@@ -17,8 +17,10 @@ import (
 type NativeManageConfigState struct {
 	Git             tools.GitConfigImport
 	Ghostty         tools.GhosttyConfigImport
+	Tmux            tools.TmuxConfigImport
 	GitError        string
 	GhosttyError    string
+	TmuxError       string
 	Applied         bool
 	PreferenceError string
 }
@@ -33,6 +35,9 @@ func (a *App) NativeConfigState() NativeManageConfigState {
 	state.Ghostty.Fields = cloneConfigProvenance(state.Ghostty.Fields)
 	state.Ghostty.Sources = append([]tools.ConfigImportSource(nil), state.Ghostty.Sources...)
 	state.Ghostty.Warnings = append([]string(nil), state.Ghostty.Warnings...)
+	state.Tmux.Fields = cloneConfigProvenance(state.Tmux.Fields)
+	state.Tmux.Sources = append([]tools.ConfigImportSource(nil), state.Tmux.Sources...)
+	state.Tmux.Warnings = append([]string(nil), state.Tmux.Warnings...)
 	return state
 }
 
@@ -138,11 +143,97 @@ func observeNativeManageConfig(target *ManageConfig, preferences managePreferenc
 			overlayImportedGhosttyConfig(target, ghosttyImport, preferences.fields)
 		}
 	}
+	tmuxImport, err := tools.ImportTmuxConfig()
+	switch {
+	case err != nil:
+		state.TmuxError = err.Error()
+	case len(tmuxImport.Warnings) != 0:
+		state.Tmux = tmuxImport
+		state.TmuxError = "refusing ambiguous tmux import: " + strings.Join(tmuxImport.Warnings, "; ")
+	default:
+		state.Tmux = tmuxImport
+		if preferences.err == nil {
+			overlayImportedTmuxConfig(target, tmuxImport, preferences.fields)
+		}
+	}
 	state.Applied = preferences.err == nil && target != nil && *target != before
 	if preferences.err != nil {
 		state.PreferenceError = preferences.err.Error()
 	}
 	return state
+}
+
+func overlayImportedTmuxConfig(target *ManageConfig, imported tools.TmuxConfigImport, explicit map[string]bool) {
+	if target == nil {
+		return
+	}
+	hasNativeSource := false
+	for _, source := range imported.Sources {
+		hasNativeSource = hasNativeSource || (source.Active && source.Exists && !source.Managed)
+	}
+	// A native source with no plugin declarations must not inherit the product's
+	// compiled TPM defaults. Explicit saved preferences continue to win.
+	if hasNativeSource {
+		for key, destination := range map[string]*bool{
+			"TmuxTPMEnabled":      &target.TmuxTPMEnabled,
+			"TmuxPluginSensible":  &target.TmuxPluginSensible,
+			"TmuxPluginResurrect": &target.TmuxPluginResurrect,
+			"TmuxPluginContinuum": &target.TmuxPluginContinuum,
+			"TmuxPluginYank":      &target.TmuxPluginYank,
+		} {
+			if !explicit[key] {
+				*destination = false
+			}
+		}
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldPrefix]; ok && !explicit["TmuxPrefix"] {
+		target.TmuxPrefix = map[string]string{"ctrl-a": "C-a", "ctrl-b": "C-b", "ctrl-space": "C-Space"}[imported.Config.Prefix]
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldSplitBinds]; ok && !explicit["TmuxSplitBinds"] {
+		target.TmuxSplitBinds = imported.Config.SplitBinds
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldStatusPosition]; ok && !explicit["TmuxStatusPosition"] {
+		target.TmuxStatusPosition = imported.Config.StatusBar
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldMouse]; ok && !explicit["TmuxMouseMode"] {
+		target.TmuxMouseMode = imported.Config.MouseMode
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldBaseIndex]; ok && !explicit["TmuxBaseIndex"] {
+		target.TmuxBaseIndex = imported.Config.BaseIndex
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldPaneBorder]; ok && !explicit["TmuxPaneBorderStyle"] {
+		target.TmuxPaneBorderStyle = imported.Config.PaneBorderStyle
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldHistoryLimit]; ok && !explicit["TmuxHistoryLimit"] {
+		target.TmuxHistoryLimit = imported.Config.HistoryLimit
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldEscapeTime]; ok && !explicit["TmuxEscapeTime"] {
+		target.TmuxEscapeTime = imported.Config.EscapeTime
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldAggressiveResize]; ok && !explicit["TmuxAggressiveResize"] {
+		target.TmuxAggressiveResize = imported.Config.AggressiveResize
+	}
+	for field, setting := range map[string]struct {
+		key         string
+		destination *bool
+		value       bool
+	}{
+		tools.TmuxFieldTPMEnabled:      {"TmuxTPMEnabled", &target.TmuxTPMEnabled, imported.Config.TPMEnabled},
+		tools.TmuxFieldPluginSensible:  {"TmuxPluginSensible", &target.TmuxPluginSensible, imported.Config.PluginSensible},
+		tools.TmuxFieldPluginResurrect: {"TmuxPluginResurrect", &target.TmuxPluginResurrect, imported.Config.PluginResurrect},
+		tools.TmuxFieldPluginContinuum: {"TmuxPluginContinuum", &target.TmuxPluginContinuum, imported.Config.PluginContinuum},
+		tools.TmuxFieldPluginYank:      {"TmuxPluginYank", &target.TmuxPluginYank, imported.Config.PluginYank},
+	} {
+		if _, ok := imported.Fields[field]; ok && !explicit[setting.key] {
+			*setting.destination = setting.value
+		}
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldContinuumSaveMin]; ok && !explicit["TmuxContinuumSaveMin"] {
+		target.TmuxContinuumSaveMin = imported.Config.ContinuumSaveMin
+	}
+	if _, ok := imported.Fields[tools.TmuxFieldContinuumRestore]; ok && !explicit["TmuxContinuumRestore"] {
+		target.TmuxContinuumRestore = imported.Config.ContinuumRestore
+	}
 }
 
 func overlayImportedGitConfig(target *ManageConfig, imported tools.GitConfigImport, explicit map[string]bool) {
