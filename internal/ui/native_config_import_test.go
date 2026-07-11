@@ -149,6 +149,49 @@ func TestNewAppLegacyPrototypePreferencesPermitOneTimeNativeAdoption(t *testing.
 	}
 }
 
+func TestNativePreferenceSchemaV1RetainsGitButPermitsTmuxMigration(t *testing.T) {
+	withTempHome(t)
+	managePath := filepath.Join(config.ToolsDir(), "manage.json")
+	if err := os.MkdirAll(filepath.Dir(managePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managePath, []byte(`{"NativeImportSchemaVersion":1,"GitDefaultBranch":"master","TmuxPrefix":"C-b"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	presence := inspectManagePreferencePresence()
+	if presence.err != nil {
+		t.Fatal(presence.err)
+	}
+	if !presence.fields["GitDefaultBranch"] {
+		t.Fatal("schema v1 lost explicit Git preference")
+	}
+	if presence.fields["TmuxPrefix"] {
+		t.Fatal("schema v1 tmux prototype default was treated as explicit")
+	}
+}
+
+func TestNativePreferenceSchemaFailsClosedOnFutureOrMalformedVersion(t *testing.T) {
+	for _, data := range []string{
+		`{"NativeImportSchemaVersion":999}`,
+		`{"NativeImportSchemaVersion":"two"}`,
+		`{"NativeImportSchemaVersion":0}`,
+	} {
+		t.Run(data, func(t *testing.T) {
+			withTempHome(t)
+			managePath := filepath.Join(config.ToolsDir(), "manage.json")
+			if err := os.MkdirAll(filepath.Dir(managePath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(managePath, []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if presence := inspectManagePreferencePresence(); presence.err == nil {
+				t.Fatalf("schema %s was accepted", data)
+			}
+		})
+	}
+}
+
 func TestNewAppMalformedPreferenceFileBlocksNativeAdoption(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

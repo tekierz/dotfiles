@@ -102,6 +102,9 @@ observability land before new integrations or broad UI work.
   unsafe relative XDG paths or symlinked candidates fail closed.
 - Manage and standalone tmux saves cannot silently adopt an existing native source: first
   ownership requires the reviewed installer plan and its mandatory rollback point.
+- Native preference schema v2 now has explicit ordered migration semantics: v1 retains
+  Git/Ghostty intent while permitting first tmux hydration, prototype files permit one-time
+  adoption, and malformed or future versions fail closed.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 

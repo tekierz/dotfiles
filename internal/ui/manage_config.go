@@ -1,5 +1,7 @@
 package ui
 
+const currentNativeImportSchemaVersion = 2
+
 // ManageConfig holds detailed management configuration for all tools
 type ManageConfig struct {
 	NativeImportSchemaVersion int
@@ -121,7 +123,7 @@ type ManageConfig struct {
 // NewManageConfig creates a new management config with defaults
 func NewManageConfig() *ManageConfig {
 	return &ManageConfig{
-		NativeImportSchemaVersion: 1,
+		NativeImportSchemaVersion: currentNativeImportSchemaVersion,
 		// Ghostty
 		// Use the same default as NewDeepDiveConfig so the two config models do
 		// not disagree on the same setting (C13). "JetBrains Mono" is also the

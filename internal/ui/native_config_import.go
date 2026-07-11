@@ -75,11 +75,30 @@ func inspectManagePreferencePresence() managePreferencePresence {
 	for key := range raw {
 		fields[key] = true
 	}
-	if !fields["NativeImportSchemaVersion"] {
+	var schemaVersion int
+	if encoded, ok := raw["NativeImportSchemaVersion"]; ok {
+		if err := json.Unmarshal(encoded, &schemaVersion); err != nil {
+			return managePreferencePresence{exists: true, fields: fields, err: errors.New("native import schema version must be an integer")}
+		}
+		if schemaVersion < 1 || schemaVersion > currentNativeImportSchemaVersion {
+			return managePreferencePresence{exists: true, fields: fields, err: errors.New("unsupported native import schema version")}
+		}
+	}
+	switch schemaVersion {
+	case 0:
 		// One-time adoption migration for prototype-era full-struct saves. Those
 		// files had no way to distinguish deliberate choices from copied defaults.
 		for key := range fields {
-			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") {
+			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") {
+				delete(fields, key)
+			}
+		}
+	case 1:
+		// Schema v1 introduced explicit Git/Ghostty presence. Tmux import did not
+		// exist, so serialized Tmux defaults from that version are not evidence of
+		// user intent and may be hydrated once from the active native source.
+		for key := range fields {
+			if strings.HasPrefix(key, "Tmux") {
 				delete(fields, key)
 			}
 		}
