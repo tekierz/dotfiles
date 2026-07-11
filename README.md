@@ -203,7 +203,8 @@ dotfiles users                 # List all user profiles
 
 ### Backup & Restore
 
-All existing configs are backed up before modification. Fully reversible installation:
+Accepted installation changes require a plan-scoped rollback backup before
+mutation. Convenience backups can also be listed and restored directly:
 
 ```bash
 dotfiles backups              # List available backups
@@ -211,7 +212,17 @@ dotfiles restore              # Open backup picker (TUI)
 dotfiles restore 20240102_143052  # Restore specific backup
 ```
 
-Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
+User-created convenience backups are stored in
+`~/.config/dotfiles/backups/` with timestamps. Mandatory plan rollback points
+live in the private operation-state backup area and are validated internally;
+they are not presented as ordinary user-managed backup sessions.
+
+Run `dotfiles` directly as the target user, never through `sudo`. Backup capture
+refuses symlinks, foreign-owned files/directories, and group/world-writable
+source or destination ancestors. Current backups preserve regular-file bytes,
+directory structure, and POSIX owner/group/other `rwx` bits. They do not
+preserve ACLs, extended attributes, file flags, hard-link topology, or
+timestamps; keep an independent machine backup when those attributes matter.
 
 ### Custom Utilities
 

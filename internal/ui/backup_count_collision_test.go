@@ -77,10 +77,8 @@ func TestCreateBackupCmdCollisionYieldsTwoDistinctDirs(t *testing.T) {
 		t.Fatalf("unique dir %q escapes backupsDir", unique)
 	}
 
-	// Create the second backup in the unique dir.
-	if err := os.MkdirAll(unique, 0o700); err != nil {
-		t.Fatalf("mkdir unique: %v", err)
-	}
+	// Create owns the final unique directory creation so its descriptor-bound
+	// identity cannot be replaced between path selection and persistence.
 	if _, err := backup.Create(home, unique, []string{".zshrc"}); err != nil {
 		t.Fatalf("backup.Create: %v", err)
 	}

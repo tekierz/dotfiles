@@ -319,6 +319,11 @@ func init() {
 }
 
 func main() {
+	if err := validateEffectiveUser(effectiveUserID()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	// Handle --<Username> quick switch before Cobra parses flags
 	// This allows "dotfiles --Alice" to work as a quick user switch
 	if len(os.Args) == 2 {
