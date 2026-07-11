@@ -246,6 +246,8 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				}
 				*f.n = clampInt(*f.n+(dir*step), f.min, f.max)
 			}
+		case manageFieldText, manageFieldToggle:
+			// Text fields use edit mode; toggles have no ordered adjustment.
 		}
 	}
 
@@ -272,8 +274,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// would drop it, strand manageInstalling=true, and orphan the install
 	// subprocess. (The 'i' install trigger is already guarded.)
 	if a.manageInstalling {
-		switch key {
-		case "esc":
+		if key == "esc" {
 			a.manageStatus = "Install in progress…"
 			return nil
 		}
@@ -473,6 +474,8 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				adjustField(1)
 			case manageFieldNumber:
 				adjustField(1)
+			case manageFieldText:
+				// Space is inserted only while the text editor is active.
 			}
 		}
 		return nil
@@ -525,7 +528,7 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// through navigateTab (NavigateTo + on-enter load). Blocked while installing
 	// so the streaming install message can't be dropped by a screen switch.
 	if !a.manageInstalling && m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+		if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -544,7 +547,7 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Wheel scroll: choose pane based on mouse X.
 	if m.IsWheel() {
 		delta := 0
-		switch m.Button {
+		switch m.Button { //nolint:exhaustive // Only vertical wheel actions are meaningful here.
 		case tea.MouseButtonWheelUp:
 			delta = -1
 		case tea.MouseButtonWheelDown:

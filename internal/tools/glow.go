@@ -87,13 +87,20 @@ func GenerateGlowConfig(cfg GlowConfig, theme string) string {
 
 // WriteGlowConfig writes the glow config to disk
 func WriteGlowConfig(cfg GlowConfig, theme string) error {
+	_, err := WriteGlowConfigTracked(cfg, theme)
+	return err
+}
+
+// WriteGlowConfigTracked writes the glow config and returns the exact committed
+// revision for rollback evidence.
+func WriteGlowConfigTracked(cfg GlowConfig, theme string) (MutationEvidence, error) {
 	configPath, err := glowConfigPath()
 	if err != nil {
-		return err
+		return MutationEvidence{}, err
 	}
 
 	content := GenerateGlowConfig(cfg, theme)
-	return writeToolConfig(configPath, []byte(content))
+	return writeToolConfigTracked(configPath, []byte(content))
 }
 
 // glowConfigPath returns the config file glow itself loads. Glow resolves its

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/config"
 )
 
 // TestManageSaveScopedToChangedTool is the data-loss regression guard for P1-A2:
@@ -41,7 +43,7 @@ func TestManageSaveScopedToChangedTool(t *testing.T) {
 	}
 
 	// Ghostty's own config MUST have been written.
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config.ghostty")
 	if _, err := os.Stat(ghosttyPath); err != nil {
 		t.Errorf("ghostty config not written by scoped Manage save: %v", err)
 	}
@@ -55,6 +57,24 @@ func TestManageSaveScopedToChangedTool(t *testing.T) {
 		if string(data) != sentinel {
 			t.Errorf("scoped Manage save clobbered %s:\n got: %q\nwant: %q", p, string(data), sentinel)
 		}
+	}
+}
+
+func TestManageSaveDoesNotPersistPreferenceWhenNativeApplyFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("GIT_CONFIG_GLOBAL", "relative/unsafe")
+	app := NewApp(true)
+	app.manageConfig.GitDefaultBranch = "develop"
+
+	msg := app.saveManageConfigCmd()()
+	saved, ok := msg.(manageSavedMsg)
+	if !ok || saved.err == nil {
+		t.Fatalf("save result = %#v, want native apply error", msg)
+	}
+	if _, err := os.Lstat(filepath.Join(config.ToolsDir(), "manage.json")); !os.IsNotExist(err) {
+		t.Fatalf("failed native apply persisted manage preference: %v", err)
 	}
 }
 

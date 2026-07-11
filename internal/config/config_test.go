@@ -33,16 +33,7 @@ func TestDefaultGlobalConfig(t *testing.T) {
 
 func TestConfigDir(t *testing.T) {
 	// Test with XDG_CONFIG_HOME set
-	origXDG := os.Getenv("XDG_CONFIG_HOME")
-	defer func() {
-		if origXDG != "" {
-			os.Setenv("XDG_CONFIG_HOME", origXDG)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	}()
-
-	os.Setenv("XDG_CONFIG_HOME", "/custom/config")
+	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	dir := ConfigDir()
 	expected := "/custom/config/dotfiles"
 	if dir != expected {
@@ -50,10 +41,10 @@ func TestConfigDir(t *testing.T) {
 	}
 
 	// Test without XDG_CONFIG_HOME (uses HOME)
-	os.Unsetenv("XDG_CONFIG_HOME")
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", "/home/testuser")
-	defer os.Setenv("HOME", origHome)
+	if err := os.Unsetenv("XDG_CONFIG_HOME"); err != nil {
+		t.Fatalf("unset XDG_CONFIG_HOME: %v", err)
+	}
+	t.Setenv("HOME", "/home/testuser")
 
 	dir = ConfigDir()
 	expected = "/home/testuser/.config/dotfiles"
@@ -73,16 +64,7 @@ func TestConfigDirIgnoresRelativeXDGPath(t *testing.T) {
 }
 
 func TestToolsDir(t *testing.T) {
-	origXDG := os.Getenv("XDG_CONFIG_HOME")
-	defer func() {
-		if origXDG != "" {
-			os.Setenv("XDG_CONFIG_HOME", origXDG)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	}()
-
-	os.Setenv("XDG_CONFIG_HOME", "/custom/config")
+	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	dir := ToolsDir()
 	expected := "/custom/config/dotfiles/tools"
 	if dir != expected {
@@ -91,7 +73,7 @@ func TestToolsDir(t *testing.T) {
 }
 
 func TestGlobalConfigCRUD(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Load when file doesn't exist - should return defaults
@@ -211,7 +193,7 @@ func TestGlobalConfigLockNameIsStableAndTargetSpecific(t *testing.T) {
 }
 
 func TestLoadGlobalConfigMigratesPartialLegacyJSONOntoDefaults(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	path := filepath.Join(ConfigDir(), "global.json")
@@ -252,7 +234,7 @@ func TestLoadGlobalConfigPreservesExplicitFalseAndZero(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, cleanup := setupTestConfigDir(t)
+			cleanup := setupTestConfigDir(t)
 			defer cleanup()
 
 			if err := os.WriteFile(filepath.Join(ConfigDir(), "global.json"), []byte(tt.json), 0o600); err != nil {
@@ -271,7 +253,7 @@ func TestLoadGlobalConfigPreservesExplicitFalseAndZero(t *testing.T) {
 }
 
 func TestSaveGlobalConfigStampsSchemaWithoutMutatingCaller(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg := &GlobalConfig{Theme: "nord", NavStyle: "vim"}
@@ -299,7 +281,7 @@ func TestSaveGlobalConfigStampsSchemaWithoutMutatingCaller(t *testing.T) {
 }
 
 func TestSaveGlobalConfigAllowsLegacyStructLiteralToCreateMissingFile(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg := &GlobalConfig{ActiveUser: "alice"}
@@ -324,7 +306,7 @@ func TestSaveGlobalConfigAllowsLegacyStructLiteralToCreateMissingFile(t *testing
 }
 
 func TestGlobalConfigPreservesUnknownCurrentSchemaFields(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	path := filepath.Join(ConfigDir(), "global.json")
@@ -463,7 +445,7 @@ func TestLoadGlobalConfigRejectsInvalidData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, cleanup := setupTestConfigDir(t)
+			cleanup := setupTestConfigDir(t)
 			defer cleanup()
 
 			if err := os.WriteFile(filepath.Join(ConfigDir(), "global.json"), []byte(tt.content), 0o600); err != nil {
@@ -490,7 +472,7 @@ func TestLoadGlobalConfigRejectsNullForEveryKnownScalar(t *testing.T) {
 	}
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {
-			_, cleanup := setupTestConfigDir(t)
+			cleanup := setupTestConfigDir(t)
 			defer cleanup()
 
 			content := fmt.Sprintf(`{%q:null}`, key)
@@ -506,7 +488,7 @@ func TestLoadGlobalConfigRejectsNullForEveryKnownScalar(t *testing.T) {
 }
 
 func TestGlobalConfigCASRejectsStaleLoadedWriter(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	initial := DefaultGlobalConfig()
@@ -541,7 +523,7 @@ func TestGlobalConfigCASRejectsStaleLoadedWriter(t *testing.T) {
 }
 
 func TestGlobalConfigCASSerializesConcurrentWriters(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	if err := SaveGlobalConfig(DefaultGlobalConfig()); err != nil {
@@ -590,7 +572,7 @@ func TestGlobalConfigCASSerializesConcurrentWriters(t *testing.T) {
 }
 
 func TestGlobalConfigConcurrentSavesOfSamePointerAreSerialized(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg, err := LoadGlobalConfig()
@@ -621,7 +603,7 @@ func TestGlobalConfigConcurrentSavesOfSamePointerAreSerialized(t *testing.T) {
 }
 
 func TestGlobalConfigReservationRejectsStaleWriterBeforeCallback(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	if err := SaveGlobalConfig(DefaultGlobalConfig()); err != nil {
@@ -654,7 +636,7 @@ func TestGlobalConfigReservationRejectsStaleWriterBeforeCallback(t *testing.T) {
 }
 
 func TestGlobalConfigReservationRejectsAndPreservesEditDuringCallback(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	if err := SaveGlobalConfig(DefaultGlobalConfig()); err != nil {
@@ -692,7 +674,7 @@ func TestGlobalConfigReservationRejectsAndPreservesEditDuringCallback(t *testing
 }
 
 func TestGlobalConfigDetectsNonCooperatingPostWriteReplacement(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg, err := LoadGlobalConfig()
@@ -727,7 +709,7 @@ func TestGlobalConfigDetectsNonCooperatingPostWriteReplacement(t *testing.T) {
 }
 
 func TestGlobalConfigCASRejectsFutureSchemaCreatedAfterMissingLoad(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	staleDefault, err := LoadGlobalConfig()
@@ -754,7 +736,7 @@ func TestGlobalConfigCASRejectsFutureSchemaCreatedAfterMissingLoad(t *testing.T)
 }
 
 func TestGlobalConfigCASRejectsFutureSchemaReplacingLoadedFile(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	if err := SaveGlobalConfig(DefaultGlobalConfig()); err != nil {
@@ -784,7 +766,7 @@ func TestGlobalConfigCASRejectsFutureSchemaReplacingLoadedFile(t *testing.T) {
 }
 
 func TestGlobalConfigCASRejectsSameContentReplacement(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	initial := DefaultGlobalConfig()
@@ -815,7 +797,7 @@ func TestGlobalConfigCASRejectsSameContentReplacement(t *testing.T) {
 }
 
 func TestGlobalConfigCASRefreshesRevisionAfterSuccessfulSave(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg, err := LoadGlobalConfig()
@@ -840,7 +822,7 @@ func TestGlobalConfigCASRefreshesRevisionAfterSuccessfulSave(t *testing.T) {
 }
 
 func TestGlobalConfigCASRejectsUntrackedStructLiteralOverExistingFile(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	if err := SaveGlobalConfig(DefaultGlobalConfig()); err != nil {
@@ -906,7 +888,7 @@ func DefaultTestToolConfig() *TestToolConfig {
 }
 
 func TestToolConfigCRUD(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Load when file doesn't exist - should return defaults
@@ -943,7 +925,7 @@ func TestToolConfigCRUD(t *testing.T) {
 }
 
 func TestToolConfigNameRejectsPathTraversal(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg := DefaultTestToolConfig()

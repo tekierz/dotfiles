@@ -130,21 +130,15 @@ func (a *App) saveManageConfigCmd() tea.Cmd {
 		// this ordering, another process can update global.json between our load and
 		// save, leaving manage.json changed even though the global save conflicts.
 		if err := config.SaveGlobalConfigWithReservedRevision(g, func() error {
+			// Apply native tool files before advancing the durable desired
+			// preference. A refused ownership boundary or malformed native config
+			// must leave manage.json at its last successfully applied value.
+			if errs := applyChangedManageTools(changed, manageConfigToDeepDive(cfg), theme); len(errs) > 0 {
+				return firstErrorSummary(errs)
+			}
 			return config.SaveToolConfig("manage", cfg)
 		}); err != nil {
 			return manageSavedMsg{err: err}
-		}
-
-		// Apply the saved preferences to the REAL tool config files (C12), but ONLY
-		// for the tools the user actually changed. Before C12 the Manage editor only
-		// persisted manage.json + global prefs and claimed "Saved ✓" while no
-		// generator ever ran; the first C12 pass over-corrected by re-applying ALL
-		// tools every save (clobbering unrelated configs). This scoped apply funnels
-		// through applyOneToolConfig — the same scoped writer the standalone
-		// `dotfiles config <tool>` editor uses — so the two paths cannot drift, and
-		// it is a PURE file write (no TPM/Neovim clone; that stays at install time).
-		if errs := applyChangedManageTools(changed, manageConfigToDeepDive(cfg), theme); len(errs) > 0 {
-			return manageSavedMsg{err: firstErrorSummary(errs)}
 		}
 
 		return manageSavedMsg{err: nil}
@@ -507,11 +501,12 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "font_family", label: "Font Family", description: "Terminal font family", kind: manageFieldText, str: &cfg.GhosttyFontFamily},
 			{key: "font_size", label: "Font Size", description: "Font size (pt)", kind: manageFieldNumber, n: &cfg.GhosttyFontSize, min: 8, max: 32, step: 1, unit: "pt"},
 			{key: "opacity", label: "Opacity", description: "Background opacity (%)", kind: manageFieldNumber, n: &cfg.GhosttyOpacity, min: 0, max: 100, step: 5, unit: "%"},
-			{key: "blur", label: "Blur Radius", description: "Background blur (platform dependent)", kind: manageFieldNumber, n: &cfg.GhosttyBlurRadius, min: 0, max: 40, step: 1},
+			{key: "blur", label: "Blur Radius", description: "Background blur (platform dependent)", kind: manageFieldNumber, n: &cfg.GhosttyBlurRadius, min: 0, max: 100, step: 1},
 			{key: "cursor", label: "Cursor Style", description: "Cursor shape", kind: manageFieldOption, str: &cfg.GhosstyCursorStyle, options: []string{"block", "bar", "underline"}},
-			{key: "scrollback", label: "Scrollback", description: "Scrollback history lines", kind: manageFieldNumber, n: &cfg.GhosttyScrollbackLines, min: 1000, max: 200000, step: 1000, unit: " lines"},
+			{key: "scrollback", label: "Scrollback Limit", description: "Maximum scrollback storage in bytes", kind: manageFieldNumber, n: &cfg.GhosttyScrollbackLines, min: 1_000_000, max: 100_000_000, step: 1_000_000, unit: " bytes"},
 			{key: "decor", label: "Window Decorations", description: "Show native window decorations", kind: manageFieldToggle, b: &cfg.GhosttyWindowDecorations},
 			{key: "confirm_close", label: "Confirm Close", description: "Prompt before closing window", kind: manageFieldToggle, b: &cfg.GhosttyConfirmClose},
+			{key: "tab_bindings", label: "Tab Bindings", description: "Modifier used for managed tab shortcuts", kind: manageFieldOption, str: &cfg.GhosttyTabBindings, options: []string{"super", "ctrl", "ctrl-shift"}},
 		}
 
 	case "tmux":
@@ -562,10 +557,16 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "branch", label: "Default Branch", description: "Default init branch name", kind: manageFieldOption, str: &cfg.GitDefaultBranch, options: []string{"main", "master", "develop"}},
 			{key: "setup_remote", label: "Auto Setup Remote", description: "Auto-create tracking remotes on push", kind: manageFieldToggle, b: &cfg.GitAutoSetupRemote},
 			{key: "rebase", label: "Pull Rebase", description: "Prefer rebase on git pull", kind: manageFieldToggle, b: &cfg.GitPullRebase},
-			{key: "diff", label: "Diff Tool", description: "Default diff tool", kind: manageFieldOption, str: &cfg.GitDiffTool, options: []string{"delta", "difftastic", "vimdiff"}},
+			{key: "diff", label: "Diff Tool", description: "Default diff tool", kind: manageFieldOption, str: &cfg.GitDiffTool, options: []string{"delta", "difftastic", "vimdiff", "nvimdiff"}},
 			{key: "merge", label: "Merge Tool", description: "Default merge tool", kind: manageFieldOption, str: &cfg.GitMergeTool, options: []string{"vimdiff", "nvimdiff", "meld"}},
-			{key: "creds", label: "Credential Helper", description: "Credential helper backend", kind: manageFieldOption, str: &cfg.GitCredentialHelper, options: []string{"store", "cache", "osxkeychain"}},
+			{key: "creds", label: "Credential Helper", description: "Credential helper backend", kind: manageFieldOption, str: &cfg.GitCredentialHelper, options: []string{"store", "cache", "osxkeychain", "none"}},
 			{key: "sign", label: "Sign Commits", description: "Require signed commits", kind: manageFieldToggle, b: &cfg.GitSignCommits},
+			{key: "delta_side", label: "Delta Side-by-Side", description: "Render Delta diffs in two columns", kind: manageFieldToggle, b: &cfg.GitDeltaSideBySide},
+			{key: "alias_st", label: "Alias st", description: "Manage git st = status", kind: manageFieldToggle, b: &cfg.GitAliasStatus},
+			{key: "alias_co", label: "Alias co", description: "Manage git co = checkout", kind: manageFieldToggle, b: &cfg.GitAliasCheckout},
+			{key: "alias_br", label: "Alias br", description: "Manage git br = branch", kind: manageFieldToggle, b: &cfg.GitAliasBranch},
+			{key: "alias_ci", label: "Alias ci", description: "Manage git ci = commit", kind: manageFieldToggle, b: &cfg.GitAliasCommit},
+			{key: "alias_lg", label: "Alias lg", description: "Manage compact graph-log alias", kind: manageFieldToggle, b: &cfg.GitAliasLogGraph},
 		}
 
 	case "yazi":
@@ -827,6 +828,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 		} else {
 			statusBadge = " " + RenderBadge("NOT INSTALLED", ColorText, ColorMuted)
 		}
+		statusBadge += a.nativeImportBadge(item.id)
 	}
 	metaName := item.name
 	if item.icon != "" {
@@ -929,6 +931,44 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	)
 
 	return panel.Render(content)
+}
+
+func (a *App) nativeImportBadge(toolID string) string {
+	var (
+		sources []tools.ConfigImportSource
+		fields  int
+		errText string
+	)
+	switch toolID {
+	case "git":
+		sources, fields, errText = a.nativeConfigState.Git.Sources, len(a.nativeConfigState.Git.Fields), a.nativeConfigState.GitError
+	case "ghostty":
+		sources, fields, errText = a.nativeConfigState.Ghostty.Sources, len(a.nativeConfigState.Ghostty.Fields), a.nativeConfigState.GhosttyError
+	default:
+		return ""
+	}
+	if errText != "" || a.nativeConfigState.PreferenceError != "" {
+		return " " + RenderBadge("IMPORT BLOCKED", ColorBg, ColorYellow)
+	}
+	if fields == 0 {
+		return ""
+	}
+	managed := false
+	native := false
+	for _, source := range sources {
+		if !source.Active {
+			continue
+		}
+		managed = managed || source.Managed
+		native = native || !source.Managed
+	}
+	label := "NATIVE SOURCE"
+	if managed && native {
+		label = "NATIVE + MANAGED"
+	} else if managed {
+		label = "MANAGED SOURCE"
+	}
+	return " " + RenderBadge(label, ColorBg, ColorCyan)
 }
 
 // renderManageFieldLine renders one settings row. applied=false means the field is

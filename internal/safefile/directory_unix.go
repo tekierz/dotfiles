@@ -21,6 +21,7 @@ type directoryHooks struct {
 	afterMoveAside        func(parentFD int, target, recovery string) error
 	beforeInstall         func(parentFD int, stagedFD int, staged, target string) error
 	afterInstall          func(parentFD int, stagedFD int, target string) error
+	beforeRestoreEvidence func(parentFD int, target string) error
 	beforeRemove          func(parentFD int, target string) error
 	afterRemoveMove       func(parentFD int, target, recovery string) error
 	afterRemoveCommit     func(parentFD int, recovery string) error
@@ -113,7 +114,10 @@ func snapshotDirectoryEntryAt(parentFD int, target string) (*DirectorySnapshot, 
 	if err != nil || fileType != unix.S_IFDIR || actual != state.identity {
 		return nil, fileIdentity{}, fmt.Errorf("%w: directory target %q namespace entry changed", ErrDirectoryChanged, target)
 	}
-	return newDirectorySnapshot(first), state.identity, nil
+	snapshot := newDirectorySnapshot(first)
+	snapshot.device = state.identity.device
+	snapshot.inode = state.identity.inode
+	return snapshot, state.identity, nil
 }
 
 func captureDirectoryNode(directoryFD int) (directorySnapshotNode, error) {
@@ -284,7 +288,7 @@ func directoryDescriptorState(fd int) (fileIdentity, uint32, fs.FileMode, error)
 // installing the staged tree rolls the original name back; failures after the
 // staged rename return *CommittedError and leave the restored tree in place.
 func RestoreDirectoryWithin(root, rel string, snapshot *DirectorySnapshot) (returnErr error) {
-	return restoreDirectoryWithinSnapshot(root, rel, snapshot, nil, false)
+	return restoreDirectoryWithinSnapshot(root, rel, snapshot, nil, false, nil)
 }
 
 // RestoreDirectoryWithinSnapshot replaces rel only if its exact recursive
@@ -294,10 +298,22 @@ func RestoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 	if expected != nil && !expected.tracked {
 		return fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
 	}
-	return restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true)
+	return restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, nil)
 }
 
-func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *DirectorySnapshot, conditional bool) (returnErr error) {
+// RestoreDirectoryWithinSnapshotTracked returns the identity-bound recursive
+// snapshot captured from the installed namespace entry before the transaction
+// returns. It never derives rollback authority from a later path re-read.
+func RestoreDirectoryWithinSnapshotTracked(root, rel string, snapshot, expected *DirectorySnapshot) (*DirectorySnapshot, error) {
+	if expected != nil && !expected.tracked {
+		return nil, fmt.Errorf("%w: expected directory snapshot is untracked", ErrDirectoryChanged)
+	}
+	var evidence *DirectorySnapshot
+	err := restoreDirectoryWithinSnapshot(root, rel, snapshot, expected, true, &evidence)
+	return evidence, err
+}
+
+func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *DirectorySnapshot, conditional bool, evidence **DirectorySnapshot) (returnErr error) {
 	if snapshot == nil || !snapshot.tracked {
 		return fmt.Errorf("directory snapshot is nil or untracked")
 	}
@@ -341,7 +357,7 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 			return fmt.Errorf("%w: expected restore target %q to remain absent", ErrDirectoryChanged, target)
 		case expected != nil && !existing:
 			return fmt.Errorf("%w: expected restore target %q disappeared", ErrDirectoryChanged, target)
-		case expected != nil && !reflect.DeepEqual(existingSnapshot.root, expected.root):
+		case expected != nil && (existingIdentity != (fileIdentity{device: expected.device, inode: expected.inode}) || !reflect.DeepEqual(existingSnapshot.root, expected.root)):
 			return fmt.Errorf("%w: restore target %q no longer matches expected post-write tree", ErrDirectoryChanged, target)
 		}
 	}
@@ -503,6 +519,11 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 		postCommit = append(postCommit, err)
 		operations = append(operations, "installed directory verification")
 	}
+	installedSnapshot, installedIdentity, installedErr := snapshotDirectoryEntryAt(parentFD, target)
+	if installedErr != nil || installedIdentity != stagedIdentity || !reflect.DeepEqual(installedSnapshot.root, snapshot.root) {
+		postCommit = append(postCommit, directoryChangedError("installed directory tree changed after restore commit", installedErr))
+		operations = append(operations, "installed directory tree verification")
+	}
 	stagedOpen = false
 	if err := unix.Close(stagedFD); err != nil {
 		postCommit = append(postCommit, fmt.Errorf("close installed directory: %w", err))
@@ -520,6 +541,13 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 	// durability is uncertain. Deleting it in that state would turn a detectable
 	// committed warning into irreversible data loss.
 	if recoveryLive && len(postCommit) == 0 {
+		recoverySnapshot, recoveryIdentity, recoveryErr := snapshotDirectoryEntryAt(parentFD, recoveryName)
+		if recoveryErr != nil || recoveryIdentity != existingIdentity || !reflect.DeepEqual(recoverySnapshot.root, existingSnapshot.root) {
+			postCommit = append(postCommit, directoryChangedError("recovery directory tree changed before cleanup", recoveryErr))
+			operations = append(operations, "recovery directory tree verification")
+		}
+	}
+	if recoveryLive && len(postCommit) == 0 {
 		if err := removeDirectoryEntryAt(parentFD, recoveryName, existingIdentity); err != nil {
 			postCommit = append(postCommit, fmt.Errorf("cleanup recovery directory %q: %w", recoveryName, err))
 			operations = append(operations, "old directory cleanup")
@@ -529,6 +557,21 @@ func restoreDirectoryWithinSnapshot(root, rel string, snapshot, expected *Direct
 	}
 	if len(postCommit) != 0 {
 		return &CommittedError{Operation: strings.Join(operations, "; "), Err: errors.Join(postCommit...)}
+	}
+	if evidence != nil {
+		if hook := directoryTestHooks.beforeRestoreEvidence; hook != nil {
+			if err := hook(parentFD, target); err != nil {
+				return &CommittedError{Operation: "pre-evidence hook", Err: err}
+			}
+		}
+		finalSnapshot, finalIdentity, finalErr := snapshotDirectoryEntryAt(parentFD, target)
+		if finalErr != nil || finalIdentity != installedIdentity || !reflect.DeepEqual(finalSnapshot.root, installedSnapshot.root) {
+			return &CommittedError{
+				Operation: "capture committed directory evidence",
+				Err:       directoryChangedError("installed directory changed before evidence capture", finalErr),
+			}
+		}
+		*evidence = finalSnapshot
 	}
 	return nil
 }
@@ -582,7 +625,7 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 	if err != nil {
 		return fmt.Errorf("validate directory before removal: %w", err)
 	}
-	if expected != nil && !reflect.DeepEqual(targetSnapshot.root, expected.root) {
+	if expected != nil && (targetIdentity != (fileIdentity{device: expected.device, inode: expected.inode}) || !reflect.DeepEqual(targetSnapshot.root, expected.root)) {
 		return fmt.Errorf("%w: removal target no longer matches expected post-write tree", ErrDirectoryChanged)
 	}
 	if hook := directoryTestHooks.beforeRemove; hook != nil {
@@ -654,6 +697,10 @@ func removeDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 		if err := hook(parentFD, recoveryName); err != nil {
 			return &CommittedError{Operation: "post-removal hook", Err: err}
 		}
+	}
+	finalRecovery, finalRecoveryIdentity, finalRecoveryErr := snapshotDirectoryEntryAt(parentFD, recoveryName)
+	if finalRecoveryErr != nil || finalRecoveryIdentity != targetIdentity || !reflect.DeepEqual(finalRecovery.root, targetSnapshot.root) {
+		return &CommittedError{Operation: "removed directory tree verification", Err: directoryChangedError("removed directory changed before cleanup", finalRecoveryErr)}
 	}
 	if err := removeDirectoryEntryAt(parentFD, recoveryName, targetIdentity); err != nil {
 		return &CommittedError{Operation: "removed directory cleanup", Err: err}

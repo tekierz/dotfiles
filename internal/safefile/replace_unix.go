@@ -3,7 +3,9 @@
 package safefile
 
 import (
+	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -96,7 +98,16 @@ func EnsureDirectoryWithin(root, rel string, mode fs.FileMode) error {
 //
 // If a failure is found after rename, the returned error is a *CommittedError.
 func ReplaceWithin(root, rel string, data []byte, mode fs.FileMode) (returnErr error) {
-	return replaceWithinRevision(root, rel, data, mode, nil)
+	return replaceWithinRevision(root, rel, data, mode, nil, nil)
+}
+
+// ReplaceWithinTracked returns the exact descriptor revision committed by the
+// replacement. If the committed target no longer matches the requested bytes
+// and mode at the return boundary, it returns a CommittedError and no evidence.
+func ReplaceWithinTracked(root, rel string, data []byte, mode fs.FileMode) (Revision, error) {
+	var revision Revision
+	err := replaceWithinRevision(root, rel, data, mode, nil, &revision)
+	return revision, err
 }
 
 // ReplaceWithinRevision atomically replaces rel only when its exact current
@@ -107,10 +118,19 @@ func ReplaceWithinRevision(root, rel string, expected Revision, data []byte, mod
 	if !expected.Tracked() {
 		return fmt.Errorf("%w: expected replacement revision is untracked", ErrRevisionChanged)
 	}
-	return replaceWithinRevision(root, rel, data, mode, &expected)
+	return replaceWithinRevision(root, rel, data, mode, &expected, nil)
 }
 
-func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expected *Revision) (returnErr error) {
+func ReplaceWithinRevisionTracked(root, rel string, expected Revision, data []byte, mode fs.FileMode) (Revision, error) {
+	if !expected.Tracked() {
+		return Revision{}, fmt.Errorf("%w: expected replacement revision is untracked", ErrRevisionChanged)
+	}
+	var revision Revision
+	err := replaceWithinRevision(root, rel, data, mode, &expected, &revision)
+	return revision, err
+}
+
+func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expected *Revision, evidence *Revision) (returnErr error) {
 	if mode != mode.Perm() {
 		return fmt.Errorf("%w: %v", ErrInvalidMode, mode)
 	}
@@ -226,6 +246,17 @@ func replaceWithinRevision(root, rel string, data []byte, mode fs.FileMode, expe
 			Operation: strings.Join(operations, "; "),
 			Err:       errors.Join(postCommit...),
 		}
+	}
+	if evidence != nil {
+		committedData, revision, err := ReadWithin(root, rel)
+		wantDigest := sha256.Sum256(data)
+		if err != nil || !revision.Exists() || revision.device != staged.identity.device || revision.inode != staged.identity.inode || revision.Permissions() != mode.Perm() || revision.Digest() != wantDigest || !bytes.Equal(committedData, data) {
+			if err == nil {
+				err = ErrRevisionChanged
+			}
+			return &CommittedError{Operation: "capture committed replacement revision", Err: err}
+		}
+		*evidence = revision
 	}
 	return nil
 }

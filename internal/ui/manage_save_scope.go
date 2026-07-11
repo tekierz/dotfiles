@@ -1,6 +1,9 @@
 package ui
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // manageGeneratorToolOrder is the stable set of tool IDs whose config files the
 // Manage save can write, in the deterministic order used for applying changes and
@@ -54,6 +57,7 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 			cfg.GitDeltaSideBySide, cfg.GitDefaultBranch, cfg.GitPullRebase,
 			cfg.GitSignCommits, cfg.GitCredentialHelper,
 			cfg.GitAutoSetupRemote, cfg.GitMergeTool, cfg.GitDiffTool,
+			strings.Join(cfg.GitAliases, "\x00"),
 		}
 	case "yazi":
 		return []any{

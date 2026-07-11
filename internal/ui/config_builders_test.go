@@ -273,7 +273,7 @@ func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 		relPath string
 		write   func(theme string) error // install-side translation
 	}{
-		{"ghostty", ".config/ghostty/config", func(th string) error {
+		{"ghostty", ".config/ghostty/config.ghostty", func(th string) error {
 			return tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), th)
 		}},
 		{"tmux", ".tmux.conf", func(th string) error {

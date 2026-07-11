@@ -34,7 +34,7 @@ func tabNavigationTarget(key string) (Screen, bool) {
 // on-enter trigger used by the migrated screen handlers' tab navigation, so every
 // entry path kicks the same load.
 func startTabTargetLoad(a *App, target Screen) tea.Cmd {
-	switch target {
+	switch target { //nolint:exhaustive // Only management tabs have on-enter loaders.
 	case ScreenUpdate:
 		if !a.updateChecking && !a.updateCheckDone {
 			a.updateChecking = true

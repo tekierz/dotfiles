@@ -315,6 +315,37 @@ func TestReplaceWithinKeepsStagedDescriptorOpenAcrossRename(t *testing.T) {
 	}
 }
 
+func TestReplaceWithinTrackedRefusesIdenticalPostCommitNamespaceReplacement(t *testing.T) {
+	root := t.TempDir()
+	const content = "committed bytes\n"
+	setReplaceHooks(t, func(hooks *replaceHooks) {
+		hooks.afterCommit = func(parentFD, _ int, target string) error {
+			if err := unix.Unlinkat(parentFD, target, 0); err != nil {
+				return err
+			}
+			fd, err := unix.Openat(parentFD, target, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
+			if err != nil {
+				return err
+			}
+			if _, err := unix.Write(fd, []byte(content)); err != nil {
+				_ = unix.Close(fd)
+				return err
+			}
+			return unix.Close(fd)
+		}
+	})
+
+	revision, err := ReplaceWithinTracked(root, "config", []byte(content), 0o600)
+	var committed *CommittedError
+	if !errors.As(err, &committed) || !errors.Is(err, ErrStagedChanged) {
+		t.Fatalf("ReplaceWithinTracked error = %v, want committed staged-identity failure", err)
+	}
+	if revision.Tracked() {
+		t.Fatalf("superseded committed write returned rollback evidence: %+v", revision)
+	}
+	assertContent(t, filepath.Join(root, "config"), content)
+}
+
 func TestReplaceWithinCreatedDirectorySwapIsDetectedWithoutChmod(t *testing.T) {
 	root := t.TempDir()
 	created := filepath.Join(root, "created")

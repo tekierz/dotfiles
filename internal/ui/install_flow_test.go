@@ -89,7 +89,7 @@ func TestConfigGating_DeselectedToolSkipsConfig(t *testing.T) {
 	}
 
 	// Ghostty config SHOULD be written (always-core).
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config.ghostty")
 	if _, err := os.Stat(ghosttyPath); err != nil {
 		t.Errorf("ghostty config not written even though it is always-core: %v (lines: %v)", err, lines)
 	}

@@ -123,7 +123,7 @@ func SaveUserProfile(profile *UserProfile) error {
 		return fmt.Errorf("failed to marshal user profile: %w", err)
 	}
 
-	if err := writeFileAtomic(path, data, 0600); err != nil {
+	if err := writeFileAtomic(path, data); err != nil {
 		return fmt.Errorf("failed to write user profile: %w", err)
 	}
 

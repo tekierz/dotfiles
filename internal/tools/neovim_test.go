@@ -80,45 +80,66 @@ func TestSetupNeovimPresetCloneFailureLeavesExistingConfigUntouched(t *testing.T
 	}
 }
 
-func TestSetupNeovimPresetUsesDistinctTimestampedBackups(t *testing.T) {
+func TestSetupNeovimPresetRefusesExistingDirectoryWithoutCreatingBackup(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	installFakeGit(t, false)
 
 	nvimDir := filepath.Join(home, ".config", "nvim")
 	cfg := NeovimConfig{ConfigPreset: "kickstart", TabWidth: 4, LineNumbers: "absolute"}
-
-	for i := 0; i < 2; i++ {
-		if err := os.RemoveAll(nvimDir); err != nil {
-			t.Fatalf("remove nvim: %v", err)
-		}
-		if err := os.MkdirAll(nvimDir, 0755); err != nil {
-			t.Fatalf("mkdir nvim: %v", err)
-		}
-		content := []byte(strings.Repeat("\" legacy config\n", i+1))
-		if err := os.WriteFile(filepath.Join(nvimDir, "init.vim"), content, 0600); err != nil {
-			t.Fatalf("write init.vim: %v", err)
-		}
-
-		if err := setupNeovimPreset(cfg, "catppuccin-mocha", nvimDir); err != nil {
-			t.Fatalf("setupNeovimPreset run %d: %v", i+1, err)
-		}
+	if err := os.MkdirAll(nvimDir, 0755); err != nil {
+		t.Fatalf("mkdir nvim: %v", err)
 	}
-
-	backups, err := filepath.Glob(nvimDir + ".backup.*")
+	original := []byte("\" legacy config\n")
+	legacy := filepath.Join(nvimDir, "init.vim")
+	if err := os.WriteFile(legacy, original, 0600); err != nil {
+		t.Fatalf("write init.vim: %v", err)
+	}
+	if err := setupNeovimPreset(cfg, "catppuccin-mocha", nvimDir); err == nil {
+		t.Fatal("setupNeovimPreset overwrote an existing directory")
+	}
+	got, err := os.ReadFile(legacy)
+	if err != nil {
+		t.Fatalf("read preserved init.vim: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("existing Neovim config changed: %q", got)
+	}
+	backups, err := filepath.Glob(nvimDir + ".backup*")
 	if err != nil {
 		t.Fatalf("glob backups: %v", err)
 	}
-	if len(backups) != 2 {
-		t.Fatalf("backup count = %d, want 2: %v", len(backups), backups)
+	if len(backups) != 0 {
+		t.Fatalf("refused install created ad-hoc backups: %v", backups)
 	}
-	if backups[0] == backups[1] {
-		t.Fatalf("backup paths are not distinct: %v", backups)
+}
+
+func TestSetupNeovimPresetStagesPreferencesBeforeTrackedCommit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	installFakeGit(t, false)
+
+	nvimDir := filepath.Join(home, ".config", "nvim")
+	cfg := NeovimConfig{ConfigPreset: "kickstart", TabWidth: 4, LineNumbers: "absolute"}
+	evidence, err := setupNeovimPresetTracked(cfg, "catppuccin-mocha", nvimDir)
+	if err != nil {
+		t.Fatalf("setupNeovimPresetTracked: %v", err)
 	}
-	for _, backup := range backups {
-		if _, err := os.Stat(filepath.Join(backup, "init.vim")); err != nil {
-			t.Fatalf("backup %s missing init.vim: %v", backup, err)
-		}
+	if evidence == nil || evidence.Digest() == ([32]byte{}) {
+		t.Fatal("successful preset install returned no tracked directory evidence")
+	}
+	initContent, err := os.ReadFile(filepath.Join(nvimDir, "init.lua"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(initContent), `pcall(require, "custom.options")`) {
+		t.Fatalf("committed init.lua lacks staged preferences loader:\n%s", initContent)
+	}
+	if _, err := os.Stat(filepath.Join(nvimDir, "lua", "custom", "options.lua")); err != nil {
+		t.Fatalf("committed preset lacks staged options.lua: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(nvimDir, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("committed preset retained clone metadata: %v", err)
 	}
 }
 

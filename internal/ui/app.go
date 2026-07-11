@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -225,6 +226,9 @@ type App struct {
 
 	// Management state (detailed config)
 	manageConfig *ManageConfig
+	// nativeConfigState records current Git/Ghostty source and field provenance.
+	// Native values seed defaults only before manage.json has ever been saved.
+	nativeConfigState NativeManageConfigState
 	// manageConfigBaseline is a snapshot of manageConfig + theme as last loaded or
 	// last successfully saved. The Manage save diffs the live config against this
 	// to apply ONLY the tools the user actually changed, so editing one tool can
@@ -253,6 +257,10 @@ type App struct {
 	installOutput       []string
 	installRunning      bool
 	installComplete     bool
+	pendingInstallPlan  *installPlan
+	installPlanError    error
+	lastOperationID     string
+	installPlanScroll   int
 	installEvents       chan installEventMsg // streamed progress from the install worker goroutine
 	updateStream        chan updateStreamMsg // streamed progress from the update worker goroutine
 	// streamCancel cancels the context driving the currently-running install or
@@ -396,7 +404,7 @@ func (a *App) postIntroTransition() tea.Cmd {
 	target := a.postIntroScreen
 
 	var async tea.Cmd
-	switch target {
+	switch target { //nolint:exhaustive // Only destinations with on-enter async work need cases.
 	case ScreenUpdate:
 		if !a.updateChecking && !a.updateCheckDone {
 			a.updateChecking = true
@@ -454,9 +462,16 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 	SetTheme(app.theme)
 
 	// Best-effort: load persisted management settings for deep-dive manager UI.
+	// A proven existing manage.json always outranks imported native values.
+	managePreferences := inspectManagePreferencePresence()
 	if cfg, err := config.LoadToolConfig("manage", NewManageConfig); err == nil && cfg != nil {
 		app.manageConfig = cfg
 	}
+	app.nativeConfigState = observeNativeManageConfig(app.manageConfig, managePreferences)
+	// The installer and Manage dashboard must share one hydrated desired model;
+	// otherwise the wizard would write compiled defaults over imported values.
+	hydrated := manageConfigToDeepDive(app.manageConfig)
+	app.deepDiveConfig = &hydrated
 
 	// Snapshot the loaded Manage config + theme as the save baseline so the Manage
 	// save can scope its config-file writes to only the tools the user changes.
@@ -831,8 +846,9 @@ func cleanupBackups() error {
 // install worker can be honest with the user (C5). enabled is false when
 // auto-backup is turned off (no backup attempted, no warning).
 type autoBackupResult struct {
-	enabled    bool  // auto-backup is on in settings
-	count      int   // number of files actually captured
+	enabled    bool // auto-backup is on in settings
+	count      int  // number of files actually captured
+	backupDir  string
 	cleanupErr error // non-fatal: retention cleanup after the backup failed
 }
 
@@ -870,7 +886,7 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 	// point exists.
 	count, err := backup.Create(home, backupDir, defaultBackupFiles)
 	if err != nil {
-		return autoBackupResult{enabled: true, count: count}, err
+		return autoBackupResult{enabled: true, count: count, backupDir: backupDir}, err
 	}
 
 	// Run cleanup after creating backup. A cleanup failure does not invalidate the
@@ -878,7 +894,53 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 	// and surfaced by the install worker as a warning line instead of being dropped.
 	cleanupErr := cleanupBackups()
 
-	return autoBackupResult{enabled: true, count: count, cleanupErr: cleanupErr}, nil
+	return autoBackupResult{enabled: true, count: count, backupDir: backupDir, cleanupErr: cleanupErr}, nil
+}
+
+// backupPlanTargets creates a mandatory rollback point for the exact accepted
+// mutation scope. Unlike the user's convenience auto-backup preference, this
+// safety boundary cannot be disabled. Missing targets are recorded explicitly
+// so rollback can remove files/directories created by the operation.
+func backupPlanTargets(files []string) (autoBackupResult, error) {
+	if len(files) == 0 {
+		return autoBackupResult{}, fmt.Errorf("accepted plan has no rollback targets")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return autoBackupResult{enabled: true}, err
+	}
+	targets, err := plannedBackupTargets(home, files)
+	if err != nil {
+		return autoBackupResult{enabled: true}, err
+	}
+	timestamp := time.Now().Format("2006-01-02_15-04-05") + "_plan"
+	backupsDir := filepath.Join(config.ConfigDir(), "backups")
+	backupDir := makeUniqueBackupDir(backupsDir, timestamp)
+	count, err := backup.CreatePlan(home, backupDir, targets)
+	if err != nil {
+		return autoBackupResult{enabled: true, count: count, backupDir: backupDir}, err
+	}
+	cleanupErr := cleanupBackups()
+	return autoBackupResult{enabled: true, count: count, backupDir: backupDir, cleanupErr: cleanupErr}, nil
+}
+
+func plannedBackupTargets(home string, files []string) ([]backup.Target, error) {
+	targets := make([]backup.Target, 0, len(files))
+	for _, rel := range files {
+		if filepath.IsAbs(rel) {
+			return nil, fmt.Errorf("rollback target outside HOME is unsupported: %s", rel)
+		}
+		kind := backup.TargetFile
+		if rel == ".config/nvim" || strings.HasPrefix(filepath.ToSlash(rel), ".tmux/plugins/") {
+			kind = backup.TargetDirectory
+		} else if info, statErr := os.Lstat(filepath.Join(home, filepath.FromSlash(rel))); statErr == nil && info.IsDir() {
+			kind = backup.TargetDirectory
+		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect rollback target %s: %w", rel, statErr)
+		}
+		targets = append(targets, backup.Target{RelPath: rel, Kind: kind})
+	}
+	return targets, nil
 }
 
 // Update handles messages
@@ -913,6 +975,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.manageInstalled = m.installed
 		a.manageInstalledReady = true
 		a.installCacheLoading = false
+		if a.screen == ScreenFileTree {
+			a.refreshPendingInstallPlan()
+		}
 		return a, nil
 	}
 
@@ -974,16 +1039,23 @@ func (a *App) View() string {
 // execCommand wraps exec.Cmd to implement tea.ExecCommand
 type execCommand struct {
 	*exec.Cmd
+	cancel context.CancelFunc
 }
 
-func (e execCommand) SetStdin(r io.Reader)  { e.Cmd.Stdin = r }
-func (e execCommand) SetStdout(w io.Writer) { e.Cmd.Stdout = w }
-func (e execCommand) SetStderr(w io.Writer) { e.Cmd.Stderr = w }
+func (e execCommand) Run() error {
+	defer e.cancel()
+	return e.Cmd.Run()
+}
+
+func (e execCommand) SetStdin(r io.Reader)  { e.Stdin = r }
+func (e execCommand) SetStdout(w io.Writer) { e.Stdout = w }
+func (e execCommand) SetStderr(w io.Writer) { e.Stderr = w }
 
 // sudoPromptCmd returns a command that prompts for sudo credentials
 func sudoPromptCmd() tea.ExecCommand {
 	// Use a script that shows a nice message then prompts for sudo
-	cmd := exec.Command("bash", "-c", `
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	cmd := exec.CommandContext(ctx, "bash", "-c", `
 		echo ""
 		echo "┌────────────────────────────────────────────┐"
 		echo "│  Installation requires administrator       │"
@@ -1006,7 +1078,7 @@ func sudoPromptCmd() tea.ExecCommand {
 			exit 1
 		fi
 	`)
-	return execCommand{cmd}
+	return execCommand{Cmd: cmd, cancel: cancel}
 }
 
 // SetStartScreen sets the initial screen to display (for CLI routing)

@@ -111,9 +111,18 @@ func (t *ClaudeCodeTool) InstallWithContextForPlatform(ctx context.Context, mgr 
 
 // ApplyConfigWithMCPs applies MCP server configuration with specific MCP selections
 func (t *ClaudeCodeTool) ApplyConfigWithMCPs(enabledMCPs map[string]bool) error {
-	cfg, err := config.LoadClaudeConfig()
+	_, err := t.ApplyConfigWithMCPsTracked(enabledMCPs)
+	return err
+}
+
+func (t *ClaudeCodeTool) ApplyConfigWithMCPsTracked(enabledMCPs map[string]bool) (MutationEvidence, error) {
+	return t.applyConfigWithMCPsTracked(enabledMCPs, config.LoadClaudeConfig)
+}
+
+func (t *ClaudeCodeTool) applyConfigWithMCPsTracked(enabledMCPs map[string]bool, load func() (*config.ClaudeConfig, error)) (MutationEvidence, error) {
+	cfg, err := load()
 	if err != nil {
-		cfg = &config.ClaudeConfig{MCPServers: make(map[string]config.MCPServer)}
+		return MutationEvidence{}, fmt.Errorf("load Claude config before MCP update: %w", err)
 	}
 
 	// Ensure MCPServers map is initialized (may be nil if settings.json exists but lacks this field)
@@ -136,5 +145,13 @@ func (t *ClaudeCodeTool) ApplyConfigWithMCPs(enabledMCPs map[string]bool) error 
 		}
 	}
 
-	return config.SaveClaudeConfig(cfg)
+	revision, err := config.SaveClaudeConfigTracked(cfg)
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return MutationEvidence{Path: filepath.Join(home, ".claude.json"), Revision: revision}, nil
 }

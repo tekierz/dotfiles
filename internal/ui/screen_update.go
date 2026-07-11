@@ -260,7 +260,7 @@ func (s *updateScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 	// Ignore a click on the already-active tab (this screen).
-	if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+	if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 		return s.navigateTab(screen)
 	}
 	return nil

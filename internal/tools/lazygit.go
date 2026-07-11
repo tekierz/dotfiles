@@ -160,12 +160,19 @@ func lazygitPager(paging string) string {
 
 // WriteLazyGitConfig writes the lazygit config to disk
 func WriteLazyGitConfig(cfg LazyGitConfig, theme string) error {
+	_, err := WriteLazyGitConfigTracked(cfg, theme)
+	return err
+}
+
+// WriteLazyGitConfigTracked writes the lazygit config and returns the exact
+// committed revision for rollback evidence.
+func WriteLazyGitConfigTracked(cfg LazyGitConfig, theme string) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	configPath := filepath.Join(home, ".config", "lazygit", "config.yml")
 	content := GenerateLazyGitConfig(cfg, theme)
-	return writeToolConfig(configPath, []byte(content))
+	return writeToolConfigTracked(configPath, []byte(content))
 }

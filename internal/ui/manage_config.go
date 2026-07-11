@@ -2,15 +2,19 @@ package ui
 
 // ManageConfig holds detailed management configuration for all tools
 type ManageConfig struct {
+	NativeImportSchemaVersion int
 	// Ghostty detailed settings
-	GhosttyFontFamily        string
-	GhosttyFontSize          int
-	GhosttyOpacity           int
-	GhosttyBlurRadius        int
-	GhosstyCursorStyle       string
+	GhosttyFontFamily  string
+	GhosttyFontSize    int
+	GhosttyOpacity     int
+	GhosttyBlurRadius  int
+	GhosstyCursorStyle string
+	// GhosttyScrollbackLines is retained as a serialized compatibility name;
+	// Ghostty interprets scrollback-limit as bytes, not terminal rows.
 	GhosttyScrollbackLines   int
 	GhosttyWindowDecorations bool
 	GhosttyConfirmClose      bool
+	GhosttyTabBindings       string
 
 	// Tmux detailed settings
 	TmuxPrefix           string
@@ -57,6 +61,12 @@ type ManageConfig struct {
 	GitMergeTool        string
 	GitCredentialHelper string
 	GitSignCommits      bool
+	GitDeltaSideBySide  bool
+	GitAliasStatus      bool
+	GitAliasCheckout    bool
+	GitAliasBranch      bool
+	GitAliasCommit      bool
+	GitAliasLogGraph    bool
 
 	// Yazi detailed settings
 	YaziShowHidden  bool
@@ -110,6 +120,7 @@ type ManageConfig struct {
 // NewManageConfig creates a new management config with defaults
 func NewManageConfig() *ManageConfig {
 	return &ManageConfig{
+		NativeImportSchemaVersion: 1,
 		// Ghostty
 		// Use the same default as NewDeepDiveConfig so the two config models do
 		// not disagree on the same setting (C13). "JetBrains Mono" is also the
@@ -119,9 +130,10 @@ func NewManageConfig() *ManageConfig {
 		GhosttyOpacity:           100,
 		GhosttyBlurRadius:        0,
 		GhosstyCursorStyle:       "block",
-		GhosttyScrollbackLines:   10000,
+		GhosttyScrollbackLines:   10_000_000,
 		GhosttyWindowDecorations: true,
 		GhosttyConfirmClose:      true,
+		GhosttyTabBindings:       "super",
 
 		// Tmux
 		TmuxPrefix:           "C-a",
@@ -171,6 +183,12 @@ func NewManageConfig() *ManageConfig {
 		// credentials to disk in plaintext the way "store" does.
 		GitCredentialHelper: "cache",
 		GitSignCommits:      false,
+		GitDeltaSideBySide:  true,
+		GitAliasStatus:      true,
+		GitAliasCheckout:    true,
+		GitAliasBranch:      true,
+		GitAliasCommit:      true,
+		GitAliasLogGraph:    true,
 
 		// Yazi
 		YaziShowHidden:  false,

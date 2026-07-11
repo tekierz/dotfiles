@@ -58,12 +58,12 @@ const CurrentGlobalConfigSchemaVersion = 1
 // writeFileAtomic writes data below a trusted filesystem anchor. Safefile owns
 // descriptor-relative traversal, no-follow enforcement, staging, rename, and
 // directory durability; callers never resolve untrusted descendants by path.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+func writeFileAtomic(path string, data []byte) error {
 	root, rel, err := anchoredFilePath(path)
 	if err != nil {
 		return err
 	}
-	return safefile.ReplaceWithin(root, rel, data, perm)
+	return safefile.ReplaceWithin(root, rel, data, 0o600)
 }
 
 // anchoredFilePath splits an absolute destination into one trusted, existing
@@ -78,63 +78,75 @@ func anchoredFilePath(path string) (string, string, error) {
 		return "", "", fmt.Errorf("%w: destination must be absolute: %q", errConfigPathOutsideTrustedRoots, path)
 	}
 
-	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
-		homeRoots := []string{filepath.Clean(home)}
-		if resolved, resolveErr := filepath.EvalSymlinks(home); resolveErr == nil && filepath.IsAbs(resolved) {
-			resolved = filepath.Clean(resolved)
-			if resolved != homeRoots[0] {
-				homeRoots = append(homeRoots, resolved)
-			}
-		}
-		for _, root := range homeRoots {
-			if rel, inside := relativeDescendant(root, clean); inside {
-				return root, rel, nil
-			}
-		}
-		if root, rel, ok := relativePathBelowHomeIdentity(home, clean); ok {
-			return root, rel, nil
-		}
+	if root, rel, ok := anchoredHomeFilePath(clean); ok {
+		return root, rel, nil
 	}
 
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
-		xdg = filepath.Clean(xdg)
-		if _, inside := relativeDescendant(xdg, clean); inside {
-			info, statErr := os.Stat(xdg)
-			switch {
-			case statErr == nil && info.IsDir():
-				rel, _ := relativeDescendant(xdg, clean)
-				return xdg, rel, nil
-			case statErr == nil:
-				return "", "", fmt.Errorf("trusted XDG config root %q is not a directory", xdg)
-			case !errors.Is(statErr, os.ErrNotExist):
-				return "", "", fmt.Errorf("inspect trusted XDG config root %q: %w", xdg, statErr)
-			}
-
-			// A not-yet-created external XDG root has no descriptor to anchor.
-			// Anchor at its nearest existing ancestor and let safefile create and
-			// verify every missing descendant directory.
-			root := filepath.Dir(xdg)
-			for {
-				if ancestorInfo, ancestorErr := os.Stat(root); ancestorErr == nil {
-					if !ancestorInfo.IsDir() {
-						return "", "", fmt.Errorf("XDG config ancestor %q is not a directory", root)
-					}
-					rel, below := relativeDescendant(root, clean)
-					if !below {
-						return "", "", fmt.Errorf("%w: %q is not below XDG ancestor %q", errConfigPathOutsideTrustedRoots, clean, root)
-					}
-					return root, rel, nil
-				}
-				parent := filepath.Dir(root)
-				if parent == root {
-					break
-				}
-				root = parent
-			}
-		}
+	if root, rel, handled, err := anchoredXDGFilePath(clean); handled {
+		return root, rel, err
 	}
 
 	return "", "", fmt.Errorf("%w: %q", errConfigPathOutsideTrustedRoots, path)
+}
+
+func anchoredHomeFilePath(clean string) (string, string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil || !filepath.IsAbs(home) {
+		return "", "", false
+	}
+	homeRoots := []string{filepath.Clean(home)}
+	if resolved, resolveErr := filepath.EvalSymlinks(home); resolveErr == nil && filepath.IsAbs(resolved) {
+		resolved = filepath.Clean(resolved)
+		if resolved != homeRoots[0] {
+			homeRoots = append(homeRoots, resolved)
+		}
+	}
+	for _, root := range homeRoots {
+		if rel, inside := relativeDescendant(root, clean); inside {
+			return root, rel, true
+		}
+	}
+	return relativePathBelowHomeIdentity(home, clean)
+}
+
+func anchoredXDGFilePath(clean string) (string, string, bool, error) {
+	xdg := os.Getenv("XDG_CONFIG_HOME")
+	if !filepath.IsAbs(xdg) {
+		return "", "", false, nil
+	}
+	xdg = filepath.Clean(xdg)
+	if _, inside := relativeDescendant(xdg, clean); !inside {
+		return "", "", false, nil
+	}
+
+	info, err := os.Stat(xdg)
+	switch {
+	case err == nil && info.IsDir():
+		rel, _ := relativeDescendant(xdg, clean)
+		return xdg, rel, true, nil
+	case err == nil:
+		return "", "", true, fmt.Errorf("trusted XDG config root %q is not a directory", xdg)
+	case !errors.Is(err, os.ErrNotExist):
+		return "", "", true, fmt.Errorf("inspect trusted XDG config root %q: %w", xdg, err)
+	}
+
+	// A missing external XDG root is anchored at its nearest existing ancestor;
+	// safefile creates and verifies each missing descendant directory.
+	for root := filepath.Dir(xdg); ; root = filepath.Dir(root) {
+		if ancestorInfo, ancestorErr := os.Stat(root); ancestorErr == nil {
+			if !ancestorInfo.IsDir() {
+				return "", "", true, fmt.Errorf("XDG config ancestor %q is not a directory", root)
+			}
+			rel, below := relativeDescendant(root, clean)
+			if !below {
+				return "", "", true, fmt.Errorf("%w: %q is not below XDG ancestor %q", errConfigPathOutsideTrustedRoots, clean, root)
+			}
+			return root, rel, true, nil
+		}
+		if filepath.Dir(root) == root {
+			return "", "", false, nil
+		}
+	}
 }
 
 // ensureConfiguredXDGRoot establishes a missing explicitly configured XDG
@@ -367,7 +379,7 @@ func SaveToolConfig[T any](toolName string, cfg *T) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := writeFileAtomic(path, data, 0600); err != nil {
+	if err := writeFileAtomic(path, data); err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 
@@ -735,6 +747,18 @@ func SaveGlobalConfigWithReservedRevision(cfg *GlobalConfig, beforeCommit func()
 	cfg.sourceRevision = revision
 
 	return nil
+}
+
+// GlobalConfigRevision returns the exact descriptor revision proven by the
+// most recent successful load/save of cfg. The boolean is false for an
+// untracked value that cannot authorize conditional rollback.
+func GlobalConfigRevision(cfg *GlobalConfig) (safefile.Revision, bool) {
+	if cfg == nil {
+		return safefile.Revision{}, false
+	}
+	globalConfigSaveMu.Lock()
+	defer globalConfigSaveMu.Unlock()
+	return cfg.sourceRevision, cfg.sourceRevision.Tracked()
 }
 
 // AvailableThemes returns the list of available themes

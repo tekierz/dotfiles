@@ -357,7 +357,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the
 	// already-active tab (this screen).
 	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+		if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -371,7 +371,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Wheel scroll.
 	if m.IsWheel() {
 		delta := 0
-		switch m.Button {
+		switch m.Button { //nolint:exhaustive // Only vertical wheel actions are meaningful here.
 		case tea.MouseButtonWheelUp:
 			delta = -1
 		case tea.MouseButtonWheelDown:
@@ -876,10 +876,10 @@ func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 		statusText = fmt.Sprintf("%s %s — %d items", cat.Icon, cat.Name, len(cat.Items))
 	}
 	if a.hotkeyFilter != "" {
-		statusText = statusText + lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  (filtered)")
+		statusText += lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  (filtered)")
 	}
 	if a.hotkeysFavoritesOnly {
-		statusText = statusText + lipgloss.NewStyle().Foreground(ColorYellow).Render("  [favorites only]")
+		statusText += lipgloss.NewStyle().Foreground(ColorYellow).Render("  [favorites only]")
 	}
 	if statusText == "" {
 		statusText = " "
@@ -1114,15 +1114,14 @@ func (a *App) renderHotkeysAliasDialog(width int) string {
 		return truncateVisible(display, width-10)
 	}
 
-	nameLabel := "Name:    "
-	cmdLabel := "Command: "
-
+	var nameLabel string
 	if a.hotkeysAliasField == 0 {
 		nameLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Name:    ")
 	} else {
 		nameLabel = labelStyle.Render("Name:    ")
 	}
 
+	var cmdLabel string
 	if a.hotkeysAliasField == 1 {
 		cmdLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Command: ")
 	} else {

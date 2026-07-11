@@ -1,17 +1,22 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/safefile"
@@ -25,11 +30,12 @@ import (
 // This is the standard Bubble Tea channel + "listen" Cmd streaming pattern and
 // avoids the data race between the worker and Update/View.
 type installEventMsg struct {
-	line    string // a line of output to append (empty if none)
-	stepInc bool   // advance the progress step counter
-	done    bool   // the install/configure sequence finished
-	err     error  // final error (only meaningful when done)
-	context string // last few output lines for error context (only when done)
+	line        string // a line of output to append (empty if none)
+	stepInc     bool   // advance the progress step counter
+	done        bool   // the install/configure sequence finished
+	err         error  // final error (only meaningful when done)
+	context     string // last few output lines for error context (only when done)
+	operationID string // durable journal record for this execution (when enabled)
 }
 
 var errInstallStreamClosed = errors.New("installation event stream closed without a terminal result")
@@ -77,6 +83,7 @@ type toolInstallRuntime struct {
 	detectPlatform  func() pkg.Platform
 	isToolInstalled func(tools.Tool) bool
 	autoBackup      func() (autoBackupResult, error)
+	backupTargets   func([]string) (autoBackupResult, error)
 }
 
 func defaultToolInstallRuntime() toolInstallRuntime {
@@ -88,7 +95,8 @@ func defaultToolInstallRuntime() toolInstallRuntime {
 		isToolInstalled: func(t tools.Tool) bool {
 			return t.IsInstalled()
 		},
-		autoBackup: autoBackupIfEnabled,
+		autoBackup:    autoBackupIfEnabled,
+		backupTargets: backupPlanTargets,
 	}
 }
 
@@ -225,54 +233,37 @@ func (a *App) startInstallation() tea.Cmd {
 	a.installStep = 0
 	a.installPlannedSteps = 0
 	a.installOutput = []string{}
-
-	// Validate and persist the global record before observing the machine or
-	// starting any backup/package/config action. Continuing after a malformed,
-	// future-schema, or unwritable global.json would apply compiled defaults to
-	// real application configs while failing to persist the desired state.
-	if err := a.saveInstallerConfig(); err != nil {
+	plan := a.pendingInstallPlan
+	if plan == nil && a.installPlanError == nil {
+		a.refreshPendingInstallPlan()
+		plan = a.pendingInstallPlan
+	}
+	if a.installPlanError != nil {
 		return func() tea.Msg {
-			return installDoneMsg{err: fmt.Errorf("installation blocked by global config error: %w", err)}
+			return installDoneMsg{err: fmt.Errorf("installation plan is invalid: %w", a.installPlanError)}
+		}
+	}
+	if plan == nil {
+		if _, err := config.LoadGlobalConfig(); err != nil {
+			return func() tea.Msg {
+				return installDoneMsg{err: fmt.Errorf("installation blocked by global config error: %w", err)}
+			}
+		}
+		return func() tea.Msg {
+			return installDoneMsg{err: fmt.Errorf("installation blocked: no reviewed plan is available")}
+		}
+	}
+	if plan.hasBlocked() {
+		return func() tea.Msg {
+			return installDoneMsg{err: fmt.Errorf("installation blocked by unresolved configuration ownership")}
 		}
 	}
 
-	// Collect all selected tools from deep dive config
-	selectedTools := a.collectSelectedTools()
-
-	// Compute the total number of step-increments the worker will emit so the
-	// progress fraction in the View is accurate. Always-core phases (utilities,
-	// tmux, ghostty, zsh, neovim, git, yazi, fzf) each emit one step. Selected
-	// gated phases (claude-code, lazygit, btop, glow) contribute one step each
-	// when their selection flag is set. Each selected tool package-install also
-	// emits one step.
-	plannedSteps := len(selectedTools) // one stepLine per tool install
-	// Always-core config phases: utilities + tmux + ghostty + zsh + neovim + git + yazi + fzf
-	const alwaysCoreSteps = 8
-	plannedSteps += alwaysCoreSteps
-	// Deep-snapshot deepDiveConfig on the Update goroutine BEFORE it is handed to the
-	// worker below. A plain *a.deepDiveConfig is only a SHALLOW copy: its map/slice
-	// fields (Utilities, CLITools, ClaudeCodeMCPs, ZshAliases, …) keep ALIASING the
-	// live maps owned by a.deepDiveConfig, and the worker ranges over them (e.g.
-	// ApplyConfigWithMCPs over cfg.ClaudeCodeMCPs). If a config screen mutated those
-	// maps concurrently that range would be a fatal concurrent map read/write — the
-	// exact aliasing the standalone path eliminated with this same helper. It is
-	// currently mitigated only because progressScreen blocks navigation during
-	// install; snapshotDeepDiveConfig clones every reference field so the worker owns
-	// its data regardless. This snapshot also drives the planned-steps reads below.
-	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
-	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
-		plannedSteps++ // claude-code step
+	// The progress total comes from the same accepted plan consumed below.
+	a.installPlannedSteps = len(plan.selectedToolIDs()) + len(plan.configToolIDs())
+	if len(enabledHelpers(plan.config.Utilities)) > 0 {
+		a.installPlannedSteps++
 	}
-	if cfg.CLITools["lazygit"] {
-		plannedSteps++
-	}
-	if cfg.CLITools["btop"] {
-		plannedSteps++
-	}
-	if cfg.CLITools["glow"] {
-		plannedSteps++
-	}
-	a.installPlannedSteps = plannedSteps
 
 	// Buffered channel so the worker can make progress without blocking on a
 	// slow consumer; the listen Cmd drains it one event at a time.
@@ -297,14 +288,7 @@ func (a *App) startInstallation() tea.Cmd {
 		a.sudoKeepAliveStop = startSudoKeepAlive(refreshSudo)
 	}
 
-	// cfg is a DEEP snapshot of deepDiveConfig (taken above via
-	// snapshotDeepDiveConfig, whose clones the planned-steps computation reused);
-	// theme is snapshotted here. Both are passed by value to the worker so it never
-	// reads App fields — nor the live config maps they used to alias — after this
-	// point, even if the Update loop mutates them concurrently.
-	theme := a.theme
-
-	go runInstallWorker(ctx, events, selectedTools, cfg, theme)
+	go runInstallPlanWorker(ctx, events, plan, defaultToolInstallRuntime())
 
 	return a.listenInstallEventsCmd()
 }
@@ -339,8 +323,230 @@ func runInstallWorker(ctx context.Context, events chan installEventMsg, selected
 // runInstallWorkerWithRuntime is the dependency-injected worker used by focused
 // install-dispatch tests. Production callers use runInstallWorker above.
 func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMsg, selectedTools []string, cfg DeepDiveConfig, theme string, installRuntime toolInstallRuntime, savePrefsErr ...error) {
-	defer close(events)
+	configTools := []string{"tmux", "ghostty", "zsh", "neovim", "git", "yazi", "fzf"}
+	for _, optional := range []string{"claude-code", "lazygit", "btop", "glow"} {
+		if optional == "claude-code" && (cfg.CLITools[optional] || cfg.Utilities[optional]) {
+			configTools = append(configTools, optional)
+		} else if optional != "claude-code" && cfg.CLITools[optional] {
+			configTools = append(configTools, optional)
+		}
+	}
+	legacy := &installPlan{
+		selectedTools: slices.Clone(selectedTools),
+		configTools:   configTools,
+		config:        snapshotDeepDiveConfig(&cfg),
+		theme:         theme,
+	}
+	runInstallWorkerFromPlanWithRuntime(ctx, events, legacy, installRuntime, false, savePrefsErr...)
+}
 
+func runInstallPlanWorker(ctx context.Context, events chan installEventMsg, plan *installPlan, installRuntime toolInstallRuntime) {
+	runInstallWorkerFromPlanWithRuntime(ctx, events, plan, installRuntime, true)
+}
+
+func captureRollbackExpectedStates(home string, files []string) (map[string]backup.ExpectedState, error) {
+	targets, err := plannedBackupTargets(home, files)
+	if err != nil {
+		return nil, err
+	}
+	expected := make(map[string]backup.ExpectedState, len(targets))
+	for _, target := range targets {
+		state, err := backup.CaptureExpectedState(home, target)
+		if err != nil {
+			return nil, fmt.Errorf("capture %s: %w", target.RelPath, err)
+		}
+		expected[filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.RelPath)))] = state
+	}
+	return expected, nil
+}
+
+func invalidateRollbackAction(plan *installPlan, actionID string, expected map[string]backup.ExpectedState) {
+	if expected == nil || plan == nil {
+		return
+	}
+	for _, action := range plan.actions() {
+		if action.ID != actionID {
+			continue
+		}
+		for _, rel := range append([]string{action.BackupTarget}, action.BackupTargets...) {
+			if rel != "" {
+				expected[filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))] = backup.ExpectedState{Attempted: true}
+			}
+		}
+		return
+	}
+}
+
+func recordFailedActionRollbackState(home string, plan *installPlan, actionID string, actionErr error, expected map[string]backup.ExpectedState) error {
+	if expected == nil {
+		return nil
+	}
+	var files []string
+	for _, action := range plan.actions() {
+		if action.ID == actionID {
+			if action.BackupTarget != "" {
+				files = append(files, action.BackupTarget)
+			}
+			files = append(files, action.BackupTargets...)
+			break
+		}
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("accepted action %s has no rollback targets", actionID)
+	}
+	var partial interface {
+		CommittedEvidence() []tools.MutationEvidence
+	}
+	if errors.As(actionErr, &partial) {
+		states, err := validateMutationEvidenceSet(home, files, partial.CommittedEvidence())
+		if err != nil {
+			invalidateRollbackAction(plan, actionID, expected)
+			return fmt.Errorf("partial mutation evidence for %s is incomplete; manual recovery required: %w", actionID, err)
+		}
+		invalidateRollbackAction(plan, actionID, expected)
+		for rel, state := range states {
+			expected[rel] = state
+		}
+		return nil
+	} else {
+		// A bare CommittedError proves that some mutation crossed its commit
+		// point, but without exact desired bytes/snapshot it does not authorize
+		// rollback. Leave every target attempted-but-uncaptured.
+		var committed interface{ Committed() bool }
+		_ = errors.As(actionErr, &committed)
+	}
+	invalidateRollbackAction(plan, actionID, expected)
+	return nil
+}
+
+func validateMutationEvidenceSet(home string, allowedFiles []string, evidenceSet []tools.MutationEvidence) (map[string]backup.ExpectedState, error) {
+	allowed := make(map[string]struct{}, len(allowedFiles))
+	for _, rel := range allowedFiles {
+		allowed[filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))] = struct{}{}
+	}
+	validated := make(map[string]backup.ExpectedState, len(evidenceSet))
+	for _, evidence := range evidenceSet {
+		if evidence.Path == "" {
+			return nil, fmt.Errorf("mutation evidence is missing destination path")
+		}
+		rel := evidence.Path
+		if filepath.IsAbs(rel) {
+			var err error
+			rel, err = filepath.Rel(home, rel)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("mutation evidence path is outside HOME: %s", evidence.Path)
+			}
+		}
+		rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+		if _, ok := allowed[rel]; !ok {
+			return nil, fmt.Errorf("mutation evidence path is outside accepted rollback scope: %s", rel)
+		}
+		if _, duplicate := validated[rel]; duplicate {
+			return nil, fmt.Errorf("duplicate mutation evidence for %s", rel)
+		}
+		targets, err := plannedBackupTargets(home, []string{rel})
+		if err != nil {
+			return nil, fmt.Errorf("classify mutation evidence %s: %w", rel, err)
+		}
+		if len(targets) != 1 {
+			return nil, fmt.Errorf("classify mutation evidence %s: target classification returned %d entries", rel, len(targets))
+		}
+		if targets[0].Kind == backup.TargetDirectory {
+			if evidence.Directory == nil {
+				return nil, fmt.Errorf("directory mutation evidence for %s has no snapshot", rel)
+			}
+			validated[rel] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetDirectory, Exists: true, DirectorySnapshot: evidence.Directory}
+			continue
+		}
+		if !evidence.Revision.Tracked() || !evidence.Revision.Exists() {
+			return nil, fmt.Errorf("file mutation evidence for %s has no tracked existing revision", rel)
+		}
+		validated[rel] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetFile, Exists: true, FileRevision: evidence.Revision}
+	}
+	return validated, nil
+}
+
+func rollbackTargetsForAction(plan *installPlan, actionID string) ([]string, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("installation plan is unavailable")
+	}
+	for _, action := range plan.actions() {
+		if action.ID != actionID {
+			continue
+		}
+		files := append([]string(nil), action.BackupTargets...)
+		if action.BackupTarget != "" {
+			files = append(files, action.BackupTarget)
+		}
+		if len(files) == 0 {
+			return nil, fmt.Errorf("accepted action %s has no rollback targets", actionID)
+		}
+		return files, nil
+	}
+	return nil, fmt.Errorf("accepted action %s is missing", actionID)
+}
+
+func authorizeMutationEvidenceSet(home string, plan *installPlan, actionID string, evidenceSet []tools.MutationEvidence, expected map[string]backup.ExpectedState) error {
+	if expected == nil || plan == nil {
+		return fmt.Errorf("mutation evidence destination state is unavailable")
+	}
+	allowed, err := rollbackTargetsForAction(plan, actionID)
+	if err != nil {
+		return err
+	}
+	validated, err := validateMutationEvidenceSet(home, allowed, evidenceSet)
+	if err != nil {
+		return err
+	}
+	for rel, state := range validated {
+		expected[rel] = state
+	}
+	return nil
+}
+
+func authorizeHelperMutationEvidence(home string, plan *installPlan, attempted []string, evidenceSet []tools.MutationEvidence, expected map[string]backup.ExpectedState) error {
+	if expected == nil || len(evidenceSet) > len(attempted) {
+		return fmt.Errorf("helper mutation evidence cannot be mapped to attempted actions")
+	}
+	validatedAll := make(map[string]backup.ExpectedState, len(evidenceSet))
+	for index, evidence := range evidenceSet {
+		actionID := "helper:" + attempted[index]
+		allowed, err := rollbackTargetsForAction(plan, actionID)
+		if err != nil {
+			return err
+		}
+		validated, err := validateMutationEvidenceSet(home, allowed, []tools.MutationEvidence{evidence})
+		if err != nil {
+			return fmt.Errorf("%s evidence: %w", actionID, err)
+		}
+		for rel, state := range validated {
+			if _, duplicate := validatedAll[rel]; duplicate {
+				return fmt.Errorf("duplicate helper mutation evidence for %s", rel)
+			}
+			validatedAll[rel] = state
+		}
+	}
+	for rel, state := range validatedAll {
+		expected[rel] = state
+	}
+	return nil
+}
+
+func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan installEventMsg, plan *installPlan, installRuntime toolInstallRuntime, persistJournal bool, savePrefsErr ...error) {
+	defer close(events)
+	if plan == nil {
+		events <- installEventMsg{done: true, err: fmt.Errorf("installation plan is nil")}
+		return
+	}
+	home, homeErr := os.UserHomeDir()
+	selectedTools := plan.selectedToolIDs()
+	cfg := snapshotDeepDiveConfig(&plan.config)
+	theme := plan.theme
+	configAllowed := make(map[string]bool, len(plan.configTools))
+	for _, toolID := range plan.configToolIDs() {
+		configAllowed[toolID] = true
+	}
+	ghosttyConfigTarget := plan.ghosttyConfigTarget
 	// Sends select on ctx.Done() so a cancelled install (Ctrl+C / teardown)
 	// unblocks the worker instead of parking forever on the bounded channel once
 	// the consumer (the listen Cmd) stops draining it.
@@ -364,8 +570,76 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 		output = appendBoundedInstallLine(output, line)
 		step(line)
 	}
+	var journal *operation.Journal
+	var journalRecord *operation.Record
+	var journalResults []operation.ActionResult
+	var operationID string
+	var backupRes autoBackupResult
+	mutationStarted := false
+	var rollbackExpected map[string]backup.ExpectedState
+	var journalWarnings []string
+	markAction := func(actionID string, status operation.ActionStatus, summary string) {
+		for index := range journalResults {
+			if journalResults[index].ActionID == actionID {
+				journalResults[index].Status = status
+				journalResults[index].Summary = summary
+				return
+			}
+		}
+	}
 
 	finish := func(err error) {
+		var rollbackOutcome *operation.RollbackResult
+		if err != nil && mutationStarted && backupRes.backupDir != "" {
+			home, homeErr := os.UserHomeDir()
+			if homeErr != nil {
+				rollbackOutcome = &operation.RollbackResult{Status: operation.RollbackFailed, Summary: "could not determine HOME"}
+				err = errors.Join(err, fmt.Errorf("automatic rollback could not determine HOME: %w", homeErr))
+			} else {
+				rollback, rollbackErr := backup.RestoreExpected(backupRes.backupDir, home, rollbackExpected)
+				switch {
+				case rollbackErr != nil:
+					rollbackOutcome = &operation.RollbackResult{Status: operation.RollbackFailed, Summary: "rollback restore returned a fatal error"}
+					err = errors.Join(err, fmt.Errorf("automatic rollback failed: %w", rollbackErr))
+				case len(rollback.Skipped) != 0 || len(rollback.Warnings) != 0:
+					rollbackOutcome = &operation.RollbackResult{Status: operation.RollbackIncomplete, Restored: len(rollback.Restored), Removed: len(rollback.Removed), Skipped: len(rollback.Skipped), Warnings: len(rollback.Warnings), Summary: "manual review required"}
+					err = errors.Join(err, fmt.Errorf("automatic rollback incomplete: %d skipped, %d warning(s)", len(rollback.Skipped), len(rollback.Warnings)))
+				default:
+					rollbackOutcome = &operation.RollbackResult{Status: operation.RollbackSucceeded, Restored: len(rollback.Restored), Removed: len(rollback.Removed), Summary: "planned filesystem scope restored"}
+					emitLine(fmt.Sprintf("↶ Rolled back %d restored and %d created path(s)", len(rollback.Restored), len(rollback.Removed)))
+				}
+			}
+		}
+		if journalRecord != nil && journal != nil {
+			if rollbackOutcome != nil {
+				if rollbackErr := journalRecord.SetRollback(*rollbackOutcome); rollbackErr != nil {
+					err = errors.Join(err, fmt.Errorf("record automatic rollback outcome: %w", rollbackErr))
+				}
+			}
+			terminalStatus := operation.StatusSucceeded
+			if errors.Is(err, context.Canceled) {
+				terminalStatus = operation.StatusCancelled
+			} else if err != nil {
+				terminalStatus = operation.StatusFailed
+			}
+			for index := range journalResults {
+				if journalResults[index].Status != operation.ActionPending {
+					continue
+				}
+				if err == nil {
+					journalResults[index].Status = operation.ActionSucceeded
+					journalResults[index].Summary = "completed"
+				} else {
+					journalResults[index].Status = operation.ActionSkipped
+					journalResults[index].Summary = "not completed before operation ended"
+				}
+			}
+			if finishErr := journalRecord.Finish(terminalStatus, time.Now(), journalResults, journalWarnings); finishErr != nil {
+				err = errors.Join(err, fmt.Errorf("finalize operation journal: %w", finishErr))
+			} else if writeErr := journal.Write(*journalRecord); writeErr != nil {
+				err = errors.Join(err, fmt.Errorf("persist terminal operation journal: %w", writeErr))
+			}
+		}
 		var errCtx string
 		if err != nil && len(output) > 0 {
 			start := 0
@@ -374,7 +648,7 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 			}
 			errCtx = strings.Join(output[start:], "\n")
 		}
-		terminal := installEventMsg{done: true, err: err, context: errCtx}
+		terminal := installEventMsg{done: true, err: err, context: errCtx, operationID: operationID}
 		select {
 		case events <- terminal:
 		default:
@@ -392,16 +666,75 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 		finish(fmt.Errorf("installation blocked by global config error: %w", savePrefsErr[0]))
 		return
 	}
+	if persistJournal && (homeErr != nil || home == "" || !filepath.IsAbs(home)) {
+		if homeErr != nil {
+			finish(fmt.Errorf("determine absolute HOME for reviewed installation: %w", homeErr))
+		} else {
+			finish(fmt.Errorf("determine absolute HOME for reviewed installation: %q is not absolute", home))
+		}
+		return
+	}
+	if persistJournal && configAllowed["ghostty"] {
+		acceptedTarget, err := plan.acceptedGhosttyConfigTarget()
+		if err != nil {
+			finish(fmt.Errorf("validate accepted Ghostty execution target: %w", err))
+			return
+		}
+		ghosttyConfigTarget = acceptedTarget
+	}
+	if persistJournal {
+		record, err := operation.StartRecord(plan.document, time.Now())
+		if err != nil {
+			finish(fmt.Errorf("create operation journal record: %w", err))
+			return
+		}
+		createdJournal, err := operation.DefaultJournal()
+		if err != nil {
+			finish(fmt.Errorf("open operation journal: %w", err))
+			return
+		}
+		markActionResults := append([]operation.ActionResult(nil), record.Actions...)
+		journalResults = markActionResults
+		if err := createdJournal.Write(record); err != nil {
+			finish(fmt.Errorf("persist initial operation journal: %w", err))
+			return
+		}
+		journal = &createdJournal
+		journalRecord = &record
+		operationID = record.OperationID
+		emitLine("Operation " + record.OperationID + " • plan " + plan.hash()[:12])
+		if err := revalidateInstallPlan(plan); err != nil {
+			finish(fmt.Errorf("installation plan expired before execution: %w", err))
+			return
+		}
+	}
 
 	// Auto-backup before making changes (if enabled). The result is honest:
 	// it only reports a created backup when at least one file was captured and
 	// the manifest persisted, so we never claim a rollback point exists right
 	// before overwriting the user's dotfiles (C5).
-	backupRes, err := installRuntime.autoBackup()
+	var err error
+	if persistJournal && installRuntime.backupTargets != nil {
+		backupRes, err = installRuntime.backupTargets(plan.backupTargets())
+	} else {
+		backupRes, err = installRuntime.autoBackup()
+	}
 	if err != nil {
 		finish(fmt.Errorf("auto-backup failed; installation stopped before mutation: %w", err))
 		return
+	} else if persistJournal && (!backupRes.enabled || backupRes.backupDir == "") {
+		finish(fmt.Errorf("mandatory rollback point was not created; installation stopped before mutation"))
+		return
 	} else if backupRes.enabled {
+		if journalRecord != nil {
+			journalRecord.Backup = backupRes.backupDir
+			if journal != nil {
+				if writeErr := journal.Write(*journalRecord); writeErr != nil {
+					finish(fmt.Errorf("persist rollback point in operation journal: %w", writeErr))
+					return
+				}
+			}
+		}
 		if backupRes.count > 0 {
 			emitLine(fmt.Sprintf("✓ Auto-backup created before installation (%d file(s))", backupRes.count))
 		} else {
@@ -411,7 +744,30 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 		// stalled retention policy is visible rather than silently swallowed.
 		if backupRes.cleanupErr != nil {
 			emitLine(fmt.Sprintf("⚠ Backup retention cleanup failed: %v", backupRes.cleanupErr))
+			journalWarnings = append(journalWarnings, "backup retention cleanup failed: "+backupRes.cleanupErr.Error())
 		}
+	}
+	if persistJournal {
+		// Backup reads every planned target, then a second observation check
+		// narrows the final pre-mutation window and refuses a stale preview.
+		if err := revalidateInstallPlan(plan); err != nil {
+			finish(fmt.Errorf("installation plan changed while creating rollback point: %w", err))
+			return
+		}
+		rollbackExpected = make(map[string]backup.ExpectedState)
+		// From this point onward failures may require restoring the mandatory
+		// rollback point. Pre-mutation journal/backup/revalidation failures must
+		// never restore over an external edit that caused the refusal.
+		mutationStarted = true
+		globalEvidence, saveErr := saveInstallerPreferencesTracked(plan.theme, plan.navStyle, plan.animations)
+		if saveErr != nil {
+			captureErr := recordFailedActionRollbackState(home, plan, "state:global", saveErr, rollbackExpected)
+			markAction("state:global", operation.ActionFailed, "global preferences could not be persisted")
+			finish(errors.Join(fmt.Errorf("installation blocked by global config error: %w", saveErr), captureErr))
+			return
+		}
+		rollbackExpected[filepath.ToSlash(filepath.Join(".config", "dotfiles", "global.json"))] = backup.ExpectedState{Attempted: true, Captured: true, Kind: backup.TargetFile, Exists: true, FileRevision: globalEvidence.Revision}
+		markAction("state:global", operation.ActionSucceeded, "global preferences persisted")
 	}
 
 	// failures aggregates every failed step so the final error reports how many
@@ -427,6 +783,13 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 		emitLine("No new tools to install; applying configuration...")
 	} else {
 		result := runSelectedToolInstalls(ctx, selectedTools, installRuntime, emitLine, stepLine)
+		for _, toolID := range selectedTools {
+			if result.installed[toolID] {
+				markAction("install:"+toolID, operation.ActionSucceeded, "installed and detected")
+			} else {
+				markAction("install:"+toolID, operation.ActionFailed, "install or postcondition failed")
+			}
+		}
 		for _, installErr := range result.failures {
 			noteFailure(installErr)
 		}
@@ -443,44 +806,115 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 
 	// configPhase runs a single configuration step, emitting a header line,
 	// advancing the progress step, and recording any failure.
-	configPhase := func(header string, run func() error, okLine string) bool {
+	configPhase := func(header string, run func() error, okLine string) error {
 		stepLine(header)
 		if err := run(); err != nil {
 			emitLine(fmt.Sprintf("  ⚠ %v", err))
 			noteFailure(err)
-			return false
+			return err
 		} else if okLine != "" {
 			emitLine(okLine)
 		}
-		return true
+		return nil
 	}
-	toolConfigPhase := func(toolID, header string, run func() error, okLine string) bool {
+	toolConfigPhase := func(toolID, header string, run func() ([]tools.MutationEvidence, error), okLine string) bool {
+		if !configAllowed[toolID] {
+			return false
+		}
 		available, reason := coreToolConfigAvailable(installRuntime, toolID)
 		if !available {
 			stepLine(header)
 			emitLine("  ↷ Skipped configuration: " + reason)
+			markAction("config:"+toolID, operation.ActionSkipped, reason)
 			return false
 		}
-		return configPhase(header, run, okLine)
+		stepLine(header)
+		evidence, actionErr := run()
+		if actionErr != nil {
+			emitLine(fmt.Sprintf("  ⚠ %v", actionErr))
+			noteFailure(actionErr)
+		} else if okLine != "" {
+			emitLine(okLine)
+		}
+		succeeded := actionErr == nil
+		if succeeded {
+			if len(evidence) == 0 {
+				invalidateRollbackAction(plan, "config:"+toolID, rollbackExpected)
+				noteFailure(fmt.Errorf("%s writer returned no exact mutation evidence", toolID))
+				succeeded = false
+			} else if err := authorizeMutationEvidenceSet(home, plan, "config:"+toolID, evidence, rollbackExpected); err != nil {
+				invalidateRollbackAction(plan, "config:"+toolID, rollbackExpected)
+				noteFailure(fmt.Errorf("authorize %s mutation evidence; automatic rollback is incomplete and manual recovery may be required: %w", toolID, err))
+				succeeded = false
+			}
+		} else {
+			if captureErr := recordFailedActionRollbackState(home, plan, "config:"+toolID, actionErr, rollbackExpected); captureErr != nil {
+				noteFailure(fmt.Errorf("capture proven %s partial writes: %w", toolID, captureErr))
+			}
+		}
+		if succeeded {
+			markAction("config:"+toolID, operation.ActionSucceeded, "configuration applied")
+		} else {
+			markAction("config:"+toolID, operation.ActionFailed, "configuration apply failed")
+		}
+		return succeeded
 	}
 
-	// Install dotfiles binary and utilities to ~/.local/bin
-	configPhase("\n▶ Installing dotfiles utilities...", func() error {
-		if err := installUtilities(cfg.Utilities); err != nil {
-			return fmt.Errorf("failed to install utilities: %w", err)
+	// Install only the helper files represented by the accepted plan. The main
+	// dotfiles binary remains package-manager owned and never appears here.
+	if len(enabledHelpers(cfg.Utilities)) > 0 {
+		var helperResult utilityInstallResult
+		_ = configPhase("\n▶ Installing dotfiles utilities...", func() error {
+			helperResult = installUtilitiesTracked(cfg.Utilities)
+			if helperResult.Err != nil {
+				return fmt.Errorf("failed to install utilities: %w", helperResult.Err)
+			}
+			return nil
+		}, "  ✓ Utilities installed to ~/.local/bin")
+		helpers := enabledHelpers(cfg.Utilities)
+		authorizationOK := true
+		if len(helperResult.Evidence) > 0 {
+			if err := authorizeHelperMutationEvidence(home, plan, helperResult.Attempted, helperResult.Evidence, rollbackExpected); err != nil {
+				authorizationOK = false
+				authorizationErr := fmt.Errorf("authorize helper mutation evidence; automatic rollback is incomplete and manual recovery may be required: %w", err)
+				noteFailure(authorizationErr)
+				for _, helper := range helperResult.Attempted {
+					invalidateRollbackAction(plan, "helper:"+helper, rollbackExpected)
+				}
+			}
 		}
-		return nil
-	}, "  ✓ Utilities installed to ~/.local/bin")
+		if authorizationOK && helperResult.Failed != "" {
+			if captureErr := recordFailedActionRollbackState(home, plan, "helper:"+helperResult.Failed, helperResult.Err, rollbackExpected); captureErr != nil {
+				noteFailure(fmt.Errorf("capture helper %s failure; manual recovery may be required: %w", helperResult.Failed, captureErr))
+			}
+		}
+		succeededCount := len(helperResult.Evidence)
+		attemptedIndex := make(map[string]int, len(helperResult.Attempted))
+		for index, helper := range helperResult.Attempted {
+			attemptedIndex[helper] = index
+		}
+		for _, helper := range helpers {
+			index, attempted := attemptedIndex[helper]
+			switch {
+			case !attempted:
+				markAction("helper:"+helper, operation.ActionSkipped, "not attempted after earlier helper failure")
+			case !authorizationOK:
+				markAction("helper:"+helper, operation.ActionFailed, "helper evidence could not be authorized")
+			case helper == helperResult.Failed || index >= succeededCount:
+				markAction("helper:"+helper, operation.ActionFailed, "helper installation failed")
+			default:
+				markAction("helper:"+helper, operation.ActionSucceeded, "helper installed")
+			}
+		}
+	}
 
 	// Configure tmux with TPM plugins. The DeepDiveConfig -> TmuxConfig translation
 	// is shared with config-apply via tmuxConfigFrom; install additionally clones
 	// TPM (SetupTPM), which is an install-only side-effect.
 	tmuxCfg := tmuxConfigFrom(cfg)
-	tmuxConfigured := toolConfigPhase("tmux", "\n▶ Configuring tmux...", func() error {
-		if err := tools.SetupTPM(tmuxCfg, theme); err != nil {
-			return fmt.Errorf("failed to configure tmux: %w", err)
-		}
-		return nil
+	tmuxConfigured := toolConfigPhase("tmux", "\n▶ Configuring tmux...", func() ([]tools.MutationEvidence, error) {
+		evidence, err := tools.SetupTPMTracked(tmuxCfg, theme)
+		return evidence, wrapMutationError("failed to configure tmux", err)
 	}, "  ✓ Tmux configured with ~/.tmux.conf")
 	if tmuxConfigured {
 		if tmuxCfg.TPMEnabled {
@@ -500,29 +934,31 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 				enabledCount++
 			}
 		}
-		toolConfigPhase("claude-code", "\n▶ Configuring Claude Code MCP servers...", func() error {
+		toolConfigPhase("claude-code", "\n▶ Configuring Claude Code MCP servers...", func() ([]tools.MutationEvidence, error) {
 			claudeTool := tools.NewClaudeCodeTool()
-			if err := claudeTool.ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs); err != nil {
-				return fmt.Errorf("failed to configure Claude MCP: %w", err)
-			}
-			return nil
+			evidence, err := claudeTool.ApplyConfigWithMCPsTracked(cfg.ClaudeCodeMCPs)
+			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Claude MCP", err)
 		}, fmt.Sprintf("  ✓ Claude Code configured with %d MCP server(s)", enabledCount))
 	}
 
 	// Configure Ghostty
-	toolConfigPhase("ghostty", "\n▶ Configuring Ghostty...", func() error {
-		if err := tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("failed to configure Ghostty: %w", err)
+	toolConfigPhase("ghostty", "\n▶ Configuring Ghostty...", func() ([]tools.MutationEvidence, error) {
+		var evidence tools.MutationEvidence
+		var err error
+		if ghosttyConfigTarget != "" {
+			evidence, err = tools.WriteGhosttyConfigAtTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme)
+		} else {
+			// Compatibility-only workers created without an accepted production plan
+			// retain the historical resolver path.
+			evidence, err = tools.WriteGhosttyConfigTracked(ghosttyConfigFrom(cfg), theme)
 		}
-		return nil
+		return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Ghostty", err)
 	}, "  ✓ Ghostty configured")
 
 	// Configure Zsh
-	toolConfigPhase("zsh", "\n▶ Configuring Zsh...", func() error {
-		if err := tools.WriteZshConfig(zshConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("failed to configure Zsh: %w", err)
-		}
-		return nil
+	toolConfigPhase("zsh", "\n▶ Configuring Zsh...", func() ([]tools.MutationEvidence, error) {
+		evidence, err := tools.WriteZshConfigTracked(zshConfigFrom(cfg), theme)
+		return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Zsh", err)
 	}, "  ✓ Zsh configured with ~/.zshrc")
 
 	// Configure Neovim. The DeepDiveConfig -> NeovimConfig translation is shared
@@ -534,68 +970,54 @@ func runInstallWorkerWithRuntime(ctx context.Context, events chan installEventMs
 	if neovimCfg.ConfigPreset == "custom" {
 		neovimSuccessMsg = "  ✓ Neovim: using existing config (unchanged)"
 	}
-	toolConfigPhase("neovim", "\n▶ Configuring Neovim...", func() error {
-		if err := tools.WriteNeovimConfig(neovimCfg, theme); err != nil {
-			return fmt.Errorf("failed to configure Neovim: %w", err)
-		}
-		return nil
+	toolConfigPhase("neovim", "\n▶ Configuring Neovim...", func() ([]tools.MutationEvidence, error) {
+		evidence, err := tools.WriteNeovimConfigTracked(neovimCfg, theme)
+		return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Neovim", err)
 	}, neovimSuccessMsg)
 
 	// Configure Git
-	toolConfigPhase("git", "\n▶ Configuring Git...", func() error {
-		if err := tools.WriteGitConfig(gitConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("failed to configure Git: %w", err)
-		}
-		return nil
+	toolConfigPhase("git", "\n▶ Configuring Git...", func() ([]tools.MutationEvidence, error) {
+		evidence, err := tools.WriteGitConfigTracked(gitConfigFrom(cfg), theme)
+		return evidence, wrapMutationError("failed to configure Git", err)
 	}, "  ✓ Git configured with ~/.gitconfig")
 
 	// Configure Yazi
-	toolConfigPhase("yazi", "\n▶ Configuring Yazi...", func() error {
-		if err := tools.WriteYaziConfig(yaziConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("failed to configure Yazi: %w", err)
-		}
-		return nil
+	toolConfigPhase("yazi", "\n▶ Configuring Yazi...", func() ([]tools.MutationEvidence, error) {
+		evidence, err := tools.WriteYaziConfigTracked(yaziConfigFrom(cfg), theme)
+		return evidence, wrapMutationError("failed to configure Yazi", err)
 	}, "  ✓ Yazi configured")
 
 	// Configure FZF
-	toolConfigPhase("fzf", "\n▶ Configuring FZF...", func() error {
-		if err := tools.WriteFzfConfig(fzfConfigFrom(cfg), theme); err != nil {
-			return fmt.Errorf("failed to configure FZF: %w", err)
-		}
-		return nil
+	toolConfigPhase("fzf", "\n▶ Configuring FZF...", func() ([]tools.MutationEvidence, error) {
+		evidence, err := tools.WriteFzfConfigTracked(fzfConfigFrom(cfg), theme)
+		return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure FZF", err)
 	}, "  ✓ FZF configured")
 
 	// Configure LazyGit — only when the user selected it in the deep-dive.
 	// lazygit is in CLITools (UIGroupCLITools) and therefore has an explicit
 	// selection flag; skipping its config when deselected matches user intent.
 	if cfg.CLITools["lazygit"] {
-		toolConfigPhase("lazygit", "\n▶ Configuring LazyGit...", func() error {
-			if err := tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("failed to configure LazyGit: %w", err)
-			}
-			return nil
+		toolConfigPhase("lazygit", "\n▶ Configuring LazyGit...", func() ([]tools.MutationEvidence, error) {
+			evidence, err := tools.WriteLazyGitConfigTracked(lazygitConfigFrom(cfg), theme)
+			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure LazyGit", err)
 		}, "  ✓ LazyGit configured")
 	}
 
 	// Configure Btop — only when the user selected it in the deep-dive.
 	// btop is in CLITools (UIGroupCLITools) and has an explicit selection flag.
 	if cfg.CLITools["btop"] {
-		toolConfigPhase("btop", "\n▶ Configuring Btop...", func() error {
-			if err := tools.WriteBtopConfig(btopConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("failed to configure Btop: %w", err)
-			}
-			return nil
+		toolConfigPhase("btop", "\n▶ Configuring Btop...", func() ([]tools.MutationEvidence, error) {
+			evidence, err := tools.WriteBtopConfigTracked(btopConfigFrom(cfg), theme)
+			return evidence, wrapMutationError("failed to configure Btop", err)
 		}, "  ✓ Btop configured")
 	}
 
 	// Configure Glow — only when the user selected it in the deep-dive.
 	// glow is in CLITools (UIGroupCLITools) and has an explicit selection flag.
 	if cfg.CLITools["glow"] {
-		toolConfigPhase("glow", "\n▶ Configuring Glow...", func() error {
-			if err := tools.WriteGlowConfig(glowConfigFrom(cfg), theme); err != nil {
-				return fmt.Errorf("failed to configure Glow: %w", err)
-			}
-			return nil
+		toolConfigPhase("glow", "\n▶ Configuring Glow...", func() ([]tools.MutationEvidence, error) {
+			evidence, err := tools.WriteGlowConfigTracked(glowConfigFrom(cfg), theme)
+			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Glow", err)
 		}, "  ✓ Glow configured")
 	}
 
@@ -608,6 +1030,13 @@ type selectedToolInstallResult struct {
 	successCount int
 	installed    map[string]bool
 	failures     []error
+}
+
+func wrapMutationError(prefix string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", prefix, err)
 }
 
 // runSelectedToolInstalls is the wizard's package/custom-install phase. It is
@@ -709,42 +1138,94 @@ func aggregateFailures(failures []error) error {
 // copying the running executable here created a second, PATH-order-dependent
 // product installation that could shadow Homebrew upgrades.
 func installUtilities(utilities map[string]bool) error {
+	return installUtilitiesTracked(utilities).Err
+}
+
+type utilityInstallResult struct {
+	Evidence  []tools.MutationEvidence
+	Attempted []string
+	Failed    string
+	Err       error
+}
+
+type utilityInstaller func(home, name string, content []byte) (tools.MutationEvidence, error)
+
+func installUtilitiesTracked(utilities map[string]bool) utilityInstallResult {
+	return installUtilitiesTrackedWith(utilities, installScriptFileTracked)
+}
+
+func installUtilitiesTrackedWith(utilities map[string]bool, install utilityInstaller) utilityInstallResult {
+	var result utilityInstallResult
 	home := os.Getenv("HOME")
 	if home == "" {
 		var err error
 		home, err = os.UserHomeDir()
 		if err != nil {
-			return fmt.Errorf("cannot determine home directory: %w", err)
+			result.Err = fmt.Errorf("cannot determine home directory: %w", err)
+			return result
 		}
 	}
 
 	// Install selected utility scripts
-	for name, enabled := range utilities {
-		if !enabled {
-			continue
-		}
+	for _, name := range enabledHelpers(utilities) {
+		result.Attempted = append(result.Attempted, name)
 		script := scripts.GetScript(name)
 		if script == "" {
-			continue
+			result.Failed = name
+			result.Err = fmt.Errorf("embedded helper %s is unavailable", name)
+			return result
 		}
-		if err := installScriptFile(home, name, []byte(script)); err != nil {
-			return fmt.Errorf("cannot write %s: %w", name, err)
+		evidence, err := install(home, name, []byte(script))
+		if err != nil {
+			result.Failed = name
+			result.Err = fmt.Errorf("cannot write %s: %w", name, err)
+			return result
 		}
+		result.Evidence = append(result.Evidence, evidence)
 	}
 
-	return nil
+	return result
 }
 
 // installScriptFile writes one known helper below the trusted HOME descriptor.
 // The shared kernel refuses symlinks/non-regular files in every descendant,
 // creates missing directories 0700, commits atomically, and sets mode 0700
 // before the helper becomes visible.
-func installScriptFile(home, name string, content []byte) error {
+func installScriptFile(home, name string, content []byte) (returnErr error) {
+	_, err := installScriptFileTracked(home, name, content)
+	return err
+}
+
+func installScriptFileTracked(home, name string, content []byte) (evidence tools.MutationEvidence, returnErr error) {
 	if name == "" || name == "." || filepath.Base(name) != name {
-		return fmt.Errorf("invalid utility name %q", name)
+		return tools.MutationEvidence{}, fmt.Errorf("invalid utility name %q", name)
 	}
 	rel := filepath.ToSlash(filepath.Join(".local", "bin", name))
-	return safefile.ReplaceWithin(home, rel, content, 0o700)
+	parent := filepath.ToSlash(filepath.Dir(rel))
+	if err := safefile.EnsureDirectoryWithin(home, parent, 0o700); err != nil {
+		return tools.MutationEvidence{}, fmt.Errorf("create utility directory: %w", err)
+	}
+	release, err := safefile.AcquireLockWithin(home, rel+".dotfiles.lock", 0o600)
+	if err != nil {
+		return tools.MutationEvidence{}, fmt.Errorf("lock utility %s: %w", name, err)
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("unlock utility %s: %w", name, releaseErr))
+		}
+	}()
+	existing, revision, err := safefile.ReadWithin(home, rel)
+	if err != nil {
+		return tools.MutationEvidence{}, fmt.Errorf("inspect utility %s: %w", name, err)
+	}
+	if revision.Exists() && !bytes.Equal(existing, content) {
+		return tools.MutationEvidence{}, fmt.Errorf("refusing to replace existing unowned utility %s at ~/%s", name, rel)
+	}
+	committed, err := safefile.ReplaceWithinRevisionTracked(home, rel, revision, content, 0o700)
+	if err != nil {
+		return tools.MutationEvidence{}, err
+	}
+	return tools.MutationEvidence{Path: filepath.Join(home, filepath.FromSlash(rel)), Revision: committed}, nil
 }
 
 func installBinary(execPath, destPath string) error {
@@ -1183,14 +1664,30 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 // the user's theme / nav-style / animation preferences unpersisted with no
 // indication anything went wrong.
 func (a *App) saveInstallerConfig() error {
+	return saveInstallerPreferences(a.theme, a.navStyle, a.animationsEnabled)
+}
+
+func saveInstallerPreferences(theme, navStyle string, animationsEnabled bool) error {
+	_, err := saveInstallerPreferencesTracked(theme, navStyle, animationsEnabled)
+	return err
+}
+
+func saveInstallerPreferencesTracked(theme, navStyle string, animationsEnabled bool) (tools.MutationEvidence, error) {
 	g, err := config.LoadGlobalConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load global config: %w", err)
+		return tools.MutationEvidence{}, fmt.Errorf("failed to load global config: %w", err)
 	}
-	g.Theme = a.theme
-	g.NavStyle = a.navStyle
-	g.DisableAnimations = !a.animationsEnabled
+	g.Theme = theme
+	g.NavStyle = navStyle
+	g.DisableAnimations = !animationsEnabled
 
 	// Save synchronously since we're about to start installation
-	return config.SaveGlobalConfig(g)
+	if err := config.SaveGlobalConfig(g); err != nil {
+		return tools.MutationEvidence{}, err
+	}
+	revision, ok := config.GlobalConfigRevision(g)
+	if !ok || !revision.Exists() {
+		return tools.MutationEvidence{}, fmt.Errorf("global config save returned no tracked revision")
+	}
+	return tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision}, nil
 }

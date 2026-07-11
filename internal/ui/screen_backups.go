@@ -169,12 +169,16 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		switch key {
 		case "y", "Y":
 			if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
-				a.backupRunning = true
 				backup := a.backups[a.backupIndex]
-				if a.backupConfirmType == "restore" {
+				switch a.backupConfirmType {
+				case "restore":
+					a.backupRunning = true
 					return restoreBackupCmd(backup)
-				} else if a.backupConfirmType == "delete" {
+				case "delete":
+					a.backupRunning = true
 					return deleteBackupCmd(backup)
+				default:
+					a.backupStatus = "Unknown backup confirmation action"
 				}
 			}
 			a.backupConfirmMode = false
@@ -240,7 +244,7 @@ func (s *backupsScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the
 	// already-active tab (this screen).
 	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+		if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -248,7 +252,7 @@ func (s *backupsScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle mouse wheel scrolling for backup list
 	if m.IsWheel() && len(a.backups) > 0 {
 		delta := 0
-		switch m.Button {
+		switch m.Button { //nolint:exhaustive // Only vertical wheel actions are meaningful here.
 		case tea.MouseButtonWheelUp:
 			delta = -1
 		case tea.MouseButtonWheelDown:
@@ -341,15 +345,16 @@ func (s *backupsScreen) View(width, height int) string {
 	var statusLine string
 	if a.backupStatus != "" {
 		statusStyle := lipgloss.NewStyle().Foreground(ColorYellow)
-		if strings.Contains(a.backupStatus, "skipped") || strings.Contains(a.backupStatus, "warning") {
+		switch {
+		case strings.Contains(a.backupStatus, "skipped") || strings.Contains(a.backupStatus, "warning"):
 			// Partial/failed restore: keep the warning (yellow) style even though
 			// the message contains "Restored" (C3).
 			statusStyle = lipgloss.NewStyle().Foreground(ColorYellow)
-		} else if strings.Contains(a.backupStatus, "Restored") || strings.Contains(a.backupStatus, "Created") {
+		case strings.Contains(a.backupStatus, "Restored") || strings.Contains(a.backupStatus, "Created"):
 			statusStyle = lipgloss.NewStyle().Foreground(ColorGreen)
-		} else if strings.Contains(a.backupStatus, "failed") || strings.Contains(a.backupStatus, "Error") {
+		case strings.Contains(a.backupStatus, "failed") || strings.Contains(a.backupStatus, "Error"):
 			statusStyle = lipgloss.NewStyle().Foreground(ColorRed)
-		} else if a.backupConfirmMode {
+		case a.backupConfirmMode:
 			statusStyle = lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
 		}
 		statusLine = statusStyle.Render(a.backupStatus)
@@ -388,7 +393,7 @@ func (s *backupsScreen) View(width, height int) string {
 	innerTextW := maxInt(20, boxOuterW-4) // border(2) + paddingX(2)
 
 	// Backup list header
-	var backupLines []string
+	backupLines := make([]string, 0, len(a.backups)+2)
 	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
 	backupLines = append(backupLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-24s %-16s %6s %8s", "NAME", "DATE", "FILES", "SIZE")), innerTextW))
 	backupLines = append(backupLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-24s %-16s %6s %8s", strings.Repeat("-", 24), strings.Repeat("-", 16), strings.Repeat("-", 6), strings.Repeat("-", 8))), innerTextW))
@@ -467,11 +472,12 @@ func (s *backupsScreen) View(width, height int) string {
 
 	// Help text
 	var helpText string
-	if a.backupRunning {
+	switch {
+	case a.backupRunning:
 		helpText = "please wait..."
-	} else if a.backupConfirmMode {
+	case a.backupConfirmMode:
 		helpText = "y confirm • n cancel"
-	} else {
+	default:
 		helpText = "up/down navigate • enter restore • d delete • n new backup • r refresh • esc menu"
 	}
 	help := HelpStyle.Render(helpText)

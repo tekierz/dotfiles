@@ -1,0 +1,832 @@
+package ui
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	goruntime "runtime"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tekierz/dotfiles/internal/backup"
+	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/operation"
+	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
+	"github.com/tekierz/dotfiles/internal/scripts"
+	"github.com/tekierz/dotfiles/internal/tools"
+)
+
+func planActionByID(t *testing.T, plan *installPlan, id string) operation.Action {
+	t.Helper()
+	for _, action := range plan.actions() {
+		if action.ID == id {
+			return action
+		}
+	}
+	t.Fatalf("plan action %q not found", id)
+	return operation.Action{}
+}
+
+func newPlanTestApp(t *testing.T) (*App, string, toolInstallRuntime) {
+	t.Helper()
+	home := withTempHome(t)
+	app := NewApp(true)
+	app.manageInstalledReady = true
+	app.installCacheLoading = false
+	app.manageInstalled = map[string]bool{}
+	runtime := registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
+	runtime.backupTargets = func([]string) (autoBackupResult, error) { return autoBackupResult{}, nil }
+	return app, home, runtime
+}
+
+func TestBuildInstallPlanContainsCoreInstallsAndExactConfigActions(t *testing.T) {
+	app, _, runtime := newPlanTestApp(t)
+	now := time.Date(2026, 7, 10, 20, 0, 0, 0, time.UTC)
+	plan, err := buildInstallPlan(app, runtime, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.hash() == "" || plan.hasBlocked() {
+		t.Fatalf("fresh install plan identity/blocked = hash %q blocked %v", plan.hash(), plan.hasBlocked())
+	}
+	for _, id := range alwaysConfiguredToolIDs {
+		if action := planActionByID(t, plan, "install:"+id); action.Disposition != operation.DispositionApply {
+			t.Fatalf("core install %s disposition = %s", id, action.Disposition)
+		}
+	}
+	for _, id := range []string{"tmux", "ghostty", "zsh", "neovim", "git", "yazi", "fzf"} {
+		if action := planActionByID(t, plan, "config:"+id); action.Disposition != operation.DispositionApply {
+			t.Fatalf("core config %s disposition = %s", id, action.Disposition)
+		}
+	}
+	for _, action := range plan.actions() {
+		if action.Target == "dotfiles" || strings.HasSuffix(action.Target, "/dotfiles") {
+			t.Fatalf("plan schedules a self-copied main binary: %+v", action)
+		}
+	}
+}
+
+func TestInstallPlanHashCoversDesiredSettingsAndTheme(t *testing.T) {
+	app, _, runtime := newPlanTestApp(t)
+	now := time.Date(2026, 7, 10, 20, 5, 0, 0, time.UTC)
+	first, err := buildInstallPlan(app, runtime, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.deepDiveConfig.GhosttyOpacity--
+	second, err := buildInstallPlan(app, runtime, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.hash() == second.hash() {
+		t.Fatal("Ghostty desired-state change did not change exact plan hash")
+	}
+	app.deepDiveConfig.GhosttyOpacity++
+	app.theme = "nord"
+	third, err := buildInstallPlan(app, runtime, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.hash() == third.hash() {
+		t.Fatal("theme change did not change exact plan hash")
+	}
+}
+
+func TestInstallPlanTargetsMatchDynamicWriters(t *testing.T) {
+	app, _, runtime := newPlanTestApp(t)
+	app.deepDiveConfig.CLITools["btop"] = true
+	app.deepDiveConfig.CLITools["glow"] = true
+	app.theme = "nord"
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	btop := planActionByID(t, plan, "config:btop")
+	if !slices.Contains(btop.BackupTargets, ".config/btop/themes/nord.theme") {
+		t.Fatalf("btop plan targets do not match theme writer: %v", btop.BackupTargets)
+	}
+	glow := planActionByID(t, plan, "config:glow")
+	if goruntime.GOOS == "darwin" && !slices.Contains(glow.BackupTargets, "Library/Preferences/glow/glow.yml") {
+		t.Fatalf("macOS Glow plan target = %v", glow.BackupTargets)
+	}
+	tmux := planActionByID(t, plan, "config:tmux")
+	for _, target := range []string{".tmux/plugins/tpm"} {
+		if !slices.Contains(tmux.BackupTargets, target) {
+			t.Errorf("tmux side-effect target %q missing from %v", target, tmux.BackupTargets)
+		}
+	}
+}
+
+func TestInstallExecutionUsesExactAcceptedGhosttyTarget(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := plan.ghosttyConfigTarget
+	if accepted == "" {
+		t.Fatal("plan did not retain accepted Ghostty target")
+	}
+	// A later-created legacy source would win a fresh resolver call. Execution
+	// must still use the exact destination reviewed in the accepted plan.
+	later := filepath.Join(home, ".config", "ghostty", "config")
+	if later == accepted {
+		later = filepath.Join(home, "Library", "Application Support", "com.mitchellh.ghostty", "config")
+	}
+	if err := os.MkdirAll(filepath.Dir(later), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte("font-size = 31\n# arrived after preview\n")
+	if err := os.WriteFile(later, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan.configTools = []string{"ghostty"}
+	plan.selectedTools = nil
+	installed := map[string]bool{"ghostty": true}
+	runtime = registryRuntime(pkg.PlatformMacOS, installed)
+	events := make(chan installEventMsg, 64)
+	runInstallWorkerFromPlanWithRuntime(context.Background(), events, plan, runtime, false)
+	for range events {
+	}
+	got, err := os.ReadFile(accepted)
+	if err != nil || !strings.Contains(string(got), "dotfiles ghostty (managed)") {
+		t.Fatalf("accepted target was not written: %q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(later); err != nil || !slices.Equal(got, original) {
+		t.Fatalf("later source changed instead of accepted target: %q err=%v", got, err)
+	}
+}
+
+func TestAcceptedGhosttyTargetIsBoundToHashedPlanAction(t *testing.T) {
+	app, _, runtime := newPlanTestApp(t)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plan.acceptedGhosttyConfigTarget(); err != nil {
+		t.Fatalf("valid accepted target was rejected: %v", err)
+	}
+	plan.ghosttyConfigTarget += ".redirected"
+	if _, err := plan.acceptedGhosttyConfigTarget(); err == nil {
+		t.Fatal("execution target mutation outside hashed action was accepted")
+	}
+}
+
+func TestBuildInstallPlanBlocksExistingUnmanagedWholeFile(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	path := filepath.Join(home, ".tmux.conf")
+	if err := os.WriteFile(path, []byte("# user's tmux config\nset -g mouse off\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := planActionByID(t, plan, "config:tmux")
+	if action.Disposition != operation.DispositionBlocked || !strings.Contains(action.Reason, "not marked") {
+		t.Fatalf("unmanaged tmux action = %+v", action)
+	}
+	if !plan.hasBlocked() {
+		t.Fatal("blocked whole-file ownership did not block plan apply")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != "# user's tmux config\nset -g mouse off\n" {
+		t.Fatalf("planning mutated native config: %q err=%v", content, err)
+	}
+}
+
+func TestBuildInstallPlanBacksUpExistingManagedWholeFile(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	path := filepath.Join(home, ".tmux.conf")
+	if err := os.WriteFile(path, []byte("# Generated by dotfiles TUI\nset -g mouse on\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := planActionByID(t, plan, "config:tmux")
+	if action.Disposition != operation.DispositionApply || !action.Observation.Exists || !slices.Contains(action.BackupTargets, ".tmux.conf") {
+		t.Fatalf("managed tmux action = %+v", action)
+	}
+	found := false
+	for _, target := range plan.backupTargets() {
+		if target == ".tmux.conf" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("plan backup scope omits managed tmux config: %v", plan.backupTargets())
+	}
+}
+
+func TestBuildInstallPlanAcceptsExactLegacyYaziThemeMigration(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	path := filepath.Join(home, ".config", "yazi", "theme.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# Theme: dracula (generated by dotfiles)\n[mgr]\ncwd = {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action := planActionByID(t, plan, "config:yazi"); action.Disposition != operation.DispositionApply {
+		t.Fatalf("exact legacy Yazi migration was blocked: %+v", action)
+	}
+}
+
+func TestBuildInstallPlanBlocksUnownedOrphanGitManagedDestination(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	path := filepath.Join(home, filepath.FromSlash(gitManagedConfigRelForPlan))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[user]\n\tname = User Owned\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action := planActionByID(t, plan, "config:git"); action.Disposition != operation.DispositionBlocked {
+		t.Fatalf("unowned orphan Git managed destination was accepted: %+v", action)
+	}
+}
+
+func TestInstallPlanRevalidationRejectsPostPreviewTargetCreation(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".tmux.conf"), []byte("user arrived after preview\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := revalidateInstallPlan(plan); err == nil || !strings.Contains(err.Error(), "changed after preview") {
+		t.Fatalf("revalidation error = %v, want post-preview change refusal", err)
+	}
+}
+
+func TestBuildInstallPlanBlocksHelperCollisionButAcceptsExactOwnedBytes(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	app.deepDiveConfig.Utilities["hk"] = true
+	path := filepath.Join(home, ".local", "bin", "hk")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho user-owned\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action := planActionByID(t, plan, "helper:hk"); action.Disposition != operation.DispositionBlocked {
+		t.Fatalf("colliding helper action = %+v", action)
+	}
+
+	if err := os.WriteFile(path, []byte(scripts.HKScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action := planActionByID(t, plan, "helper:hk"); action.Disposition != operation.DispositionApply {
+		t.Fatalf("exact owned helper action = %+v", action)
+	}
+}
+
+func TestFileTreeRefusesBlockedPlan(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.manageInstalledReady = true
+	ctx.app.installCacheLoading = false
+	path := filepath.Join(os.Getenv("HOME"), ".tmux.conf")
+	if err := os.WriteFile(path, []byte("user config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	screen := NewFileTreeScreen(ctx)
+	_ = screen.Init()
+	if ctx.app.pendingInstallPlan == nil || !ctx.app.pendingInstallPlan.hasBlocked() {
+		t.Fatal("fixture did not create blocked plan")
+	}
+	_, cmd := screen.Update(keyMsg("enter"))
+	if cmd != nil {
+		t.Fatal("blocked plan navigated to execution")
+	}
+	if !strings.Contains(screen.View(ctx.Width, ctx.Height), "Resolve blocked ownership") {
+		t.Fatal("blocked plan did not render resolution guidance")
+	}
+}
+
+func TestFileTreeViewportCanReachFinalReviewedLine(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.manageInstalledReady = true
+	ctx.app.installCacheLoading = false
+	screen := NewFileTreeScreen(ctx)
+	_ = screen.Init()
+	if ctx.app.pendingInstallPlan == nil || ctx.app.pendingInstallPlan.hasBlocked() {
+		t.Fatalf("fixture plan unavailable or blocked: plan=%v err=%v", ctx.app.pendingInstallPlan, ctx.app.installPlanError)
+	}
+	const shortHeight = 18
+	initial := screen.View(ctx.Width, shortHeight)
+	if strings.Contains(initial, "Verified rollback scope") {
+		t.Fatal("fixture is not long enough to exercise viewport scrolling")
+	}
+	_, _ = screen.Update(keyMsg("end"))
+	lastPage := screen.View(ctx.Width, shortHeight)
+	if !strings.Contains(lastPage, "Verified rollback scope") {
+		t.Fatalf("final reviewed line is unreachable at viewport end:\n%s", lastPage)
+	}
+}
+
+func TestInstallPlanWorkerJournalsExactReviewedHash(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	global, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	global.AutoBackup = false
+	if err := config.SaveGlobalConfig(global); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.GetRegistry().All() {
+		app.manageInstalled[tool.ID()] = true
+	}
+	runtime = registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
+	runtime.backupTargets = func(targets []string) (autoBackupResult, error) {
+		if len(targets) == 0 {
+			t.Fatal("fresh plan omitted newly-created paths from rollback scope")
+		}
+		return autoBackupResult{enabled: true, backupDir: filepath.Join(home, ".config", "dotfiles", "backups", "test-plan")}, nil
+	}
+	app.deepDiveConfig.NeovimConfig = "custom"
+	app.deepDiveConfig.TmuxTPMEnabled = false
+	for id := range app.deepDiveConfig.CLITools {
+		app.deepDiveConfig.CLITools[id] = false
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.hasBlocked() {
+		t.Fatalf("fresh plan unexpectedly blocked: %+v", plan.actions())
+	}
+
+	events := make(chan installEventMsg, 128)
+	go runInstallPlanWorker(context.Background(), events, plan, runtime)
+	var terminal installEventMsg
+	for event := range events {
+		if event.done {
+			terminal = event
+		}
+	}
+	if terminal.err != nil {
+		t.Fatalf("plan worker failed: %v\n%s", terminal.err, terminal.context)
+	}
+
+	operationsDir := filepath.Join(home, ".local", "state", "dotfiles", "operations")
+	entries, err := os.ReadDir(operationsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recordFiles []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			recordFiles = append(recordFiles, entry.Name())
+		}
+	}
+	if len(recordFiles) != 1 {
+		t.Fatalf("operation journal files = %v, want one", recordFiles)
+	}
+	data, err := os.ReadFile(filepath.Join(operationsDir, recordFiles[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record operation.Record
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.PlanHash != plan.hash() || record.Status != operation.StatusSucceeded || record.FinishedAt == nil || record.Backup == "" {
+		t.Fatalf("terminal journal does not identify reviewed plan: %+v", record)
+	}
+	for _, result := range record.Actions {
+		if result.Status == operation.ActionPending {
+			t.Fatalf("terminal journal left pending action: %+v", result)
+		}
+	}
+}
+
+func TestInstallPlanFailureAutomaticallyRestoresGlobalState(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	global, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	global.Theme = "nord"
+	global.NavStyle = "vim"
+	global.AutoBackup = false
+	if err := config.SaveGlobalConfig(global); err != nil {
+		t.Fatal(err)
+	}
+	globalPath := filepath.Join(config.ConfigDir(), "global.json")
+	wantBytes, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInfo, err := os.Stat(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app.theme = "catppuccin-mocha"
+	app.navStyle = "emacs"
+	app.deepDiveConfig.NeovimConfig = "custom"
+	app.deepDiveConfig.TmuxTPMEnabled = false
+	for id := range app.deepDiveConfig.CLITools {
+		app.deepDiveConfig.CLITools[id] = false
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.hasBlocked() {
+		t.Fatalf("fresh rollback plan unexpectedly blocked: %+v", plan.actions())
+	}
+	runtime.backupTargets = backupPlanTargets
+	events := make(chan installEventMsg, 256)
+	go runInstallPlanWorker(context.Background(), events, plan, runtime)
+	var terminal installEventMsg
+	for event := range events {
+		if event.done {
+			terminal = event
+		}
+	}
+	if terminal.err == nil {
+		t.Fatal("fixture expected package postcondition failures")
+	}
+	gotBytes, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotInfo, err := os.Stat(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotBytes) != string(wantBytes) || gotInfo.Mode().Perm() != wantInfo.Mode().Perm() {
+		t.Fatalf("automatic rollback changed global state: bytes=%q mode=%04o; want bytes=%q mode=%04o", gotBytes, gotInfo.Mode().Perm(), wantBytes, wantInfo.Mode().Perm())
+	}
+	if terminal.operationID == "" {
+		t.Fatal("failed operation did not retain a journal operation ID")
+	}
+	entries, err := os.ReadDir(filepath.Join(home, ".local", "state", "dotfiles", "operations"))
+	journalCount := 0
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			journalCount++
+		}
+	}
+	if err != nil || journalCount != 1 {
+		t.Fatalf("failed operation journal entries=%v err=%v", entries, err)
+	}
+	journal, err := operation.DefaultJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := journal.Read(terminal.operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != operation.StatusFailed || record.Rollback == nil || record.Rollback.Status != operation.RollbackSucceeded || record.Backup == "" {
+		t.Fatalf("failed operation did not journal successful rollback: %+v", record)
+	}
+}
+
+func TestSecondRevalidationRefusalDoesNotRollbackExternalEdit(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	app.deepDiveConfig.NeovimConfig = "custom"
+	app.deepDiveConfig.TmuxTPMEnabled = false
+	for id := range app.deepDiveConfig.CLITools {
+		app.deepDiveConfig.CLITools[id] = false
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil || plan.hasBlocked() {
+		t.Fatalf("plan = %v blocked=%v err=%v", plan, plan != nil && plan.hasBlocked(), err)
+	}
+	tmuxPath := filepath.Join(home, ".tmux.conf")
+	external := []byte("# external edit during backup\n")
+	runtime.backupTargets = func(targets []string) (autoBackupResult, error) {
+		result, err := backupPlanTargets(targets)
+		if err != nil {
+			return result, err
+		}
+		if err := os.WriteFile(tmuxPath, external, 0o600); err != nil {
+			return result, err
+		}
+		return result, nil
+	}
+	events := make(chan installEventMsg, 128)
+	go runInstallPlanWorker(context.Background(), events, plan, runtime)
+	var terminal installEventMsg
+	for event := range events {
+		if event.done {
+			terminal = event
+		}
+	}
+	if terminal.err == nil || !strings.Contains(terminal.err.Error(), "changed while creating rollback point") {
+		t.Fatalf("terminal error = %v, want second revalidation refusal", terminal.err)
+	}
+	if got, err := os.ReadFile(tmuxPath); err != nil || !slices.Equal(got, external) {
+		t.Fatalf("pre-mutation refusal rolled back external edit: %q err=%v", got, err)
+	}
+	journal, err := operation.DefaultJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := journal.Read(terminal.operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Rollback != nil || record.Status != operation.StatusFailed {
+		t.Fatalf("pre-mutation refusal journaled a rollback that did not run: %+v", record)
+	}
+}
+
+func TestAutomaticRollbackPreservesExternalEditAfterMutation(t *testing.T) {
+	app, _, runtime := newPlanTestApp(t)
+	app.deepDiveConfig.NeovimConfig = "custom"
+	app.deepDiveConfig.TmuxTPMEnabled = false
+	for id := range app.deepDiveConfig.CLITools {
+		app.deepDiveConfig.CLITools[id] = false
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil || plan.hasBlocked() {
+		t.Fatalf("plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+	}
+	runtime.backupTargets = backupPlanTargets
+	globalPath := filepath.Join(config.ConfigDir(), "global.json")
+	external := []byte("{\"schema_version\":1,\"theme\":\"nord\",\"nav_style\":\"vim\",\"external_edit\":true}\n")
+	edited := false
+	var injectionErr error
+	runtime.isToolInstalled = func(tools.Tool) bool {
+		if !edited {
+			edited = true
+			injectionErr = os.WriteFile(globalPath, external, 0o600)
+		}
+		// Force a package postcondition failure after global state was mutated and
+		// its exact post-write revision captured.
+		return false
+	}
+	events := make(chan installEventMsg, 256)
+	go runInstallPlanWorker(context.Background(), events, plan, runtime)
+	var terminal installEventMsg
+	for event := range events {
+		if event.done {
+			terminal = event
+		}
+	}
+	if injectionErr != nil {
+		t.Fatalf("inject external edit: %v", injectionErr)
+	}
+	if terminal.err == nil || !strings.Contains(terminal.err.Error(), "automatic rollback incomplete") {
+		t.Fatalf("terminal error = %v, want incomplete conditional rollback", terminal.err)
+	}
+	if got, err := os.ReadFile(globalPath); err != nil || !slices.Equal(got, external) {
+		t.Fatalf("automatic rollback overwrote external edit: %q err=%v", got, err)
+	}
+	journal, err := operation.DefaultJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := journal.Read(terminal.operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Rollback == nil || record.Rollback.Status != operation.RollbackIncomplete || record.Rollback.Skipped == 0 {
+		t.Fatalf("conditional rollback result was not journaled honestly: %+v", record)
+	}
+}
+
+func TestFailedWriterInvalidatesRollbackAuthorityForItsExternalCollision(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	for _, tool := range tools.GetRegistry().All() {
+		app.manageInstalled[tool.ID()] = true
+	}
+	app.deepDiveConfig.NeovimConfig = "custom"
+	app.deepDiveConfig.TmuxTPMEnabled = false
+	for id := range app.deepDiveConfig.CLITools {
+		app.deepDiveConfig.CLITools[id] = false
+	}
+	runtime = registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil || plan.hasBlocked() {
+		t.Fatalf("plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+	}
+	runtime.backupTargets = backupPlanTargets
+	ghosttyTarget := plan.ghosttyConfigTarget
+	victim := filepath.Join(home, "external-ghostty-config")
+	external := []byte("font-size = 31\n# external collision\n")
+	if err := os.WriteFile(victim, external, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	injected := false
+	runtime.isToolInstalled = func(tools.Tool) bool {
+		if !injected {
+			injected = true
+			if err := os.MkdirAll(filepath.Dir(ghosttyTarget), 0o700); err != nil {
+				t.Errorf("create Ghostty parent: %v", err)
+				return true
+			}
+			if err := os.Symlink(victim, ghosttyTarget); err != nil {
+				t.Errorf("inject Ghostty collision: %v", err)
+			}
+		}
+		return true
+	}
+	events := make(chan installEventMsg, 256)
+	go runInstallPlanWorker(context.Background(), events, plan, runtime)
+	var terminal installEventMsg
+	for event := range events {
+		if event.done {
+			terminal = event
+		}
+	}
+	if terminal.err == nil || !strings.Contains(terminal.err.Error(), "automatic rollback incomplete") {
+		t.Fatalf("terminal error = %v, want failed writer and incomplete rollback", terminal.err)
+	}
+	if got, err := os.ReadFile(victim); err != nil || !slices.Equal(got, external) {
+		t.Fatalf("rollback overwrote external collision victim: %q err=%v", got, err)
+	}
+	if info, err := os.Lstat(ghosttyTarget); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("rollback removed external collision link: mode=%v err=%v", info, err)
+	}
+	journal, err := operation.DefaultJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := journal.Read(terminal.operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Rollback == nil || record.Rollback.Status != operation.RollbackIncomplete {
+		t.Fatalf("failed-writer rollback was not fail-closed: %+v", record)
+	}
+}
+
+func TestPartialWriterEvidenceCannotAuthorizeEditBeforeWorkerHandling(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := ".config/yazi/yazi.toml"
+	path := filepath.Join(home, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The writer's committed evidence describes different desired bytes; this
+	// file models an external edit after that commit but before worker handling.
+	if err := os.WriteFile(path, []byte("# external edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	partial := &tools.PartialMutationError{
+		Err:      errors.New("later target failed"),
+		Evidence: []tools.MutationEvidence{{Path: path}},
+	}
+	expected := make(map[string]backup.ExpectedState)
+	if err := recordFailedActionRollbackState(home, plan, "config:yazi", partial, expected); err == nil || !strings.Contains(err.Error(), "manual recovery required") {
+		t.Fatalf("untracked partial evidence error = %v, want manual recovery requirement", err)
+	}
+	state := expected[rel]
+	if !state.Attempted || state.Captured {
+		t.Fatalf("external edit gained rollback authority: %+v", state)
+	}
+}
+
+func TestMutationEvidenceSetsRejectOutOfScopePathsAtomicallyInBothOrders(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeEvidence := func(rel, content string) tools.MutationEvidence {
+		t.Helper()
+		path := filepath.Join(home, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, revision, err := safefile.ReadWithin(home, rel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tools.MutationEvidence{Path: path, Revision: revision}
+	}
+	validRel := ".config/yazi/yazi.toml"
+	valid := makeEvidence(validRel, "# generated\n")
+	tests := []struct {
+		name    string
+		invalid tools.MutationEvidence
+	}{
+		{name: "fully unplanned", invalid: makeEvidence(".outside-plan", "outside\n")},
+		{name: "different planned action", invalid: makeEvidence(".zshrc", "planned elsewhere\n")},
+	}
+	for _, test := range tests {
+		for _, invalidFirst := range []bool{false, true} {
+			name := test.name + "/invalid-last"
+			evidence := []tools.MutationEvidence{valid, test.invalid}
+			if invalidFirst {
+				name = test.name + "/invalid-first"
+				evidence = []tools.MutationEvidence{test.invalid, valid}
+			}
+			t.Run(name, func(t *testing.T) {
+				expected := make(map[string]backup.ExpectedState)
+				if err := authorizeMutationEvidenceSet(home, plan, "config:yazi", evidence, expected); err == nil {
+					t.Fatal("mixed-scope evidence set was authorized")
+				}
+				if len(expected) != 0 {
+					t.Fatalf("evidence authorization partially mutated rollback state: %+v", expected)
+				}
+
+				partialExpected := make(map[string]backup.ExpectedState)
+				partial := &tools.PartialMutationError{Err: errors.New("later failure"), Evidence: evidence}
+				if err := recordFailedActionRollbackState(home, plan, "config:yazi", partial, partialExpected); err == nil || !strings.Contains(err.Error(), "manual recovery required") {
+					t.Fatalf("mixed-scope partial evidence error = %v, want manual recovery requirement", err)
+				}
+				for _, rel := range []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml", ".config/yazi/theme.toml"} {
+					state := partialExpected[rel]
+					if !state.Attempted || state.Captured {
+						t.Fatalf("%s partial evidence gained rollback authority: %+v", rel, state)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestInstallUtilitiesTrackedStopsAtExactFailureBoundary(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	utilities := map[string]bool{"caff": true, "hk": true, "sshh": true}
+	app.deepDiveConfig.Utilities = utilities
+	var calls []string
+	result := installUtilitiesTrackedWith(utilities, func(_ string, name string, _ []byte) (tools.MutationEvidence, error) {
+		calls = append(calls, name)
+		if name == "hk" {
+			return tools.MutationEvidence{}, errors.New("injected helper failure")
+		}
+		rel := filepath.ToSlash(filepath.Join(".local", "bin", name))
+		path := filepath.Join(home, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		_, revision, err := safefile.ReadWithin(home, rel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tools.MutationEvidence{Path: path, Revision: revision}, nil
+	})
+	if !slices.Equal(calls, []string{"caff", "hk"}) || !slices.Equal(result.Attempted, []string{"caff", "hk"}) {
+		t.Fatalf("helper boundary calls=%v attempted=%v", calls, result.Attempted)
+	}
+	if result.Failed != "hk" || result.Err == nil || len(result.Evidence) != 1 {
+		t.Fatalf("helper result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "bin", "sshh")); !os.IsNotExist(err) {
+		t.Fatalf("helper after failure was attempted: %v", err)
+	}
+
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := make(map[string]backup.ExpectedState)
+	if err := authorizeHelperMutationEvidence(home, plan, result.Attempted, result.Evidence, expected); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordFailedActionRollbackState(home, plan, "helper:hk", result.Err, expected); err != nil {
+		t.Fatal(err)
+	}
+	if state := expected[".local/bin/caff"]; !state.Captured {
+		t.Fatalf("successful helper evidence not captured: %+v", state)
+	}
+	if state := expected[".local/bin/hk"]; !state.Attempted || state.Captured {
+		t.Fatalf("failed helper state = %+v", state)
+	}
+	if _, exists := expected[".local/bin/sshh"]; exists {
+		t.Fatalf("unattempted helper forced rollback state: %+v", expected[".local/bin/sshh"])
+	}
+}

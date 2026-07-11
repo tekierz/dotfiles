@@ -20,6 +20,10 @@ func RestoreDirectoryWithinSnapshot(_ string, _ string, _, _ *DirectorySnapshot)
 	return ErrUnsupported
 }
 
+func RestoreDirectoryWithinSnapshotTracked(_ string, _ string, _, _ *DirectorySnapshot) (*DirectorySnapshot, error) {
+	return nil, ErrUnsupported
+}
+
 // RemoveDirectoryWithin is unavailable on platforms without the required
 // descriptor-relative recursive removal and durability operations.
 func RemoveDirectoryWithin(_ string, _ string) error {
@@ -42,8 +46,16 @@ func ReplaceWithin(_ string, _ string, _ []byte, _ fs.FileMode) error {
 	return ErrUnsupported
 }
 
+func ReplaceWithinTracked(_ string, _ string, _ []byte, _ fs.FileMode) (Revision, error) {
+	return Revision{}, ErrUnsupported
+}
+
 func ReplaceWithinRevision(_ string, _ string, _ Revision, _ []byte, _ fs.FileMode) error {
 	return ErrUnsupported
+}
+
+func ReplaceWithinRevisionTracked(_ string, _ string, _ Revision, _ []byte, _ fs.FileMode) (Revision, error) {
+	return Revision{}, ErrUnsupported
 }
 
 // ReadWithin is unavailable on platforms without descriptor-relative open and

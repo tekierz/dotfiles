@@ -2,6 +2,7 @@ package tools
 
 import (
 	"reflect"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -94,13 +95,13 @@ var expectedTools = map[string]toolSpec{
 	"ghostty": {
 		name: "Ghostty", description: "GPU-accelerated terminal emulator", category: CategoryTerminal, icon: "\U000f018d",
 		uiGroup: UIGroupNone, configScreen: 9, isHeavy: false, defaultEnabled: true, platformFilter: "",
-		hasConfig: true, configPaths: 1,
+		hasConfig: true, configPaths: ghosttyExpectedConfigPathCount(),
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"ghostty"}, pkg.PlatformMacOS: {"ghostty"}},
 	},
 	"git": {
 		name: "Git", description: "Distributed version control system", category: CategoryGit, icon: "",
 		uiGroup: UIGroupNone, configScreen: 13, isHeavy: false, defaultEnabled: true, platformFilter: "",
-		hasConfig: true, configPaths: 1,
+		hasConfig: true, configPaths: 2,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"git"}, pkg.PlatformDebian: {"git"}, pkg.PlatformMacOS: {"git"}},
 	},
 	"glow": {
@@ -211,6 +212,13 @@ var expectedTools = map[string]toolSpec{
 		hasConfig: true, configPaths: 2,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "zsh-theme-powerlevel10k"}, pkg.PlatformDebian: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting"}, pkg.PlatformMacOS: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "powerlevel10k"}},
 	},
+}
+
+func ghosttyExpectedConfigPathCount() int {
+	if runtime.GOOS == "darwin" {
+		return 4
+	}
+	return 2
 }
 
 // TestRegistryToolMetadataSnapshot is a characterization test that asserts the

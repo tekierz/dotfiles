@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/theme"
 )
 
@@ -305,99 +307,128 @@ func neovimColorschemeForTheme(themeName string) string {
 
 // WriteNeovimConfig writes the neovim configuration to disk
 func WriteNeovimConfig(cfg NeovimConfig, theme string) error {
+	_, err := WriteNeovimConfigTracked(cfg, theme)
+	return err
+}
+
+func WriteNeovimConfigTracked(cfg NeovimConfig, theme string) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	nvimDir := filepath.Join(home, ".config", "nvim")
 
-	// Handle preset configurations.  Every case here must correspond to an entry
-	// in ValidNeovimPresets; adding a new preset requires updating both.
+	// Handle preset configurations. Every install-time mutation must return
+	// evidence captured by the directory commit itself; a later path snapshot
+	// could accidentally authorize rollback over a superseding writer.
 	switch cfg.ConfigPreset {
 	case "kickstart", "lazyvim", "nvchad":
-		return setupNeovimPreset(cfg, theme, nvimDir)
+		installed, err := setupNeovimPresetTracked(cfg, theme, nvimDir)
+		if err != nil {
+			var committed []MutationEvidence
+			if installed != nil {
+				committed = append(committed, MutationEvidence{Path: nvimDir, Directory: installed})
+			}
+			return MutationEvidence{}, partialMutationError(err, committed)
+		}
+		return MutationEvidence{Path: nvimDir, Directory: installed}, nil
 	case "custom":
 		// "custom" means "leave the user's existing config alone".  Do not write
 		// anything — the user manages their own ~/.config/nvim.
-		return nil
+		return MutationEvidence{}, nil
 	default:
-		// Unknown preset: fall back to a minimal standalone config rather than
-		// silently succeeding.  This branch should not be reachable from the UI
-		// because neovimAdjust only sets values from ValidNeovimPresets.
-		return writeMinimalNeovimConfig(cfg, theme, nvimDir)
+		return MutationEvidence{}, fmt.Errorf("refusing unknown Neovim preset %q", cfg.ConfigPreset)
 	}
 }
 
 // setupNeovimPreset clones a preset config and adds user customizations
 func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
+	_, err := setupNeovimPresetTracked(cfg, theme, nvimDir)
+	return err
+}
+
+func setupNeovimPresetTracked(cfg NeovimConfig, theme, nvimDir string) (result *safefile.DirectorySnapshot, returnErr error) {
 	repoURL, ok := neovimConfigRepos[cfg.ConfigPreset]
 	if !ok {
-		return writeMinimalNeovimConfig(cfg, theme, nvimDir)
+		return nil, fmt.Errorf("refusing unknown Neovim preset %q", cfg.ConfigPreset)
 	}
 
-	// Check if config already exists
-	initFile := filepath.Join(nvimDir, "init.lua")
-	if _, err := os.Stat(initFile); err == nil {
-		// Config exists, just update user preferences
-		return writeNeovimUserPrefs(cfg, theme, nvimDir)
-	}
-
-	parentDir := filepath.Dir(nvimDir)
-	if err := os.MkdirAll(parentDir, 0700); err != nil {
-		return fmt.Errorf("failed to create neovim config parent: %w", err)
-	}
-
-	tempDir, err := os.MkdirTemp(parentDir, ".nvim-clone-*")
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to create temporary neovim config directory: %w", err)
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(tempDir) }()
+	targetRel := filepath.ToSlash(filepath.Join(".config", "nvim"))
+	if _, err := safefile.SnapshotDirectoryWithin(home, targetRel); err == nil {
+		return nil, fmt.Errorf("refusing to install Neovim preset over existing directory %s", nvimDir)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect Neovim preset target: %w", err)
+	}
+
+	// Clone under the trusted home root, then copy the validated snapshot into
+	// place with an absence precondition. This keeps network/git work away from
+	// the live namespace and refuses a target created after planning.
+	tempDir, err := os.MkdirTemp(home, ".nvim-clone-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary neovim config directory: %w", err)
+	}
+	tempRel := filepath.Base(tempDir)
+	defer func() {
+		if cleanupErr := safefile.RemoveDirectoryWithin(home, tempRel); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("clean Neovim clone staging directory: %w", cleanupErr))
+		}
+	}()
 
 	// Clone the preset into a temp directory first.  The user's existing config
 	// must not be moved unless the network/git operation has fully succeeded.
-	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	// #nosec G204 -- repoURL is selected from the immutable neovimConfigRepos allowlist.
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", repoURL, tempDir)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to clone %s config: %w", cfg.ConfigPreset, err)
+		return nil, fmt.Errorf("failed to clone %s config: %w", cfg.ConfigPreset, err)
 	}
 
-	// Remove .git directory to make it user-owned
-	gitDir := filepath.Join(tempDir, ".git")
-	_ = os.RemoveAll(gitDir)
-
-	var backupDir string
-	if _, err := os.Stat(nvimDir); err == nil {
-		backupDir = timestampedNeovimBackupDir(nvimDir)
-		if err := os.Rename(nvimDir, backupDir); err != nil {
-			return fmt.Errorf("failed to backup existing neovim config: %w", err)
-		}
+	// Remove clone metadata through the same descriptor-anchored directory API
+	// used by rollback, then install only the captured user-owned tree.
+	if err := safefile.RemoveDirectoryWithin(home, filepath.ToSlash(filepath.Join(tempRel, ".git"))); err != nil {
+		return nil, fmt.Errorf("remove Neovim preset git metadata: %w", err)
 	}
-
-	if err := os.Rename(tempDir, nvimDir); err != nil {
-		if backupDir != "" {
-			if rollbackErr := os.Rename(backupDir, nvimDir); rollbackErr != nil {
-				return fmt.Errorf("failed to install neovim config: %w; also failed to restore backup: %v", err, rollbackErr)
-			}
-		}
-		return fmt.Errorf("failed to install neovim config: %w", err)
+	if err := writeNeovimStagedPrefs(home, tempRel, cfg, theme); err != nil {
+		return nil, fmt.Errorf("apply preferences to staged Neovim preset: %w", err)
 	}
-
-	// Write user preferences
-	return writeNeovimUserPrefs(cfg, theme, nvimDir)
+	presetSnapshot, err := safefile.SnapshotDirectoryWithin(home, tempRel)
+	if err != nil {
+		return nil, fmt.Errorf("capture staged Neovim preset: %w", err)
+	}
+	installed, err := safefile.RestoreDirectoryWithinSnapshotTracked(home, targetRel, presetSnapshot, nil)
+	if err != nil {
+		return nil, fmt.Errorf("install Neovim preset: %w", err)
+	}
+	return installed, nil
 }
 
-func timestampedNeovimBackupDir(nvimDir string) string {
-	timestamp := time.Now().Format("20060102_150405.000000000")
-	backupDir := nvimDir + ".backup." + timestamp
-	if _, err := os.Stat(backupDir); err != nil {
-		return backupDir
+func writeNeovimStagedPrefs(home, stagingRel string, cfg NeovimConfig, theme string) error {
+	initRel := filepath.ToSlash(filepath.Join(stagingRel, "init.lua"))
+	initContent, initRevision, err := safefile.ReadWithin(home, initRel)
+	if err != nil {
+		return fmt.Errorf("read staged init.lua: %w", err)
 	}
-	for i := 1; ; i++ {
-		candidate := fmt.Sprintf("%s.%d", backupDir, i)
-		if _, err := os.Stat(candidate); err != nil {
-			return candidate
+	if !initRevision.Exists() {
+		return errors.New("staged Neovim preset has no init.lua")
+	}
+	requireLine := "pcall(require, \"custom.options\")"
+	if !strings.Contains(string(initContent), requireLine) {
+		updated := string(initContent) + "\n\n-- User options from dotfiles\n" + requireLine + "\n"
+		if err := safefile.ReplaceWithinRevision(home, initRel, initRevision, []byte(updated), 0600); err != nil {
+			return fmt.Errorf("update staged init.lua: %w", err)
 		}
 	}
+	prefsRel := filepath.ToSlash(filepath.Join(stagingRel, "lua", "custom", "options.lua"))
+	if err := safefile.ReplaceWithin(home, prefsRel, []byte(GenerateNeovimConfig(cfg, theme)), 0600); err != nil {
+		return fmt.Errorf("write staged options.lua: %w", err)
+	}
+	return nil
 }
 
 // WriteNeovimUserPrefs writes ONLY the user-preferences overlay

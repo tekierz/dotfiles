@@ -323,7 +323,8 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
 	// Handle new user name input.
-	if a.usersCreating {
+	switch {
+	case a.usersCreating:
 		switch key {
 		case "esc":
 			a.usersCreating = false
@@ -588,7 +589,7 @@ func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// click on the already-active tab (this screen).
 	if m.Y == 0 {
 		if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-			if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+			if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 				return s.navigateTab(screen)
 			}
 		}
@@ -724,7 +725,8 @@ func (a *App) renderUsersListPane(width, height int) string {
 		Width(width).
 		Padding(0, 1)
 
-	if a.usersCreating {
+	switch {
+	case a.usersCreating:
 		b.WriteString(headerStyle.Render("New User: " + a.usersNewName + "█"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().
@@ -732,7 +734,7 @@ func (a *App) renderUsersListPane(width, height int) string {
 			Padding(0, 1).
 			Render("Enter name, Esc to cancel"))
 		b.WriteString("\n\n")
-	} else if a.usersDeleting && a.usersIndex < len(a.usersItems) {
+	case a.usersDeleting && a.usersIndex < len(a.usersItems):
 		b.WriteString(headerStyle.Render("Delete " + a.usersItems[a.usersIndex].name + "?"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().
@@ -740,7 +742,7 @@ func (a *App) renderUsersListPane(width, height int) string {
 			Padding(0, 1).
 			Render("Press Y to confirm, N to cancel"))
 		b.WriteString("\n\n")
-	} else {
+	default:
 		b.WriteString(headerStyle.Render("User Profiles"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().

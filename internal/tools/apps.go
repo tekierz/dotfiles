@@ -2,10 +2,12 @@ package tools
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
@@ -381,10 +383,14 @@ func isFlatpakInstalled(appIDs ...string) bool {
 	}
 
 	for _, appID := range appIDs {
-		cmd := exec.Command(flatpak, "info", appID)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// #nosec G204 -- flatpak is resolved by exec.LookPath and app IDs come from the tool registry.
+		cmd := exec.CommandContext(ctx, flatpak, "info", appID)
 		if cmd.Run() == nil {
+			cancel()
 			return true
 		}
+		cancel()
 	}
 	return false
 }
@@ -450,7 +456,7 @@ func hasDesktopEntryExec(path string, names ...string) bool {
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

@@ -218,6 +218,7 @@ type RestoreResult struct {
 // zero-value permission grant: callers must set Captured after a successful
 // descriptor-anchored observation.
 type ExpectedState struct {
+	Attempted         bool
 	Captured          bool
 	Kind              TargetKind
 	Exists            bool
@@ -235,16 +236,16 @@ func CaptureExpectedState(home string, target Target) (ExpectedState, error) {
 		if err != nil {
 			return ExpectedState{}, err
 		}
-		return ExpectedState{Captured: true, Kind: TargetFile, Exists: revision.Exists(), FileRevision: revision}, nil
+		return ExpectedState{Attempted: true, Captured: true, Kind: TargetFile, Exists: revision.Exists(), FileRevision: revision}, nil
 	case TargetDirectory:
 		snapshot, err := safefile.SnapshotDirectoryWithin(home, rel)
 		if errors.Is(err, os.ErrNotExist) {
-			return ExpectedState{Captured: true, Kind: TargetDirectory}, nil
+			return ExpectedState{Attempted: true, Captured: true, Kind: TargetDirectory}, nil
 		}
 		if err != nil {
 			return ExpectedState{}, err
 		}
-		return ExpectedState{Captured: true, Kind: TargetDirectory, Exists: true, DirectorySnapshot: snapshot}, nil
+		return ExpectedState{Attempted: true, Captured: true, Kind: TargetDirectory, Exists: true, DirectorySnapshot: snapshot}, nil
 	default:
 		return ExpectedState{}, fmt.Errorf("invalid expected-state target kind %q", target.Kind)
 	}
@@ -338,7 +339,11 @@ func restoreWithExpectedOperations(backupDir, home string, operations restoreOpe
 		if conditional {
 			var ok bool
 			postState, ok = expected[relKey]
-			if !ok || !postState.Captured {
+			if !ok || !postState.Attempted {
+				// The action never ran, so rollback has no authority or work here.
+				continue
+			}
+			if !postState.Captured {
 				result.Skipped[it.key()] = "conditional rollback has no proven post-write state"
 				continue
 			}

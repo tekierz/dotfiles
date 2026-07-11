@@ -426,6 +426,7 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.GhosttyScrollbackLines = mc.GhosttyScrollbackLines
 	dd.GhosttyWindowDecorations = mc.GhosttyWindowDecorations
 	dd.GhosttyConfirmClose = mc.GhosttyConfirmClose
+	dd.GhosttyTabBindings = mc.GhosttyTabBindings
 
 	// Tmux (prefix vocabulary reconciled for the generator).
 	dd.TmuxPrefix = tmuxPrefixToGenerator(mc.TmuxPrefix)
@@ -473,6 +474,23 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.GitDiffTool = mc.GitDiffTool
 	dd.GitAutoSetupRemote = mc.GitAutoSetupRemote
 	dd.GitMergeTool = mc.GitMergeTool
+	dd.GitDeltaSideBySide = mc.GitDeltaSideBySide
+	dd.GitAliases = nil
+	if mc.GitAliasStatus {
+		dd.GitAliases = append(dd.GitAliases, "st")
+	}
+	if mc.GitAliasCheckout {
+		dd.GitAliases = append(dd.GitAliases, "co")
+	}
+	if mc.GitAliasBranch {
+		dd.GitAliases = append(dd.GitAliases, "br")
+	}
+	if mc.GitAliasCommit {
+		dd.GitAliases = append(dd.GitAliases, "ci")
+	}
+	if mc.GitAliasLogGraph {
+		dd.GitAliases = append(dd.GitAliases, "lg")
+	}
 
 	// Yazi
 	dd.YaziShowHidden = mc.YaziShowHidden

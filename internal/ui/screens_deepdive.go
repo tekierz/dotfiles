@@ -93,7 +93,7 @@ func renderFieldLabel(label string, focused bool) string {
 	return cursor + style.Render(label) + "\n"
 }
 
-func renderNumberControl(value, min, max int, focused bool) string {
+func renderNumberControl(value, max int, focused bool) string {
 	leftArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("◀")
 	rightArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("▶")
 	if focused {

@@ -250,12 +250,19 @@ func isDarkHexColor(hex string) bool {
 
 // WriteFzfConfig writes the fzf configuration to a sourceable file
 func WriteFzfConfig(cfg FzfConfig, theme string) error {
+	_, err := WriteFzfConfigTracked(cfg, theme)
+	return err
+}
+
+// WriteFzfConfigTracked writes the fzf configuration and returns the exact
+// committed revision for rollback evidence.
+func WriteFzfConfigTracked(cfg FzfConfig, theme string) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	configPath := filepath.Join(home, ".config", "fzf", "fzf.zsh")
 	content := GenerateFzfConfig(cfg, theme)
-	return writeToolConfig(configPath, []byte(content))
+	return writeToolConfigTracked(configPath, []byte(content))
 }

@@ -264,20 +264,20 @@ func TestFileTreeScreenGolden(t *testing.T) {
 	ctx.app.manageInstalledReady = true
 
 	screen := NewFileTreeScreen(ctx)
+	_ = screen.Init()
 	out := screen.View(ctx.Width, ctx.Height)
 
 	if strings.TrimSpace(out) == "" {
 		t.Fatal("fileTreeScreen.View() returned empty output")
 	}
 
-	// The "Files to be Modified" section is static and always rendered.
+	// Preview is rendered from the exact immutable plan accepted by Enter.
 	wantSubstrings := []string{
-		"Installation Summary",
-		"Files to be Modified",
-		"ghostty/",
-		"yazi/",
-		".zshrc",
-		"Start Installation",
+		"Reviewed Installation Plan",
+		"Plan:",
+		"install or verify",
+		"Exact Plan",
+		"Blocked",
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(out, want) {

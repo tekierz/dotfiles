@@ -14,9 +14,9 @@ import (
 
 var claudeConfigSaveMu sync.Mutex
 
-// claudeConfigAfterBackupHook is package-private test instrumentation for a
-// non-cooperating writer that changes ~/.claude.json after the backup commits.
-var claudeConfigAfterBackupHook func(path string) error
+// claudeConfigBeforeCommitHook is package-private test instrumentation for a
+// non-cooperating writer that replaces ~/.claude.json after the merge read.
+var claudeConfigBeforeCommitHook func(path string) error
 
 // ClaudeConfig represents the subset of Claude Code configuration this tool
 // owns: the user-scope MCP server map. It deliberately models ONLY mcpServers
@@ -129,28 +129,33 @@ func LoadClaudeConfig() (*ClaudeConfig, error) {
 }
 
 // SaveClaudeConfig writes the MCP server map to ~/.claude.json using a
-// read-modify-write that preserves all other keys in the file. The existing
-// file is backed up to ~/.claude.json.bak before writing, and the write is
-// atomic (temp file + rename) so an interrupted save cannot truncate the file.
+// read-modify-write that preserves all other keys in the file. The replacement
+// is atomic and revision-bound. The caller's reviewed backup/rollback workflow
+// owns recovery; this merge never overwrites an unowned ~/.claude.json.bak.
 func SaveClaudeConfig(cfg *ClaudeConfig) (returnErr error) {
+	_, err := SaveClaudeConfigTracked(cfg)
+	return err
+}
+
+func SaveClaudeConfigTracked(cfg *ClaudeConfig) (committedRevision safefile.Revision, returnErr error) {
 	if cfg == nil {
-		return errors.New("claude config is nil")
+		return safefile.Revision{}, errors.New("claude config is nil")
 	}
 	claudeConfigSaveMu.Lock()
 	defer claudeConfigSaveMu.Unlock()
 
 	path, err := claudeConfigPath()
 	if err != nil {
-		return err
+		return safefile.Revision{}, err
 	}
 	root, rel, err := anchoredFilePath(path)
 	if err != nil {
-		return fmt.Errorf("resolve Claude config path: %w", err)
+		return safefile.Revision{}, fmt.Errorf("resolve Claude config path: %w", err)
 	}
 	lockRel := ".dotfiles-claude-config.lock"
 	release, err := safefile.AcquireLockWithin(root, lockRel, 0600)
 	if err != nil {
-		return fmt.Errorf("lock Claude config: %w", err)
+		return safefile.Revision{}, fmt.Errorf("lock Claude config: %w", err)
 	}
 	anyCommit := false
 	defer func() {
@@ -169,29 +174,15 @@ func SaveClaudeConfig(cfg *ClaudeConfig) (returnErr error) {
 	raw := make(map[string]json.RawMessage)
 	existing, revision, err := safefile.ReadWithin(root, rel)
 	if err != nil {
-		return err
+		return safefile.Revision{}, err
 	}
 	if revision.Exists() {
 		raw, err = decodeJSONObject(existing)
 		if err != nil {
-			return fmt.Errorf("parse existing Claude config: %w", err)
+			return safefile.Revision{}, fmt.Errorf("parse existing Claude config: %w", err)
 		}
 		if servers, ok := raw["mcpServers"]; ok && bytes.Equal(bytes.TrimSpace(servers), []byte("null")) {
-			return errors.New("parse existing Claude config: mcpServers must not be null")
-		}
-		// Back up the existing file before overwriting it.
-		if err := safefile.ReplaceWithin(root, rel+".bak", existing, 0600); err != nil {
-			var committed interface{ Committed() bool }
-			if errors.As(err, &committed) && committed.Committed() {
-				anyCommit = true
-			}
-			return err
-		}
-		anyCommit = true
-		if claudeConfigAfterBackupHook != nil {
-			if err := claudeConfigAfterBackupHook(path); err != nil {
-				return claudeConfigFailure(true, "post-backup test hook", err)
-			}
+			return safefile.Revision{}, errors.New("parse existing Claude config: mcpServers must not be null")
 		}
 	}
 
@@ -202,42 +193,27 @@ func SaveClaudeConfig(cfg *ClaudeConfig) (returnErr error) {
 	}
 	encoded, err := json.Marshal(servers)
 	if err != nil {
-		return claudeConfigFailure(anyCommit, "marshal Claude MCP servers after backup", err)
+		return safefile.Revision{}, err
 	}
 	raw["mcpServers"] = encoded
 
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
-		return claudeConfigFailure(anyCommit, "marshal Claude config after backup", err)
+		return safefile.Revision{}, err
 	}
-	_, currentRevision, err := safefile.ReadWithin(root, rel)
+	if claudeConfigBeforeCommitHook != nil {
+		if err := claudeConfigBeforeCommitHook(path); err != nil {
+			return safefile.Revision{}, fmt.Errorf("before Claude config commit: %w", err)
+		}
+	}
+	finalRevision, err := safefile.ReplaceWithinRevisionTracked(root, rel, revision, data, 0600)
 	if err != nil {
-		return claudeConfigFailure(anyCommit, "verify Claude source revision after backup", err)
-	}
-	if currentRevision != revision {
-		return claudeConfigFailure(anyCommit, "verify Claude source revision after backup", fmt.Errorf("%w: Claude config changed since it was read", safefile.ErrRevisionChanged))
-	}
-	if err := safefile.ReplaceWithin(root, rel, data, 0600); err != nil {
 		var committed interface{ Committed() bool }
 		if errors.As(err, &committed) && committed.Committed() {
 			anyCommit = true
 		}
-		return claudeConfigFailure(anyCommit, "replace Claude config after backup", err)
+		return safefile.Revision{}, err
 	}
 	anyCommit = true
-	committed, finalRevision, err := safefile.ReadWithin(root, rel)
-	if err != nil {
-		return &safefile.CommittedError{Operation: "read committed Claude config", Err: err}
-	}
-	if !finalRevision.Exists() || finalRevision.Permissions() != 0600 || !bytes.Equal(committed, data) {
-		return &safefile.CommittedError{Operation: "verify committed Claude config", Err: safefile.ErrRevisionChanged}
-	}
-	return nil
-}
-
-func claudeConfigFailure(committed bool, operation string, err error) error {
-	if !committed {
-		return err
-	}
-	return &safefile.CommittedError{Operation: operation, Err: err}
+	return finalRevision, nil
 }

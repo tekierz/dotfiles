@@ -356,14 +356,20 @@ func shellQuote(value string) string {
 
 // WriteZshConfig writes the .zshrc file to disk
 func WriteZshConfig(cfg ZshConfig, theme string) error {
+	_, err := WriteZshConfigTracked(cfg, theme)
+	return err
+}
+
+func WriteZshConfigTracked(cfg ZshConfig, theme string) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	configPath := filepath.Join(home, ".zshrc")
 	managed := []byte(wrapZshManagedSection(GenerateZshConfig(cfg, theme)))
-	return withToolConfigLock(configPath, func(root, rel string) error {
+	var evidence MutationEvidence
+	err = withToolConfigLock(configPath, func(root, rel string) error {
 		existing, revision, err := readToolConfig(root, rel)
 		if err != nil {
 			return err
@@ -375,8 +381,13 @@ func WriteZshConfig(cfg ZshConfig, theme string) error {
 				return err
 			}
 		}
-		return replaceToolConfigAtRevision(root, rel, revision, content)
+		committed, err := replaceToolConfigAtRevisionTracked(root, rel, revision, content)
+		if err == nil {
+			evidence = MutationEvidence{Path: configPath, Revision: committed}
+		}
+		return err
 	})
+	return evidence, err
 }
 
 func wrapZshManagedSection(content string) string {

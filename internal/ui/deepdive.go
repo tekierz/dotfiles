@@ -37,7 +37,7 @@ type DeepDiveConfig struct {
 	GhosttyTabBindings       string
 	GhosttyFontFamily        string // Font family name
 	GhosttyBlurRadius        int    // 0-100 (blur behind window)
-	GhosttyScrollbackLines   int    // Number of scrollback lines
+	GhosttyScrollbackLines   int    // Byte limit (legacy field name retained for config compatibility)
 	GhosttyCursorStyle       string // block, bar, underline
 	GhosttyWindowDecorations bool   // Native window decorations
 	GhosttyConfirmClose      bool   // Confirm before closing a surface
@@ -165,7 +165,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GhosttyTabBindings:       "super",
 		GhosttyFontFamily:        "JetBrains Mono",
 		GhosttyBlurRadius:        0,
-		GhosttyScrollbackLines:   10000,
+		GhosttyScrollbackLines:   10_000_000,
 		GhosttyCursorStyle:       "block",
 		GhosttyWindowDecorations: true,
 		GhosttyConfirmClose:      true,

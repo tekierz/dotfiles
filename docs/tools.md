@@ -134,6 +134,6 @@ shown before apply is authoritative for a particular machine.
 | `~/.config/dotfiles/users/` | Product user profiles |
 | `~/.sshh` | SSH host entries used by `sshh` |
 
-Git and Ghostty adoption preserves existing native content and creates a sibling
-`*.dotfiles.bak` before the first managed write. A different existing adoption
-backup is a collision and must fail closed instead of being overwritten.
+Git and Ghostty adoption preserves existing native content inside bounded
+managed sections. Recovery comes from the reviewed operation backup; writers do
+not create or overwrite ambiguous sibling `*.dotfiles.bak` files.

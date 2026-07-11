@@ -79,7 +79,7 @@ func SaveHotkeysConfig(cfg *HotkeysConfig) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, data, 0600)
+	return writeFileAtomic(path, data)
 }
 
 // GetUserHotkeys gets or creates hotkeys for a specific user.
@@ -177,57 +177,13 @@ func MigrateLegacyFavorites(u *UserHotkeys) bool {
 		return false
 	}
 
-	// Build the lookup tables for both nav styles.
-	// keysToID[catID][keysString] = stableID
-	// knownIDs[stableID] = true
-	keysToID := map[string]map[string]string{}
-	knownIDs := map[string]bool{}
-
-	for _, ns := range []string{"emacs", "vim"} {
-		for _, cat := range hotkeys.Categories(ns) {
-			if _, ok := keysToID[cat.ID]; !ok {
-				keysToID[cat.ID] = map[string]string{}
-			}
-			for _, it := range cat.Items {
-				knownIDs[it.ID] = true
-				// Map this nav-style Keys to the stable ID; safe to overwrite since
-				// the same item always maps to the same ID regardless of nav style.
-				keysToID[cat.ID][it.Keys] = it.ID
-			}
-		}
-	}
+	keysToID, knownIDs := legacyFavoriteLookups()
 
 	changed := false
 	for catID, entries := range u.Favorites {
 		catKeys := keysToID[catID] // may be nil if catID is unknown
 
-		seen := map[string]bool{}
-		migrated := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			if knownIDs[entry] {
-				// Already a stable ID — keep as-is (idempotent).
-				if !seen[entry] {
-					seen[entry] = true
-					migrated = append(migrated, entry)
-				}
-				continue
-			}
-			// Attempt to resolve via the Keys lookup.
-			if catKeys != nil {
-				if id, ok := catKeys[entry]; ok {
-					if !seen[id] {
-						seen[id] = true
-						migrated = append(migrated, id)
-					}
-					continue
-				}
-			}
-			// Unrecognized entry: preserve it verbatim so no favorite is lost.
-			if !seen[entry] {
-				seen[entry] = true
-				migrated = append(migrated, entry)
-			}
-		}
+		migrated := migrateFavoriteEntries(entries, catKeys, knownIDs)
 		// Report a change if the rewritten slice differs from the original (an
 		// entry was remapped to a stable ID, or a duplicate was collapsed).
 		if !stringSliceEqual(entries, migrated) {
@@ -236,6 +192,42 @@ func MigrateLegacyFavorites(u *UserHotkeys) bool {
 		u.Favorites[catID] = migrated
 	}
 	return changed
+}
+
+func legacyFavoriteLookups() (map[string]map[string]string, map[string]bool) {
+	keysToID := map[string]map[string]string{}
+	knownIDs := map[string]bool{}
+	for _, navStyle := range []string{"emacs", "vim"} {
+		for _, category := range hotkeys.Categories(navStyle) {
+			if keysToID[category.ID] == nil {
+				keysToID[category.ID] = map[string]string{}
+			}
+			for _, item := range category.Items {
+				knownIDs[item.ID] = true
+				keysToID[category.ID][item.Keys] = item.ID
+			}
+		}
+	}
+	return keysToID, knownIDs
+}
+
+func migrateFavoriteEntries(entries []string, keysToID map[string]string, knownIDs map[string]bool) []string {
+	seen := make(map[string]bool, len(entries))
+	migrated := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		resolved := entry
+		if !knownIDs[entry] {
+			if id, ok := keysToID[entry]; ok {
+				resolved = id
+			}
+		}
+		if seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
+		migrated = append(migrated, resolved)
+	}
+	return migrated
 }
 
 // stringSliceEqual reports whether two string slices have identical length and

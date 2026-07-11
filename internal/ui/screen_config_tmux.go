@@ -290,7 +290,7 @@ func (s *configTmuxScreen) View(width, height int) string {
 			rec.field(fieldIdx)
 			intervalFocused := a.configFieldIndex == fieldIdx
 			rec.write(renderFieldLabel("Auto-save Interval", intervalFocused))
-			rec.write(renderNumberControl(cfg.TmuxContinuumSaveMin, 5, 60, intervalFocused))
+			rec.write(renderNumberControl(cfg.TmuxContinuumSaveMin, 60, intervalFocused))
 			rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Render(" min"))
 		}
 	}

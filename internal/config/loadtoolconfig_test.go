@@ -27,7 +27,7 @@ func sampleDefaults() *sampleToolConfig {
 // intended defaults rather than the Go zero value (config-medium). Only keys
 // actually present in the file should override the defaults.
 func TestLoadToolConfigKeepsDefaultsForAbsentKeys(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	if err := os.MkdirAll(ToolsDir(), 0o700); err != nil {
@@ -61,7 +61,7 @@ func TestLoadToolConfigKeepsDefaultsForAbsentKeys(t *testing.T) {
 // TestLoadToolConfigMissingFileReturnsDefaults guards the existing
 // not-found-returns-defaults path still holds after the change.
 func TestLoadToolConfigMissingFileReturnsDefaults(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	cfg, err := LoadToolConfig("does-not-exist", sampleDefaults)

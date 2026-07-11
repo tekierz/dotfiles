@@ -10,7 +10,7 @@ User configuration management with JSON storage.
 | `tool.go` | Tool config structs (GhosttyConfig, TmuxConfig, ZshConfig, NeovimConfig, GitConfig, YaziConfig, FzfConfig, AppsConfig, UtilitiesConfig) |
 | `defaults.go` | Default config functions (Default*Config) |
 | `user.go` | UserProfile management (multi-user support) |
-| `claude.go` | Claude Code MCP config (ClaudeConfig/MCPServer) in `~/.claude.json` with read-merge-preserve + `.bak` backup + atomic write; MCP server defaults |
+| `claude.go` | Claude Code MCP config (ClaudeConfig/MCPServer) in `~/.claude.json` with revision-bound read-merge-preserve; MCP server defaults |
 | `hotkeys.go` | Per-user hotkey favorites & aliases (HotkeysConfig/UserHotkeys) |
 | `config_test.go` | Config tests |
 | `user_test.go` | User profile tests |
@@ -166,10 +166,10 @@ Manages user-scope MCP server entries in `~/.claude.json` (NOT
 `~/.claude/settings.json`, which holds model/permissions/hooks/statusLine and
 must never be clobbered). `SaveClaudeConfig` does a read-merge-preserve: it reads
 the existing file into a generic map, replaces only the `mcpServers` key, leaves
-all other keys untouched, writes a `~/.claude.json.bak` backup of the prior
-contents, then writes atomically (temp file + rename) via `writeFileAtomic`
-(file 0600). `LoadClaudeConfig` extracts only `mcpServers` and returns an empty
-map if the file is missing.
+all other keys untouched, and commits only if the exact source revision still
+matches. Recovery is owned by the reviewed operation backup; the merge does not
+create or overwrite an ad-hoc `.bak` sidecar. `LoadClaudeConfig` extracts only
+`mcpServers` and returns an empty map if the file is missing.
 
 ```go
 type ClaudeConfig struct {

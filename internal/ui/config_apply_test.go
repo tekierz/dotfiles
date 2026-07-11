@@ -63,7 +63,7 @@ func TestApplyManageConfigWritesGeneratedFiles(t *testing.T) {
 	}
 
 	// Ghostty
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config.ghostty")
 	ghostty := readFileOrFail(t, ghosttyPath)
 	if !strings.Contains(ghostty, "font-size = 21") {
 		t.Errorf("ghostty config missing font-size 21:\n%s", ghostty)
@@ -73,7 +73,7 @@ func TestApplyManageConfigWritesGeneratedFiles(t *testing.T) {
 	}
 
 	// Git
-	gitPath := filepath.Join(home, ".gitconfig")
+	gitPath := filepath.Join(home, ".config", "dotfiles", "git", "config")
 	git := readFileOrFail(t, gitPath)
 	if !strings.Contains(git, "defaultBranch = develop") && !strings.Contains(git, "develop") {
 		t.Errorf("gitconfig missing develop default branch:\n%s", git)

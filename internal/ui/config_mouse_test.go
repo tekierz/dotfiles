@@ -63,7 +63,7 @@ func TestConfigFieldClickGhostty(t *testing.T) {
 		{"Font Size", 1},
 		{"Background Opacity", 2},
 		{"Blur Radius", 3},
-		{"Scrollback Lines", 4},
+		{"Scrollback Bytes", 4},
 		{"Cursor Style", 5},
 		{"New Tab Keybinding", 6},
 	}
@@ -280,7 +280,7 @@ func TestConfigFieldClickWidthSweep(t *testing.T) {
 				{"Font Size", 1},
 				{"Background Opacity", 2},
 				{"Blur Radius", 3},
-				{"Scrollback Lines", 4},
+				{"Scrollback Bytes", 4},
 				{"Cursor Style", 5},
 				{"New Tab Keybinding", 6},
 			},

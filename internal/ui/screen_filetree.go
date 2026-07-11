@@ -2,14 +2,13 @@ package ui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/operation"
 )
 
 // fileTreeScreen is the migrated ScreenHandler for the installation summary
@@ -37,6 +36,7 @@ func (s *fileTreeScreen) ID() Screen { return ScreenFileTree }
 // Init triggers the async install-cache load on entry (idempotent).
 func (s *fileTreeScreen) Init() tea.Cmd {
 	if a := s.App(); a != nil {
+		a.refreshPendingInstallPlan()
 		return a.startInstallCacheLoad()
 	}
 	return nil
@@ -45,12 +45,34 @@ func (s *fileTreeScreen) Init() tea.Cmd {
 // Update handles keyboard input for the file tree screen. (Mouse is a no-op,
 // matching the legacy handleSummaryMouse for ScreenFileTree.)
 func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	a := s.App()
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return s, tea.Quit
+		case "up", "k":
+			if a.installPlanScroll > 0 {
+				a.installPlanScroll--
+			}
+		case "down", "j":
+			if a.installPlanScroll < int(^uint(0)>>1) {
+				a.installPlanScroll++
+			}
+		case "pgup":
+			a.installPlanScroll = maxInt(0, a.installPlanScroll-maxInt(1, s.Height()/2))
+		case "pgdown":
+			a.installPlanScroll += maxInt(1, s.Height()/2)
+		case "home":
+			a.installPlanScroll = 0
+		case "end":
+			a.installPlanScroll = int(^uint(0) >> 1)
 		case "enter":
+			if a.pendingInstallPlan == nil && a.installPlanError == nil {
+				a.refreshPendingInstallPlan()
+			}
+			if a.installPlanError != nil || a.pendingInstallPlan == nil || a.pendingInstallPlan.hasBlocked() {
+				return s, nil
+			}
 			// Begin installation: navigate to the migrated progress screen. The
 			// install is triggered by progressScreen.Init() (which does the sudo
 			// check itself), so we deliberately do NOT emit a separate
@@ -59,6 +81,7 @@ func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// handler until Progress is active.
 			return s, NavigateTo(ScreenProgress)
 		case "esc":
+			a.invalidatePendingInstallPlan()
 			return s, NavigateTo(ScreenNavPicker)
 		}
 	}
@@ -73,178 +96,93 @@ func (s *fileTreeScreen) View(width, height int) string {
 		return installStatusLoadingView(a, width, height)
 	}
 
-	title := TitleStyle.Render("Installation Summary")
-
-	cfg := a.deepDiveConfig
+	title := TitleStyle.Render("Reviewed Installation Plan")
 	newStyle := lipgloss.NewStyle().Foreground(ColorGreen)
 	modStyle := lipgloss.NewStyle().Foreground(ColorYellow)
+	blockedStyle := lipgloss.NewStyle().Foreground(ColorRed)
 	mutedStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 	pkgStyle := lipgloss.NewStyle().Foreground(ColorCyan)
 
 	var lines []string
-
-	// Collect selected and already installed tools
-	var toInstall []string
-	var alreadyInstalled []string
-
-	// CLI Tools
-	for id, enabled := range cfg.CLITools {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
+	plan := a.pendingInstallPlan
+	switch {
+	case a.installPlanError != nil:
+		lines = append(lines, blockedStyle.Render("  Plan could not be built:"), "  "+a.installPlanError.Error())
+	case plan == nil:
+		lines = append(lines, mutedStyle.Render("  Waiting for host observations..."))
+	default:
+		hash := plan.hash()
+		if len(hash) > 12 {
+			hash = hash[:12]
 		}
-	}
-	// GUI Apps
-	for id, enabled := range cfg.GUIApps {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// CLI Utilities
-	for id, enabled := range cfg.CLIUtilities {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// Utilities
-	for id, enabled := range cfg.Utilities {
-		if enabled {
-			if a.manageInstalled[id] {
-				alreadyInstalled = append(alreadyInstalled, id)
-			} else {
-				toInstall = append(toInstall, id)
-			}
-		}
-	}
-	// macOS Apps (only on macOS)
-	if pkg.DetectPlatform() == pkg.PlatformMacOS {
-		for id, enabled := range cfg.MacApps {
-			if enabled {
-				if a.manageInstalled[id] {
-					alreadyInstalled = append(alreadyInstalled, id)
-				} else {
-					toInstall = append(toInstall, id)
+		lines = append(lines, mutedStyle.Render("  Plan: "+hash))
+		for _, action := range plan.actions() {
+			var style lipgloss.Style
+			marker := "●"
+			switch action.Disposition {
+			case operation.DispositionBlocked:
+				style = blockedStyle
+				marker = "✗"
+			case operation.DispositionSkip:
+				style = mutedStyle
+				marker = "↷"
+			case operation.DispositionApply:
+				switch {
+				case action.Kind == operation.KindInstallTool:
+					style = pkgStyle
+				case action.Observation.Exists:
+					style = modStyle
+				default:
+					style = newStyle
 				}
 			}
-		}
-	}
-
-	// Sort for stable display order (prevents flickering from map iteration)
-	sort.Strings(toInstall)
-	sort.Strings(alreadyInstalled)
-
-	// Packages to install section
-	if len(toInstall) > 0 {
-		lines = append(lines, textStyle.Render("  Packages to Install:"))
-		for i, toolID := range toInstall {
-			prefix := "├──"
-			if i == len(toInstall)-1 {
-				prefix = "└──"
+			line := fmt.Sprintf("  %s %-14s %s", marker, action.ToolID, action.Description)
+			if action.ToolID == "" {
+				line = fmt.Sprintf("  %s %-14s %s", marker, "state", action.Description)
 			}
-			lines = append(lines, textStyle.Render("  "+prefix+" ")+pkgStyle.Render(toolID))
-		}
-		lines = append(lines, "")
-	}
-
-	// Already installed section
-	if len(alreadyInstalled) > 0 {
-		lines = append(lines, mutedStyle.Render("  Already Installed (settings will update):"))
-		for i, toolID := range alreadyInstalled {
-			prefix := "├──"
-			if i == len(alreadyInstalled)-1 {
-				prefix = "└──"
+			lines = append(lines, style.Render(line))
+			if action.Reason != "" {
+				lines = append(lines, blockedStyle.Render("      "+action.Reason))
 			}
-			lines = append(lines, textStyle.Render("  "+prefix+" ")+mutedStyle.Render(toolID+" ✓"))
 		}
-		lines = append(lines, mutedStyle.Render("  Note: Settings and themes will be applied to all tools"))
-		lines = append(lines, "")
-	}
-
-	// ~/.config/ section
-	lines = append(lines, textStyle.Render("  Files to be Modified:"))
-	lines = append(lines, textStyle.Render("  ~/.config/"))
-	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("dotfiles/")+mutedStyle.Render(" (new)"))
-	lines = append(lines, textStyle.Render("  │   ├── settings"))
-	lines = append(lines, textStyle.Render("  │   └── backups/"))
-
-	// Ghostty
-	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("ghostty/"))
-	lines = append(lines, textStyle.Render("  │   └── config"))
-
-	// Yazi
-	lines = append(lines, textStyle.Render("  ├── ")+newStyle.Render("yazi/"))
-	lines = append(lines, textStyle.Render("  │   ├── yazi.toml"))
-	lines = append(lines, textStyle.Render("  │   ├── keymap.toml"))
-	lines = append(lines, textStyle.Render("  │   └── theme.toml"))
-
-	// Neovim with config type
-	nvimNote := ""
-	switch cfg.NeovimConfig {
-	case "kickstart":
-		nvimNote = " (Kickstart.nvim)"
-	case "lazyvim":
-		nvimNote = " (LazyVim)"
-	case "nvchad":
-		nvimNote = " (NvChad)"
-	case "custom":
-		nvimNote = " (unchanged)"
-	}
-	lines = append(lines, textStyle.Render("  └── ")+newStyle.Render("nvim/")+mutedStyle.Render(nvimNote))
-
-	// ~/ section
-	lines = append(lines, "")
-	lines = append(lines, textStyle.Render("  ~/"))
-	lines = append(lines, textStyle.Render("  ├── ")+modStyle.Render(".zshrc")+mutedStyle.Render(" (backed up)"))
-	lines = append(lines, textStyle.Render("  ├── ")+modStyle.Render(".tmux.conf")+mutedStyle.Render(" (backed up)"))
-	lines = append(lines, textStyle.Render("  ├── ")+modStyle.Render(".gitconfig")+mutedStyle.Render(" (backed up)"))
-
-	// ~/.local/bin/ utilities - only show enabled ones
-	var binFiles []string
-	if cfg.Utilities["hk"] {
-		binFiles = append(binFiles, "hk")
-	}
-	if cfg.Utilities["caff"] {
-		binFiles = append(binFiles, "caff")
-	}
-	if cfg.Utilities["sshh"] {
-		binFiles = append(binFiles, "sshh")
-	}
-	binFiles = append(binFiles, "dotfiles") // Always installed
-
-	if len(binFiles) > 0 {
-		lines = append(lines, textStyle.Render("  └── .local/bin/"))
-		for i, f := range binFiles {
-			prefix := "├──"
-			if i == len(binFiles)-1 {
-				prefix = "└──"
-			}
-			lines = append(lines, textStyle.Render("      "+prefix+" ")+newStyle.Render(f))
+		if targets := plan.backupTargets(); len(targets) > 0 {
+			lines = append(lines, "", textStyle.Render(fmt.Sprintf("  Verified rollback scope: %d target(s)", len(targets))))
 		}
+	}
+
+	maxLines := maxInt(6, height-12)
+	if len(lines) > maxLines {
+		// Reserve one row for the scroll status instead of overwriting the last
+		// action. The prior viewport made the final plan line unreachable even
+		// at maximum scroll, undermining the "review all" promise.
+		contentLines := maxInt(1, maxLines-1)
+		maxScroll := len(lines) - contentLines
+		a.installPlanScroll = clampInt(a.installPlanScroll, 0, maxScroll)
+		start := a.installPlanScroll
+		end := min(len(lines), start+contentLines)
+		visible := append([]string(nil), lines[start:end]...)
+		visible = append(visible, mutedStyle.Render(fmt.Sprintf("  Plan lines %d–%d of %d  •  ↑↓/PgUp/PgDn/Home/End scroll", start+1, end, len(lines))))
+		lines = visible
+	} else {
+		a.installPlanScroll = 0
 	}
 
 	tree := strings.Join(lines, "\n")
 
 	legend := mutedStyle.Render(
-		fmt.Sprintf("  %s New    %s Modified    %s Package    %s Settings Only",
+		fmt.Sprintf("  %s New    %s Modified    %s Package    %s Blocked",
 			newStyle.Render("●"),
 			modStyle.Render("●"),
 			pkgStyle.Render("●"),
-			mutedStyle.Render("●"),
+			blockedStyle.Render("✗"),
 		))
 
-	help := HelpStyle.Render("[ENTER] Start Installation    [ESC] Back")
+	helpText := "[↑↓] Review All    [ENTER] Apply This Exact Plan    [ESC] Back"
+	if a.installPlanError != nil || (plan != nil && plan.hasBlocked()) {
+		helpText = "Resolve blocked ownership items before applying    [ESC] Back"
+	}
+	help := HelpStyle.Render(helpText)
 
 	// Prevent the tree from overflowing narrow terminals.
 	treeMaxW := maxInt(20, width-6)

@@ -1,13 +1,17 @@
 package tools
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 	dotfilesTheme "github.com/tekierz/dotfiles/internal/theme"
 )
 
@@ -80,24 +84,46 @@ func IsTPMInstalled() bool {
 
 // InstallTPM clones TPM repository
 func InstallTPM() error {
-	tpmPath := TPMPath()
+	_, err := installTPMTracked()
+	return err
+}
 
-	// Create parent directory
-	pluginsDir := filepath.Dir(tpmPath)
-	if err := os.MkdirAll(pluginsDir, 0700); err != nil {
-		return fmt.Errorf("failed to create plugins directory: %w", err)
+func installTPMTracked() (result MutationEvidence, returnErr error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("determine HOME for TPM: %w", err)
 	}
+	staging, err := os.MkdirTemp(home, ".dotfiles-tpm-clone-*")
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("create TPM clone staging directory: %w", err)
+	}
+	defer func() {
+		if cleanupErr := safefile.RemoveDirectoryWithin(home, filepath.Base(staging)); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("clean TPM clone staging directory: %w", cleanupErr))
+		}
+	}()
 
-	// Clone TPM
-	cmd := exec.Command("git", "clone", "--depth", "1",
+	// Clone outside the live plugin path. A failed clone is deleted without ever
+	// becoming a planned mutation target.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	// #nosec G204 -- TPM URL is fixed and the destination is derived from HOME.
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1",
 		"https://github.com/tmux-plugins/tpm",
-		tpmPath)
+		staging)
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to clone TPM: %w", err)
+		return MutationEvidence{}, fmt.Errorf("failed to clone TPM: %w", err)
 	}
-
-	return nil
+	snapshot, err := safefile.SnapshotDirectoryWithin(home, filepath.Base(staging))
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("snapshot cloned TPM: %w", err)
+	}
+	live, err := safefile.RestoreDirectoryWithinSnapshotTracked(home, filepath.ToSlash(filepath.Join(".tmux", "plugins", "tpm")), snapshot, nil)
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	return MutationEvidence{Path: TPMPath(), Directory: live}, nil
 }
 
 // RunTPMInstall triggers TPM to install plugins
@@ -108,7 +134,10 @@ func RunTPMInstall() error {
 		return fmt.Errorf("TPM install script not found: %w", err)
 	}
 
-	cmd := exec.Command(installScript)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	// #nosec G204 -- running the installed TPM script is the explicit purpose of this operation.
+	cmd := exec.CommandContext(ctx, installScript)
 	return cmd.Run()
 }
 
@@ -290,37 +319,51 @@ func paneBorderToTmuxFormat(style string) string {
 
 // WriteTmuxConfig writes the tmux.conf file
 func WriteTmuxConfig(cfg TmuxConfig, theme string) error {
+	_, err := WriteTmuxConfigTracked(cfg, theme)
+	return err
+}
+
+func WriteTmuxConfigTracked(cfg TmuxConfig, theme string) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	configPath := filepath.Join(home, ".tmux.conf")
 	content := GenerateTmuxConfig(cfg, theme)
-	return writeToolConfig(configPath, []byte(content))
+	return writeToolConfigTracked(configPath, []byte(content))
 }
 
 // SetupTPM handles TPM installation and plugin setup
 func SetupTPM(cfg TmuxConfig, theme string) error {
+	_, err := SetupTPMTracked(cfg, theme)
+	return err
+}
+
+func SetupTPMTracked(cfg TmuxConfig, theme string) ([]MutationEvidence, error) {
 	// Write config first
-	if err := WriteTmuxConfig(cfg, theme); err != nil {
-		return err
+	configEvidence, err := WriteTmuxConfigTracked(cfg, theme)
+	if err != nil {
+		return nil, err
 	}
+	committed := []MutationEvidence{configEvidence}
 
 	if !cfg.TPMEnabled {
-		return nil
+		return committed, nil
 	}
 
-	// Install TPM if not present
-	if !IsTPMInstalled() {
-		if err := InstallTPM(); err != nil {
-			return err
+	// Install TPM transactionally. Existing targets are refused at the snapshot
+	// commit boundary instead of being trusted because they appeared mid-plan.
+	tpmEvidence, err := installTPMTracked()
+	if err != nil {
+		if tpmEvidence.Directory != nil || tpmEvidence.Revision.Tracked() {
+			committed = append(committed, tpmEvidence)
 		}
+		return nil, partialMutationError(err, committed)
 	}
+	committed = append(committed, tpmEvidence)
 
-	// Run plugin installation
-	// This may fail if tmux is not running, which is OK
-	_ = RunTPMInstall()
-
-	return nil
+	// Plugin installation remains an explicit prefix+I user action. The third-
+	// party installer has a broader mutation surface than this reviewed plan.
+	return committed, nil
 }
