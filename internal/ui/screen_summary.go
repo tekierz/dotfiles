@@ -32,8 +32,7 @@ func (s *SummaryScreen) Init() tea.Cmd {
 
 // Update handles input messages.
 func (s *SummaryScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "enter":
 			return s, tea.Quit
@@ -57,11 +56,30 @@ func (s *SummaryScreen) View(width, height int) string {
 
 	theme := s.Theme()
 	navStyle := s.NavStyle()
+	planHash := "unavailable"
+	operationID := "unavailable"
+	actionCount := 0
+	backupCount := 0
+	if app := s.App(); app != nil {
+		if app.pendingInstallPlan != nil {
+			planHash = app.pendingInstallPlan.hash()
+			if len(planHash) > 12 {
+				planHash = planHash[:12]
+			}
+			actionCount = len(app.pendingInstallPlan.actions())
+			backupCount = len(app.pendingInstallPlan.backupTargets())
+		}
+		if app.lastOperationID != "" {
+			operationID = app.lastOperationID
+		}
+	}
 
 	summary := lipgloss.NewStyle().Foreground(ColorText).Render(fmt.Sprintf(`
   Theme:      %s
   Navigation: %s
-  Backup:     ~/.config/dotfiles/backups/
+  Plan:       %s (%d actions)
+  Operation:  %s
+  Rollback:   %d plan-derived target(s), including newly created paths
 
   Next steps:
 
@@ -73,6 +91,10 @@ func (s *SummaryScreen) View(width, height int) string {
 `,
 		lipgloss.NewStyle().Foreground(ColorCyan).Render(theme),
 		lipgloss.NewStyle().Foreground(ColorCyan).Render(navStyle),
+		lipgloss.NewStyle().Foreground(ColorCyan).Render(planHash),
+		actionCount,
+		lipgloss.NewStyle().Foreground(ColorCyan).Render(operationID),
+		backupCount,
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("source ~/.zshrc"),
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("tmux"),
 		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("nvim"),

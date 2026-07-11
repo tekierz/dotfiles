@@ -23,8 +23,12 @@ func TestMain(m *testing.M) {
 		panic("TestMain: create temp HOME: " + err.Error())
 	}
 
-	os.Setenv("HOME", dir)
-	os.Unsetenv("XDG_CONFIG_HOME")
+	if err := os.Setenv("HOME", dir); err != nil {
+		panic("TestMain: set HOME: " + err.Error())
+	}
+	if err := os.Unsetenv("XDG_CONFIG_HOME"); err != nil {
+		panic("TestMain: unset XDG_CONFIG_HOME: " + err.Error())
+	}
 
 	code := m.Run()
 

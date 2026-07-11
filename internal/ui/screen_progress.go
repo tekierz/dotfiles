@@ -146,6 +146,9 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.installStep++
 		}
 		if msg.done {
+			if msg.operationID != "" {
+				a.lastOperationID = msg.operationID
+			}
 			a.installEvents = nil
 			// Route into the done handler (mark complete / navigate / error).
 			return s.Update(installDoneMsg{err: msg.err, context: msg.context})
@@ -175,7 +178,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.manageInstalledReady = false
 			reloadCmd := a.startInstallCacheLoad()
 			if msg.context != "" {
-				a.lastError = fmt.Errorf("%v\n\nOutput:\n%s", msg.err, msg.context)
+				a.lastError = fmt.Errorf("%w\n\nOutput:\n%s", msg.err, msg.context)
 			} else {
 				a.lastError = msg.err
 			}
@@ -188,7 +191,6 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		tools.GetRegistry().InvalidateCache()
 		a.manageInstalledReady = false
 		return s, nil
-
 	}
 	return s, nil
 }
@@ -262,13 +264,14 @@ func (s *progressScreen) View(width, height int) string {
 		var status string
 		var style lipgloss.Style
 
-		if i < currentPhase {
+		switch {
+		case i < currentPhase:
 			status = "✓"
 			style = lipgloss.NewStyle().Foreground(ColorGreen)
-		} else if i == currentPhase && a.installRunning {
+		case i == currentPhase && a.installRunning:
 			status = "▶"
 			style = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
-		} else {
+		default:
 			status = "○"
 			style = lipgloss.NewStyle().Foreground(ColorTextMuted)
 		}
@@ -291,16 +294,17 @@ func (s *progressScreen) View(width, height int) string {
 
 	// Output panel - show real output.
 	var outputLines string
-	if len(a.installOutput) > 0 {
+	switch {
+	case len(a.installOutput) > 0:
 		// Show last 6 lines.
 		start := 0
 		if len(a.installOutput) > 6 {
 			start = len(a.installOutput) - 6
 		}
 		outputLines = strings.Join(a.installOutput[start:], "\n")
-	} else if a.installRunning {
+	case a.installRunning:
 		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Starting installation...")
-	} else if !a.installComplete {
+	case !a.installComplete:
 		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Press ENTER to start")
 	}
 
@@ -316,11 +320,12 @@ func (s *progressScreen) View(width, height int) string {
 		Render(outputLines)
 
 	var help string
-	if a.installComplete {
+	switch {
+	case a.installComplete:
 		help = HelpStyle.Render("[ENTER] Continue")
-	} else if a.installRunning {
+	case a.installRunning:
 		help = HelpStyle.Render("Installation in progress...")
-	} else {
+	default:
 		help = HelpStyle.Render("[ENTER] Start    [ESC] Back")
 	}
 

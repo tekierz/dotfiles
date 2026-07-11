@@ -8,3 +8,12 @@
   batch is a checkpoint, not a release verdict.
 - Keep logical commits flowing after each independently verified layer, but never mix the
   user's untracked planning files into staging.
+- After converting an if/else chain to a condition switch, run `gofmt` on that
+  file immediately before touching another file; a partial mechanical rewrite
+  must never leave the shared multi-agent tree syntactically invalid.
+- Before adding a linter-requested lifecycle call such as `t.Parallel`, inspect
+  the whole function for an existing platform-guarded call; duplicate lifecycle
+  calls can compile cleanly yet panic at runtime.
+- After extracting a large function into helpers, run the package compile before
+  any other edit so obsolete locals and signatures cannot destabilize the shared
+  tree, even briefly.

@@ -332,7 +332,7 @@ func ProgressBarAnimated(percent float64, width int, frame int) string {
 	var bar strings.Builder
 	for i := 0; i < filled; i++ {
 		colorIdx := ((i + frame) * len(GradientCyber)) / width
-		colorIdx = colorIdx % len(GradientCyber)
+		colorIdx %= len(GradientCyber)
 		style := lipgloss.NewStyle().Foreground(GradientCyber[colorIdx])
 		bar.WriteString(style.Render("█"))
 	}
@@ -378,7 +378,7 @@ func ASCIILogo() string {
 			}
 			// Mix horizontal and vertical gradient
 			colorIdx := ((i + lineIdx*2) * len(colors)) / (len(line) + len(lines)*2)
-			colorIdx = colorIdx % len(colors)
+			colorIdx %= len(colors)
 			style := lipgloss.NewStyle().Foreground(colors[colorIdx])
 			result.WriteString(style.Render(string(char)))
 		}
