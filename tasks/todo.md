@@ -38,7 +38,9 @@ observability land before new integrations or broad UI work.
 - [ ] Add schema versions, ordered migrations, ownership revisions, operation IDs, and a
       durable non-secret journal.
 - [x] Stop self-copying the Homebrew-owned main binary.
-- [ ] Add executable provenance, stale-build detection, and PATH-collision checks/repair.
+- [x] Add executable provenance, stale-build detection, and PATH-collision diagnostics.
+- [x] Add an explicitly reviewed repair flow for stale PATH entries; diagnostics remain
+      deliberately read-only until ownership can be proven.
 
 ### Batch 3 — truthful UX, settings platform, and CLI contracts
 
@@ -57,7 +59,12 @@ observability land before new integrations or broad UI work.
 - [ ] Finish current install-only integrations or label them honestly.
 - [ ] Add Codex, Cursor Agent, OpenCode, Pi, T3 Code, and Hermes only after the safety kernel,
       all opt-in with provenance/auth/permission/egress policy.
-- [ ] Retire the legacy Bash product from active distribution.
+- [x] Retire the legacy Bash product from active distribution: remove its source and
+      bespoke tests, stop `make install` from distributing it, delete active execution
+      instructions, and retain a conservative migration guide.
+- [ ] Remove the public Homebrew formula's basename-only deletion of old
+      `dotfiles-tui`/`dotfiles-setup` executables and correct its stale v2.0.1 metadata
+      and legacy feature claims before recommending tap upgrades.
 - [ ] Make Linux and macOS tests fully blocking; add reproducible signed artifacts,
       checksums, SBOM/provenance, and Homebrew upgrade/rollback tests.
 - [ ] Complete owner-hardware, friends/family, and mock-enterprise gates from
@@ -142,15 +149,14 @@ P0+P1 are release blockers; P2 should ship but won't eat data; P3+ is post-relea
             Uninstall must refuse to delete backups it could not actually restore.
       - [x] TUI restore reports success on backups it silently skipped.
       - [x] Either teach Go restore the bash manifest format, or migrate/refuse loudly.
-- [x] **Bash restore half-aborts**: `((var++))` under `set -e` still aborts
-      `restore_backup` partway in one copy of the logic (bin/dotfiles-setup:~824); the
-      duplicated later copy was fixed, the earlier one wasn't. Fix both / dedupe.
+- [x] **Bash restore half-aborts**: resolved by retiring and removing the unsupported
+      Bash product; no current restore path executes its duplicated logic.
 - [x] **neovim preset destroys config + its only backup** (internal/tools/neovim.go):
       re-running the preset flow moves the user's config to a fixed backup path,
       clobbering the previous backup, then a failed clone leaves nothing. Timestamped
       backups + clone-to-temp-then-swap.
-- [x] **Git config clobber (residual)**: Go `WriteGitConfig` now preserves identity but
-      bash `setup_git` (bin/dotfiles-setup:~1845) still replaces `~/.gitconfig` wholesale.
+- [x] **Git config clobber (residual)**: Go `WriteGitConfig` preserves native settings;
+      the clobbering Bash implementation was removed with the retired product.
 
 ## P1 — Release blockers (broken promises, versioning, dead gates)
 
@@ -191,7 +197,7 @@ Features that don't do what the UI says:
       hidden settings fields (mouse path was fixed; keyboard + misleading "↑↓: scroll"
       footer remain) (internal/ui/screen_manage.go).
 
-Bash installer (still the documented fallback path):
+Retired Bash installer (historical findings; source and execution docs removed):
 - [x] `--list-backups` prints one entry then exits 1 (`((count++))` under `set -e`).
 - [x] `setup_utilities` writes a legacy bash CLI to `~/.local/bin/dotfiles`, shadowing or
       clobbering the Go binary of the same name.
@@ -213,7 +219,7 @@ Bash installer (still the documented fallback path):
 - [x] Raw package-manager output rendered to the terminal without stripping ANSI/control
       sequences (update results path) — escape-sequence injection surface.
 - [x] caff pidfile in world-writable /tmp is predictable — cross-user process-kill;
-      Go copy partially fixed, generated-script copy (bin/dotfiles-setup) unchanged.
+      the Go copy was fixed and the duplicated retired-script copy was removed.
 - [x] App-detection substring matching produces false "installed" (internal/tools/apps.go).
 - [x] Hotkeys config path ignores `XDG_CONFIG_HOME`, diverging from ConfigDir().
 - [x] Blocking package-manager subprocess calls inside `View()` via ensureInstallCache
@@ -253,12 +259,12 @@ Bash installer (still the documented fallback path):
 - [ ] On macOS, confirm glow reads its config where we write it
       (`glow config` should show/edit `~/Library/Preferences/glow/glow.yml`,
       per go-app-paths User scope)
-- [ ] Fresh-machine install test: brew tap path AND bash-script path; then uninstall and
-      verify configs restored byte-identical (this exercises the P0 backup fixes)
+- [ ] Fresh-machine install test: Homebrew tap and signed release artifact paths; then
+      uninstall and verify configs restored byte-identical (this exercises the P0 backup fixes)
 - [ ] Tag release; verify `dotfiles --version` matches the tag; update homebrew-tap
       formula sha256; verify `brew install` from the tap
-- [ ] README final pass: install instructions match reality; consider adding a
-      commit-pinned/checksummed variant of the curl|bash instruction
+- [ ] README final pass: supported install instructions match release artifacts and the
+      Homebrew tap; verify no retired-installer execution path is advertised
 
 ## Post-release backlog (carried forward)
 

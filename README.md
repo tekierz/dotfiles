@@ -36,6 +36,7 @@ make build
 | `dotfiles update` | Check for package updates |
 | `dotfiles status` | Show current configuration |
 | `dotfiles doctor [--json]` | Diagnose which build is running, PATH collisions, Homebrew ownership, and stale legacy binaries |
+| `dotfiles doctor repair [--json]` | Preview or quarantine one ownership-proven stale `~/.local/bin/dotfiles` entry |
 | `dotfiles theme list` | List available themes |
 | `dotfiles theme set <name>` | Set theme (run `dotfiles install` to apply) |
 | `dotfiles config <tool>` | Configure a specific tool |
@@ -56,6 +57,15 @@ dotfiles doctor --json
 ```
 
 Doctor reports the executable currently running, every `dotfiles` match reachable through `PATH`, safe static version/build hints, Homebrew's managed executable, and stale `dotfiles-tui` or `dotfiles-setup` candidates. It is read-only and does not execute discovered `dotfiles` binaries or modify files. JSON output uses a stable schema and omits timestamps so repeated runs against unchanged state are deterministic.
+
+If Doctor finds the exact historical `~/.local/bin/dotfiles` shadow, run
+`dotfiles doctor repair --json` to preview a deterministic repair plan. Repair
+is offered only when embedded Go metadata proves project ownership and the
+candidate differs from the running and Homebrew-managed executables. Interactive
+repair requires typing `quarantine`; automation requires both `--yes` and the
+fresh `--plan-hash`. The original bytes and permission mode are retained in a
+private quarantine with a recovery manifest. Legacy binary names remain
+diagnostic-only.
 
 ## What It Installs & Configures
 

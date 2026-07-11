@@ -87,6 +87,7 @@ Run `dotfiles` with no arguments to launch the TUI.
 | `dotfiles hotkeys [--tool <name>]` | View keybindings |
 | `dotfiles status` | Print current product configuration |
 | `dotfiles doctor [--json]` | Diagnose executable provenance and PATH collisions |
+| `dotfiles doctor repair [--json]` | Preview a stale user-local binary repair; confirmation is required to apply |
 | `dotfiles theme list` | List themes |
 | `dotfiles theme set <name>` | Select the product theme |
 | `dotfiles backups` | List product backups |
@@ -100,6 +101,14 @@ Run `dotfiles` with no arguments to launch the TUI.
 `dotfiles doctor` is read-only. It reports the running executable, ordered
 `PATH` matches, static build metadata, Homebrew ownership hints, and stale legacy
 binary names without executing or deleting discovered binaries.
+
+`dotfiles doctor repair` is a separate, fail-closed mutation path limited to
+`~/.local/bin/dotfiles`. It refuses symlinks, hardlinks, unknown builds, the
+running executable, and Homebrew-owned or byte-identical candidates. A preview
+is bound to a SHA-256 plan hash; noninteractive apply requires `--yes` and
+`--plan-hash <hash>`. Successful repair preserves the exact binary as mode 0600
+and records its original mode plus restore guidance in a private manifest.
+`dotfiles-tui` and `dotfiles-setup` are never changed by this command.
 
 ## Managed configuration locations
 
