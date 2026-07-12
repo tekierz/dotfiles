@@ -21,12 +21,14 @@ type NativeManageConfigState struct {
 	Btop                 tools.BtopConfigImport
 	Glow                 tools.GlowConfigImport
 	LazyGit              tools.LazyGitConfigImport
+	Yazi                 tools.YaziConfigImport
 	GitError             string
 	GhosttyError         string
 	TmuxError            string
 	BtopError            string
 	GlowError            string
 	LazyGitError         string
+	YaziError            string
 	BtopThemeExplicit    bool
 	BtopThemeUnsupported bool
 	Applied              bool
@@ -96,6 +98,7 @@ func (a *App) NativeConfigState() NativeManageConfigState {
 	state.LazyGit.Fields = cloneConfigProvenance(state.LazyGit.Fields)
 	state.LazyGit.Sources = append([]tools.ConfigImportSource(nil), state.LazyGit.Sources...)
 	state.LazyGit.Warnings = append([]string(nil), state.LazyGit.Warnings...)
+	state.Yazi.Fields = cloneConfigProvenance(state.Yazi.Fields)
 	return state
 }
 
@@ -162,7 +165,7 @@ func inspectManagePreferencePresence() managePreferencePresence {
 		// One-time adoption migration for prototype-era full-struct saves. Those
 		// files had no way to distinguish deliberate choices from copied defaults.
 		for key := range fields {
-			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") || strings.HasPrefix(key, "Btop") || strings.HasPrefix(key, "Glow") || strings.HasPrefix(key, "LazyGit") {
+			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") || strings.HasPrefix(key, "Btop") || strings.HasPrefix(key, "Glow") || strings.HasPrefix(key, "LazyGit") || strings.HasPrefix(key, "Yazi") {
 				delete(fields, key)
 			}
 		}
@@ -198,6 +201,15 @@ func inspectManagePreferencePresence() managePreferencePresence {
 		// LazyGit native hydration and honest preset names are schema v5.
 		for key := range fields {
 			if strings.HasPrefix(key, "LazyGit") {
+				delete(fields, key)
+			}
+		}
+		fallthrough
+	case 5:
+		// Native Yazi observation is schema v6. Earlier files serialized
+		// dashboard defaults rather than explicit per-field intent.
+		for key := range fields {
+			if strings.HasPrefix(key, "Yazi") {
 				delete(fields, key)
 			}
 		}
@@ -301,6 +313,15 @@ func observeNativeManageConfig(target *ManageConfig, preferences managePreferenc
 			overlayImportedLazyGitConfig(target, lazyGitImport, explicit, preferences)
 		}
 	}
+	yaziImport, err := tools.ImportYaziConfig()
+	if err != nil {
+		state.YaziError = err.Error()
+	} else {
+		state.Yazi = yaziImport
+		if preferences.err == nil {
+			overlayImportedYaziConfig(target, yaziImport, preferences.fields)
+		}
+	}
 	state.Applied = preferences.err == nil && target != nil && *target != before
 	if preferences.err == nil && target != nil {
 		target.NativeImportSchemaVersion = currentNativeImportSchemaVersion
@@ -309,6 +330,35 @@ func observeNativeManageConfig(target *ManageConfig, preferences managePreferenc
 		state.PreferenceError = preferences.err.Error()
 	}
 	return state
+}
+
+func overlayImportedYaziConfig(target *ManageConfig, imported tools.YaziConfigImport, explicit map[string]bool) {
+	if target == nil {
+		return
+	}
+	applyMain := imported.Main.Exists && imported.Main.Ownership != tools.YaziOwnershipMissing && imported.Main.Ownership != tools.YaziOwnershipMalformed
+	if applyMain {
+		force := imported.Main.Ownership == tools.YaziOwnershipNative || imported.Main.Ownership == tools.YaziOwnershipExactHistorical
+		for key, apply := range map[string]func(){
+			"YaziShowHidden":  func() { target.YaziShowHidden = imported.Config.ShowHidden },
+			"YaziPreviewMode": func() { target.YaziPreviewMode = imported.Config.PreviewMode },
+			"YaziSortBy":      func() { target.YaziSortBy = imported.Config.SortBy },
+			"YaziSortReverse": func() { target.YaziSortReverse = imported.Config.SortReverse },
+			"YaziLineMode":    func() { target.YaziLineMode = imported.Config.LineMode },
+			"YaziScrollOff":   func() { target.YaziScrollOff = imported.Config.ScrollOff },
+		} {
+			if force || !explicit[key] {
+				apply()
+			}
+		}
+	}
+	applyKeymap := imported.Keymap.Exists && imported.Keymap.Ownership != tools.YaziOwnershipMissing && imported.Keymap.Ownership != tools.YaziOwnershipMalformed
+	if applyKeymap {
+		force := imported.Keymap.Ownership == tools.YaziOwnershipNative || imported.Keymap.Ownership == tools.YaziOwnershipExactHistorical
+		if force || !explicit["YaziKeymap"] {
+			target.YaziKeymap = imported.Config.Keymap
+		}
+	}
 }
 
 func overlayImportedLazyGitConfig(target *ManageConfig, imported tools.LazyGitConfigImport, explicit map[string]bool, preferences managePreferencePresence) {

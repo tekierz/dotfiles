@@ -1,6 +1,6 @@
 package ui
 
-const currentNativeImportSchemaVersion = 5
+const currentNativeImportSchemaVersion = 6
 
 // ManageConfig holds detailed management configuration for all tools
 type ManageConfig struct {
@@ -205,7 +205,7 @@ func NewManageConfig() *ManageConfig {
 		YaziPreviewMode: "auto",
 		YaziSortBy:      "alphabetical",
 		YaziSortReverse: false,
-		YaziLineMode:    "size",
+		YaziLineMode:    "none",
 		YaziScrollOff:   5,
 
 		// FZF

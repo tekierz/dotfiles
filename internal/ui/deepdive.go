@@ -259,7 +259,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		YaziPreviewMode: "auto",
 		YaziSortBy:      "alphabetical",
 		YaziSortReverse: false,
-		YaziLineMode:    "size",
+		YaziLineMode:    "none",
 		YaziScrollOff:   5,
 
 		// FZF defaults
