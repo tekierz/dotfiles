@@ -181,6 +181,27 @@ observability land before new integrations or broad UI work.
   its reviewed Homebrew/Arch routes; T3 Code uses an exact typed Homebrew-cask
   action. Unsupported platform rows are disabled instead of poisoning the plan.
 
+### Current product-gap checkpoint — 2026-07-12
+
+- [x] Give the Manage left selector a clear, accessible application taxonomy so terminal,
+      editor, AI-agent, utility, service, and system-management tools are distinguishable at
+      60x18, 80x24, and 120x40 without relying on color or optional glyph support alone.
+- [x] Diagnose and repair Pi installation reachability from Manage while preserving the
+      immutable typed-recipe plan, confirmation, journal, and execution authority.
+- [x] Reconcile the intended new-tool registry against the deep-dive installer and make every
+      supported integration selectable with truthful unsupported/install-only states.
+- [x] Add focused tests for Manage taxonomy, Pi plan reachability, and deep-dive registry
+      completeness before production changes; require adversarial review and responsive-view
+      evidence before accepting each slice.
+- [ ] Specify installation-profile loading, validation, versioning, portability, preview, and
+      failure behavior now, but defer implementation until installer and integration behavior
+      has passed owner-hardware verification.
+
+The supported deep-dive registry is now exact for Codex, OpenCode, Pi, T3 Code, Cursor
+desktop, and the existing service/app integrations. Cursor Agent CLI and Hermes remain
+deliberately absent until their artifact, authentication, and policy designs are reviewed;
+the dashboard does not present them as installable.
+
 ## Comprehensive pre-deployment audit — 2026-07-09
 
 - [x] Inventory every tracked file and record exact coverage.

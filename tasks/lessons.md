@@ -24,3 +24,9 @@
   twice, interrupt that turn and replace it with a fresh tests-only agent. Do not
   permit more production growth until the complete failing matrix is visible and
   independently reviewed.
+- Registry presence is not feature reachability. For every added integration, test the full
+  user path through Manage, the deep-dive selector, immutable planning, confirmation, and
+  typed execution; a tool that exists only in registry metadata is still a missing feature.
+- Terminal category styling must preserve meaning without color or decorative glyphs. Treat
+  narrow layouts, plain-ASCII terminals, and reduced-color environments as first-class
+  acceptance cases rather than visual polish deferred until release.
