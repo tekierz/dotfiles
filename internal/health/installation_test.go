@@ -21,8 +21,9 @@ func packageNamespaceForTest(t *testing.T, facet PackageFacet, namespace Package
 
 func TestNewInstallationObservationValidatesVersionOneDomain(t *testing.T) {
 	valid := InstallationObservationSpec{
-		ToolID:         "ghostty",
-		Installability: InstallabilitySupported,
+		ToolID:              "ghostty",
+		Installability:      InstallabilitySupported,
+		InstallRecipeDigest: validRecipeDigest,
 		Package: PackageFacet{
 			State:            PackagePartial,
 			Provider:         "brew",
@@ -190,7 +191,7 @@ func TestInstallationPresenceAuthorityTruthTable(t *testing.T) {
 		{name: "direct authority unknown without positive", pkg: packageFacet(PackageMissing, false), direct: directFacet(ComponentUnknown, true), presence: PresenceUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			observation, err := NewInstallationObservation(InstallationObservationSpec{ToolID: "tool", Installability: InstallabilitySupported, Package: tc.pkg, Direct: tc.direct})
+			observation, err := NewInstallationObservation(InstallationObservationSpec{ToolID: "tool", Installability: InstallabilitySupported, InstallRecipeDigest: validRecipeDigest, Package: tc.pkg, Direct: tc.direct})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -204,8 +205,9 @@ func TestInstallationPresenceAuthorityTruthTable(t *testing.T) {
 func TestInstallationDiagnosticIsStableBoundedAndSanitized(t *testing.T) {
 	raw := "brew failed\x00\n\u0085\x1b[31m\u202E" + strings.Repeat("界", 300)
 	observation, err := NewInstallationObservation(InstallationObservationSpec{
-		ToolID:         "safe",
-		Installability: InstallabilitySupported,
+		ToolID:              "safe",
+		Installability:      InstallabilitySupported,
+		InstallRecipeDigest: validRecipeDigest,
 		Package: PackageFacet{
 			State: PackageUnknown, ExpectedReceipts: []string{"safe"}, Complete: false,
 			DiagnosticCode: DiagnosticPackageBatchFailed, DiagnosticSummary: raw,
@@ -227,7 +229,7 @@ func TestInstallationDiagnosticIsStableBoundedAndSanitized(t *testing.T) {
 func TestInstallationObservationRejectsDuplicateConflictingAndOversizeEvidence(t *testing.T) {
 	base := func() InstallationObservationSpec {
 		return InstallationObservationSpec{
-			ToolID: "tool", Installability: InstallabilitySupported,
+			ToolID: "tool", Installability: InstallabilitySupported, InstallRecipeDigest: validRecipeDigest,
 			Package: PackageFacet{State: PackageMissing, Provider: "brew", ExpectedReceipts: []string{"one"}, MissingReceipts: []string{"one"}, Complete: true},
 			Direct:  DirectFacet{State: ComponentMissing, Alternatives: []DirectAlternative{{Kind: DirectSourceBinary, Identifiers: []string{"tool"}, State: ComponentMissing}}},
 		}
@@ -284,7 +286,7 @@ func TestInstallationObservationRejectsDuplicateConflictingAndOversizeEvidence(t
 
 func TestInstallationObservationSortsEvidenceWithoutDeduplicatingInvalidInput(t *testing.T) {
 	observation, err := NewInstallationObservation(InstallationObservationSpec{
-		ToolID: "sorted", Installability: InstallabilitySupported,
+		ToolID: "sorted", Installability: InstallabilitySupported, InstallRecipeDigest: validRecipeDigest,
 		Package: PackageFacet{State: PackageMissing, Provider: "brew", ExpectedReceipts: []string{"z", "a"}, MissingReceipts: []string{"z", "a"}, Complete: true},
 		Direct: DirectFacet{State: ComponentMissing, Alternatives: []DirectAlternative{
 			{Kind: DirectSourceFlatpak, Identifiers: []string{"z", "a"}, State: ComponentMissing},
@@ -298,7 +300,7 @@ func TestInstallationObservationSortsEvidenceWithoutDeduplicatingInvalidInput(t 
 		t.Fatalf("evidence was not canonicalized: package=%+v direct=%+v", observation.Package(), observation.Direct())
 	}
 	withNamespaces, err := NewInstallationObservation(InstallationObservationSpec{
-		ToolID: "namespaces", Installability: InstallabilitySupported,
+		ToolID: "namespaces", Installability: InstallabilitySupported, InstallRecipeDigest: validRecipeDigest,
 		Package: PackageFacet{State: PackageUnknown, ExpectedReceipts: []string{"one"}, UnresolvedReceipts: []string{"one"}, Namespaces: []PackageNamespaceFacet{
 			{Namespace: PackageNamespaceFormula, State: PackageUnknown, ExpectedReceipts: []string{"one"}, UnresolvedReceipts: []string{"one"}},
 			{Namespace: PackageNamespaceCask, State: PackageUnknown, ExpectedReceipts: []string{"one"}, UnresolvedReceipts: []string{"one"}},
@@ -330,7 +332,7 @@ func TestPackageNamespacesReconcileWithAggregateEvidence(t *testing.T) {
 			},
 		},
 	} {
-		if _, err := NewInstallationObservation(InstallationObservationSpec{ToolID: "valid", Installability: InstallabilitySupported, Package: facet, Direct: DirectFacet{State: ComponentNotApplicable}}); err != nil {
+		if _, err := NewInstallationObservation(InstallationObservationSpec{ToolID: "valid", Installability: InstallabilitySupported, InstallRecipeDigest: validRecipeDigest, Package: facet, Direct: DirectFacet{State: ComponentNotApplicable}}); err != nil {
 			t.Fatalf("valid namespace aggregate rejected: %v", err)
 		}
 	}
@@ -353,7 +355,7 @@ func TestPackageNamespacesReconcileWithAggregateEvidence(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			facet := clonePackageFacet(base)
 			mutate(&facet)
-			if _, err := NewInstallationObservation(InstallationObservationSpec{ToolID: "invalid", Installability: InstallabilitySupported, Package: facet, Direct: DirectFacet{State: ComponentNotApplicable}}); err == nil {
+			if _, err := NewInstallationObservation(InstallationObservationSpec{ToolID: "invalid", Installability: InstallabilitySupported, InstallRecipeDigest: validRecipeDigest, Package: facet, Direct: DirectFacet{State: ComponentNotApplicable}}); err == nil {
 				t.Fatal("contradictory namespace aggregate was accepted")
 			}
 		})
@@ -408,8 +410,9 @@ func TestInstallationObservationIsImmutable(t *testing.T) {
 	}
 	alternatives := []DirectAlternative{{Kind: DirectSourceAppBundle, Identifiers: identifiers, State: ComponentPresent}}
 	observation, err := NewInstallationObservation(InstallationObservationSpec{
-		ToolID:         "example",
-		Installability: InstallabilitySupported,
+		ToolID:              "example",
+		Installability:      InstallabilitySupported,
+		InstallRecipeDigest: validRecipeDigest,
 		Package: PackageFacet{
 			State: PackagePartial, Provider: "brew", ExpectedReceipts: expectedAll, ObservedReceipts: observed, MissingReceipts: missing, UnresolvedReceipts: unresolved, Authoritative: true, Complete: false,
 			Namespaces: namespaces,
@@ -478,7 +481,7 @@ func TestInstallationObservationIsImmutable(t *testing.T) {
 func TestNewInstallationSnapshotSortsAndClonesObservations(t *testing.T) {
 	makeObservation := func(id string) InstallationObservation {
 		observation, err := NewInstallationObservation(InstallationObservationSpec{
-			ToolID: id, Installability: InstallabilitySupported,
+			ToolID: id, Installability: InstallabilitySupported, InstallRecipeDigest: validRecipeDigest,
 			Package: PackageFacet{State: PackageMissing, Provider: "brew", ExpectedReceipts: []string{"receipt"}, MissingReceipts: []string{"receipt"}, Authoritative: true, Complete: true},
 			Direct:  DirectFacet{State: ComponentNotApplicable},
 		})

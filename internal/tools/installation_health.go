@@ -116,12 +116,12 @@ func observeInstallationHealthWithRuntime(ctx context.Context, all []Tool, mgr p
 		if ctx.Err() == nil {
 			directFacet = buildDirectHealth(tool, directObservation, flatpakState, flatpakCode, flatpakSummary)
 		}
-		installability, err := observeInstallability(tool, platform, managerName, mgr != nil)
+		installability, recipeDigest, err := observeInstallability(tool, platform, managerName, mgr != nil)
 		if err != nil {
 			return health.InstallationSnapshot{}, fmt.Errorf("describe %s installability: %w", tool.ID(), err)
 		}
 		observation, err := health.NewInstallationObservation(health.InstallationObservationSpec{
-			ToolID: tool.ID(), Installability: installability, Package: packageFacet, Direct: directFacet,
+			ToolID: tool.ID(), Installability: installability, InstallRecipeDigest: recipeDigest, Package: packageFacet, Direct: directFacet,
 		})
 		if err != nil {
 			return health.InstallationSnapshot{}, fmt.Errorf("collect %s installation health: %w", tool.ID(), err)
@@ -390,26 +390,27 @@ func aggregatePackageDiagnostic(formula, cask namespaceObservation) (health.Diag
 	return "", ""
 }
 
-func observeInstallability(tool Tool, platform pkg.Platform, manager string, managerAvailable bool) (health.Installability, error) {
+func observeInstallability(tool Tool, platform pkg.Platform, manager string, managerAvailable bool) (health.Installability, string, error) {
 	if !managerAvailable {
 		if len(PackagesForPlatform(tool.Packages(), platform)) == 0 {
 			if _, provider := tool.(InstallRecipeProvider); !provider {
-				return health.InstallabilityUnsupported, nil
+				return health.InstallabilityUnsupported, "", nil
 			}
 		}
-		return health.InstallabilityUnknown, nil
+		return health.InstallabilityUnknown, "", nil
 	}
 	recipe, available := describeInstallabilityRecipe(tool, platform, manager)
 	if !available {
-		return health.InstallabilityUnsupported, nil
+		return health.InstallabilityUnsupported, "", nil
 	}
-	if _, err := operation.InstallRecipeDigest(recipe); err != nil {
-		return health.InstallabilityUnknown, errInvalidInstallRecipeMetadata
+	digest, err := operation.InstallRecipeDigest(recipe)
+	if err != nil {
+		return health.InstallabilityUnknown, "", errInvalidInstallRecipeMetadata
 	}
 	if recipe.ToolID != tool.ID() || recipe.Platform != string(platform) || recipe.Manager != manager {
-		return health.InstallabilityUnknown, errInvalidInstallRecipeMetadata
+		return health.InstallabilityUnknown, "", errInvalidInstallRecipeMetadata
 	}
-	return health.InstallabilitySupported, nil
+	return health.InstallabilitySupported, digest, nil
 }
 
 func describeInstallabilityRecipe(tool Tool, platform pkg.Platform, manager string) (operation.InstallRecipe, bool) {

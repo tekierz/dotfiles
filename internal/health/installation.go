@@ -1,6 +1,9 @@
 package health
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -125,18 +128,20 @@ type DirectFacet struct {
 }
 
 type InstallationObservationSpec struct {
-	ToolID         string
-	Installability Installability
-	Package        PackageFacet
-	Direct         DirectFacet
+	ToolID              string
+	Installability      Installability
+	InstallRecipeDigest string
+	Package             PackageFacet
+	Direct              DirectFacet
 }
 
 type InstallationObservation struct {
-	toolID         string
-	installability Installability
-	presence       Presence
-	packageFacet   PackageFacet
-	directFacet    DirectFacet
+	toolID              string
+	installability      Installability
+	installRecipeDigest string
+	presence            Presence
+	packageFacet        PackageFacet
+	directFacet         DirectFacet
 }
 
 // ValidateInstallationToolIDs validates collector input before any external
@@ -166,6 +171,13 @@ func NewInstallationObservation(spec InstallationObservationSpec) (InstallationO
 	if !validInstallability(spec.Installability) {
 		return InstallationObservation{}, fmt.Errorf("invalid installability %q", spec.Installability)
 	}
+	if spec.Installability == InstallabilitySupported {
+		if !validLowerHexDigest(spec.InstallRecipeDigest) {
+			return InstallationObservation{}, errors.New("supported installation requires a valid recipe digest")
+		}
+	} else if spec.InstallRecipeDigest != "" {
+		return InstallationObservation{}, errors.New("non-supported installation cannot carry a recipe digest")
+	}
 	packageFacet, err := normalizePackageFacet(spec.Package)
 	if err != nil {
 		return InstallationObservation{}, fmt.Errorf("package facet: %w", err)
@@ -175,7 +187,7 @@ func NewInstallationObservation(spec InstallationObservationSpec) (InstallationO
 		return InstallationObservation{}, fmt.Errorf("direct facet: %w", err)
 	}
 	return InstallationObservation{
-		toolID: spec.ToolID, installability: spec.Installability,
+		toolID: spec.ToolID, installability: spec.Installability, installRecipeDigest: spec.InstallRecipeDigest,
 		presence:     derivePresence(packageFacet, directFacet),
 		packageFacet: packageFacet, directFacet: directFacet,
 	}, nil
@@ -183,6 +195,7 @@ func NewInstallationObservation(spec InstallationObservationSpec) (InstallationO
 
 func (o InstallationObservation) ToolID() string                 { return o.toolID }
 func (o InstallationObservation) Installability() Installability { return o.installability }
+func (o InstallationObservation) InstallRecipeDigest() string    { return o.installRecipeDigest }
 func (o InstallationObservation) Presence() Presence             { return o.presence }
 func (o InstallationObservation) Package() PackageFacet          { return clonePackageFacet(o.packageFacet) }
 func (o InstallationObservation) Direct() DirectFacet            { return cloneDirectFacet(o.directFacet) }
@@ -201,6 +214,86 @@ type InstallationSnapshot struct {
 	manager       string
 	tools         []InstallationObservation
 	byID          map[string]InstallationObservation
+	canonical     []byte
+	digest        string
+}
+
+type canonicalInstallationSnapshot struct {
+	SchemaVersion int                                `json:"schema_version"`
+	Generation    uint64                             `json:"generation"`
+	Platform      string                             `json:"platform"`
+	Manager       string                             `json:"manager"`
+	Tools         []canonicalInstallationObservation `json:"tools"`
+}
+type canonicalInstallationObservation struct {
+	ToolID              string                `json:"tool_id"`
+	Installability      Installability        `json:"installability"`
+	InstallRecipeDigest string                `json:"install_recipe_digest"`
+	Presence            Presence              `json:"presence"`
+	Package             canonicalPackageFacet `json:"package"`
+	Direct              canonicalDirectFacet  `json:"direct"`
+}
+type canonicalPackageFacet struct {
+	State              PackageState                     `json:"state"`
+	Provider           string                           `json:"provider"`
+	ExpectedReceipts   []string                         `json:"expected_receipts"`
+	ObservedReceipts   []string                         `json:"observed_receipts"`
+	MissingReceipts    []string                         `json:"missing_receipts"`
+	UnresolvedReceipts []string                         `json:"unresolved_receipts"`
+	Authoritative      bool                             `json:"authoritative"`
+	Complete           bool                             `json:"complete"`
+	Namespaces         []canonicalPackageNamespaceFacet `json:"namespaces"`
+	DiagnosticCode     DiagnosticCode                   `json:"diagnostic_code"`
+	DiagnosticSummary  string                           `json:"diagnostic_summary"`
+}
+type canonicalPackageNamespaceFacet struct {
+	Namespace          PackageNamespace `json:"namespace"`
+	State              PackageState     `json:"state"`
+	ExpectedReceipts   []string         `json:"expected_receipts"`
+	ObservedReceipts   []string         `json:"observed_receipts"`
+	MissingReceipts    []string         `json:"missing_receipts"`
+	UnresolvedReceipts []string         `json:"unresolved_receipts"`
+	Complete           bool             `json:"complete"`
+	DiagnosticCode     DiagnosticCode   `json:"diagnostic_code"`
+	DiagnosticSummary  string           `json:"diagnostic_summary"`
+}
+type canonicalDirectFacet struct {
+	State             ComponentState               `json:"state"`
+	Authoritative     bool                         `json:"authoritative"`
+	Alternatives      []canonicalDirectAlternative `json:"alternatives"`
+	DiagnosticCode    DiagnosticCode               `json:"diagnostic_code"`
+	DiagnosticSummary string                       `json:"diagnostic_summary"`
+}
+type canonicalDirectAlternative struct {
+	Kind              DirectSourceKind `json:"kind"`
+	Identifiers       []string         `json:"identifiers"`
+	State             ComponentState   `json:"state"`
+	DiagnosticCode    DiagnosticCode   `json:"diagnostic_code"`
+	DiagnosticSummary string           `json:"diagnostic_summary"`
+}
+
+func canonicalSnapshotFrom(schema int, generation uint64, platform, manager string, tools []InstallationObservation) canonicalInstallationSnapshot {
+	document := canonicalInstallationSnapshot{SchemaVersion: schema, Generation: generation, Platform: platform, Manager: manager, Tools: make([]canonicalInstallationObservation, len(tools))}
+	for index, observation := range tools {
+		packageFacet, directFacet := observation.packageFacet, observation.directFacet
+		canonicalPackage := canonicalPackageFacet{State: packageFacet.State, Provider: packageFacet.Provider, ExpectedReceipts: nonNilStrings(packageFacet.ExpectedReceipts), ObservedReceipts: nonNilStrings(packageFacet.ObservedReceipts), MissingReceipts: nonNilStrings(packageFacet.MissingReceipts), UnresolvedReceipts: nonNilStrings(packageFacet.UnresolvedReceipts), Authoritative: packageFacet.Authoritative, Complete: packageFacet.Complete, Namespaces: make([]canonicalPackageNamespaceFacet, len(packageFacet.Namespaces)), DiagnosticCode: packageFacet.DiagnosticCode, DiagnosticSummary: packageFacet.DiagnosticSummary}
+		for namespaceIndex, namespace := range packageFacet.Namespaces {
+			canonicalPackage.Namespaces[namespaceIndex] = canonicalPackageNamespaceFacet{Namespace: namespace.Namespace, State: namespace.State, ExpectedReceipts: nonNilStrings(namespace.ExpectedReceipts), ObservedReceipts: nonNilStrings(namespace.ObservedReceipts), MissingReceipts: nonNilStrings(namespace.MissingReceipts), UnresolvedReceipts: nonNilStrings(namespace.UnresolvedReceipts), Complete: namespace.Complete, DiagnosticCode: namespace.DiagnosticCode, DiagnosticSummary: namespace.DiagnosticSummary}
+		}
+		canonicalDirect := canonicalDirectFacet{State: directFacet.State, Authoritative: directFacet.Authoritative, Alternatives: make([]canonicalDirectAlternative, len(directFacet.Alternatives)), DiagnosticCode: directFacet.DiagnosticCode, DiagnosticSummary: directFacet.DiagnosticSummary}
+		for alternativeIndex, alternative := range directFacet.Alternatives {
+			canonicalDirect.Alternatives[alternativeIndex] = canonicalDirectAlternative{Kind: alternative.Kind, Identifiers: nonNilStrings(alternative.Identifiers), State: alternative.State, DiagnosticCode: alternative.DiagnosticCode, DiagnosticSummary: alternative.DiagnosticSummary}
+		}
+		document.Tools[index] = canonicalInstallationObservation{ToolID: observation.toolID, Installability: observation.installability, InstallRecipeDigest: observation.installRecipeDigest, Presence: observation.presence, Package: canonicalPackage, Direct: canonicalDirect}
+	}
+	return document
+}
+
+func nonNilStrings(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	return slices.Clone(values)
 }
 
 func NewInstallationSnapshot(spec InstallationSnapshotSpec) (InstallationSnapshot, error) {
@@ -230,13 +323,20 @@ func NewInstallationSnapshot(spec InstallationSnapshotSpec) (InstallationSnapsho
 		}
 		byID[observation.toolID] = observation
 	}
-	return InstallationSnapshot{CurrentInstallationSchemaVersion, spec.Generation, spec.Platform, spec.Manager, tools, byID}, nil
+	canonical, err := json.Marshal(canonicalSnapshotFrom(CurrentInstallationSchemaVersion, spec.Generation, spec.Platform, spec.Manager, tools))
+	if err != nil {
+		return InstallationSnapshot{}, fmt.Errorf("marshal canonical installation snapshot: %w", err)
+	}
+	hash := sha256.Sum256(canonical)
+	return InstallationSnapshot{schemaVersion: CurrentInstallationSchemaVersion, generation: spec.Generation, platform: spec.Platform, manager: spec.Manager, tools: tools, byID: byID, canonical: canonical, digest: hex.EncodeToString(hash[:])}, nil
 }
 
-func (s InstallationSnapshot) SchemaVersion() int { return s.schemaVersion }
-func (s InstallationSnapshot) Generation() uint64 { return s.generation }
-func (s InstallationSnapshot) Platform() string   { return s.platform }
-func (s InstallationSnapshot) Manager() string    { return s.manager }
+func (s InstallationSnapshot) SchemaVersion() int     { return s.schemaVersion }
+func (s InstallationSnapshot) Generation() uint64     { return s.generation }
+func (s InstallationSnapshot) Platform() string       { return s.platform }
+func (s InstallationSnapshot) Manager() string        { return s.manager }
+func (s InstallationSnapshot) Digest() string         { return s.digest }
+func (s InstallationSnapshot) CanonicalBytes() []byte { return slices.Clone(s.canonical) }
 func (s InstallationSnapshot) Tools() []InstallationObservation {
 	return slices.Clone(s.tools)
 }
@@ -582,6 +682,18 @@ func validateIdentifier(label, value string) error {
 		}
 	}
 	return nil
+}
+
+func validLowerHexDigest(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeDiagnostic(code *DiagnosticCode, summary *string) error {

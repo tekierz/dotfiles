@@ -589,6 +589,20 @@ func TestObserveInstallationHealthBlocker6InstallabilityComesFromValidatedRecipe
 	if healthTool(t, snapshot, "valid").Installability() != health.InstallabilitySupported || healthTool(t, snapshot, "rejected").Installability() != health.InstallabilityUnsupported {
 		t.Fatalf("installability valid=%q rejected=%q", healthTool(t, snapshot, "valid").Installability(), healthTool(t, snapshot, "rejected").Installability())
 	}
+	recipe, recipeErr := DescribeInstall(valid, InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
+	if recipeErr != nil {
+		t.Fatal(recipeErr)
+	}
+	wantDigest, digestErr := operation.InstallRecipeDigest(recipe)
+	if digestErr != nil {
+		t.Fatal(digestErr)
+	}
+	if got := healthTool(t, snapshot, "valid").InstallRecipeDigest(); got != wantDigest {
+		t.Fatalf("supported recipe digest=%q want %q", got, wantDigest)
+	}
+	if got := healthTool(t, snapshot, "rejected").InstallRecipeDigest(); got != "" {
+		t.Fatalf("unsupported recipe digest=%q", got)
+	}
 	invalid := &recipeHealthTool{BaseTool: *observationBaseTool("invalid", "invalid"), recipe: operation.InstallRecipe{ToolID: "invalid"}}
 	published, err := observeInstallationHealthWithRuntime(context.Background(), []Tool{valid, invalid}, mgr, pkg.PlatformMacOS, 9, defaultInstallationObservationRuntime())
 	_, lookup := published.Tool("valid")
