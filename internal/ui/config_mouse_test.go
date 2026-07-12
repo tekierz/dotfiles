@@ -199,7 +199,7 @@ func TestConfigFieldClickFamily(t *testing.T) {
 		{
 			name:  "glow",
 			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigGlowScreen(ctx) },
-			want:  []fieldCase{{"Style", 0}, {"Pager", 1}, {"Width", 2}},
+			want:  []fieldCase{{"Style", 0}, {"Use Pager", 1}, {"Width", 2}, {"Mouse", 3}, {"Show All Files", 4}, {"Line Numbers", 5}, {"Preserve Newlines", 6}},
 		},
 		{
 			name:  "fzf",

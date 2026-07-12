@@ -105,6 +105,9 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 	dd.GlowStyle = "dark"
 	dd.GlowWidth = 100
 	dd.GlowMouse = true
+	dd.GlowAll = true
+	dd.GlowShowLineNumbers = true
+	dd.GlowPreserveNewLines = true
 
 	return dd
 }
@@ -242,10 +245,13 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 	}
 
 	if got, want := glowConfigFrom(cfg), (tools.GlowConfig{
-		Pager: cfg.GlowPager,
-		Style: cfg.GlowStyle,
-		Width: cfg.GlowWidth,
-		Mouse: cfg.GlowMouse,
+		Pager:            cfg.GlowPager,
+		Style:            cfg.GlowStyle,
+		Width:            cfg.GlowWidth,
+		Mouse:            cfg.GlowMouse,
+		All:              cfg.GlowAll,
+		ShowLineNumbers:  cfg.GlowShowLineNumbers,
+		PreserveNewLines: cfg.GlowPreserveNewLines,
 	}); got != want {
 		t.Errorf("glowConfigFrom mismatch:\n got %+v\nwant %+v", got, want)
 	}

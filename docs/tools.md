@@ -137,7 +137,7 @@ shown before apply is authoritative for a particular machine.
 | `~/.config/btop/btop.conf` | btop settings |
 | `~/.config/lazygit/config.yml` | LazyGit settings |
 | `~/.config/lazydocker/config.yml` | LazyDocker settings |
-| `~/.config/glow/glow.yml` | Glow settings on platforms using the XDG path |
+| Active `glow.{yaml,yml}` under `GLOW_CONFIG_HOME`, `XDG_CONFIG_HOME/glow`, or Glow's platform user-config directory | Glow settings; the first Viper-compatible source wins |
 | `~/.claude.json` | Claude Code user-scope MCP servers |
 | `~/.gitconfig` | Native Git configuration with a bounded managed include |
 | `~/.config/dotfiles/git/config` | Product-owned Git and diff settings |
@@ -148,3 +148,12 @@ shown before apply is authoritative for a particular machine.
 Git and Ghostty adoption preserves existing native content inside bounded
 managed sections. Recovery comes from the reviewed operation backup; writers do
 not create or overwrite ambiguous sibling `*.dotfiles.bak` files.
+
+Glow management is pinned to Glow v2.1.2. It exposes `style`, `mouse`, `pager`,
+`width`, `all`, `showLineNumbers`, and `preserveNewLines` in one trailing managed
+YAML block while preserving unknown flat scalar settings byte-for-byte. Adoption
+rejects complex, duplicate, malformed, or unsupported YAML and blocks when a
+higher-precedence non-YAML source or environment setting override is active.
+The eight built-in styles are writable. Existing custom style strings are
+imported and displayed read-only; choose a built-in before saving other Glow
+changes. Width `0` is Glow's automatic mode (maximum 120, fallback 80).

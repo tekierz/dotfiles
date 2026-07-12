@@ -147,10 +147,13 @@ type DeepDiveConfig struct {
 	BtopShownBoxes string // shown boxes
 
 	// Glow settings
-	GlowPager string
-	GlowStyle string
-	GlowWidth int
-	GlowMouse bool // mouse support
+	GlowPager            string
+	GlowStyle            string
+	GlowWidth            int
+	GlowMouse            bool // mouse support
+	GlowAll              bool
+	GlowShowLineNumbers  bool
+	GlowPreserveNewLines bool
 
 	// Claude Code MCP settings
 	ClaudeCodeMCPs map[string]bool // MCP servers to enable
@@ -304,10 +307,10 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		BtopShownBoxes: "cpu mem net proc",
 
 		// Glow defaults
-		GlowPager: "auto",
+		GlowPager: "never",
 		GlowStyle: "auto",
 		GlowWidth: 80,
-		GlowMouse: true,
+		GlowMouse: false,
 
 		// Claude Code MCP defaults
 		ClaudeCodeMCPs: map[string]bool{

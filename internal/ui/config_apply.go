@@ -242,10 +242,13 @@ func btopConfigFrom(cfg DeepDiveConfig) tools.BtopConfig {
 // glowConfigFrom is the single mapping of DeepDiveConfig to tools.GlowConfig.
 func glowConfigFrom(cfg DeepDiveConfig) tools.GlowConfig {
 	return tools.GlowConfig{
-		Pager: cfg.GlowPager,
-		Style: cfg.GlowStyle,
-		Width: cfg.GlowWidth,
-		Mouse: cfg.GlowMouse,
+		Pager:            cfg.GlowPager,
+		Style:            cfg.GlowStyle,
+		Width:            cfg.GlowWidth,
+		Mouse:            cfg.GlowMouse,
+		All:              cfg.GlowAll,
+		ShowLineNumbers:  cfg.GlowShowLineNumbers,
+		PreserveNewLines: cfg.GlowPreserveNewLines,
 	}
 }
 
@@ -354,11 +357,8 @@ func tmuxPrefixToGenerator(prefix string) string {
 	}
 }
 
-// glowPagerToGenerator maps the Manage UI's pager vocabulary onto the values
-// GenerateGlowConfig understands ("auto"/"less" -> pager on, "never" -> off).
-// The Manage options include "more" and "none" which the generator does not
-// recognize; map them to the closest supported value so the written file is
-// never wrong (C26).
+// glowPagerToGenerator canonicalizes prototype-era persisted labels. Current
+// Manage options are only auto (enabled) and never (disabled).
 func glowPagerToGenerator(pager string) string {
 	switch pager {
 	case "none":
@@ -513,6 +513,9 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.GlowPager = glowPagerToGenerator(mc.GlowPager)
 	dd.GlowWidth = mc.GlowWidth
 	dd.GlowMouse = mc.GlowMouse
+	dd.GlowAll = mc.GlowAll
+	dd.GlowShowLineNumbers = mc.GlowShowLineNumbers
+	dd.GlowPreserveNewLines = mc.GlowPreserveNewLines
 
 	// Claude Code MCP servers: translate the flat bools into the map the
 	// generator consumes (keys must match config.AllMCPServers()).

@@ -43,6 +43,82 @@ func TestStandaloneConfigFirstEnterBuildsExactNonMutatingPreview(t *testing.T) {
 	}
 }
 
+func TestStandaloneGlowPreviewThenExecuteAdoptsSevenFieldManagedBlock(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	t.Setenv("GLOW_CONFIG_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	path, err := tools.GlowConfigMutationPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	native := []byte("style: /missing/custom.json\ncustom: keep\n")
+	if err := os.WriteFile(path, native, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.startScreen = ScreenConfigGlow
+	app.deepDiveConfig.CLITools["glow"] = true
+	cfg := app.deepDiveConfig
+	cfg.GlowStyle = "dracula"
+	cfg.GlowPager = "auto"
+	cfg.GlowWidth = 0
+	cfg.GlowMouse = true
+	cfg.GlowAll = true
+	cfg.GlowShowLineNumbers = true
+	cfg.GlowPreserveNewLines = true
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil || plan.hasBlocked() {
+		t.Fatalf("plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, native) {
+		t.Fatalf("preview mutated native config: %q", got)
+	}
+	action := planActionByID(t, plan, "config:glow")
+	if action.Ownership != operation.OwnershipManagedFragment {
+		t.Fatalf("ownership=%s", action.Ownership)
+	}
+	err, manual := executeStandaloneConfigPlanWithRuntime(context.Background(), plan, defaultStandaloneConfigRuntime())
+	if err != nil || manual {
+		t.Fatalf("execute err=%v manual=%v", err, manual)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"custom: keep\n", "style: \"dracula\"", "pager: true", "width: 0", "mouse: true", "all: true", "showLineNumbers: true", "preserveNewLines: true"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("result missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestStandaloneGlowCustomStyleRemainsReadOnlyAndNonMutating(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	t.Setenv("GLOW_CONFIG_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	path, err := tools.GlowConfigMutationPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	native := []byte("style: /missing/custom.json\ncustom: keep\n")
+	if err := os.WriteFile(path, native, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.startScreen = ScreenConfigGlow
+	app.deepDiveConfig.GlowStyle = "/missing/custom.json"
+	if _, err := buildStandaloneConfigPlan(app, time.Now()); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("custom plan error=%v", err)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, native) {
+		t.Fatalf("blocked custom preview mutated file: %q", got)
+	}
+}
+
 func TestStandaloneConfigPlansAuthorityCapableWriterTargets(t *testing.T) {
 	app, home, _ := newPlanTestApp(t)
 	app.deepDiveConfig.CLITools["lazygit"] = true

@@ -120,6 +120,90 @@ func TestNewAppHydratesNativeBtopForManageAndStandalone(t *testing.T) {
 	}
 }
 
+func TestNewAppHydratesNativeGlowSevenFieldsForManageAndStandalone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GLOW_CONFIG_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	path := filepath.Join(home, ".config", "glow", "glow.yml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := "style: /tmp/custom.json\nmouse: true\npager: true\nwidth: 111\nall: true\nshowLineNumbers: true\npreserveNewLines: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(true)
+	mc := app.manageConfig
+	if mc.GlowStyle != "/tmp/custom.json" || !mc.GlowMouse || mc.GlowPager != "auto" || mc.GlowWidth != 111 || !mc.GlowAll || !mc.GlowShowLineNumbers || !mc.GlowPreserveNewLines {
+		t.Fatalf("Manage Glow hydration=%+v", mc)
+	}
+	dd := app.deepDiveConfig
+	if dd.GlowStyle != "/tmp/custom.json" || !dd.GlowMouse || dd.GlowPager != "auto" || dd.GlowWidth != 111 || !dd.GlowAll || !dd.GlowShowLineNumbers || !dd.GlowPreserveNewLines {
+		t.Fatalf("DeepDive Glow hydration=%+v", dd)
+	}
+	state := app.NativeConfigState()
+	if state.GlowError != "" || len(state.Glow.Fields) != 7 || state.Glow.Fields[tools.GlowFieldStyle].Path != path {
+		t.Fatalf("Glow state=%+v err=%s", state.Glow, state.GlowError)
+	}
+	ctx := NewTestScreenContext()
+	ctx.app = app
+	if view := NewConfigGlowScreen(ctx).View(80, 24); !strings.Contains(view, "/tmp/custom.json") || !strings.Contains(view, "111 chars") || !strings.Contains(view, "Enabled") {
+		t.Fatalf("hydrated Glow view:\n%s", view)
+	}
+}
+
+func TestGlowSchemaFourExplicitWinsAndLegacyPagerMigratesWithoutNativeSource(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		schema      int
+		pager, want string
+	}{{"schema four explicit", 4, "less", "less"}, {"schema three less canonicalizes", 3, "less", "auto"}, {"schema three none canonicalizes", 3, "none", "never"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("GLOW_CONFIG_HOME", "")
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+			path := filepath.Join(config.ToolsDir(), "manage.json")
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"NativeImportSchemaVersion":%d,"GlowPager":%q}`, tc.schema, tc.pager)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			app := NewApp(true)
+			if app.manageConfig.GlowPager != tc.want {
+				t.Fatalf("pager=%q want %q", app.manageConfig.GlowPager, tc.want)
+			}
+		})
+	}
+}
+
+func TestGlowSchemaZeroDefaultsDoNotBlockNativeHydration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GLOW_CONFIG_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	native := filepath.Join(home, ".config", "glow", "glow.yml")
+	if err := os.MkdirAll(filepath.Dir(native), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("style: light\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manage := filepath.Join(config.ToolsDir(), "manage.json")
+	if err := os.MkdirAll(filepath.Dir(manage), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manage, []byte(`{"GlowStyle":"dark","GlowPager":"less"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(true)
+	if app.manageConfig.GlowStyle != "light" || app.manageConfig.GlowPager != "never" || app.manageConfig.GlowAll != true || app.manageConfig.GlowWidth != 0 {
+		t.Fatalf("schema zero native hydration=%+v", app.manageConfig)
+	}
+}
+
 func TestBtopSchemaThreeExplicitPreferenceWinsAndSchemaTwoMigrates(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

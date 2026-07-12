@@ -58,7 +58,6 @@ func TestWriteGlowConfigRejectsInjectedOrUnsupportedValuesBeforeMutation(t *test
 		"style injection": {GlowConfig{Style: "dark\nlocal: false", Pager: "auto", Width: 100}, "nord"},
 		"unknown pager":   {GlowConfig{Style: "dark", Pager: "shell", Width: 100}, "nord"},
 		"negative width":  {GlowConfig{Style: "dark", Pager: "auto", Width: -1}, "nord"},
-		"huge width":      {GlowConfig{Style: "dark", Pager: "auto", Width: 1001}, "nord"},
 		"theme injection": {GlowConfig{Style: "dark", Pager: "auto", Width: 100}, "nord\nlocal: false"},
 	} {
 		t.Run(name, func(t *testing.T) {

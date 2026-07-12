@@ -59,6 +59,12 @@ func TestNormalizeNavStyle(t *testing.T) {
 	}
 }
 
+func TestGlowPagerExampleNamesAnInputFile(t *testing.T) {
+	if got := keysFor(t, Categories("emacs"), "glow", "Render a file with the configured pager"); got != "glow -p README.md" {
+		t.Fatalf("Glow pager example=%q", got)
+	}
+}
+
 func TestCategoriesStableSetAndCount(t *testing.T) {
 	t.Parallel()
 

@@ -413,11 +413,11 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 		if err := tools.ValidateGlowConfig(glowConfigFrom(cfg), theme); err != nil {
 			return spec, "", err
 		}
-		paths := tools.NewGlowTool().ConfigPaths()
-		if len(paths) != 1 {
-			return spec, "", fmt.Errorf("glow registry returned %d config paths", len(paths))
+		path, err := tools.GlowConfigMutationPath()
+		if err != nil {
+			return spec, "", err
 		}
-		spec.targets, spec.ownership, spec.description, spec.fullFilePolicy = []string{planTargetPath(home, paths[0])}, operation.OwnershipManagedFile, "write managed Glow configuration", true
+		spec.targets, spec.ownership, spec.description = []string{planTargetPath(home, path)}, operation.OwnershipManagedFragment, "merge managed Glow settings"
 	case "claude-code":
 		spec.targets, spec.ownership, spec.description = []string{".claude.json"}, operation.OwnershipManagedFragment, "merge selected Claude Code MCP servers"
 	default:
@@ -427,7 +427,7 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 }
 
 func standaloneNativeBlockReason(a *App, toolID string, allowBtopThemeReplacement bool) string {
-	if a.nativeConfigState.PreferenceError != "" && (toolID == "ghostty" || toolID == "tmux" || toolID == "git" || toolID == "btop") {
+	if a.nativeConfigState.PreferenceError != "" && (toolID == "ghostty" || toolID == "tmux" || toolID == "git" || toolID == "btop" || toolID == "glow") {
 		return "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
 	}
 	switch toolID {
@@ -446,6 +446,10 @@ func standaloneNativeBlockReason(a *App, toolID string, allowBtopThemeReplacemen
 	case "btop":
 		if a.nativeConfigState.BtopError != "" && (!a.nativeConfigState.BtopThemeUnsupported || !allowBtopThemeReplacement) {
 			return "native btop configuration could not be imported safely: " + a.nativeConfigState.BtopError
+		}
+	case "glow":
+		if a.nativeConfigState.GlowError != "" {
+			return "native Glow configuration could not be imported safely: " + a.nativeConfigState.GlowError
 		}
 	}
 	return ""

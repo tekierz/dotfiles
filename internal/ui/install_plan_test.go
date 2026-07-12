@@ -112,7 +112,7 @@ func TestInstallPlanHashCoversDesiredSettingsAndTheme(t *testing.T) {
 }
 
 func TestInstallPlanTargetsMatchDynamicWriters(t *testing.T) {
-	app, _, runtime := newPlanTestApp(t)
+	app, home, runtime := newPlanTestApp(t)
 	app.deepDiveConfig.CLITools["btop"] = true
 	app.deepDiveConfig.CLITools["glow"] = true
 	app.theme = "nord"
@@ -125,14 +125,64 @@ func TestInstallPlanTargetsMatchDynamicWriters(t *testing.T) {
 		t.Fatalf("btop plan targets do not match theme writer: %v", btop.BackupTargets)
 	}
 	glow := planActionByID(t, plan, "config:glow")
+	if glow.Ownership != operation.OwnershipManagedFragment {
+		t.Fatalf("Glow ownership=%s", glow.Ownership)
+	}
 	if goruntime.GOOS == "darwin" && !slices.Contains(glow.BackupTargets, "Library/Preferences/glow/glow.yml") {
 		t.Fatalf("macOS Glow plan target = %v", glow.BackupTargets)
+	}
+	path, err := tools.GlowConfigMutationPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := planTargetPath(home, path); len(glow.BackupTargets) != 1 || glow.BackupTargets[0] != want {
+		t.Fatalf("Glow plan path=%v, writer path=%s", glow.BackupTargets, want)
 	}
 	tmux := planActionByID(t, plan, "config:tmux")
 	for _, target := range []string{".tmux/plugins/tpm"} {
 		if !slices.Contains(tmux.BackupTargets, target) {
 			t.Errorf("tmux side-effect target %q missing from %v", target, tmux.BackupTargets)
 		}
+	}
+}
+
+func TestInstallPlanBlocksMalformedNativeGlowAtExactDynamicPath(t *testing.T) {
+	app, home, runtime := newPlanTestApp(t)
+	app.deepDiveConfig.CLITools["glow"] = true
+	t.Setenv("GLOW_CONFIG_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	path := filepath.Join(home, ".config", "glow", "glow.yml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("style: dark\nSTYLE: light\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := planActionByID(t, plan, "config:glow")
+	if action.Disposition != operation.DispositionBlocked || !strings.Contains(action.Reason, "cannot be merged safely") {
+		t.Fatalf("Glow action=%+v", action)
+	}
+	if len(action.BackupTargets) != 1 || action.BackupTargets[0] != ".config/glow/glow.yml" {
+		t.Fatalf("Glow backups=%v", action.BackupTargets)
+	}
+}
+
+func TestInstallPlanRejectsGlowRuntimeSettingOverride(t *testing.T) {
+	for _, env := range []string{"GLOW_STYLE", "GLAMOUR_STYLE"} {
+		t.Run(env, func(t *testing.T) {
+			app, _, runtime := newPlanTestApp(t)
+			app.deepDiveConfig.CLITools["glow"] = true
+			t.Setenv("GLOW_STYLE", "")
+			t.Setenv("GLAMOUR_STYLE", "")
+			t.Setenv(env, "dark")
+			if _, err := buildInstallPlan(app, runtime, time.Now()); err == nil || !strings.Contains(err.Error(), env) {
+				t.Fatalf("runtime override plan error=%v", err)
+			}
+		})
 	}
 }
 

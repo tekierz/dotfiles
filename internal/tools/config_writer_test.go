@@ -661,6 +661,7 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 	}
 	expectedLockedUpdates := map[string]int{
 		"btop.go":    1,
+		"glow.go":    2,
 		"ghostty.go": 1,
 		"git.go":     2,
 		"neovim.go":  1,
@@ -774,9 +775,8 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"ghostty.go:replaceToolConfigAtRevisionNoCreateAuthorizedTracked": 1,
 		"git.go:replaceToolConfigAtRevisionTracked":                       2,
 		"git.go:replaceToolConfigAtRevisionNoCreateAuthorizedTracked":     2,
-		"glow.go:writeToolConfigAtRevisionTracked":                        1,
-		"glow.go:writeToolConfigAtAuthorityTracked":                       1,
-		"glow.go:writeToolConfigTracked":                                  1,
+		"glow.go:replaceToolConfigAtRevisionTracked":                      1,
+		"glow.go:replaceToolConfigAtRevisionNoCreateAuthorizedTracked":    1,
 		"lazygit.go:writeToolConfigAtRevisionTracked":                     1,
 		"lazygit.go:writeToolConfigAtAuthorityTracked":                    1,
 		"lazygit.go:writeToolConfigTracked":                               1,

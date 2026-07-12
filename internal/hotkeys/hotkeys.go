@@ -304,7 +304,7 @@ func Categories(navStyle string) []Category {
 			Icon: "󰈙",
 			Items: []Item{
 				mk("glow", "glow README.md", "Render markdown file"),
-				mk("glow", "glow -p", "Use pager"),
+				mk("glow", "glow -p README.md", "Render a file with the configured pager"),
 				mk("glow", "glow -s dark", "Dark style"),
 				mk("glow", "j/k", "Scroll up/down"),
 				mk("glow", "q", "Quit"),

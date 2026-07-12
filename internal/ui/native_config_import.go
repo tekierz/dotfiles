@@ -19,10 +19,12 @@ type NativeManageConfigState struct {
 	Ghostty              tools.GhosttyConfigImport
 	Tmux                 tools.TmuxConfigImport
 	Btop                 tools.BtopConfigImport
+	Glow                 tools.GlowConfigImport
 	GitError             string
 	GhosttyError         string
 	TmuxError            string
 	BtopError            string
+	GlowError            string
 	BtopThemeExplicit    bool
 	BtopThemeUnsupported bool
 	Applied              bool
@@ -45,6 +47,9 @@ func (a *App) NativeConfigState() NativeManageConfigState {
 	state.Btop.Fields = cloneConfigProvenance(state.Btop.Fields)
 	state.Btop.Sources = append([]tools.ConfigImportSource(nil), state.Btop.Sources...)
 	state.Btop.Warnings = append([]string(nil), state.Btop.Warnings...)
+	state.Glow.Fields = cloneConfigProvenance(state.Glow.Fields)
+	state.Glow.Sources = append([]tools.ConfigImportSource(nil), state.Glow.Sources...)
+	state.Glow.Warnings = append([]string(nil), state.Glow.Warnings...)
 	return state
 }
 
@@ -62,6 +67,7 @@ func cloneConfigProvenance(source map[string]tools.ConfigFieldProvenance) map[st
 type managePreferencePresence struct {
 	exists bool
 	fields map[string]bool
+	schema int
 	err    error
 }
 
@@ -101,7 +107,7 @@ func inspectManagePreferencePresence() managePreferencePresence {
 		// One-time adoption migration for prototype-era full-struct saves. Those
 		// files had no way to distinguish deliberate choices from copied defaults.
 		for key := range fields {
-			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") || strings.HasPrefix(key, "Btop") {
+			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") || strings.HasPrefix(key, "Btop") || strings.HasPrefix(key, "Glow") {
 				delete(fields, key)
 			}
 		}
@@ -123,8 +129,17 @@ func inspectManagePreferencePresence() managePreferencePresence {
 				delete(fields, key)
 			}
 		}
+		fallthrough
+	case 3:
+		// Native Glow import is schema v4. Earlier files serialized prototype
+		// defaults and pager labels that do not prove explicit user intent.
+		for key := range fields {
+			if strings.HasPrefix(key, "Glow") {
+				delete(fields, key)
+			}
+		}
 	}
-	return managePreferencePresence{exists: true, fields: fields}
+	return managePreferencePresence{exists: true, fields: fields, schema: schemaVersion}
 }
 
 func observeNativeManageConfig(target *ManageConfig, preferences managePreferencePresence, theme string) NativeManageConfigState {
@@ -190,11 +205,61 @@ func observeNativeManageConfig(target *ManageConfig, preferences managePreferenc
 			overlayImportedBtopConfig(target, btopImport, preferences.fields, theme)
 		}
 	}
+	glowImport, err := tools.ImportGlowConfig()
+	switch {
+	case err != nil:
+		state.GlowError = err.Error()
+	case len(glowImport.Warnings) != 0:
+		state.Glow = glowImport
+		state.GlowError = "refusing ambiguous Glow import: " + strings.Join(glowImport.Warnings, "; ")
+	default:
+		state.Glow = glowImport
+		if preferences.err == nil {
+			overlayImportedGlowConfig(target, glowImport, preferences.fields, preferences.schema)
+		}
+	}
 	state.Applied = preferences.err == nil && target != nil && *target != before
+	if preferences.err == nil && target != nil {
+		target.NativeImportSchemaVersion = currentNativeImportSchemaVersion
+	}
 	if preferences.err != nil {
 		state.PreferenceError = preferences.err.Error()
 	}
 	return state
+}
+
+func overlayImportedGlowConfig(target *ManageConfig, imported tools.GlowConfigImport, explicit map[string]bool, schema int) {
+	if target == nil {
+		return
+	}
+	hasNative := false
+	for _, source := range imported.Sources {
+		hasNative = hasNative || (source.Active && source.Exists)
+	}
+	if !hasNative {
+		if schema < 4 && !explicit["GlowPager"] {
+			switch target.GlowPager {
+			case "none", "never":
+				target.GlowPager = "never"
+			case "auto", "less", "more", "":
+				target.GlowPager = "auto"
+			}
+		}
+		return
+	}
+	for key, apply := range map[string]func(){
+		"GlowStyle":            func() { target.GlowStyle = imported.Config.Style },
+		"GlowPager":            func() { target.GlowPager = imported.Config.Pager },
+		"GlowWidth":            func() { target.GlowWidth = imported.Config.Width },
+		"GlowMouse":            func() { target.GlowMouse = imported.Config.Mouse },
+		"GlowAll":              func() { target.GlowAll = imported.Config.All },
+		"GlowShowLineNumbers":  func() { target.GlowShowLineNumbers = imported.Config.ShowLineNumbers },
+		"GlowPreserveNewLines": func() { target.GlowPreserveNewLines = imported.Config.PreserveNewLines },
+	} {
+		if !explicit[key] {
+			apply()
+		}
+	}
 }
 
 func btopImportedThemeNeedsReplacement(imported tools.BtopConfigImport, theme string) bool {

@@ -9,6 +9,28 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+func adjustManageNumber(value, dir, step, minValue, maxValue int) int {
+	if step <= 0 {
+		step = 1
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	if dir > 0 {
+		if value > maxValue-step {
+			return maxValue
+		}
+		return value + step
+	}
+	if value < minValue+step {
+		return minValue
+	}
+	return value - step
+}
+
 // manageScreen is the migrated ScreenHandler for the live dual-pane Manage
 // screen (the management-tab "Manage" entry).
 //
@@ -125,8 +147,9 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 
 		case "enter":
-			a.manageCommitEditing()
-			a.manageStatus = "Updated ✓"
+			if a.manageCommitEditing() {
+				a.manageStatus = "Updated ✓"
+			}
 			return nil
 
 		case "left", "h":
@@ -232,7 +255,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				if step == 0 {
 					step = 1
 				}
-				*f.n = clampInt(*f.n+(dir*step), f.min, f.max)
+				*f.n = adjustManageNumber(*f.n, dir, step, f.min, f.max)
 			}
 		case manageFieldText, manageFieldToggle:
 			// Text fields use edit mode; toggles have no ordered adjustment.
@@ -477,12 +500,9 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
 					return tickUI()
 				}
-			case manageFieldText:
+			case manageFieldText, manageFieldNumber:
 				startEditingField()
 			case manageFieldOption:
-				adjustField(1)
-			case manageFieldNumber:
-				// No modal editor for numbers yet; treat as increment.
 				adjustField(1)
 			}
 		}
@@ -638,7 +658,7 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 				if step == 0 {
 					step = 1
 				}
-				*f.n = clampInt(*f.n+dir*step, f.min, f.max)
+				*f.n = adjustManageNumber(*f.n, dir, step, f.min, f.max)
 			}
 		case manageFieldText:
 			// Single click just focuses. Enter starts editing (keyboard) for now.

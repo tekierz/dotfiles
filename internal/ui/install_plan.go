@@ -482,6 +482,15 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 				action.Reason = "native btop configuration could not be imported safely: " + a.nativeConfigState.BtopError
 			}
 		}
+		if spec.toolID == "glow" {
+			if a.nativeConfigState.PreferenceError != "" {
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
+			} else if a.nativeConfigState.GlowError != "" {
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "native Glow configuration could not be imported safely: " + a.nativeConfigState.GlowError
+			}
+		}
 		actions = append(actions, action)
 		if action.Disposition == operation.DispositionApply {
 			configTools = append(configTools, spec.toolID)
@@ -810,11 +819,11 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig, allowBtopTheme
 		if err := tools.ValidateGlowConfig(glowConfigFrom(cfg), theme); err != nil {
 			return nil, fmt.Errorf("validate planned Glow configuration: %w", err)
 		}
-		paths := tools.NewGlowTool().ConfigPaths()
-		if len(paths) != 1 {
-			return nil, fmt.Errorf("glow registry returned %d config paths", len(paths))
+		path, err := tools.GlowConfigMutationPath()
+		if err != nil {
+			return nil, fmt.Errorf("resolve planned Glow config: %w", err)
 		}
-		specs = append(specs, configPlanSpec{toolID: "glow", targets: []string{planTargetPath(home, paths[0])}, ownership: operation.OwnershipManagedFile, description: "write managed Glow configuration", fullFilePolicy: true})
+		specs = append(specs, configPlanSpec{toolID: "glow", targets: []string{planTargetPath(home, path)}, ownership: operation.OwnershipManagedFragment, description: "merge managed Glow settings"})
 	}
 	return specs, nil
 }
@@ -915,6 +924,18 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			case btopImportedThemeNeedsReplacement(imported, spec.currentTheme) && !spec.allowBtopThemeReplacement:
 				disposition = operation.DispositionBlocked
 				reason = "native btop color_theme cannot be represented by the dashboard without explicit replacement"
+			}
+			observed.Managed = imported.Managed
+		}
+		if spec.toolID == "glow" && spec.ownership == operation.OwnershipManagedFragment {
+			imported, importErr := tools.InspectGlowConfigContent(absolute, content, revision.Exists())
+			switch {
+			case importErr != nil:
+				disposition = operation.DispositionBlocked
+				reason = "native Glow configuration cannot be merged safely: " + importErr.Error()
+			case len(imported.Warnings) != 0:
+				disposition = operation.DispositionBlocked
+				reason = "native Glow configuration cannot be merged safely: " + strings.Join(imported.Warnings, "; ")
 			}
 			observed.Managed = imported.Managed
 		}

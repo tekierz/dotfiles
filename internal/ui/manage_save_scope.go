@@ -79,7 +79,7 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 			cfg.BtopTempScale, cfg.BtopShownBoxes,
 		}
 	case "glow":
-		return []any{cfg.GlowPager, cfg.GlowStyle, cfg.GlowWidth, cfg.GlowMouse}
+		return []any{cfg.GlowPager, cfg.GlowStyle, cfg.GlowWidth, cfg.GlowMouse, cfg.GlowAll, cfg.GlowShowLineNumbers, cfg.GlowPreserveNewLines}
 	}
 	return nil
 }

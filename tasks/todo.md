@@ -307,9 +307,12 @@ Retired Bash installer (historical findings; source and execution docs removed):
 - [ ] golangci-lint clean with the repaired config; CI fully blocking
 - [ ] `govulncheck ./...` re-run clean
 - [ ] Run the `pre-pr-tests` skill checklist (manual TUI pass on macOS + one Linux)
-- [ ] On macOS, confirm glow reads its config where we write it
-      (`glow config` should show/edit `~/Library/Preferences/glow/glow.yml`,
-      per go-app-paths User scope)
+- [x] Automated macOS Glow path parity: planner, importer, registry, and writer resolve
+      the same go-app-paths/Viper-precedence target with revision-bound tests.
+- [ ] Manual owner-hardware confirmation remains: run `glow config` and verify the
+      active macOS path and resulting behavior before release.
+- [ ] Add pinned Glamour v0.10.0 style-schema/renderer validation, then enable custom
+      Glow style editing. Until then, imported custom styles remain read-only.
 - [ ] Fresh-machine install test: Homebrew tap and signed release artifact paths; then
       uninstall and verify configs restored byte-identical (this exercises the P0 backup fixes)
 - [ ] Tag release; verify `dotfiles --version` matches the tag; update homebrew-tap

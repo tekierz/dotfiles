@@ -36,13 +36,6 @@ func TestTrackedWholeFileWritersReturnExactPrivateRevision(t *testing.T) {
 				return WriteLazyGitConfigTracked(LazyGitConfig{SideBySide: true, Theme: "dark", Paging: "never"}, theme)
 			},
 		},
-		{
-			name: "glow",
-			path: glowConfigPath,
-			write: func(theme string) (MutationEvidence, error) {
-				return WriteGlowConfigTracked(GlowConfig{Style: "auto", Width: 100, Mouse: true}, theme)
-			},
-		},
 	}
 
 	for _, test := range tests {

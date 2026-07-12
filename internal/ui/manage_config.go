@@ -1,6 +1,6 @@
 package ui
 
-const currentNativeImportSchemaVersion = 3
+const currentNativeImportSchemaVersion = 4
 
 // ManageConfig holds detailed management configuration for all tools
 type ManageConfig struct {
@@ -107,10 +107,13 @@ type ManageConfig struct {
 	BtopShownBoxes  string
 
 	// Glow detailed settings
-	GlowStyle string
-	GlowPager string
-	GlowWidth int
-	GlowMouse bool
+	GlowStyle            string
+	GlowPager            string
+	GlowWidth            int
+	GlowMouse            bool
+	GlowAll              bool
+	GlowShowLineNumbers  bool
+	GlowPreserveNewLines bool
 
 	// Claude Code MCP server settings
 	ClaudeCodeMCPContext7           bool
@@ -234,9 +237,10 @@ func NewManageConfig() *ManageConfig {
 		// Glow
 		// Match NewDeepDiveConfig's default of "auto" (C13).
 		GlowStyle: "auto",
-		GlowPager: "auto",
+		GlowPager: "never",
 		GlowWidth: 80,
-		GlowMouse: true,
+		GlowMouse: false,
+		GlowAll:   false,
 
 		// Claude Code MCPs (context7 enabled by default)
 		ClaudeCodeMCPContext7:           true,

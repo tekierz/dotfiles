@@ -258,6 +258,9 @@ type App struct {
 	manageEditValue       string
 	manageEditCursor      int
 	manageEditField       *string
+	manageEditNumber      *int
+	manageEditMin         int
+	manageEditMax         int
 	manageEditFieldKey    string // human label for the field being edited
 	manageStatus          string // transient status line (save result, etc.)
 	pendingManageSavePlan *manageSavePlan

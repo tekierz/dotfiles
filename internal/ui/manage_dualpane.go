@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -553,10 +555,13 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 
 	case "glow":
 		return []manageField{
-			{key: "style", label: "Style", description: "Style theme for Glow", kind: manageFieldOption, str: &cfg.GlowStyle, options: []string{"auto", "dark", "light", "notty"}},
-			{key: "pager", label: "Pager", description: "Pager program", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"auto", "less", "never"}},
-			{key: "width", label: "Width", description: "Max render width", kind: manageFieldNumber, n: &cfg.GlowWidth, min: 40, max: 240, step: 5, unit: " chars"},
-			{key: "mouse", label: "Mouse", description: "Enable mouse support in Glow", kind: manageFieldToggle, b: &cfg.GlowMouse},
+			{key: "style", label: "Style", description: "8 built-ins; imported custom paths are read-only until explicitly replaced", kind: manageFieldOption, str: &cfg.GlowStyle, options: []string{"auto", "ascii", "dark", "dracula", "tokyo-night", "light", "notty", "pink"}},
+			{key: "pager", label: "Use Pager", description: "Page CLI file rendering; $PAGER selects the command", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"auto", "never"}},
+			{key: "width", label: "Width", description: "Maximum render width; 0 is Auto (max 120; fallback 80)", kind: manageFieldNumber, n: &cfg.GlowWidth, min: 0, max: math.MaxInt, step: 1, unit: " chars"},
+			{key: "mouse", label: "Mouse", description: "Enable mouse support in the Glow TUI", kind: manageFieldToggle, b: &cfg.GlowMouse},
+			{key: "all", label: "Show All Files", description: "Include hidden and ignored files in the Glow TUI", kind: manageFieldToggle, b: &cfg.GlowAll},
+			{key: "line_numbers", label: "Line Numbers", description: "Show source line numbers in the Glow TUI", kind: manageFieldToggle, b: &cfg.GlowShowLineNumbers},
+			{key: "preserve_newlines", label: "Preserve Newlines", description: "Preserve newlines in the TUI; v2.1.2 CLI always preserves them", kind: manageFieldToggle, b: &cfg.GlowPreserveNewLines},
 		}
 
 	case "claude-code":
@@ -782,7 +787,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	// Field list lines (fixed height for stable layout).
 	visibleFieldLines := layout.rightListH
 	fieldCapacity := visibleFieldLines
-	if a.manageEditing && a.manageEditField != nil && fieldCapacity > 0 {
+	if a.manageEditing && (a.manageEditField != nil || a.manageEditNumber != nil) && fieldCapacity > 0 {
 		// Reserve the first line for the editor, but keep overall height stable.
 		fieldCapacity--
 	}
@@ -835,7 +840,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	}
 
 	var fieldsBlock string
-	if a.manageEditing && a.manageEditField != nil && visibleFieldLines > 0 {
+	if a.manageEditing && (a.manageEditField != nil || a.manageEditNumber != nil) && visibleFieldLines > 0 {
 		fieldsBlock = strings.Join(append([]string{a.renderManageInlineEditor(innerW)}, fieldLines...), "\n")
 	} else {
 		fieldsBlock = strings.Join(fieldLines, "\n")
@@ -887,6 +892,8 @@ func (a *App) nativeImportBadge(toolID string) string {
 		sources, fields, errText = a.nativeConfigState.Tmux.Sources, len(a.nativeConfigState.Tmux.Fields), a.nativeConfigState.TmuxError
 	case "btop":
 		sources, fields, errText = a.nativeConfigState.Btop.Sources, len(a.nativeConfigState.Btop.Fields), a.nativeConfigState.BtopError
+	case "glow":
+		sources, fields, errText = a.nativeConfigState.Glow.Sources, len(a.nativeConfigState.Glow.Fields), a.nativeConfigState.GlowError
 	default:
 		return ""
 	}
@@ -956,7 +963,11 @@ func renderManageFieldLineBase(f manageField, focused bool) string {
 			leftArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("◀")
 			rightArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("▶")
 		}
-		val := valueStyle.Render(fmt.Sprintf("%d%s", *f.n, f.unit))
+		display := fmt.Sprintf("%d%s", *f.n, f.unit)
+		if f.key == "width" && f.min == 0 && *f.n == 0 {
+			display = "Auto (max 120; fallback 80)"
+		}
+		val := valueStyle.Render(display)
 		return fmt.Sprintf("%s%s %s %s %s", cursor, labelStyle.Render(f.label), leftArrow, val, rightArrow)
 
 	case manageFieldOption:
@@ -969,7 +980,16 @@ func renderManageFieldLineBase(f manageField, focused bool) string {
 			leftArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("◀")
 			rightArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("▶")
 		}
-		val := valueStyle.Render(*f.str)
+		display := *f.str
+		if f.key == "pager" {
+			switch *f.str {
+			case "auto":
+				display = "Enabled"
+			case "never":
+				display = "Disabled"
+			}
+		}
+		val := valueStyle.Render(display)
 		return fmt.Sprintf("%s%s %s %s %s", cursor, labelStyle.Render(f.label), leftArrow, val, rightArrow)
 
 	case manageFieldText:
@@ -1011,30 +1031,58 @@ func (a *App) renderManageInlineEditor(width int) string {
 }
 
 func (a *App) manageStartEditing(field manageField) {
-	if field.kind != manageFieldText || field.str == nil {
+	if field.kind != manageFieldText && field.kind != manageFieldNumber {
 		return
 	}
-
 	a.manageEditing = true
-	a.manageEditField = field.str
+	a.manageEditField = nil
+	a.manageEditNumber = nil
+	if field.kind == manageFieldText {
+		if field.str == nil {
+			return
+		}
+		a.manageEditField = field.str
+		a.manageEditValue = *field.str
+	} else {
+		if field.n == nil {
+			return
+		}
+		a.manageEditNumber = field.n
+		a.manageEditMin = field.min
+		a.manageEditMax = field.max
+		a.manageEditValue = strconv.Itoa(*field.n)
+	}
 	a.manageEditFieldKey = field.label
-	a.manageEditValue = *field.str
 	a.manageEditCursor = utf8.RuneCountInString(a.manageEditValue)
 }
 
-func (a *App) manageCommitEditing() {
-	if !a.manageEditing || a.manageEditField == nil {
-		return
+func (a *App) manageCommitEditing() bool {
+	if !a.manageEditing {
+		return false
 	}
-	*a.manageEditField = a.manageEditValue
+	if a.manageEditField != nil {
+		*a.manageEditField = a.manageEditValue
+	} else if a.manageEditNumber != nil {
+		n, err := strconv.ParseInt(strings.TrimSpace(a.manageEditValue), 10, strconv.IntSize)
+		if err != nil || n < int64(a.manageEditMin) || n > int64(a.manageEditMax) {
+			a.manageStatus = "Enter a valid value within the field range"
+			return false
+		}
+		*a.manageEditNumber = int(n)
+	} else {
+		return false
+	}
 	a.manageEditing = false
 	a.manageEditField = nil
+	a.manageEditNumber = nil
 	a.manageEditFieldKey = ""
+	return true
 }
 
 func (a *App) manageCancelEditing() {
 	a.manageEditing = false
 	a.manageEditField = nil
+	a.manageEditNumber = nil
 	a.manageEditFieldKey = ""
 	a.manageEditValue = ""
 	a.manageEditCursor = 0
