@@ -67,7 +67,7 @@ type standaloneConfigRuntime struct {
 	backup       func(*operation.StateAuthority, []backup.Target) (autoBackupResult, error)
 	acquire      func(*operation.StateAuthority, string, string) (func() error, error)
 	ensureParent func(string, string, *safefile.DirectorySnapshot, *safefile.ParentChain, os.FileMode) (*safefile.DirectorySnapshot, error)
-	write        func(string, DeepDiveConfig, string, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error)
+	writeAction  func(string, string, DeepDiveConfig, string, tools.YaziConfigPaths, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error)
 }
 
 func defaultStandaloneConfigRuntime() standaloneConfigRuntime {
@@ -75,7 +75,7 @@ func defaultStandaloneConfigRuntime() standaloneConfigRuntime {
 		backup:       backupPlanTargetsWithState,
 		acquire:      operation.AcquireStateLockWithAuthority,
 		ensureParent: safefile.EnsureShallowDirectoryWithinParentChainTracked,
-		write:        writeStandaloneConfigAtAuthority,
+		writeAction:  writeStandaloneConfigAtAuthority,
 	}
 }
 
@@ -88,14 +88,31 @@ func executeStandaloneConfigPlanResult(ctx context.Context, plan *installPlan, r
 	if plan == nil || plan.hasBlocked() || len(plan.configTools) != 1 {
 		return standaloneConfigExecutionResult{err: fmt.Errorf("standalone config plan is blocked or has no applicable write")}
 	}
-	if runtime.write == nil {
+	if runtime.writeAction == nil {
 		return standaloneConfigExecutionResult{err: fmt.Errorf("standalone config writer is unavailable")}
 	}
 	return executeConfigTransactionResult(ctx, plan, runtime, "standalone-config-operation", func(home string, plan *installPlan, bound map[string]map[string]acceptedTarget, locker operation.Locker, expected map[string]backup.ExpectedState) (bool, bool, error) {
 		toolID := plan.configTools[0]
-		return executeConfigTransactionAction(home, plan, "config:"+toolID, expected, func() ([]tools.MutationEvidence, error) {
-			return runtime.write(toolID, plan.config, plan.theme, bound["config:"+toolID], locker)
-		})
+		mutationStarted, manualRecovery := false, false
+		executed := 0
+		for _, action := range plan.actions() {
+			if action.Kind != operation.KindWriteConfig || action.ToolID != toolID || action.Disposition != operation.DispositionApply {
+				continue
+			}
+			started, manual, err := executeConfigTransactionAction(home, plan, action.ID, expected, func() ([]tools.MutationEvidence, error) {
+				return runtime.writeAction(action.ID, toolID, plan.config, plan.theme, plan.yaziConfigPaths, bound[action.ID], locker)
+			})
+			executed++
+			mutationStarted = mutationStarted || started
+			manualRecovery = manualRecovery || manual
+			if err != nil {
+				return mutationStarted, manualRecovery, err
+			}
+		}
+		if executed == 0 {
+			return mutationStarted, manualRecovery, fmt.Errorf("standalone config plan has no applicable config action for %s", toolID)
+		}
+		return mutationStarted, manualRecovery, nil
 	})
 }
 
@@ -284,52 +301,62 @@ func buildStandaloneConfigPlan(a *App, now time.Time) (*installPlan, error) {
 	if !ok {
 		return blockedStandaloneConfigPlan(now, statePlan, cfg, a.theme, "unknown", "the selected screen has no standalone config writer")
 	}
+	var yaziConfigPaths tools.YaziConfigPaths
+	if toolID == "yazi" {
+		yaziConfigPaths, err = tools.ResolveYaziConfigPaths()
+		if err != nil {
+			return nil, fmt.Errorf("resolve Yazi config paths for standalone plan: %w", err)
+		}
+	}
 
 	allowBtopThemeReplacement := a.nativeConfigState.BtopThemeExplicit || cfg.BtopTheme != manageConfigToDeepDive(&a.manageConfigBaseline).BtopTheme || (cfg.BtopTheme == "auto" && a.theme != a.manageConfigBaselineTheme)
-	spec, blockedReason, err := standaloneConfigPlanSpec(home, a.theme, cfg, toolID, allowBtopThemeReplacement)
+	specs, blockedReason, err := standaloneConfigPlanSpecsAtResolved(home, a.theme, cfg, toolID, allowBtopThemeReplacement, yaziConfigPaths)
 	if err != nil {
 		return nil, err
 	}
 	if blockedReason != "" {
 		return blockedStandaloneConfigPlan(now, statePlan, cfg, a.theme, toolID, blockedReason)
 	}
-	action, actionAuthority, err := planConfigAction(home, spec, digestPlanValue(struct {
-		ToolID string
-		Theme  string
-		Config DeepDiveConfig
-	}{toolID, a.theme, cfg}))
-	if err != nil {
-		return nil, err
-	}
-
-	if reason := standaloneNativeBlockReason(a, toolID, allowBtopThemeReplacement); reason != "" {
-		action.Disposition = operation.DispositionBlocked
-		action.Reason = reason
-		actionAuthority = nil
-	}
-	if action.Disposition != operation.DispositionBlocked && toolID == "lazygit" && cfg.LazyGitPagerPreset == "delta" {
-		if reason := lazyGitDeltaAvailabilityReason(a); reason != "" {
+	actions := make([]operation.Action, 0, len(specs))
+	authority := make(map[string]map[string]acceptedTarget)
+	toolApplicable := false
+	for _, spec := range specs {
+		action, actionAuthority, planErr := planConfigAction(home, spec, digestPlanValue(struct {
+			ToolID string
+			Theme  string
+			Config DeepDiveConfig
+		}{toolID, a.theme, cfg}))
+		if planErr != nil {
+			return nil, planErr
+		}
+		if reason := standaloneNativeBlockReason(a, toolID, allowBtopThemeReplacement); reason != "" {
 			action.Disposition = operation.DispositionBlocked
 			action.Reason = reason
 			actionAuthority = nil
 		}
-	}
-	if toolID == "claude-code" {
-		changed, err := claudeSelectionChanges(cfg.ClaudeCodeMCPs)
-		if err != nil {
-			return nil, fmt.Errorf("compare Claude MCP selection: %w", err)
+		if action.Disposition != operation.DispositionBlocked && toolID == "lazygit" && cfg.LazyGitPagerPreset == "delta" {
+			if reason := lazyGitDeltaAvailabilityReason(a); reason != "" {
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = reason
+				actionAuthority = nil
+			}
 		}
-		if !changed {
-			action.Disposition = operation.DispositionSkip
-			action.Reason = "Claude MCP selection already matches the saved file"
-			actionAuthority = nil
+		if toolID == "claude-code" {
+			changed, compareErr := claudeSelectionChanges(cfg.ClaudeCodeMCPs)
+			if compareErr != nil {
+				return nil, fmt.Errorf("compare Claude MCP selection: %w", compareErr)
+			}
+			if !changed {
+				action.Disposition = operation.DispositionSkip
+				action.Reason = "Claude MCP selection already matches the saved file"
+				actionAuthority = nil
+			}
 		}
-	}
-
-	actions := []operation.Action{action}
-	authority := make(map[string]map[string]acceptedTarget)
-	if action.Disposition == operation.DispositionApply {
-		authority[action.ID] = actionAuthority
+		actions = append(actions, action)
+		if action.Disposition == operation.DispositionApply {
+			authority[action.ID] = actionAuthority
+			toolApplicable = true
+		}
 	}
 	parents, parentAction, parentAuthority, err := planStandaloneConfigParents(home, actions)
 	if err != nil {
@@ -347,12 +374,12 @@ func buildStandaloneConfigPlan(a *App, now time.Time) (*installPlan, error) {
 		return nil, err
 	}
 	configTools := []string(nil)
-	if action.Disposition == operation.DispositionApply {
+	if toolApplicable {
 		configTools = []string{toolID}
 	}
 	return &installPlan{
 		document: document, configTools: configTools, config: cfg, theme: a.theme,
-		authority: authority, parentDirs: parents, statePlan: statePlan,
+		authority: authority, parentDirs: parents, statePlan: statePlan, yaziConfigPaths: yaziConfigPaths,
 	}, nil
 }
 
@@ -373,6 +400,9 @@ func blockedStandaloneConfigPlan(now time.Time, statePlan *operation.StatePlan, 
 
 func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID string, allowBtopThemeReplacement bool) (configPlanSpec, string, error) {
 	spec := configPlanSpec{toolID: toolID}
+	if toolID == "yazi" {
+		return spec, "Yazi configuration requires resolved per-file planning", nil
+	}
 	switch toolID {
 	case "ghostty":
 		path, err := tools.GhosttyConfigMutationPath()
@@ -392,8 +422,6 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 		spec.targets, spec.ownership, spec.description = []string{".config/nvim/init.lua", ".config/nvim/lua/custom/options.lua"}, operation.OwnershipManagedFragment, "merge managed Neovim preferences"
 	case "git":
 		spec.targets, spec.ownership, spec.description = []string{".gitconfig", ".config/dotfiles/git/config"}, operation.OwnershipManagedFragment, "install managed Git include"
-	case "yazi":
-		spec.targets, spec.ownership, spec.description, spec.fullFilePolicy = []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml", ".config/yazi/theme.toml"}, operation.OwnershipManagedFile, "write managed Yazi configuration", true
 	case "fzf":
 		spec.targets, spec.ownership, spec.description, spec.fullFilePolicy = []string{".config/fzf/fzf.zsh"}, operation.OwnershipManagedFile, "write managed fzf configuration", true
 	case "lazygit":
@@ -435,6 +463,20 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 		return spec, "the selected tool has no reviewed standalone config writer", nil
 	}
 	return spec, "", nil
+}
+
+func standaloneConfigPlanSpecsAtResolved(home, theme string, cfg DeepDiveConfig, toolID string, allowBtopThemeReplacement bool, yaziConfigPaths tools.YaziConfigPaths) ([]configPlanSpec, string, error) {
+	if toolID == "yazi" {
+		return []configPlanSpec{
+			{actionID: "config:yazi:main", toolID: "yazi", yaziKind: tools.YaziFileKindMain, targets: []string{planTargetPath(home, yaziConfigPaths.Main)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi main configuration", fullFilePolicy: true},
+			{actionID: "config:yazi:keymap", toolID: "yazi", yaziKind: tools.YaziFileKindKeymap, targets: []string{planTargetPath(home, yaziConfigPaths.Keymap)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi keymap configuration", fullFilePolicy: true},
+		}, "", nil
+	}
+	spec, reason, err := standaloneConfigPlanSpec(home, theme, cfg, toolID, allowBtopThemeReplacement)
+	if err != nil {
+		return nil, "", err
+	}
+	return []configPlanSpec{spec}, reason, nil
 }
 
 func standaloneNativeBlockReason(a *App, toolID string, allowBtopThemeReplacement bool) string {
@@ -561,7 +603,7 @@ func standaloneFileAuthority(targets map[string]acceptedTarget, rel string) (saf
 	return target.file, target.parents, nil
 }
 
-func writeStandaloneConfigAtAuthority(toolID string, cfg DeepDiveConfig, theme string, targets map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+func writeStandaloneConfigAtAuthority(actionID, toolID string, cfg DeepDiveConfig, theme string, yaziPaths tools.YaziConfigPaths, targets map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -577,16 +619,22 @@ func writeStandaloneConfigAtAuthority(toolID string, cfg DeepDiveConfig, theme s
 	}
 	switch toolID {
 	case "ghostty":
-		path, err := tools.GhosttyConfigMutationPath()
-		if err != nil {
-			return nil, err
+		if len(targets) != 1 {
+			return nil, fmt.Errorf("accepted Ghostty action %s must contain exactly one target", actionID)
 		}
-		rel := planTargetPath(home, path)
+		var rel string
+		for target := range targets {
+			rel = target
+		}
 		revision, parents, err := file(rel)
 		if err != nil {
 			return nil, err
 		}
-		return one(tools.WriteGhosttyConfigAtBoundAuthorityTracked(path, ghosttyConfigFrom(cfg), theme, revision, parents, locker))
+		path := rel
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(home, filepath.FromSlash(path))
+		}
+		return one(tools.WriteGhosttyConfigAtResolvedAuthorityTracked(filepath.Clean(path), ghosttyConfigFrom(cfg), theme, revision, parents, locker))
 	case "tmux":
 		path, err := tools.TmuxConfigMutationPath()
 		if err != nil {
@@ -625,19 +673,22 @@ func writeStandaloneConfigAtAuthority(toolID string, cfg DeepDiveConfig, theme s
 		}
 		return tools.WriteGitConfigAtBoundAuthoritiesTracked(gitConfigFrom(cfg), theme, rootRevision, rootParents, managedRevision, managedParents, locker)
 	case "yazi":
-		yaziRevision, yaziParents, err := file(".config/yazi/yazi.toml")
+		var kind tools.YaziFileKind
+		var path string
+		switch actionID {
+		case "config:yazi:main":
+			kind, path = tools.YaziFileKindMain, yaziPaths.Main
+		case "config:yazi:keymap":
+			kind, path = tools.YaziFileKindKeymap, yaziPaths.Keymap
+		default:
+			return nil, fmt.Errorf("unsupported standalone Yazi action %s", actionID)
+		}
+		rel := planTargetPath(home, path)
+		revision, parents, err := file(rel)
 		if err != nil {
 			return nil, err
 		}
-		keymapRevision, keymapParents, err := file(".config/yazi/keymap.toml")
-		if err != nil {
-			return nil, err
-		}
-		themeRevision, themeParents, err := file(".config/yazi/theme.toml")
-		if err != nil {
-			return nil, err
-		}
-		return tools.WriteYaziConfigAtAuthoritiesTracked(yaziConfigFrom(cfg), theme, yaziRevision, yaziParents, keymapRevision, keymapParents, themeRevision, themeParents, locker)
+		return one(tools.WriteYaziFileAtResolvedAuthorityTracked(kind, yaziConfigFrom(cfg), theme, yaziPaths, revision, parents, locker))
 	case "fzf":
 		revision, parents, err := file(".config/fzf/fzf.zsh")
 		if err != nil {

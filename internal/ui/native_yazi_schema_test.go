@@ -83,16 +83,17 @@ func TestYaziNativePerFilePrecedence(t *testing.T) {
 	}
 
 	t.Run("exact historical hydrates observed truth read-only", func(t *testing.T) {
-		dir := prepareNativeYaziUI(t)
 		observed := tools.YaziConfig{Keymap: "emacs", ShowHidden: true, PreviewMode: "never", SortBy: "modified", SortReverse: true, LineMode: "permissions", ScrollOff: 9}
-		writeNativeYaziUI(t, dir, tools.YaziFileMain, tools.GenerateYaziConfig(observed, "nord"))
-		writeNativeYaziUI(t, dir, tools.YaziFileKeymap, tools.GenerateYaziKeymap(observed, "nord"))
-		writeNativeYaziUI(t, dir, tools.YaziFileTheme, tools.GenerateYaziTheme("nord"))
+		imported := tools.YaziConfigImport{
+			Config: observed,
+			Main:   tools.YaziFileObservation{Kind: tools.YaziFileKindMain, Exists: true, Ownership: tools.YaziOwnershipExactHistorical, ReadOnlyReason: "exact historical Yazi main is read-only"},
+			Keymap: tools.YaziFileObservation{Kind: tools.YaziFileKindKeymap, Exists: true, Ownership: tools.YaziOwnershipExactHistorical, ReadOnlyReason: "exact historical Yazi keymap is read-only"},
+		}
 		target := savedYaziPreferences()
-		state := observeNativeManageConfig(target, explicitYaziPreferences(nil), "dracula")
+		overlayImportedYaziConfig(target, imported, explicitYaziPreferences(nil).fields)
 		assertYaziValues(t, target, "emacs", true, "never", "modified", true, "permissions", 9)
-		if state.Yazi.Main.Ownership != tools.YaziOwnershipExactHistorical || state.Yazi.Keymap.Ownership != tools.YaziOwnershipExactHistorical {
-			t.Fatalf("historical state lost: %#v", state.Yazi)
+		if imported.Main.Ownership != tools.YaziOwnershipExactHistorical || imported.Keymap.Ownership != tools.YaziOwnershipExactHistorical {
+			t.Fatalf("historical state lost: %#v", imported)
 		}
 	})
 

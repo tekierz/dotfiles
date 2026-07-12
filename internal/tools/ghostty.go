@@ -315,6 +315,30 @@ func WriteGhosttyConfigAtBoundAuthorityTracked(configPath string, cfg GhosttyCon
 	return writeGhosttyConfigAtRevisionTracked(configPath, cfg, themeName, &accepted, parents, locker)
 }
 
+// WriteGhosttyConfigAtResolvedAuthorityTracked writes one exact in-HOME target
+// accepted by a plan without rediscovering Ghostty's live config candidates.
+func WriteGhosttyConfigAtResolvedAuthorityTracked(configPath string, cfg GhosttyConfig, themeName string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	cleanTarget := filepath.Clean(configPath)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	if home == "" || !filepath.IsAbs(home) || yaziPathHasUnsafeCharacters(home) {
+		return MutationEvidence{}, fmt.Errorf("refusing resolved Ghostty config target because HOME is invalid")
+	}
+	home = filepath.Clean(home)
+	if yaziPathHasUnsafeCharacters(configPath) || !filepath.IsAbs(configPath) || configPath != cleanTarget || !pathWithinHome(home, cleanTarget) {
+		return MutationEvidence{}, fmt.Errorf("refusing resolved Ghostty config target outside HOME: %s", configPath)
+	}
+	if !accepted.Tracked() {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Ghostty revision is untracked", safefile.ErrRevisionChanged)
+	}
+	if !parents.Tracked() || locker == nil {
+		return MutationEvidence{}, fmt.Errorf("%w: accepted Ghostty authority is incomplete", safefile.ErrParentChanged)
+	}
+	return writeGhosttyConfigMutationCore(cleanTarget, cfg, themeName, &accepted, parents, locker)
+}
+
 func writeGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, themeName string, accepted *safefile.Revision, parents *safefile.ParentChain, lockers ...operation.Locker) (MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -331,6 +355,14 @@ func writeGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, t
 	if !allowed {
 		return MutationEvidence{}, fmt.Errorf("refusing unsupported Ghostty config target %s", configPath)
 	}
+	locker := operation.DefaultLocker
+	if len(lockers) != 0 && lockers[0] != nil {
+		locker = lockers[0]
+	}
+	return writeGhosttyConfigMutationCore(cleanTarget, cfg, themeName, accepted, parents, locker)
+}
+
+func writeGhosttyConfigMutationCore(cleanTarget string, cfg GhosttyConfig, themeName string, accepted *safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
 	managed := wrapManagedConfigSection(
 		ghosttyManagedStart,
 		ghosttyManagedEnd,
@@ -340,15 +372,11 @@ func writeGhosttyConfigAtRevisionTracked(configPath string, cfg GhosttyConfig, t
 	var evidence MutationEvidence
 	lock := withToolConfigLock
 	if accepted != nil {
-		locker := operation.DefaultLocker
-		if len(lockers) != 0 && lockers[0] != nil {
-			locker = lockers[0]
-		}
 		lock = func(path string, mutate func(string, string) error) error {
 			return withToolConfigLockAuthorized(path, locker, mutate)
 		}
 	}
-	err = lock(cleanTarget, func(root, rel string) error {
+	err := lock(cleanTarget, func(root, rel string) error {
 		var existing []byte
 		var revision safefile.Revision
 		var err error

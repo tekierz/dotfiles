@@ -399,28 +399,6 @@ func writeToolConfigAtAuthorityTracked(path string, content []byte, accepted saf
 	return evidence, err
 }
 
-func preflightToolConfigAtAuthority(path string, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker, allowLegacy func([]byte) bool) error {
-	if !accepted.Tracked() {
-		return fmt.Errorf("%w: accepted revision for %s is untracked", safefile.ErrRevisionChanged, path)
-	}
-	if !parents.Tracked() || locker == nil {
-		return fmt.Errorf("%w: preflight authority for %s is incomplete", safefile.ErrParentChanged, path)
-	}
-	return withToolConfigLockAuthorized(path, locker, func(root, rel string) error {
-		existing, current, err := safefile.ReadWithinAuthorized(root, rel, parents)
-		if err != nil {
-			return err
-		}
-		if current != accepted {
-			return fmt.Errorf("%w: generated config %s changed after plan acceptance", safefile.ErrRevisionChanged, rel)
-		}
-		if current.Exists() && !hasGeneratedConfigHeader(existing) && (allowLegacy == nil || !allowLegacy(existing)) {
-			return fmt.Errorf("%w: %s", ErrUnmanagedConfig, path)
-		}
-		return nil
-	})
-}
-
 func hasGeneratedConfigHeader(content []byte) bool {
 	for _, header := range generatedConfigHeaders {
 		if bytes.HasPrefix(content, header) {

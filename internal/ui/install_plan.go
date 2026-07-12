@@ -34,16 +34,17 @@ type installPlan struct {
 	// selectedTools is reserved for the explicitly unreviewed legacy test
 	// harness. Reviewed production plans leave it nil and derive installs from
 	// the hash-bound operation actions.
-	selectedTools []string
-	configTools   []string
-	config        DeepDiveConfig
-	theme         string
-	navStyle      string
-	animations    bool
-	globalConfig  *config.GlobalConfig
-	authority     map[string]map[string]acceptedTarget
-	parentDirs    []string
-	statePlan     *operation.StatePlan
+	selectedTools   []string
+	configTools     []string
+	config          DeepDiveConfig
+	theme           string
+	navStyle        string
+	animations      bool
+	globalConfig    *config.GlobalConfig
+	authority       map[string]map[string]acceptedTarget
+	parentDirs      []string
+	statePlan       *operation.StatePlan
+	yaziConfigPaths tools.YaziConfigPaths
 	// ghosttyConfigTarget is the exact absolute destination accepted during
 	// planning. Execution must not rediscover a different higher-precedence file
 	// after preview/revalidation.
@@ -255,7 +256,9 @@ func (p *installPlan) acceptedGhosttyConfigTarget() (string, error) {
 }
 
 type configPlanSpec struct {
+	actionID                  string
 	toolID                    string
+	yaziKind                  tools.YaziFileKind
 	targets                   []string
 	ownership                 operation.Ownership
 	description               string
@@ -296,6 +299,10 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return nil, fmt.Errorf("determine home for install plan: %w", err)
+	}
+	yaziConfigPaths, err := tools.ResolveYaziConfigPaths()
+	if err != nil {
+		return nil, fmt.Errorf("resolve Yazi config paths for install plan: %w", err)
 	}
 	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
 	selected := a.collectSelectedToolsWithRuntime(installRuntime)
@@ -422,7 +429,7 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 	}
 
 	allowBtopThemeReplacement := a.nativeConfigState.BtopThemeExplicit || cfg.BtopTheme != manageConfigToDeepDive(&a.manageConfigBaseline).BtopTheme || (cfg.BtopTheme == "auto" && a.theme != a.manageConfigBaselineTheme)
-	configSpecs, err := installerConfigSpecs(home, a.theme, cfg, allowBtopThemeReplacement)
+	configSpecs, err := installerConfigSpecsAtResolved(home, a.theme, cfg, allowBtopThemeReplacement, yaziConfigPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +517,9 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		}
 		actions = append(actions, action)
 		if action.Disposition == operation.DispositionApply {
-			configTools = append(configTools, spec.toolID)
+			if !slices.Contains(configTools, spec.toolID) {
+				configTools = append(configTools, spec.toolID)
+			}
 			authority[action.ID] = actionAuthority
 		}
 	}
@@ -568,6 +577,7 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		authority:           authority,
 		parentDirs:          slices.Clone(parents),
 		statePlan:           statePlan,
+		yaziConfigPaths:     yaziConfigPaths,
 		ghosttyConfigTarget: ghosttyConfigTarget,
 	}, nil
 }
@@ -784,6 +794,14 @@ func scriptsForPlan(name string) []byte {
 }
 
 func installerConfigSpecs(home, theme string, cfg DeepDiveConfig, allowBtopThemeReplacement bool) ([]configPlanSpec, error) {
+	yaziConfigPaths, err := tools.ResolveYaziConfigPaths()
+	if err != nil {
+		return nil, fmt.Errorf("resolve Yazi config paths: %w", err)
+	}
+	return installerConfigSpecsAtResolved(home, theme, cfg, allowBtopThemeReplacement, yaziConfigPaths)
+}
+
+func installerConfigSpecsAtResolved(home, theme string, cfg DeepDiveConfig, allowBtopThemeReplacement bool, yaziConfigPaths tools.YaziConfigPaths) ([]configPlanSpec, error) {
 	tmuxPath, err := tools.TmuxConfigMutationPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve tmux mutation path: %w", err)
@@ -810,7 +828,9 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig, allowBtopTheme
 	}
 	specs = append(specs,
 		configPlanSpec{toolID: "git", targets: []string{".gitconfig", ".config/dotfiles/git/config"}, ownership: operation.OwnershipManagedFragment, description: "install managed Git include"},
-		configPlanSpec{toolID: "yazi", targets: []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml", ".config/yazi/theme.toml"}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi configuration", fullFilePolicy: true},
+		configPlanSpec{actionID: "config:yazi:main", toolID: "yazi", yaziKind: tools.YaziFileKindMain, targets: []string{planTargetPath(home, yaziConfigPaths.Main)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi main configuration", fullFilePolicy: true},
+		configPlanSpec{actionID: "config:yazi:keymap", toolID: "yazi", yaziKind: tools.YaziFileKindKeymap, targets: []string{planTargetPath(home, yaziConfigPaths.Keymap)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi keymap configuration", fullFilePolicy: true},
+		configPlanSpec{actionID: "config:yazi:theme", toolID: "yazi", yaziKind: tools.YaziFileKindTheme, targets: []string{planTargetPath(home, yaziConfigPaths.Theme)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi theme configuration", fullFilePolicy: true},
 		configPlanSpec{toolID: "fzf", targets: []string{".config/fzf/fzf.zsh"}, ownership: operation.OwnershipManagedFile, description: "write managed fzf configuration", fullFilePolicy: true},
 	)
 	if cfg.CLITools["lazygit"] {
@@ -973,6 +993,23 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			}
 			observed.Managed = imported.Managed
 		}
+		if spec.yaziKind != "" {
+			inspected := tools.InspectYaziConfigContent(spec.yaziKind, absolute, content, revision.Exists())
+			observed.Managed = inspected.Ownership == tools.YaziOwnershipExactCurrent
+			switch inspected.Ownership {
+			case tools.YaziOwnershipMissing, tools.YaziOwnershipExactCurrent:
+			case tools.YaziOwnershipNative, tools.YaziOwnershipExactHistorical, tools.YaziOwnershipMalformed:
+				disposition = operation.DispositionBlocked
+				detail := inspected.ReadOnlyReason
+				if inspected.Error != "" {
+					detail = inspected.Error
+				}
+				if detail == "" {
+					detail = "ownership is read-only"
+				}
+				reason = fmt.Sprintf("%s has %s ownership: %s", filepath.Base(absolute), inspected.Ownership, detail)
+			}
+		}
 		if spec.toolID == "glow" && spec.ownership == operation.OwnershipManagedFragment {
 			imported, importErr := tools.InspectGlowConfigContent(absolute, content, revision.Exists())
 			switch {
@@ -1006,11 +1043,7 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 		observations = append(observations, operation.Observation{Exists: observed.Exists, Source: rel, Digest: observed.Digest, Managed: observed.Managed})
 		managedWholeFile := spec.fullFilePolicy || spec.targetOwnership[rel] == operation.OwnershipManagedFile || (spec.toolID == "neovim" && rel == ".config/nvim/lua/custom/options.lua")
 		if managedWholeFile && observed.Exists && !observed.Managed {
-			migratable := false
-			if spec.toolID == "yazi" && filepath.Base(rel) == "theme.toml" {
-				migratable = tools.IsLegacyGeneratedYaziThemeContent(content)
-			}
-			if !migratable && disposition != operation.DispositionBlocked {
+			if disposition != operation.DispositionBlocked {
 				disposition = operation.DispositionBlocked
 				reason = "an existing config is not marked as a dotfiles-managed file"
 			}
@@ -1018,8 +1051,12 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 	}
 	combined.Managed = combined.Exists && allExistingManaged
 	combined.Digest = digestPlanValue(observations)
+	actionID := spec.actionID
+	if actionID == "" {
+		actionID = "config:" + spec.toolID
+	}
 	return operation.Action{
-		ID:              "config:" + spec.toolID,
+		ID:              actionID,
 		Kind:            operation.KindWriteConfig,
 		ToolID:          spec.toolID,
 		Target:          strings.Join(spec.targets, ", "),

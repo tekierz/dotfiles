@@ -22,17 +22,17 @@ type manageSaveDoneMsg struct {
 
 type manageSaveRuntime struct {
 	transaction standaloneConfigRuntime
-	saveManage  func(*ManageConfig, safefile.Revision, *safefile.ParentChain, operation.Locker) (safefile.Revision, error)
-	saveGlobal  func(*config.GlobalConfig, safefile.Revision, *safefile.ParentChain, operation.Locker) (safefile.Revision, error)
+	saveManage  func(string, *ManageConfig, safefile.Revision, *safefile.ParentChain, operation.Locker) (safefile.Revision, error)
+	saveGlobal  func(string, *config.GlobalConfig, safefile.Revision, *safefile.ParentChain, operation.Locker) (safefile.Revision, error)
 }
 
 func defaultManageSaveRuntime() manageSaveRuntime {
 	return manageSaveRuntime{
 		transaction: defaultStandaloneConfigRuntime(),
-		saveManage: func(cfg *ManageConfig, revision safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (safefile.Revision, error) {
-			return config.SaveToolConfigAtBoundAuthorityTracked("manage", cfg, revision, parents, locker)
+		saveManage: func(path string, cfg *ManageConfig, revision safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (safefile.Revision, error) {
+			return config.SaveToolConfigAtPathBoundAuthorityTracked(path, cfg, revision, parents, locker)
 		},
-		saveGlobal: config.SaveGlobalConfigAtBoundAuthorityTracked,
+		saveGlobal: config.SaveGlobalConfigAtPathBoundAuthorityTracked,
 	}
 }
 
@@ -71,7 +71,7 @@ func executeManageSavePlanResult(ctx context.Context, accepted *manageSavePlan, 
 	if accepted == nil || accepted.plan == nil || accepted.plan.hasBlocked() || !managePlanHasApplicableChanges(accepted.plan) {
 		return standaloneConfigExecutionResult{err: fmt.Errorf("manage save plan is blocked or has no applicable change")}
 	}
-	if len(accepted.plan.configTools) > 0 && runtime.transaction.write == nil {
+	if len(accepted.plan.configTools) > 0 && runtime.transaction.writeAction == nil {
 		return standaloneConfigExecutionResult{err: fmt.Errorf("manage config writer is unavailable")}
 	}
 	if accepted.saveManageState && runtime.saveManage == nil {
@@ -81,27 +81,36 @@ func executeManageSavePlanResult(ctx context.Context, accepted *manageSavePlan, 
 		return standaloneConfigExecutionResult{err: fmt.Errorf("global state writer is unavailable")}
 	}
 	return executeConfigTransactionResult(ctx, accepted.plan, runtime.transaction, "manage-save-operation", func(home string, plan *installPlan, bound map[string]map[string]acceptedTarget, locker operation.Locker, expected map[string]backup.ExpectedState) (bool, bool, error) {
-		mutationStarted := false
+		mutationStarted, manualRecovery := false, false
 		for _, toolID := range plan.configTools {
-			actionID := "config:" + toolID
-			mutated, manual, err := executeConfigTransactionAction(home, plan, actionID, expected, func() ([]tools.MutationEvidence, error) {
-				return runtime.transaction.write(toolID, plan.config, plan.theme, bound[actionID], locker)
-			})
-			mutationStarted = mutationStarted || mutated
-			if err != nil {
-				return mutationStarted, manual, err
+			executed := 0
+			for _, action := range plan.actions() {
+				if action.Kind != operation.KindWriteConfig || action.ToolID != toolID || action.Disposition != operation.DispositionApply {
+					continue
+				}
+				mutated, manual, err := executeConfigTransactionAction(home, plan, action.ID, expected, func() ([]tools.MutationEvidence, error) {
+					return runtime.transaction.writeAction(action.ID, toolID, plan.config, plan.theme, plan.yaziConfigPaths, bound[action.ID], locker)
+				})
+				executed++
+				mutationStarted = mutationStarted || mutated
+				manualRecovery = manualRecovery || manual
+				if err != nil {
+					return mutationStarted, manualRecovery, err
+				}
+			}
+			if executed == 0 {
+				return mutationStarted, manualRecovery, fmt.Errorf("manage plan has no applicable config action for %s", toolID)
 			}
 		}
 		if accepted.saveManageState {
 			actionID := "state:manage-preferences"
 			mutated, manual, err := executeConfigTransactionAction(home, plan, actionID, expected, func() ([]tools.MutationEvidence, error) {
-				rel := planTargetPath(home, filepath.Join(config.ToolsDir(), "manage.json"))
-				target, ok := bound[actionID][rel]
-				if !ok || target.kind != acceptedFileTarget {
-					return nil, fmt.Errorf("accepted manage.json authority is unavailable")
+				path, target, authorityErr := frozenStateFileAuthority(home, plan, actionID, bound[actionID])
+				if authorityErr != nil {
+					return nil, authorityErr
 				}
-				revision, err := runtime.saveManage(&accepted.snapshot, target.file, target.parents, locker)
-				evidence := tools.MutationEvidence{Path: filepath.Join(config.ToolsDir(), "manage.json"), Revision: revision, Parents: target.parents}
+				revision, err := runtime.saveManage(path, &accepted.snapshot, target.file, target.parents, locker)
+				evidence := tools.MutationEvidence{Path: path, Revision: revision, Parents: target.parents}
 				return stateMutationEvidence(evidence, err)
 			})
 			mutationStarted = mutationStarted || mutated
@@ -112,13 +121,12 @@ func executeManageSavePlanResult(ctx context.Context, accepted *manageSavePlan, 
 		if accepted.saveGlobalState {
 			actionID := "state:global"
 			mutated, manual, err := executeConfigTransactionAction(home, plan, actionID, expected, func() ([]tools.MutationEvidence, error) {
-				rel := planTargetPath(home, filepath.Join(config.ConfigDir(), "global.json"))
-				target, ok := bound[actionID][rel]
-				if !ok || target.kind != acceptedFileTarget {
-					return nil, fmt.Errorf("accepted global.json authority is unavailable")
+				path, target, authorityErr := frozenStateFileAuthority(home, plan, actionID, bound[actionID])
+				if authorityErr != nil {
+					return nil, authorityErr
 				}
-				revision, err := runtime.saveGlobal(accepted.global, target.file, target.parents, locker)
-				evidence := tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision, Parents: target.parents}
+				revision, err := runtime.saveGlobal(path, accepted.global, target.file, target.parents, locker)
+				evidence := tools.MutationEvidence{Path: path, Revision: revision, Parents: target.parents}
 				return stateMutationEvidence(evidence, err)
 			})
 			mutationStarted = mutationStarted || mutated
@@ -138,6 +146,32 @@ func stateMutationEvidence(evidence tools.MutationEvidence, err error) ([]tools.
 		return nil, &tools.PartialMutationError{Err: err, Evidence: []tools.MutationEvidence{evidence}}
 	}
 	return nil, err
+}
+
+func frozenStateFileAuthority(home string, plan *installPlan, actionID string, scope map[string]acceptedTarget) (string, acceptedTarget, error) {
+	if plan == nil || len(scope) != 1 {
+		return "", acceptedTarget{}, fmt.Errorf("accepted %s state authority must contain exactly one file", actionID)
+	}
+	var action operation.Action
+	found := false
+	for _, candidate := range plan.actions() {
+		if candidate.ID == actionID {
+			action, found = candidate, true
+			break
+		}
+	}
+	if !found || action.Kind != operation.KindUpdateState || action.Disposition != operation.DispositionApply || action.Target == "" || action.BackupTarget != action.Target || len(action.BackupTargets) != 0 || len(action.Observations) != 1 || action.Observations[0].Source != action.Target {
+		return "", acceptedTarget{}, fmt.Errorf("accepted %s state action has invalid single-file scope", actionID)
+	}
+	target, ok := scope[action.Target]
+	if !ok || target.kind != acceptedFileTarget || !target.file.Tracked() || !target.parents.Tracked() {
+		return "", acceptedTarget{}, fmt.Errorf("accepted %s state file authority is unavailable", actionID)
+	}
+	path := action.Target
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(home, filepath.FromSlash(path))
+	}
+	return filepath.Clean(path), target, nil
 }
 
 func buildManageSavePlan(a *App, now time.Time) (*manageSavePlan, error) {
@@ -164,53 +198,72 @@ func buildManageSavePlan(a *App, now time.Time) (*manageSavePlan, error) {
 	baseline := a.manageConfigBaseline
 	deep := manageConfigToDeepDive(&snapshot)
 	changed := changedManageTools(&baseline, &snapshot, a.manageConfigBaselineTheme, a.theme)
+	var yaziConfigPaths tools.YaziConfigPaths
+	if slices.Contains(changed, "yazi") {
+		yaziConfigPaths, err = tools.ResolveYaziConfigPaths()
+		if err != nil {
+			return nil, fmt.Errorf("resolve Yazi config paths for Manage plan: %w", err)
+		}
+	}
 	actions := make([]operation.Action, 0, len(changed)+3)
 	authority := make(map[string]map[string]acceptedTarget)
 	configTools := make([]string, 0, len(changed))
 	for _, toolID := range changed {
 		allowBtopThemeReplacement := a.nativeConfigState.BtopThemeExplicit || snapshot.BtopTheme != baseline.BtopTheme || (snapshot.BtopTheme == "auto" && a.theme != a.manageConfigBaselineTheme)
-		spec, reason, specErr := standaloneConfigPlanSpec(home, a.theme, deep, toolID, allowBtopThemeReplacement)
-		if specErr != nil {
-			return nil, specErr
+		var specs []configPlanSpec
+		if toolID == "yazi" {
+			specs = manageYaziConfigSpecsAtResolved(home, yaziConfigPaths, &baseline, &snapshot)
+		} else {
+			spec, reason, specErr := standaloneConfigPlanSpec(home, a.theme, deep, toolID, allowBtopThemeReplacement)
+			if specErr != nil {
+				return nil, specErr
+			}
+			if reason != "" {
+				actions = append(actions, blockedManageToolAction(toolID, reason))
+				continue
+			}
+			specs = []configPlanSpec{spec}
 		}
-		if reason != "" {
-			actions = append(actions, blockedManageToolAction(toolID, reason))
-			continue
-		}
-		action, accepted, actionErr := planConfigAction(home, spec, digestPlanValue(struct {
-			ToolID string
-			Theme  string
-			Config DeepDiveConfig
-		}{toolID, a.theme, deep}))
-		if actionErr != nil {
-			return nil, actionErr
-		}
-		if nativeReason := standaloneNativeBlockReason(a, toolID, allowBtopThemeReplacement); nativeReason != "" {
-			action.Disposition = operation.DispositionBlocked
-			action.Reason = nativeReason
-			accepted = nil
-		}
-		if action.Disposition != operation.DispositionBlocked && toolID == "lazygit" && deep.LazyGitPagerPreset == "delta" {
-			if deltaReason := lazyGitDeltaAvailabilityReason(a); deltaReason != "" {
+		toolApplicable := false
+		for _, spec := range specs {
+			action, accepted, actionErr := planConfigAction(home, spec, digestPlanValue(struct {
+				ToolID string
+				Theme  string
+				Config DeepDiveConfig
+			}{toolID, a.theme, deep}))
+			if actionErr != nil {
+				return nil, actionErr
+			}
+			if nativeReason := standaloneNativeBlockReason(a, toolID, allowBtopThemeReplacement); nativeReason != "" {
 				action.Disposition = operation.DispositionBlocked
-				action.Reason = deltaReason
+				action.Reason = nativeReason
 				accepted = nil
 			}
-		}
-		if toolID == "claude-code" {
-			changes, compareErr := claudeSelectionChanges(deep.ClaudeCodeMCPs)
-			if compareErr != nil {
-				return nil, compareErr
+			if action.Disposition != operation.DispositionBlocked && toolID == "lazygit" && deep.LazyGitPagerPreset == "delta" {
+				if deltaReason := lazyGitDeltaAvailabilityReason(a); deltaReason != "" {
+					action.Disposition = operation.DispositionBlocked
+					action.Reason = deltaReason
+					accepted = nil
+				}
 			}
-			if !changes {
-				action.Disposition = operation.DispositionSkip
-				action.Reason = "Claude MCP selection already matches the saved file"
-				accepted = nil
+			if toolID == "claude-code" {
+				changes, compareErr := claudeSelectionChanges(deep.ClaudeCodeMCPs)
+				if compareErr != nil {
+					return nil, compareErr
+				}
+				if !changes {
+					action.Disposition = operation.DispositionSkip
+					action.Reason = "Claude MCP selection already matches the saved file"
+					accepted = nil
+				}
+			}
+			actions = append(actions, action)
+			if action.Disposition == operation.DispositionApply {
+				authority[action.ID] = accepted
+				toolApplicable = true
 			}
 		}
-		actions = append(actions, action)
-		if action.Disposition == operation.DispositionApply {
-			authority[action.ID] = accepted
+		if toolApplicable {
 			configTools = append(configTools, toolID)
 		}
 	}
@@ -278,13 +331,30 @@ func buildManageSavePlan(a *App, now time.Time) (*manageSavePlan, error) {
 	inner := &installPlan{
 		document: document, configTools: slices.Clone(configTools), config: deep,
 		theme: a.theme, navStyle: a.navStyle, animations: a.animationsEnabled,
-		globalConfig: plannedGlobal, authority: authority, parentDirs: parents, statePlan: statePlan,
+		globalConfig: plannedGlobal, authority: authority, parentDirs: parents, statePlan: statePlan, yaziConfigPaths: yaziConfigPaths,
 	}
 	return &manageSavePlan{
 		plan: inner, snapshot: snapshot, theme: a.theme,
 		navStyle: a.navStyle, animationsEnabled: a.animationsEnabled, global: plannedGlobal,
 		saveManageState: saveManage, saveGlobalState: saveGlobal,
 	}, nil
+}
+
+func manageYaziConfigSpecsAtResolved(home string, paths tools.YaziConfigPaths, baseline, current *ManageConfig) []configPlanSpec {
+	var specs []configPlanSpec
+	mainChanged := baseline.YaziShowHidden != current.YaziShowHidden ||
+		baseline.YaziPreviewMode != current.YaziPreviewMode ||
+		baseline.YaziSortBy != current.YaziSortBy ||
+		baseline.YaziSortReverse != current.YaziSortReverse ||
+		baseline.YaziLineMode != current.YaziLineMode ||
+		baseline.YaziScrollOff != current.YaziScrollOff
+	if mainChanged {
+		specs = append(specs, configPlanSpec{actionID: "config:yazi:main", toolID: "yazi", yaziKind: tools.YaziFileKindMain, targets: []string{planTargetPath(home, paths.Main)}, ownership: operation.OwnershipManagedFile, description: "write changed Yazi main settings", fullFilePolicy: true})
+	}
+	if baseline.YaziKeymap != current.YaziKeymap {
+		specs = append(specs, configPlanSpec{actionID: "config:yazi:keymap", toolID: "yazi", yaziKind: tools.YaziFileKindKeymap, targets: []string{planTargetPath(home, paths.Keymap)}, ownership: operation.OwnershipManagedFile, description: "write changed Yazi keymap settings", fullFilePolicy: true})
+	}
+	return specs
 }
 
 func blockedManageToolAction(toolID, reason string) operation.Action {

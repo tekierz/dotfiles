@@ -56,6 +56,99 @@ func TestSaveToolConfigAtBoundAuthorityTrackedModeAndStaleRevision(t *testing.T)
 	}
 }
 
+func TestSaveToolConfigAtPathBoundAuthorityTrackedUsesFrozenPathAfterXDGDrift(t *testing.T) {
+	home := t.TempDir()
+	configA := filepath.Join(home, "config-a")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configA)
+	pathA := filepath.Join(ToolsDir(), "manage.json")
+	if err := os.MkdirAll(filepath.Dir(pathA), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root, rel, err := anchoredFilePath(pathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, accepted, parents, err := safefile.ObserveFileWithin(root, rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configB := filepath.Join(home, "config-b")
+	t.Setenv("XDG_CONFIG_HOME", configB)
+	lockedPath := ""
+	locker := operation.Locker(func(_ string, target string) (func() error, error) {
+		lockedPath = target
+		return func() error { return nil }, nil
+	})
+	committed, err := SaveToolConfigAtPathBoundAuthorityTracked(pathA, &reviewedToolState{Value: "frozen"}, accepted, parents, locker)
+	if err != nil || !committed.Tracked() || !committed.Exists() {
+		t.Fatalf("frozen tool-state commit=%+v err=%v", committed, err)
+	}
+	if lockedPath != pathA {
+		t.Fatalf("tool-state lock target=%q, want frozen %q", lockedPath, pathA)
+	}
+	got, err := os.ReadFile(pathA)
+	want := []byte("{\n  \"value\": \"frozen\"\n}")
+	if err != nil || string(got) != string(want) {
+		t.Fatalf("frozen tool-state bytes=%q err=%v want=%q", got, err, want)
+	}
+	pathB := filepath.Join(configB, "dotfiles", "tools", "manage.json")
+	for _, path := range []string{pathB, configB} {
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("XDG drift created %s: %v", path, statErr)
+		}
+	}
+}
+
+func TestSaveToolConfigAtPathBoundAuthorityTrackedRejectsInvalidPathsBeforeLock(t *testing.T) {
+	home := t.TempDir()
+	configA := filepath.Join(home, "config-a")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configA)
+	validPath := filepath.Join(ToolsDir(), "manage.json")
+	if err := os.MkdirAll(filepath.Dir(validPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root, rel, err := anchoredFilePath(validPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, accepted, parents, err := safefile.ObserveFileWithin(root, rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside-manage.json")
+	for _, test := range []struct {
+		name string
+		path string
+	}{
+		{"relative", filepath.Join("relative", "manage.json")},
+		{"outside home and xdg", outside},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			lockCalled := false
+			locker := operation.Locker(func(string, string) (func() error, error) {
+				lockCalled = true
+				return func() error { return nil }, nil
+			})
+			if _, err := SaveToolConfigAtPathBoundAuthorityTracked(test.path, &reviewedToolState{Value: "blocked"}, accepted, parents, locker); err == nil {
+				t.Fatalf("invalid explicit path %q was accepted", test.path)
+			}
+			if lockCalled {
+				t.Fatalf("invalid explicit path %q acquired a lock", test.path)
+			}
+			if filepath.IsAbs(test.path) {
+				if _, statErr := os.Lstat(test.path); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("invalid explicit path %q was mutated: %v", test.path, statErr)
+				}
+			}
+			if _, statErr := os.Lstat(validPath); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("invalid explicit path attempt mutated valid target: %v", statErr)
+			}
+		})
+	}
+}
+
 func TestSaveToolConfigAtBoundAuthorityTrackedRejectsParentReplacementAndSymlink(t *testing.T) {
 	for _, symlink := range []bool{false, true} {
 		name := "replacement"

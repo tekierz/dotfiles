@@ -398,6 +398,17 @@ func SaveToolConfigAtBoundAuthorityTracked[T any](toolName string, cfg *T, accep
 	if err := validateToolConfigName(toolName); err != nil {
 		return safefile.Revision{}, err
 	}
+	path := filepath.Join(ToolsDir(), toolName+".json")
+	return SaveToolConfigAtPathBoundAuthorityTracked(path, cfg, accepted, parents, locker)
+}
+
+// SaveToolConfigAtPathBoundAuthorityTracked atomically saves product-owned
+// tool state to one explicit reviewed path without rediscovering config roots.
+func SaveToolConfigAtPathBoundAuthorityTracked[T any](path string, cfg *T, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (committed safefile.Revision, returnErr error) {
+	root, rel, err := anchoredFilePath(path)
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("resolve tool-state path: %w", err)
+	}
 	if !accepted.Tracked() {
 		return safefile.Revision{}, fmt.Errorf("%w: accepted tool-state revision is untracked", safefile.ErrRevisionChanged)
 	}
@@ -407,11 +418,6 @@ func SaveToolConfigAtBoundAuthorityTracked[T any](toolName string, cfg *T, accep
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("failed to marshal config: %w", err)
-	}
-	path := filepath.Join(ToolsDir(), toolName+".json")
-	root, rel, err := anchoredFilePath(path)
-	if err != nil {
-		return safefile.Revision{}, fmt.Errorf("resolve tool-state path: %w", err)
 	}
 
 	toolConfigSaveMu.Lock()
@@ -752,10 +758,38 @@ func SaveGlobalConfigAtBoundAuthorityTracked(cfg *GlobalConfig, accepted safefil
 	if !parents.Tracked() || locker == nil {
 		return safefile.Revision{}, fmt.Errorf("%w: global config authority is incomplete", safefile.ErrParentChanged)
 	}
-	return saveGlobalConfigAtRevisionTracked(cfg, &accepted, parents, locker, nil)
+	dir := ConfigDir()
+	if dir == "" {
+		return safefile.Revision{}, ErrNoConfigDir
+	}
+	return SaveGlobalConfigAtPathBoundAuthorityTracked(filepath.Join(dir, "global.json"), cfg, accepted, parents, locker)
+}
+
+// SaveGlobalConfigAtPathBoundAuthorityTracked saves global state to one
+// explicit reviewed path without rediscovering the active config directory.
+func SaveGlobalConfigAtPathBoundAuthorityTracked(path string, cfg *GlobalConfig, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (safefile.Revision, error) {
+	if _, _, err := anchoredFilePath(path); err != nil {
+		return safefile.Revision{}, fmt.Errorf("resolve global config path: %w", err)
+	}
+	if !parents.Tracked() || locker == nil {
+		return safefile.Revision{}, fmt.Errorf("%w: global config authority is incomplete", safefile.ErrParentChanged)
+	}
+	return saveGlobalConfigAtPathRevisionTracked(path, cfg, &accepted, parents, locker, nil, false)
 }
 
 func saveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted *safefile.Revision, parents *safefile.ParentChain, locker operation.Locker, beforeCommit func() error) (committedRevision safefile.Revision, returnErr error) {
+	dir := ConfigDir()
+	if dir == "" {
+		return safefile.Revision{}, ErrNoConfigDir
+	}
+	return saveGlobalConfigAtPathRevisionTracked(filepath.Join(dir, "global.json"), cfg, accepted, parents, locker, beforeCommit, accepted == nil)
+}
+
+func saveGlobalConfigAtPathRevisionTracked(path string, cfg *GlobalConfig, accepted *safefile.Revision, parents *safefile.ParentChain, locker operation.Locker, beforeCommit func() error, allowCreate bool) (committedRevision safefile.Revision, returnErr error) {
+	root, rel, err := anchoredFilePath(path)
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("resolve global config path: %w", err)
+	}
 	// SaveGlobalConfig refreshes cfg.sourceRevision after a successful write.
 	// Lock before reading any cfg field so concurrent saves of the same pointer do
 	// not race with that refresh. This also protects unknownFields map reads made
@@ -776,21 +810,12 @@ func saveGlobalConfigAtRevisionTracked(cfg *GlobalConfig, accepted *safefile.Rev
 	}
 	expectedRevision := cfg.sourceRevision
 
-	dir := ConfigDir()
-	if dir == "" {
-		return safefile.Revision{}, ErrNoConfigDir
-	}
-	path := filepath.Join(dir, "global.json")
-	if accepted == nil {
+	if allowCreate {
 		if err := ensureConfiguredXDGRoot(path); err != nil {
 			return safefile.Revision{}, fmt.Errorf("prepare global config path: %w", err)
 		}
 	} else if parents != nil && !parents.Tracked() {
 		return safefile.Revision{}, fmt.Errorf("%w: global config parent authority is untracked", safefile.ErrParentChanged)
-	}
-	root, rel, err := anchoredFilePath(path)
-	if err != nil {
-		return safefile.Revision{}, fmt.Errorf("resolve global config path: %w", err)
 	}
 	// Ordinary and reviewed writers share the private state lock so neither can
 	// bypass the other's reserved read/modify/write window.

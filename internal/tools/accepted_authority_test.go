@@ -109,39 +109,6 @@ func TestAcceptedFragmentWritersCheckIdentityBeforeSameContentNoop(t *testing.T)
 	}
 }
 
-func TestAcceptedYaziPreflightsCompleteSetBeforeMutation(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	initial := YaziConfig{Keymap: "vim", ShowHidden: false}
-	if err := WriteYaziConfig(initial, "dracula"); err != nil {
-		t.Fatal(err)
-	}
-	base := filepath.Join(home, ".config", "yazi")
-	yaziPath := filepath.Join(base, "yazi.toml")
-	keymapPath := filepath.Join(base, "keymap.toml")
-	themePath := filepath.Join(base, "theme.toml")
-	yaziAccepted := readAcceptedFileRevision(t, yaziPath)
-	keymapAccepted := readAcceptedFileRevision(t, keymapPath)
-	themeAccepted := readAcceptedFileRevision(t, themePath)
-	yaziBefore, err := os.ReadFile(yaziPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	replaceFileWithIdenticalNewIdentity(t, keymapPath)
-	_, err = WriteYaziConfigAtRevisionsTracked(YaziConfig{Keymap: "emacs", ShowHidden: true}, "nord", yaziAccepted, keymapAccepted, themeAccepted)
-	if !errors.Is(err, safefile.ErrRevisionChanged) {
-		t.Fatalf("Yazi error = %v, want ErrRevisionChanged", err)
-	}
-	yaziAfter, err := os.ReadFile(yaziPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(yaziAfter) != string(yaziBefore) {
-		t.Fatal("Yazi mutated an earlier target before complete accepted-set preflight")
-	}
-}
-
 func TestAcceptedBtopPreflightsCompleteSetBeforeMutation(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -232,16 +199,40 @@ func TestAcceptedFragmentAndMultiFileWritersCreateNoBackupSidecars(t *testing.T)
 	if err := WriteYaziConfig(yaziCfg, "dracula"); err != nil {
 		t.Fatal(err)
 	}
-	yaziBase := filepath.Join(home, ".config", "yazi")
-	yaziAccepted := readAcceptedFileRevision(t, filepath.Join(yaziBase, "yazi.toml"))
-	keymapAccepted := readAcceptedFileRevision(t, filepath.Join(yaziBase, "keymap.toml"))
-	themeAccepted := readAcceptedFileRevision(t, filepath.Join(yaziBase, "theme.toml"))
-	yaziCfg.ShowHidden = true
-	if _, err := WriteYaziConfigAtRevisionsTracked(yaziCfg, "nord", yaziAccepted, keymapAccepted, themeAccepted); err != nil {
+	yaziPaths, err := ResolveYaziConfigPaths()
+	if err != nil {
 		t.Fatal(err)
 	}
+	type acceptedYaziFile struct {
+		revision safefile.Revision
+		parents  *safefile.ParentChain
+	}
+	observeYaziFile := func(path string) acceptedYaziFile {
+		t.Helper()
+		rel, err := filepath.Rel(home, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, revision, parents, err := safefile.ObserveFileWithin(home, filepath.ToSlash(rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return acceptedYaziFile{revision: revision, parents: parents}
+	}
+	acceptedYazi := map[YaziFileKind]acceptedYaziFile{
+		YaziFileKindMain:   observeYaziFile(yaziPaths.Main),
+		YaziFileKindKeymap: observeYaziFile(yaziPaths.Keymap),
+		YaziFileKindTheme:  observeYaziFile(yaziPaths.Theme),
+	}
+	yaziCfg.ShowHidden = true
+	for _, kind := range []YaziFileKind{YaziFileKindMain, YaziFileKindKeymap, YaziFileKindTheme} {
+		accepted := acceptedYazi[kind]
+		if _, err := WriteYaziFileAtResolvedAuthorityTracked(kind, yaziCfg, "nord", yaziPaths, accepted.revision, accepted.parents, operation.DefaultLocker); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	err := filepath.Walk(home, func(path string, _ os.FileInfo, err error) error {
+	err = filepath.Walk(home, func(path string, _ os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

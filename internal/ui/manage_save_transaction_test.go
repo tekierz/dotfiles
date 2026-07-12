@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -129,7 +130,7 @@ func TestManageSavePlanExactMultiToolAndStateScope(t *testing.T) {
 	if !slices.Equal(plan.plan.configTools, []string{"ghostty", "yazi"}) || !plan.saveManageState || plan.saveGlobalState {
 		t.Fatalf("configTools=%v saveManage=%v saveGlobal=%v", plan.plan.configTools, plan.saveManageState, plan.saveGlobalState)
 	}
-	for _, actionID := range []string{"config:ghostty", "config:yazi", "state:manage-preferences"} {
+	for _, actionID := range []string{"config:ghostty", "config:yazi:main", "state:manage-preferences"} {
 		found := false
 		for _, action := range plan.plan.actions() {
 			found = found || action.ID == actionID
@@ -138,9 +139,381 @@ func TestManageSavePlanExactMultiToolAndStateScope(t *testing.T) {
 			t.Errorf("Manage plan omits %s", actionID)
 		}
 	}
-	for _, rel := range []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml", ".config/yazi/theme.toml", planTargetPath(os.Getenv("HOME"), filepath.Join(config.ToolsDir(), "manage.json"))} {
+	for _, rel := range []string{".config/yazi/yazi.toml", planTargetPath(os.Getenv("HOME"), filepath.Join(config.ToolsDir(), "manage.json"))} {
 		if !slices.Contains(plan.plan.backupTargets(), rel) {
 			t.Errorf("backup scope %v omits %s", plan.plan.backupTargets(), rel)
+		}
+	}
+	for _, rel := range []string{".config/yazi/keymap.toml", ".config/yazi/theme.toml"} {
+		if slices.Contains(plan.plan.backupTargets(), rel) {
+			t.Errorf("main-only Yazi change leaked backup %s into %v", rel, plan.plan.backupTargets())
+		}
+	}
+}
+
+func TestManageYaziChangesPlanOnlyAffectedFilesAndOmitTheme(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		actionID   string
+		file       string
+		change     func(*ManageConfig)
+		unexpected string
+	}{
+		{"show hidden", "config:yazi:main", tools.YaziFileMain, func(cfg *ManageConfig) { cfg.YaziShowHidden = !cfg.YaziShowHidden }, "config:yazi:keymap"},
+		{"keymap", "config:yazi:keymap", tools.YaziFileKeymap, func(cfg *ManageConfig) {
+			if cfg.YaziKeymap == "vim" {
+				cfg.YaziKeymap = "emacs"
+			} else {
+				cfg.YaziKeymap = "vim"
+			}
+		}, "config:yazi:main"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app, home, _ := newPlanTestApp(t)
+			override := filepath.Join(home, "reviewed-yazi-override")
+			t.Setenv("YAZI_CONFIG_HOME", override)
+			t.Setenv("XDG_CONFIG_HOME", "")
+			test.change(app.manageConfig)
+			planned, err := buildManageSavePlan(app, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := planned.plan
+			var selected operation.Action
+			found := false
+			for _, action := range plan.actions() {
+				switch action.ID {
+				case "config:yazi":
+					t.Fatalf("legacy aggregate Yazi action remains in Manage plan: %+v", action)
+				case "config:yazi:theme":
+					t.Fatalf("ordinary Manage Yazi save unexpectedly planned theme: %+v", action)
+				case test.unexpected:
+					t.Fatalf("unaffected Yazi file action was planned: %+v", action)
+				case test.actionID:
+					selected, found = action, true
+				}
+			}
+			if !found {
+				t.Fatalf("affected Yazi action %s not found", test.actionID)
+			}
+			selectedPath := filepath.Join(override, test.file)
+			wantTarget := planTargetPath(home, selectedPath)
+			if selected.Disposition != operation.DispositionApply || selected.ToolID != "yazi" || selected.Ownership != operation.OwnershipManagedFile || selected.Target != wantTarget || !slices.Equal(selected.BackupTargets, []string{wantTarget}) || len(selected.Observations) != 1 || selected.Observations[0].Source != wantTarget || selected.Observations[0].Exists || selected.Observations[0].Managed {
+				t.Fatalf("affected Yazi action=%+v", selected)
+			}
+			authority := plan.authority[selected.ID]
+			accepted, ok := authority[wantTarget]
+			if len(authority) != 1 || !ok || accepted.kind != acceptedFileTarget || !accepted.file.Tracked() || accepted.file.Exists() || !accepted.parents.Tracked() {
+				t.Fatalf("affected Yazi authority=%+v map=%+v", accepted, authority)
+			}
+			if !slices.Equal(plan.configTools, []string{"yazi"}) {
+				t.Fatalf("Manage logical config tools=%v, want [yazi]", plan.configTools)
+			}
+			mainPath := filepath.Join(override, tools.YaziFileMain)
+			keymapPath := filepath.Join(override, tools.YaziFileKeymap)
+			themePath := filepath.Join(override, tools.YaziFileTheme)
+			if plan.yaziConfigPaths.Origin != tools.YaziConfigOriginOverride || plan.yaziConfigPaths.Dir != override || plan.yaziConfigPaths.Main != mainPath || plan.yaziConfigPaths.Keymap != keymapPath || plan.yaziConfigPaths.Theme != themePath {
+				t.Fatalf("Manage frozen Yazi paths=%+v", plan.yaziConfigPaths)
+			}
+			themeTarget := planTargetPath(home, themePath)
+			if _, ok := plan.authority["config:yazi:theme"]; ok || slices.Contains(plan.backupTargets(), themeTarget) {
+				t.Fatalf("Manage plan leaked theme authority/backup: authority=%+v backups=%v", plan.authority["config:yazi:theme"], plan.backupTargets())
+			}
+			for actionID, scope := range plan.authority {
+				if _, ok := scope[themeTarget]; ok {
+					t.Fatalf("Manage authority %s leaked theme target %s", actionID, themeTarget)
+				}
+			}
+			unaffectedPath := mainPath
+			if test.file == tools.YaziFileMain {
+				unaffectedPath = keymapPath
+			}
+			selectedCount, unaffectedCount := 0, 0
+			for _, target := range plan.backupTargets() {
+				switch target {
+				case wantTarget:
+					selectedCount++
+				case planTargetPath(home, unaffectedPath):
+					unaffectedCount++
+				}
+			}
+			if selectedCount != 1 || unaffectedCount != 0 {
+				t.Fatalf("Manage Yazi backup counts selected=%d unaffected=%d in %v", selectedCount, unaffectedCount, plan.backupTargets())
+			}
+			for _, path := range []string{override, filepath.Join(override, tools.YaziFileMain), filepath.Join(override, tools.YaziFileKeymap), themePath} {
+				if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("Manage preview created %s: %v", path, statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestManageNonYaziPlanIgnoresHostileYaziEnvironment(t *testing.T) {
+	app, _, _ := newPlanTestApp(t)
+	t.Setenv("YAZI_CONFIG_HOME", "relative-hostile-yazi")
+	t.Setenv("XDG_CONFIG_HOME", "relative-hostile-xdg")
+	app.manageConfig.GhosttyFontSize++
+	planned, err := buildManageSavePlan(app, time.Now())
+	if err != nil {
+		t.Fatalf("Ghostty-only Manage plan failed on unrelated Yazi environment: %v", err)
+	}
+	plan := planned.plan
+	action := planActionByID(t, plan, "config:ghostty")
+	if action.Disposition != operation.DispositionApply || action.ToolID != "ghostty" {
+		t.Fatalf("Ghostty-only Manage action=%+v", action)
+	}
+	if plan.yaziConfigPaths != (tools.YaziConfigPaths{}) {
+		t.Fatalf("Ghostty-only Manage plan captured Yazi paths: %+v", plan.yaziConfigPaths)
+	}
+	if !slices.Equal(plan.configTools, []string{"ghostty"}) {
+		t.Fatalf("Ghostty-only Manage config tools=%v", plan.configTools)
+	}
+	for _, candidate := range plan.actions() {
+		if strings.HasPrefix(candidate.ID, "config:yazi") {
+			t.Fatalf("Ghostty-only Manage plan emitted Yazi action: %+v", candidate)
+		}
+	}
+	for actionID := range plan.authority {
+		if strings.HasPrefix(actionID, "config:yazi") {
+			t.Fatalf("Ghostty-only Manage plan captured Yazi authority: %s", actionID)
+		}
+	}
+}
+
+func TestManageCombinedYaziChangesPlanMainAndKeymapOnly(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	override := filepath.Join(home, "reviewed-yazi-override")
+	t.Setenv("YAZI_CONFIG_HOME", override)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	app.manageConfig.YaziShowHidden = !app.manageConfig.YaziShowHidden
+	if app.manageConfig.YaziKeymap == "vim" {
+		app.manageConfig.YaziKeymap = "emacs"
+	} else {
+		app.manageConfig.YaziKeymap = "vim"
+	}
+	planned, err := buildManageSavePlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := planned.plan
+	actions := map[string]operation.Action{}
+	for _, action := range plan.actions() {
+		switch action.ID {
+		case "config:yazi":
+			t.Fatalf("combined Manage save retained aggregate Yazi action: %+v", action)
+		case "config:yazi:theme":
+			t.Fatalf("combined Manage save planned theme: %+v", action)
+		case "config:yazi:main", "config:yazi:keymap":
+			actions[action.ID] = action
+		}
+	}
+	if len(actions) != 2 {
+		t.Fatalf("combined Manage Yazi actions=%v, want main+keymap", actions)
+	}
+	mainPath := filepath.Join(override, tools.YaziFileMain)
+	keymapPath := filepath.Join(override, tools.YaziFileKeymap)
+	themePath := filepath.Join(override, tools.YaziFileTheme)
+	for _, item := range []struct {
+		id   string
+		path string
+	}{{"config:yazi:main", mainPath}, {"config:yazi:keymap", keymapPath}} {
+		action := actions[item.id]
+		wantTarget := planTargetPath(home, item.path)
+		if action.Disposition != operation.DispositionApply || action.ToolID != "yazi" || action.Ownership != operation.OwnershipManagedFile || action.Target != wantTarget || !slices.Equal(action.BackupTargets, []string{wantTarget}) || len(action.Observations) != 1 || action.Observations[0].Source != wantTarget || action.Observations[0].Exists || action.Observations[0].Managed {
+			t.Fatalf("combined Manage action %s=%+v", item.id, action)
+		}
+		authority := plan.authority[item.id]
+		accepted, ok := authority[wantTarget]
+		if len(authority) != 1 || !ok || accepted.kind != acceptedFileTarget || !accepted.file.Tracked() || accepted.file.Exists() || !accepted.parents.Tracked() {
+			t.Fatalf("combined Manage authority %s=%+v map=%+v", item.id, accepted, authority)
+		}
+		count := 0
+		for _, target := range plan.backupTargets() {
+			if target == wantTarget {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("combined Manage backup count for %s=%d in %v", wantTarget, count, plan.backupTargets())
+		}
+	}
+	if !slices.Equal(plan.configTools, []string{"yazi"}) {
+		t.Fatalf("combined Manage logical config tools=%v", plan.configTools)
+	}
+	themeTarget := planTargetPath(home, themePath)
+	if slices.Contains(plan.backupTargets(), themeTarget) {
+		t.Fatalf("combined Manage backups leaked theme: %v", plan.backupTargets())
+	}
+	for actionID, scope := range plan.authority {
+		if _, ok := scope[themeTarget]; ok {
+			t.Fatalf("combined Manage authority %s leaked theme", actionID)
+		}
+	}
+	for _, path := range []string{override, mainPath, keymapPath, themePath} {
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("combined Manage preview created %s: %v", path, statErr)
+		}
+	}
+}
+
+func TestManageYaziExecutionUsesFrozenSplitAuthorities(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		changeMain bool
+		changeKey  bool
+	}{{"main only", true, false}, {"keymap only", false, true}, {"combined", true, true}} {
+		t.Run(test.name, func(t *testing.T) {
+			app, home, _ := newPlanTestApp(t)
+			configA := filepath.Join(home, "config-a")
+			stateA := filepath.Join(home, "state-a")
+			t.Setenv("YAZI_CONFIG_HOME", configA)
+			t.Setenv("XDG_CONFIG_HOME", stateA)
+			if test.changeMain {
+				app.manageConfig.YaziShowHidden = !app.manageConfig.YaziShowHidden
+			}
+			if test.changeKey {
+				if app.manageConfig.YaziKeymap == "vim" {
+					app.manageConfig.YaziKeymap = "emacs"
+				} else {
+					app.manageConfig.YaziKeymap = "vim"
+				}
+			}
+			planned, err := buildManageSavePlan(app, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			configB := filepath.Join(home, "config-b-override")
+			configBParent := filepath.Join(home, "config-b-parent")
+			t.Setenv("YAZI_CONFIG_HOME", configB)
+			t.Setenv("XDG_CONFIG_HOME", configBParent)
+			result := executeManageSavePlanResult(context.Background(), planned, defaultManageSaveRuntime())
+			if result.err != nil || result.manualRecovery || !result.applied {
+				t.Fatalf("Manage frozen Yazi execution err=%v manual=%t applied=%t warning=%q", result.err, result.manualRecovery, result.applied, result.warning)
+			}
+			managePathA := filepath.Join(stateA, "dotfiles", "tools", "manage.json")
+			manageBytes, readErr := os.ReadFile(managePathA)
+			if readErr != nil {
+				t.Fatalf("frozen Manage state missing at %s: %v", managePathA, readErr)
+			}
+			var saved ManageConfig
+			if err := json.Unmarshal(manageBytes, &saved); err != nil {
+				t.Fatalf("decode frozen Manage state: %v", err)
+			}
+			acceptedSnapshot := planned.snapshot
+			if saved != acceptedSnapshot {
+				t.Fatalf("frozen Manage state=%+v, want accepted=%+v", saved, acceptedSnapshot)
+			}
+			cfg := yaziConfigFrom(planned.plan.config)
+			selected := map[string][]byte{}
+			if test.changeMain {
+				selected[tools.YaziFileMain] = []byte(tools.GenerateYaziConfig(cfg, planned.plan.theme))
+			}
+			if test.changeKey {
+				selected[tools.YaziFileKeymap] = []byte(tools.GenerateYaziKeymap(cfg, planned.plan.theme))
+			}
+			for _, name := range []string{tools.YaziFileMain, tools.YaziFileKeymap} {
+				path := filepath.Join(configA, name)
+				want, shouldExist := selected[name]
+				if shouldExist {
+					got, readErr := os.ReadFile(path)
+					if readErr != nil || !slices.Equal(got, want) {
+						t.Fatalf("frozen Manage target %s data=%q err=%v want=%q", path, got, readErr, want)
+					}
+				} else if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("unaffected Manage split target %s was written: %v", path, statErr)
+				}
+			}
+			if _, statErr := os.Lstat(filepath.Join(configA, tools.YaziFileTheme)); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("Manage execution wrote theme: %v", statErr)
+			}
+			for _, dir := range []string{configB, configBParent, filepath.Join(configBParent, "yazi")} {
+				if _, statErr := os.Lstat(dir); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("Manage environment drift created directory %s: %v", dir, statErr)
+				}
+			}
+			for _, dir := range []string{configB, filepath.Join(configBParent, "yazi")} {
+				for _, name := range []string{tools.YaziFileMain, tools.YaziFileKeymap, tools.YaziFileTheme} {
+					if _, statErr := os.Lstat(filepath.Join(dir, name)); !errors.Is(statErr, os.ErrNotExist) {
+						t.Fatalf("Manage environment-drift target %s was written: %v", filepath.Join(dir, name), statErr)
+					}
+				}
+			}
+			for _, path := range []string{
+				filepath.Join(configBParent, "dotfiles", "tools", "manage.json"),
+				filepath.Join(configBParent, "dotfiles", "tools"),
+				filepath.Join(configBParent, "dotfiles"),
+			} {
+				if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("Manage state drift created %s: %v", path, statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestManageStateOnlyExecutionUsesFrozenXDGPath(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	stateA := filepath.Join(home, "state-a")
+	stateB := filepath.Join(home, "state-b")
+	t.Setenv("XDG_CONFIG_HOME", stateA)
+	app.manageConfig.LazyDockerMouseMode = !app.manageConfig.LazyDockerMouseMode
+	planned, err := buildManageSavePlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", stateB)
+	result := executeManageSavePlanResult(context.Background(), planned, defaultManageSaveRuntime())
+	if result.err != nil || result.manualRecovery || !result.applied {
+		t.Fatalf("state-only frozen execution err=%v manual=%t applied=%t", result.err, result.manualRecovery, result.applied)
+	}
+	pathA := filepath.Join(stateA, "dotfiles", "tools", "manage.json")
+	data, err := os.ReadFile(pathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved ManageConfig
+	if err := json.Unmarshal(data, &saved); err != nil || saved != planned.snapshot {
+		t.Fatalf("state-only saved=%+v err=%v want=%+v", saved, err, planned.snapshot)
+	}
+	for _, path := range []string{stateB, filepath.Join(stateB, "dotfiles"), filepath.Join(stateB, "dotfiles", "tools"), filepath.Join(stateB, "dotfiles", "tools", "manage.json")} {
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("state-only drift created %s: %v", path, statErr)
+		}
+	}
+}
+
+func TestManageGlobalOnlyExecutionUsesFrozenXDGPath(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	stateA := filepath.Join(home, "state-a")
+	stateB := filepath.Join(home, "state-b")
+	t.Setenv("XDG_CONFIG_HOME", stateA)
+	app.theme = "nord"
+	planned, err := buildManageSavePlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", stateB)
+	result := executeManageSavePlanResult(context.Background(), planned, defaultManageSaveRuntime())
+	if result.err != nil || result.manualRecovery || !result.applied {
+		t.Fatalf("global-only frozen execution err=%v manual=%t applied=%t", result.err, result.manualRecovery, result.applied)
+	}
+	pathA := filepath.Join(stateA, "dotfiles", "global.json")
+	data, err := os.ReadFile(pathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved config.GlobalConfig
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatalf("decode global-only state: %v", err)
+	}
+	wantGlobal := planned.global
+	if saved.SchemaVersion != wantGlobal.SchemaVersion || saved.Theme != wantGlobal.Theme || saved.NavStyle != wantGlobal.NavStyle || saved.ActiveUser != wantGlobal.ActiveUser || saved.DisableAnimations != wantGlobal.DisableAnimations || saved.AutoBackup != wantGlobal.AutoBackup || saved.BackupMaxCount != wantGlobal.BackupMaxCount || saved.BackupMaxAgeDays != wantGlobal.BackupMaxAgeDays {
+		t.Fatalf("global-only saved=%+v want=%+v", saved, wantGlobal)
+	}
+	for _, path := range []string{stateB, filepath.Join(stateB, "dotfiles"), filepath.Join(stateB, "dotfiles", "global.json")} {
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("global-only drift created %s: %v", path, statErr)
 		}
 	}
 }
@@ -219,7 +592,7 @@ func TestManageSaveFailsClosedBeforeBackupWithoutProductWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := defaultManageSaveRuntime()
-	runtime.transaction.write = nil
+	runtime.transaction.writeAction = nil
 	backupCalled := false
 	runtime.transaction.backup = func(*operation.StateAuthority, []backup.Target) (autoBackupResult, error) {
 		backupCalled = true
@@ -263,10 +636,10 @@ func TestManageSaveStateOnlySkipsProductWriter(t *testing.T) {
 	}
 	runtime := defaultManageSaveRuntime()
 	writes := 0
-	actualWrite := runtime.transaction.write
-	runtime.transaction.write = func(toolID string, cfg DeepDiveConfig, theme string, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+	actualWrite := runtime.transaction.writeAction
+	runtime.transaction.writeAction = func(actionID, toolID string, cfg DeepDiveConfig, theme string, paths tools.YaziConfigPaths, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
 		writes++
-		return actualWrite(toolID, cfg, theme, authority, locker)
+		return actualWrite(actionID, toolID, cfg, theme, paths, authority, locker)
 	}
 	result := executeManageSavePlanResult(context.Background(), plan, runtime)
 	if result.err != nil || !result.applied || writes != 0 {
@@ -287,7 +660,7 @@ func TestManageSaveStateFailureRollsBackEarlierProductWrite(t *testing.T) {
 	}
 	runtime := defaultManageSaveRuntime()
 	stateErr := errors.New("injected manage state failure")
-	runtime.saveManage = func(*ManageConfig, safefile.Revision, *safefile.ParentChain, operation.Locker) (safefile.Revision, error) {
+	runtime.saveManage = func(string, *ManageConfig, safefile.Revision, *safefile.ParentChain, operation.Locker) (safefile.Revision, error) {
 		return safefile.Revision{}, stateErr
 	}
 	result := executeManageSavePlanResult(context.Background(), plan, runtime)
@@ -319,8 +692,8 @@ func TestManageSaveCommittedGlobalFailureRollsBackAllProvenWrites(t *testing.T) 
 	runtime := defaultManageSaveRuntime()
 	actualSaveGlobal := runtime.saveGlobal
 	committedErr := errors.New("injected global post-commit failure")
-	runtime.saveGlobal = func(cfg *config.GlobalConfig, revision safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (safefile.Revision, error) {
-		committed, err := actualSaveGlobal(cfg, revision, parents, locker)
+	runtime.saveGlobal = func(path string, cfg *config.GlobalConfig, revision safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (safefile.Revision, error) {
+		committed, err := actualSaveGlobal(path, cfg, revision, parents, locker)
 		if err != nil {
 			return committed, err
 		}

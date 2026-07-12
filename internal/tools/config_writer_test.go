@@ -667,8 +667,8 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"lazygit.go": 2,
 		"neovim.go":  1,
 		"tmux.go":    1,
-		"tool.go":    3,
-		"yazi.go":    2,
+		"tool.go":    2,
+		"yazi.go":    1, // exact-current direct writer
 		"zsh.go":     1,
 	}
 	type mutationExpectation struct {
@@ -791,10 +791,8 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"tool.go:writeGeneratedConfigWith":                                1,
 		"tool.go:writeToolConfigAtAuthorityTracked":                       1,
 		"tool.go:writeToolConfigTracked":                                  1,
-		"yazi.go:replaceToolConfigAtRevisionTracked":                      1,
-		"yazi.go:replaceToolConfigAtRevisionNoCreateAuthorizedTracked":    1,
-		"yazi.go:preflightToolConfigAtAuthority":                          1,
-		"yazi.go:writeToolConfigAtAuthorityTracked":                       2,
+		"yazi.go:replaceToolConfigAtRevisionTracked":                      1, // exact-current direct writer
+		"yazi.go:replaceToolConfigAtRevisionNoCreateAuthorizedTracked":    1, // exact-current accepted writer
 		"zsh.go:replaceToolConfigAtRevisionTracked":                       1,
 		"zsh.go:replaceToolConfigAtRevisionNoCreateAuthorizedTracked":     1,
 	}
@@ -802,7 +800,6 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"writeGeneratedConfig":                                 true,
 		"writeGeneratedConfigWith":                             true,
 		"preflightToolConfigAtRevision":                        true,
-		"preflightToolConfigAtAuthority":                       true,
 		"writeToolConfigAtRevisionTracked":                     true,
 		"writeToolConfigAtAuthorityTracked":                    true,
 		"writeToolConfigTracked":                               true,

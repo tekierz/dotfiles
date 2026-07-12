@@ -954,7 +954,7 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			finish(authorityErr)
 			return
 		}
-		globalEvidence, saveErr := savePlannedInstallerPreferencesTracked(plan, globalTarget, boundLocker)
+		globalEvidence, saveErr := savePlannedInstallerPreferencesTracked(plan, home, globalRels[0], globalTarget, boundLocker)
 		if saveErr != nil {
 			captureErr := recordFailedActionRollbackState(home, plan, "state:global", saveErr, rollbackExpected)
 			markAction("state:global", operation.ActionFailed, "global preferences could not be persisted")
@@ -982,6 +982,38 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		}
 		return nil
 	}
+	applyConfigAction := func(actionID, toolID string, run func() ([]tools.MutationEvidence, error)) bool {
+		if persistJournal {
+			invalidateRollbackAction(plan, actionID, rollbackExpected)
+		}
+		evidence, actionErr := run()
+		if actionErr != nil {
+			emitLine(fmt.Sprintf("  ⚠ %v", actionErr))
+			noteFailure(actionErr)
+		}
+		succeeded := actionErr == nil
+		if succeeded {
+			if len(evidence) == 0 {
+				invalidateRollbackAction(plan, actionID, rollbackExpected)
+				noteFailure(fmt.Errorf("%s writer returned no exact mutation evidence", toolID))
+				succeeded = false
+			} else if err := authorizeMutationEvidenceSet(home, plan, actionID, evidence, rollbackExpected); err != nil {
+				invalidateRollbackAction(plan, actionID, rollbackExpected)
+				noteFailure(fmt.Errorf("authorize %s mutation evidence; automatic rollback is incomplete and manual recovery may be required: %w", toolID, err))
+				succeeded = false
+			}
+		} else {
+			if captureErr := recordFailedActionRollbackState(home, plan, actionID, actionErr, rollbackExpected); captureErr != nil {
+				noteFailure(fmt.Errorf("capture proven %s partial writes: %w", toolID, captureErr))
+			}
+		}
+		if succeeded {
+			markAction(actionID, operation.ActionSucceeded, "configuration applied")
+		} else {
+			markAction(actionID, operation.ActionFailed, "configuration apply failed")
+		}
+		return succeeded
+	}
 	toolConfigPhase := func(toolID, header string, run func() ([]tools.MutationEvidence, error), okLine string) bool {
 		if !configAllowed[toolID] {
 			return false
@@ -994,36 +1026,9 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			return false
 		}
 		stepLine(header)
-		if persistJournal {
-			invalidateRollbackAction(plan, "config:"+toolID, rollbackExpected)
-		}
-		evidence, actionErr := run()
-		if actionErr != nil {
-			emitLine(fmt.Sprintf("  ⚠ %v", actionErr))
-			noteFailure(actionErr)
-		} else if okLine != "" {
+		succeeded := applyConfigAction("config:"+toolID, toolID, run)
+		if succeeded && okLine != "" {
 			emitLine(okLine)
-		}
-		succeeded := actionErr == nil
-		if succeeded {
-			if len(evidence) == 0 {
-				invalidateRollbackAction(plan, "config:"+toolID, rollbackExpected)
-				noteFailure(fmt.Errorf("%s writer returned no exact mutation evidence", toolID))
-				succeeded = false
-			} else if err := authorizeMutationEvidenceSet(home, plan, "config:"+toolID, evidence, rollbackExpected); err != nil {
-				invalidateRollbackAction(plan, "config:"+toolID, rollbackExpected)
-				noteFailure(fmt.Errorf("authorize %s mutation evidence; automatic rollback is incomplete and manual recovery may be required: %w", toolID, err))
-				succeeded = false
-			}
-		} else {
-			if captureErr := recordFailedActionRollbackState(home, plan, "config:"+toolID, actionErr, rollbackExpected); captureErr != nil {
-				noteFailure(fmt.Errorf("capture proven %s partial writes: %w", toolID, captureErr))
-			}
-		}
-		if succeeded {
-			markAction("config:"+toolID, operation.ActionSucceeded, "configuration applied")
-		} else {
-			markAction("config:"+toolID, operation.ActionFailed, "configuration apply failed")
 		}
 		return succeeded
 	}
@@ -1161,7 +1166,7 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			if acceptedErr != nil {
 				return nil, acceptedErr
 			}
-			evidence, err = tools.WriteGhosttyConfigAtBoundAuthorityTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme, accepted.file, accepted.parents, boundLocker)
+			evidence, err = tools.WriteGhosttyConfigAtResolvedAuthorityTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme, accepted.file, accepted.parents, boundLocker)
 		} else if ghosttyConfigTarget != "" {
 			evidence, err = tools.WriteGhosttyConfigAtTracked(ghosttyConfigTarget, ghosttyConfigFrom(cfg), theme)
 		} else {
@@ -1227,26 +1232,65 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	}, "  ✓ Git configured with ~/.gitconfig")
 
 	// Configure Yazi
-	toolConfigPhase("yazi", "\n▶ Configuring Yazi...", func() ([]tools.MutationEvidence, error) {
-		if persistJournal {
-			yaziAccepted, err := executionTarget("config:yazi", ".config/yazi/yazi.toml")
-			if err != nil {
-				return nil, err
-			}
-			keymapAccepted, err := executionTarget("config:yazi", ".config/yazi/keymap.toml")
-			if err != nil {
-				return nil, err
-			}
-			themeAccepted, err := executionTarget("config:yazi", ".config/yazi/theme.toml")
-			if err != nil {
-				return nil, err
-			}
-			evidence, err := tools.WriteYaziConfigAtAuthoritiesTracked(yaziConfigFrom(cfg), theme, yaziAccepted.file, yaziAccepted.parents, keymapAccepted.file, keymapAccepted.parents, themeAccepted.file, themeAccepted.parents, boundLocker)
+	if !persistJournal {
+		toolConfigPhase("yazi", "\n▶ Configuring Yazi...", func() ([]tools.MutationEvidence, error) {
+			evidence, err := tools.WriteYaziConfigTracked(yaziConfigFrom(cfg), theme)
 			return evidence, wrapMutationError("failed to configure Yazi", err)
+		}, "  ✓ Yazi configured")
+	} else if configAllowed["yazi"] {
+		const yaziHeader = "\n▶ Configuring Yazi..."
+		yaziActions := []struct {
+			actionID string
+			kind     tools.YaziFileKind
+			path     string
+		}{
+			{actionID: "config:yazi:main", kind: tools.YaziFileKindMain, path: plan.yaziConfigPaths.Main},
+			{actionID: "config:yazi:keymap", kind: tools.YaziFileKindKeymap, path: plan.yaziConfigPaths.Keymap},
+			{actionID: "config:yazi:theme", kind: tools.YaziFileKindTheme, path: plan.yaziConfigPaths.Theme},
 		}
-		evidence, err := tools.WriteYaziConfigTracked(yaziConfigFrom(cfg), theme)
-		return evidence, wrapMutationError("failed to configure Yazi", err)
-	}, "  ✓ Yazi configured")
+		available, reason := coreToolConfigAvailable(installRuntime, "yazi")
+		stepLine(yaziHeader)
+		if !available {
+			emitLine("  ↷ Skipped configuration: " + reason)
+			for _, item := range yaziActions {
+				markAction(item.actionID, operation.ActionSkipped, reason)
+			}
+		} else {
+			allSucceeded := true
+			for _, item := range yaziActions {
+				item := item
+				succeeded := applyConfigAction(item.actionID, "yazi", func() ([]tools.MutationEvidence, error) {
+					target := planTargetPath(home, item.path)
+					foundApply := false
+					for _, action := range plan.actions() {
+						if action.ID != item.actionID {
+							continue
+						}
+						if foundApply {
+							return nil, fmt.Errorf("duplicate accepted Yazi action %s", item.actionID)
+						}
+						if action.Disposition != operation.DispositionApply || action.ToolID != "yazi" || action.Target != target {
+							return nil, fmt.Errorf("accepted Yazi action %s does not match frozen target %s", item.actionID, target)
+						}
+						foundApply = true
+					}
+					if !foundApply {
+						return nil, fmt.Errorf("accepted Yazi action %s is unavailable", item.actionID)
+					}
+					accepted, err := executionTarget(item.actionID, target)
+					if err != nil {
+						return nil, err
+					}
+					evidence, err := tools.WriteYaziFileAtResolvedAuthorityTracked(item.kind, yaziConfigFrom(cfg), theme, plan.yaziConfigPaths, accepted.file, accepted.parents, boundLocker)
+					return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Yazi", err)
+				})
+				allSucceeded = allSucceeded && succeeded
+			}
+			if allSucceeded {
+				emitLine("  ✓ Yazi configured")
+			}
+		}
+	}
 
 	// Configure FZF
 	toolConfigPhase("fzf", "\n▶ Configuring FZF...", func() ([]tools.MutationEvidence, error) {
@@ -2221,7 +2265,7 @@ func saveInstallerPreferencesTracked(theme, navStyle string, animationsEnabled b
 	return tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision}, nil
 }
 
-func savePlannedInstallerPreferencesTracked(plan *installPlan, authority acceptedTarget, locker operation.Locker) (tools.MutationEvidence, error) {
+func savePlannedInstallerPreferencesTracked(plan *installPlan, home, plannedTarget string, authority acceptedTarget, locker operation.Locker) (tools.MutationEvidence, error) {
 	planned, err := plan.plannedGlobalConfig()
 	if err != nil {
 		return tools.MutationEvidence{}, err
@@ -2230,15 +2274,20 @@ func savePlannedInstallerPreferencesTracked(plan *installPlan, authority accepte
 	if err != nil {
 		return tools.MutationEvidence{}, fmt.Errorf("resolve accepted global target: %w", err)
 	}
-	if len(actionTargets) != 1 {
+	if len(actionTargets) != 1 || actionTargets[0] != plannedTarget {
 		return tools.MutationEvidence{}, fmt.Errorf("resolve accepted global target: got %d targets", len(actionTargets))
 	}
+	cleanTarget := filepath.ToSlash(filepath.Clean(filepath.FromSlash(plannedTarget)))
+	if !filepath.IsAbs(home) || filepath.IsAbs(plannedTarget) || cleanTarget == "." || cleanTarget == "" || cleanTarget == ".." || strings.HasPrefix(cleanTarget, "../") {
+		return tools.MutationEvidence{}, fmt.Errorf("accepted global target must be a HOME-relative path")
+	}
+	absolutePath := filepath.Join(filepath.Clean(home), filepath.FromSlash(cleanTarget))
 	if authority.kind != acceptedFileTarget || !authority.file.Tracked() || !authority.parents.Tracked() {
 		return tools.MutationEvidence{}, fmt.Errorf("global execution authority is incomplete")
 	}
-	revision, err := config.SaveGlobalConfigAtBoundAuthorityTracked(planned, authority.file, authority.parents, locker)
+	revision, err := config.SaveGlobalConfigAtPathBoundAuthorityTracked(absolutePath, planned, authority.file, authority.parents, locker)
 	if err != nil {
 		return tools.MutationEvidence{}, err
 	}
-	return tools.MutationEvidence{Path: filepath.Join(config.ConfigDir(), "global.json"), Revision: revision, Parents: authority.parents}, nil
+	return tools.MutationEvidence{Path: absolutePath, Revision: revision, Parents: authority.parents}, nil
 }

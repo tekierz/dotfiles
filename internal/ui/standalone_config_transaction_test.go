@@ -34,12 +34,169 @@ func TestStandaloneConfigFirstEnterBuildsExactNonMutatingPreview(t *testing.T) {
 	if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenConfigSaveConfirm {
 		t.Fatalf("first Enter message = %#v, want config-save confirmation", nav)
 	}
-	want := []string{".config", ".config/yazi", ".config/yazi/keymap.toml", ".config/yazi/theme.toml", ".config/yazi/yazi.toml"}
+	want := []string{".config", ".config/yazi", ".config/yazi/keymap.toml", ".config/yazi/yazi.toml"}
 	if got := app.standaloneConfigPlan.backupTargets(); !slices.Equal(got, want) {
 		t.Fatalf("Yazi preview targets = %v, want %v", got, want)
 	}
 	if app.standaloneConfigPlan.hash() == "" || app.standaloneConfigPlan.hasBlocked() {
 		t.Fatalf("preview hash=%q blocked=%v", app.standaloneConfigPlan.hash(), app.standaloneConfigPlan.hasBlocked())
+	}
+}
+
+func TestStandaloneSingleSpecYaziFailsClosedToResolvedPerFilePlanner(t *testing.T) {
+	_, home, _ := newPlanTestApp(t)
+	spec, reason, err := standaloneConfigPlanSpec(home, "nord", DeepDiveConfig{}, "yazi", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.targets) != 0 {
+		t.Fatalf("single-spec Yazi fallback exposed aggregate targets: %v", spec.targets)
+	}
+	if !strings.Contains(strings.ToLower(reason), "yazi") || !strings.Contains(strings.ToLower(reason), "resolved per-file") {
+		t.Fatalf("single-spec Yazi fallback reason = %q, want explicit resolved per-file direction", reason)
+	}
+}
+
+func TestStandaloneYaziSavePlansMainAndKeymapButOmitsTheme(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	app.startScreen = ScreenConfigYazi
+	override := filepath.Join(home, "reviewed-yazi-override")
+	t.Setenv("YAZI_CONFIG_HOME", override)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mainAction, keymapAction operation.Action
+	foundMain, foundKeymap := false, false
+	for _, action := range plan.actions() {
+		switch action.ID {
+		case "config:yazi":
+			t.Fatalf("legacy aggregate Yazi action remains in standalone plan: %+v", action)
+		case "config:yazi:main":
+			mainAction, foundMain = action, true
+		case "config:yazi:keymap":
+			keymapAction, foundKeymap = action, true
+		case "config:yazi:theme":
+			t.Fatalf("ordinary standalone Yazi save unexpectedly planned theme: %+v", action)
+		}
+	}
+	if !foundMain || !foundKeymap {
+		t.Fatalf("standalone Yazi split actions found main=%t keymap=%t", foundMain, foundKeymap)
+	}
+	mainPath := filepath.Join(override, tools.YaziFileMain)
+	keymapPath := filepath.Join(override, tools.YaziFileKeymap)
+	themePath := filepath.Join(override, tools.YaziFileTheme)
+	if plan.yaziConfigPaths.Origin != tools.YaziConfigOriginOverride || plan.yaziConfigPaths.Dir != override || plan.yaziConfigPaths.Main != mainPath || plan.yaziConfigPaths.Keymap != keymapPath || plan.yaziConfigPaths.Theme != themePath {
+		t.Fatalf("standalone frozen Yazi paths=%+v", plan.yaziConfigPaths)
+	}
+	for _, item := range []struct {
+		action operation.Action
+		path   string
+	}{
+		{mainAction, mainPath},
+		{keymapAction, keymapPath},
+	} {
+		wantTarget := planTargetPath(home, item.path)
+		if item.action.Disposition != operation.DispositionApply || item.action.ToolID != "yazi" || item.action.Ownership != operation.OwnershipManagedFile || item.action.Target != wantTarget || !slices.Equal(item.action.BackupTargets, []string{wantTarget}) || len(item.action.Observations) != 1 || item.action.Observations[0].Source != wantTarget || item.action.Observations[0].Exists || item.action.Observations[0].Managed {
+			t.Fatalf("standalone split action=%+v", item.action)
+		}
+		authority := plan.authority[item.action.ID]
+		accepted, ok := authority[wantTarget]
+		if len(authority) != 1 || !ok || accepted.kind != acceptedFileTarget || !accepted.file.Tracked() || accepted.file.Exists() || !accepted.parents.Tracked() {
+			t.Fatalf("standalone split authority=%+v map=%+v", accepted, authority)
+		}
+	}
+	if !slices.Equal(plan.configTools, []string{"yazi"}) {
+		t.Fatalf("standalone logical config tools=%v, want [yazi]", plan.configTools)
+	}
+	themeTarget := planTargetPath(home, themePath)
+	if _, ok := plan.authority["config:yazi:theme"]; ok || slices.Contains(plan.backupTargets(), themeTarget) {
+		t.Fatalf("ordinary standalone plan leaked theme authority/backup: authority=%+v backups=%v", plan.authority["config:yazi:theme"], plan.backupTargets())
+	}
+	for actionID, scope := range plan.authority {
+		if _, ok := scope[themeTarget]; ok {
+			t.Fatalf("standalone authority %s leaked theme target %s", actionID, themeTarget)
+		}
+	}
+	for _, path := range []string{override, mainPath, keymapPath, themePath} {
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("standalone preview created %s: %v", path, statErr)
+		}
+	}
+}
+
+func TestStandaloneNonYaziPlanIgnoresHostileYaziEnvironment(t *testing.T) {
+	app, _, _ := newPlanTestApp(t)
+	app.startScreen = ScreenConfigFzf
+	t.Setenv("YAZI_CONFIG_HOME", "relative-hostile-yazi")
+	t.Setenv("XDG_CONFIG_HOME", "relative-hostile-xdg")
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil {
+		t.Fatalf("non-Yazi standalone plan failed on unrelated Yazi environment: %v", err)
+	}
+	action := planActionByID(t, plan, "config:fzf")
+	if action.Disposition != operation.DispositionApply || action.ToolID != "fzf" {
+		t.Fatalf("non-Yazi standalone action=%+v", action)
+	}
+	if plan.yaziConfigPaths != (tools.YaziConfigPaths{}) {
+		t.Fatalf("non-Yazi standalone plan captured Yazi paths: %+v", plan.yaziConfigPaths)
+	}
+	for _, candidate := range plan.actions() {
+		if strings.HasPrefix(candidate.ID, "config:yazi") {
+			t.Fatalf("non-Yazi standalone plan emitted Yazi action: %+v", candidate)
+		}
+	}
+	for actionID := range plan.authority {
+		if strings.HasPrefix(actionID, "config:yazi") {
+			t.Fatalf("non-Yazi standalone plan captured Yazi authority: %s", actionID)
+		}
+	}
+}
+
+func TestStandaloneYaziExecuteUsesFrozenSplitAuthoritiesAndOmitsTheme(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	app.startScreen = ScreenConfigYazi
+	configA := filepath.Join(home, "config-a")
+	t.Setenv("YAZI_CONFIG_HOME", configA)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	configB := filepath.Join(home, "config-b-override")
+	configBParent := filepath.Join(home, "config-b-parent")
+	t.Setenv("YAZI_CONFIG_HOME", configB)
+	t.Setenv("XDG_CONFIG_HOME", configBParent)
+	err, manual := executeStandaloneConfigPlanWithRuntime(context.Background(), plan, defaultStandaloneConfigRuntime())
+	if err != nil || manual {
+		t.Fatalf("standalone frozen Yazi execution err=%v manual=%t", err, manual)
+	}
+	wantCfg := yaziConfigFrom(plan.config)
+	want := map[string][]byte{
+		filepath.Join(configA, tools.YaziFileMain):   []byte(tools.GenerateYaziConfig(wantCfg, plan.theme)),
+		filepath.Join(configA, tools.YaziFileKeymap): []byte(tools.GenerateYaziKeymap(wantCfg, plan.theme)),
+	}
+	for path, content := range want {
+		got, readErr := os.ReadFile(path)
+		if readErr != nil || !bytes.Equal(got, content) {
+			t.Fatalf("frozen standalone target %s data=%q err=%v want=%q", path, got, readErr, content)
+		}
+	}
+	if _, statErr := os.Lstat(filepath.Join(configA, tools.YaziFileTheme)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("ordinary standalone execution mutated frozen theme: %v", statErr)
+	}
+	for _, dir := range []string{configB, filepath.Join(configBParent, "yazi")} {
+		for _, name := range []string{tools.YaziFileMain, tools.YaziFileKeymap, tools.YaziFileTheme} {
+			if _, statErr := os.Lstat(filepath.Join(dir, name)); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("environment-drift target %s was mutated: %v", filepath.Join(dir, name), statErr)
+			}
+		}
+	}
+	for _, dir := range []string{configB, configBParent, filepath.Join(configBParent, "yazi")} {
+		if _, statErr := os.Lstat(dir); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("environment drift created directory %s: %v", dir, statErr)
+		}
 	}
 }
 
@@ -146,7 +303,7 @@ func TestStandaloneConfigPlansAuthorityCapableWriterTargets(t *testing.T) {
 		{ScreenConfigTmux, []string{planTargetPath(home, tmuxPath)}},
 		{ScreenConfigZsh, []string{".zshrc"}},
 		{ScreenConfigGit, []string{".gitconfig", ".config/dotfiles/git/config"}},
-		{ScreenConfigYazi, []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml", ".config/yazi/theme.toml"}},
+		{ScreenConfigYazi, []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml"}},
 		{ScreenConfigFzf, []string{".config/fzf/fzf.zsh"}},
 		{ScreenConfigLazyGit, []string{planTargetPath(home, lazyGitPath)}},
 		{ScreenConfigBtop, []string{".config/btop/btop.conf", filepath.ToSlash(filepath.Join(".config", "btop", "themes", artifact))}},
@@ -349,10 +506,10 @@ func TestStandaloneNeovimPostcommitFailureRollsBackBothTargetsAndParents(t *test
 		t.Fatal(err)
 	}
 	runtime := defaultStandaloneConfigRuntime()
-	actualWrite := runtime.write
+	actualWrite := runtime.writeAction
 	failure := errors.New("injected failure after Neovim overlay commit")
-	runtime.write = func(toolID string, cfg DeepDiveConfig, theme string, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
-		evidence, err := actualWrite(toolID, cfg, theme, authority, locker)
+	runtime.writeAction = func(actionID, toolID string, cfg DeepDiveConfig, theme string, paths tools.YaziConfigPaths, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+		evidence, err := actualWrite(actionID, toolID, cfg, theme, paths, authority, locker)
 		if err != nil {
 			return nil, err
 		}
@@ -382,10 +539,10 @@ func TestStandaloneNeovimUnprovenInitCommitRollsBackOptionsAndRequiresManualReco
 		t.Fatal(err)
 	}
 	runtime := defaultStandaloneConfigRuntime()
-	actualWrite := runtime.write
+	actualWrite := runtime.writeAction
 	unknownCommit := &safefile.CommittedError{Operation: "injected unproven init commit", Err: errors.New("revision lost")}
-	runtime.write = func(toolID string, cfg DeepDiveConfig, theme string, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
-		evidence, err := actualWrite(toolID, cfg, theme, authority, locker)
+	runtime.writeAction = func(actionID, toolID string, cfg DeepDiveConfig, theme string, paths tools.YaziConfigPaths, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+		evidence, err := actualWrite(actionID, toolID, cfg, theme, paths, authority, locker)
 		if err != nil {
 			return nil, err
 		}
@@ -584,14 +741,13 @@ func TestStandaloneConfigMultiFileFailureRollsBackProvenWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := defaultStandaloneConfigRuntime()
-	actualWrite := runtime.write
-	writeErr := errors.New("injected failure after multi-file commit")
-	runtime.write = func(toolID string, cfg DeepDiveConfig, theme string, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
-		evidence, err := actualWrite(toolID, cfg, theme, authority, locker)
-		if err != nil {
-			return nil, err
+	actualWrite := runtime.writeAction
+	writeErr := errors.New("injected keymap action failure after main commit")
+	runtime.writeAction = func(actionID, toolID string, cfg DeepDiveConfig, theme string, paths tools.YaziConfigPaths, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+		if actionID == "config:yazi:keymap" {
+			return nil, writeErr
 		}
-		return nil, &tools.PartialMutationError{Err: writeErr, Evidence: evidence}
+		return actualWrite(actionID, toolID, cfg, theme, paths, authority, locker)
 	}
 	err, manual := executeStandaloneConfigPlanWithRuntime(context.Background(), plan, runtime)
 	if !errors.Is(err, writeErr) || manual || !strings.Contains(err.Error(), "automatic rollback completed") {
@@ -612,20 +768,28 @@ func TestStandaloneConfigMissingEvidenceRequiresManualRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := defaultStandaloneConfigRuntime()
-	actualWrite := runtime.write
-	runtime.write = func(toolID string, cfg DeepDiveConfig, theme string, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
-		evidence, err := actualWrite(toolID, cfg, theme, authority, locker)
+	actualWrite := runtime.writeAction
+	runtime.writeAction = func(actionID, toolID string, cfg DeepDiveConfig, theme string, paths tools.YaziConfigPaths, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+		evidence, err := actualWrite(actionID, toolID, cfg, theme, paths, authority, locker)
 		if err != nil {
 			return nil, err
 		}
-		return evidence[:1], nil
+		if actionID == "config:yazi:main" {
+			return nil, nil
+		}
+		return evidence, nil
 	}
 	err, manual := executeStandaloneConfigPlanWithRuntime(context.Background(), plan, runtime)
 	if err == nil || !manual || !strings.Contains(err.Error(), "manual recovery required") {
 		t.Fatalf("execute error=%v manual=%v", err, manual)
 	}
-	if _, statErr := os.Stat(filepath.Join(home, ".config", "yazi", "theme.toml")); statErr != nil {
-		t.Fatalf("fixture did not prove an untracked committed target remains for manual recovery: %v", statErr)
+	if _, statErr := os.Stat(filepath.Join(home, ".config", "yazi", "yazi.toml")); statErr != nil {
+		t.Fatalf("fixture did not prove committed main remains for manual recovery: %v", statErr)
+	}
+	for _, rel := range []string{".config/yazi/keymap.toml", ".config/yazi/theme.toml"} {
+		if _, statErr := os.Lstat(filepath.Join(home, filepath.FromSlash(rel))); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("missing-evidence execution unexpectedly wrote %s: %v", rel, statErr)
+		}
 	}
 }
 
@@ -637,10 +801,10 @@ func TestStandaloneConfigConcurrentEditIsPreserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := defaultStandaloneConfigRuntime()
-	actualWrite := runtime.write
+	actualWrite := runtime.writeAction
 	external := []byte("# external edit after commit\n")
-	runtime.write = func(toolID string, cfg DeepDiveConfig, theme string, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
-		evidence, err := actualWrite(toolID, cfg, theme, authority, locker)
+	runtime.writeAction = func(actionID, toolID string, cfg DeepDiveConfig, theme string, paths tools.YaziConfigPaths, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+		evidence, err := actualWrite(actionID, toolID, cfg, theme, paths, authority, locker)
 		if err != nil {
 			return nil, err
 		}
@@ -699,7 +863,7 @@ func TestStandaloneParentCommittedErrorRequiresManualRecovery(t *testing.T) {
 	}
 	runtime := defaultStandaloneConfigRuntime()
 	writerCalled := false
-	runtime.write = func(string, DeepDiveConfig, string, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error) {
+	runtime.writeAction = func(string, string, DeepDiveConfig, string, tools.YaziConfigPaths, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error) {
 		writerCalled = true
 		return nil, nil
 	}
@@ -725,7 +889,7 @@ func TestStandalonePrecommitParentErrorDoesNotClaimManualRecovery(t *testing.T) 
 	runtime.ensureParent = func(string, string, *safefile.DirectorySnapshot, *safefile.ParentChain, os.FileMode) (*safefile.DirectorySnapshot, error) {
 		return nil, precommit
 	}
-	runtime.write = func(string, DeepDiveConfig, string, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error) {
+	runtime.writeAction = func(string, string, DeepDiveConfig, string, tools.YaziConfigPaths, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error) {
 		writerCalled = true
 		return nil, nil
 	}
@@ -744,7 +908,7 @@ func TestStandalonePrecommitWriterErrorDoesNotClaimManualRecovery(t *testing.T) 
 	}
 	runtime := defaultStandaloneConfigRuntime()
 	precommit := errors.New("injected writer preflight failure")
-	runtime.write = func(string, DeepDiveConfig, string, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error) {
+	runtime.writeAction = func(string, string, DeepDiveConfig, string, tools.YaziConfigPaths, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error) {
 		return nil, precommit
 	}
 	err, manual := executeStandaloneConfigPlanWithRuntime(context.Background(), plan, runtime)
@@ -833,7 +997,7 @@ func TestStandaloneFailureAndLockReleaseErrorsAreBothPreserved(t *testing.T) {
 	writeErr := errors.New("injected precommit writer failure")
 	releaseErr := errors.New("injected release failure")
 	releaseCalls := 0
-	runtime.write = func(string, DeepDiveConfig, string, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error) {
+	runtime.writeAction = func(string, string, DeepDiveConfig, string, tools.YaziConfigPaths, map[string]acceptedTarget, operation.Locker) ([]tools.MutationEvidence, error) {
 		return nil, writeErr
 	}
 	runtime.acquire = func(*operation.StateAuthority, string, string) (func() error, error) {

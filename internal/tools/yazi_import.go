@@ -99,6 +99,11 @@ type YaziConfigPaths struct {
 	Main   string
 	Keymap string
 	Theme  string
+
+	// trustedRoot freezes the HOME containment authority established when the
+	// path set is resolved. An empty value keeps higher-precedence external
+	// configurations observable but read-only.
+	trustedRoot string
 }
 
 // ResolveYaziConfigPaths mirrors Yazi v26.5.6 global config discovery.
@@ -140,12 +145,20 @@ func ResolveYaziConfigPaths() (YaziConfigPaths, error) {
 		dir = filepath.Join(home, ".config", "yazi")
 		origin = YaziConfigOriginDefault
 	}
+	trustedRoot := ""
+	if home, err := os.UserHomeDir(); err == nil && home != "" && filepath.IsAbs(home) && !yaziPathHasUnsafeCharacters(home) {
+		home = filepath.Clean(home)
+		if pathWithinHome(home, dir) {
+			trustedRoot = home
+		}
+	}
 	return YaziConfigPaths{
-		Origin: origin,
-		Dir:    dir,
-		Main:   filepath.Join(dir, YaziFileMain),
-		Keymap: filepath.Join(dir, YaziFileKeymap),
-		Theme:  filepath.Join(dir, YaziFileTheme),
+		Origin:      origin,
+		Dir:         dir,
+		Main:        filepath.Join(dir, YaziFileMain),
+		Keymap:      filepath.Join(dir, YaziFileKeymap),
+		Theme:       filepath.Join(dir, YaziFileTheme),
+		trustedRoot: trustedRoot,
 	}, nil
 }
 
@@ -166,6 +179,10 @@ func ImportYaziConfig() (YaziConfigImport, error) {
 	if err != nil {
 		return YaziConfigImport{}, err
 	}
+	return importYaziConfigAtPaths(paths), nil
+}
+
+func importYaziConfigAtPaths(paths YaziConfigPaths) YaziConfigImport {
 	result := YaziConfigImport{
 		Config: defaultImportedYaziConfig(),
 		Fields: map[string]ConfigFieldProvenance{},
@@ -174,7 +191,60 @@ func ImportYaziConfig() (YaziConfigImport, error) {
 	result.Main, result.Config, result.Fields = observeYaziMain(paths.Main, result.Config, result.Fields)
 	result.Keymap, result.Config, result.Fields = observeYaziKeymap(paths.Keymap, result.Config, result.Fields)
 	result.Theme = observeYaziTheme(paths.Theme)
-	return result, nil
+	return result
+}
+
+// InspectYaziConfigContent classifies one stable Yazi file observation without
+// consulting the filesystem, environment, or live path containment.
+func InspectYaziConfigContent(kind YaziFileKind, path string, content []byte, exists bool) YaziFileObservation {
+	if !exists {
+		observation := YaziFileObservation{Kind: kind, Path: path, Ownership: YaziOwnershipMissing}
+		finalizeYaziObservation(&observation)
+		return observation
+	}
+	return inspectYaziContentObservation(kind, path, content)
+}
+
+func inspectYaziContentObservation(kind YaziFileKind, path string, content []byte) YaziFileObservation {
+	observation := YaziFileObservation{Kind: kind, Path: path, Exists: true}
+	defaults := defaultImportedYaziConfig()
+	switch kind {
+	case YaziFileKindMain:
+		parsed, _, err := parseYaziMain(path, content, defaults)
+		if err != nil {
+			return malformedYaziObservation(observation, err)
+		}
+		if _, _, ok := inspectExactHistoricalYaziMain(path, content, defaults); ok {
+			observation.Ownership = YaziOwnershipExactHistorical
+		} else {
+			observation.Ownership = classifyYaziMain(content, parsed)
+		}
+	case YaziFileKindKeymap:
+		keymap, _, err := parseYaziKeymap(path, content, defaults.Keymap)
+		if err != nil {
+			return malformedYaziObservation(observation, err)
+		}
+		if _, _, ok := inspectExactHistoricalYaziKeymap(path, content, defaults.Keymap); ok {
+			observation.Ownership = YaziOwnershipExactHistorical
+		} else {
+			candidate := defaults
+			candidate.Keymap = keymap
+			observation.Ownership = classifyYaziKeymap(content, candidate)
+		}
+	case YaziFileKindTheme:
+		doc, err := parseYaziTOML(path, content)
+		if err != nil {
+			return malformedYaziObservation(observation, err)
+		}
+		if err := validateYaziTableTypes(path, doc, "flavor", "mgr", "manager", "tabs", "indicator", "mode", "status", "input", "pick", "select", "tasks", "which", "help", "filetype"); err != nil {
+			return malformedYaziObservation(observation, err)
+		}
+		observation.Ownership = classifyYaziTheme(content)
+	default:
+		return malformedYaziObservation(observation, fmt.Errorf("unknown Yazi file kind %q", kind))
+	}
+	finalizeYaziObservation(&observation)
+	return observation
 }
 
 func defaultImportedYaziConfig() YaziConfig {
@@ -927,7 +997,7 @@ func classifyYaziMain(content []byte, cfg YaziConfig) YaziFileOwnership {
 			return YaziOwnershipExactCurrent
 		}
 		for _, candidate := range yaziHistoricalPreviewCandidates(cfg) {
-			if bytes.Equal(content, []byte(GenerateYaziConfig(candidate, theme))) || bytes.Equal(content, []byte(generateHistoricalYaziMain(candidate, theme))) {
+			if bytes.Equal(content, []byte(generateHistoricalFullYaziConfig(candidate, theme))) || bytes.Equal(content, []byte(generateHistoricalYaziMain(candidate, theme))) {
 				return YaziOwnershipExactHistorical
 			}
 		}
@@ -965,7 +1035,7 @@ func classifyYaziKeymap(content []byte, cfg YaziConfig) YaziFileOwnership {
 	if _, ok := currentYaziKeymapStyle(content); ok {
 		return YaziOwnershipExactCurrent
 	}
-	if (cfg.Keymap == "vim" || cfg.Keymap == "emacs") && (bytes.Equal(content, []byte(GenerateYaziKeymap(cfg, ""))) || bytes.Equal(content, []byte(generateHistoricalYaziKeymap(cfg)))) {
+	if (cfg.Keymap == "vim" || cfg.Keymap == "emacs") && (bytes.Equal(content, []byte(generateHistoricalFullYaziKeymap(cfg, ""))) || bytes.Equal(content, []byte(generateHistoricalYaziKeymap(cfg)))) {
 		return YaziOwnershipExactHistorical
 	}
 	return YaziOwnershipNative
@@ -1000,7 +1070,7 @@ func classifyYaziTheme(content []byte) YaziFileOwnership {
 		if bytes.Equal(content, []byte(current)) {
 			return YaziOwnershipExactCurrent
 		}
-		if bytes.Equal(content, []byte(GenerateYaziTheme(theme))) || bytes.Equal(content, []byte(generateHistoricalYaziTheme(theme))) {
+		if bytes.Equal(content, []byte(generateHistoricalFullYaziTheme(theme))) || bytes.Equal(content, []byte(generateHistoricalYaziTheme(theme))) {
 			return YaziOwnershipExactHistorical
 		}
 	}
@@ -1008,7 +1078,7 @@ func classifyYaziTheme(content []byte) YaziFileOwnership {
 }
 
 func generateCurrentYaziTheme(theme string) string {
-	old := GenerateYaziTheme(theme)
+	old := generateHistoricalFullYaziTheme(theme)
 	const header = "# Generated by dotfiles TUI\n"
 	if !strings.HasPrefix(old, header) {
 		return ""
