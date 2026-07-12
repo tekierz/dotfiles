@@ -221,59 +221,13 @@ func drainCmd(cmd tea.Cmd) []tea.Msg {
 	return []tea.Msg{msg}
 }
 
-// TestStreamingMsgSurvivesNavigation pins down the durable fix for cluster A:
-// the terminal/streaming install & update async messages must be fully
+// TestStreamingMsgSurvivesNavigation pins down the durable update fix:
+// terminal update async messages must be fully
 // processed (running flags reset, cache refresh requested) even when a
 // DIFFERENT screen is active when the message arrives. Before the fix these
 // messages were handled ONLY by the originating screen's Update, so navigating
 // away dropped them, stranded the running flag, and orphaned the worker.
 func TestStreamingMsgSurvivesNavigation(t *testing.T) {
-	t.Run("manageInstallWithLogsMsg resets flag from another screen", func(t *testing.T) {
-		app := NewApp(true)
-		// Simulate an install started on Manage, then the user navigated to the
-		// main menu (a different screen) before the terminal message arrives.
-		app.screenMgr.Navigate(ScreenMainMenu)
-		app.manageInstalling = true
-		app.manageInstallID = "btop"
-		app.manageInstalledReady = true
-
-		_, cmd := app.Update(manageInstallWithLogsMsg{toolID: "btop", logs: []string{"done"}})
-
-		if app.manageInstalling {
-			t.Error("manageInstalling still true after terminal msg delivered to another screen")
-		}
-		if app.manageInstalledReady {
-			t.Error("manageInstalledReady not reset; install-status cache would stay stale")
-		}
-		// A successful install must kick a fresh cache load.
-		if cmd == nil {
-			t.Fatal("expected a cache-refresh command after successful install, got nil")
-		}
-		if !app.installCacheLoading {
-			t.Error("expected installCacheLoading=true (cache refresh kicked)")
-		}
-	})
-
-	t.Run("manageInstallDoneMsg resets flag from another screen", func(t *testing.T) {
-		app := NewApp(true)
-		app.screenMgr.Navigate(ScreenMainMenu)
-		app.manageInstalling = true
-		app.manageInstallID = "btop"
-		app.manageInstalledReady = true
-
-		app.Update(manageInstallDoneMsg{toolID: "btop"})
-
-		if app.manageInstalling {
-			t.Error("manageInstalling still true after manageInstallDoneMsg on another screen")
-		}
-		if app.manageInstallID != "" {
-			t.Error("manageInstallID not cleared")
-		}
-		if app.manageInstalledReady {
-			t.Error("manageInstalledReady not reset")
-		}
-	})
-
 	t.Run("updateStreamMsg done resets updateRunning from another screen", func(t *testing.T) {
 		app := NewApp(true)
 		app.screenMgr.Navigate(ScreenMainMenu)
@@ -319,14 +273,6 @@ func TestStreamingMsgSurvivesNavigation(t *testing.T) {
 // would drop the terminal message, strand the running flag, and orphan the
 // subprocess. Navigation must be a no-op while the op is running.
 func TestNavBlockedWhileStreaming(t *testing.T) {
-	t.Run("manage keyboard tab-nav is a no-op while installing", func(t *testing.T) {
-		ctx := newGoldenContext(t)
-		ctx.app.manageInstalling = true
-		s := NewManageScreen(ctx)
-		if _, cmd := s.Update(keyMsg("2")); cmd != nil {
-			t.Error("manage tab-nav while installing returned a command; want nil (no navigation)")
-		}
-	})
 	t.Run("update mouse tab-click is a no-op while running", func(t *testing.T) {
 		ctx := newGoldenContext(t)
 		ctx.app.updateRunning = true

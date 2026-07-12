@@ -20,6 +20,7 @@ import (
 func newLazyGitPlanApp(t *testing.T, home string, installed map[string]bool) (*App, toolInstallRuntime) {
 	t.Helper()
 	app := NewApp(true)
+	seedTypedReadyInstallCache(t, app, installed)
 	app.manageInstalledReady = true
 	app.installCacheLoading = false
 	app.manageInstalled = installed

@@ -12,7 +12,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
+	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -1713,6 +1715,7 @@ func TestManageYaziCompactSanitizesStatusBeforeLayout(t *testing.T) {
 
 func TestManageYaziCompactTabsInstallAndSourceMetadataAreTruthful(t *testing.T) {
 	ctx, screen := newManageYaziPolicyScreen(t, false, false)
+	setManageTruthSnapshot(t, ctx.app, 29, pkg.PlatformMacOS, "brew", manageTruthObservation(t, "yazi", health.PresenceMissing))
 	ctx.Width, ctx.Height = 60, 18
 	ctx.app.width, ctx.app.height = 60, 18
 	view := screen.View(60, 18)

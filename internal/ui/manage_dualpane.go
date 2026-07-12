@@ -3,17 +3,17 @@ package ui
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/pkg"
-	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -89,30 +89,57 @@ type manageItem struct {
 	category     tools.Category
 	installed    bool
 	configurable bool
+	presence     health.Presence
+	installable  health.Installability
+	observed     bool
 }
 
-// manageInstallDoneMsg is emitted after attempting to install a tool/app.
-type manageInstallDoneMsg struct {
-	toolID string
-	err    error
-}
-
-// checkSudoAndInstallCmd checks if sudo is needed and either prompts or starts install
-func (a *App) checkSudoAndInstallCmd(toolID string) tea.Cmd {
-	return func() tea.Msg {
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
-		}
-
-		// Check if sudo is needed and not cached
-		if mgr.NeedsSudo() && !runner.CheckSudoCached() {
-			return manageSudoRequiredMsg{toolID: toolID}
-		}
-
-		// Sudo not needed or already cached - start streaming install
-		return manageStartInstallMsg{toolID: toolID}
+func (item manageItem) installationTruth() (health.Presence, health.Installability) {
+	if !item.observed {
+		return health.PresenceUnknown, health.InstallabilityUnknown
 	}
+	return item.presence, item.installable
+}
+
+func (item manageItem) installationAction() string {
+	presence, installability := item.installationTruth()
+	switch presence {
+	case health.PresencePresent:
+		return "none"
+	case health.PresencePartial:
+		if installability == health.InstallabilitySupported {
+			return "repair"
+		}
+	case health.PresenceMissing:
+		if installability == health.InstallabilitySupported {
+			return "install"
+		}
+	case health.PresenceUnknown:
+		return "blocked"
+	}
+	return "blocked"
+}
+
+func (item manageItem) installationLabel() string {
+	presence, installability := item.installationTruth()
+	switch presence {
+	case health.PresencePresent:
+		return "installed"
+	case health.PresencePartial:
+		switch installability {
+		case health.InstallabilitySupported:
+			return "partial — repair"
+		case health.InstallabilityUnsupported:
+			return "partial — unavailable"
+		case health.InstallabilityUnknown:
+			return "partial — availability unknown"
+		}
+	case health.PresenceMissing:
+		return "not installed"
+	case health.PresenceUnknown:
+		return "status unknown"
+	}
+	return "status unknown"
 }
 
 // manageLayout captures all geometry needed for consistent rendering and mouse hit-testing.
@@ -328,9 +355,12 @@ func (a *App) manageEnsureFieldsVisible(layout manageLayout, fieldsLen int) {
 }
 
 func (a *App) manageItems() []manageItem {
-	reg := tools.GetRegistry()
-	all := reg.All()
-	platform := pkg.DetectPlatform()
+	toolSource := a.manageToolSource
+	if toolSource == nil {
+		toolSource = func() []tools.Tool { return tools.GetRegistry().All() }
+	}
+	all := slices.Clone(toolSource())
+	typed := a.installationSnapshot.Digest() != ""
 
 	// Prefer a stable, human-friendly ordering (category → name).
 	categoryOrder := map[tools.Category]int{
@@ -358,21 +388,25 @@ func (a *App) manageItems() []manageItem {
 		a.manageInstalled = make(map[string]bool, len(all))
 	}
 
-	// Filter by platform support: hide tools/apps that can't be installed on this
-	// OS, but keep anything already installed.
-	//
-	// This is especially important for GUI apps: don't show macOS-only apps on
-	// Linux and vice versa.
-	if platform != pkg.PlatformUnknown {
-		filtered := make([]tools.Tool, 0, len(all))
-		for _, t := range all {
-			installed := a.manageInstalled[t.ID()]
-			supported := installerAvailable(t, platform)
-			if installed || supported {
-				filtered = append(filtered, t)
-			}
+	// Before the first typed observation only, retain the legacy platform filter.
+	// Typed snapshots already bind installability to their accepted platform and
+	// Manage must never rediscover host truth while rendering or handling keys.
+	if !typed {
+		platform := pkg.PlatformUnknown
+		if a.manageDetectPlatform != nil {
+			platform = a.manageDetectPlatform()
 		}
-		all = filtered
+		if platform != pkg.PlatformUnknown {
+			filtered := make([]tools.Tool, 0, len(all))
+			for _, t := range all {
+				installed := a.manageInstalled[t.ID()]
+				supported := installerAvailable(t, platform)
+				if installed || supported {
+					filtered = append(filtered, t)
+				}
+			}
+			all = filtered
+		}
 	}
 
 	// Add a global section at the top.
@@ -385,6 +419,9 @@ func (a *App) manageItems() []manageItem {
 			category:     "global",
 			installed:    true,
 			configurable: true,
+			presence:     health.PresencePresent,
+			installable:  health.InstallabilityUnsupported,
+			observed:     true,
 		},
 	}
 
@@ -394,14 +431,33 @@ func (a *App) manageItems() []manageItem {
 			icon = fallbackToolIcon(t.ID(), t.Category())
 		}
 
+		presence := health.PresenceUnknown
+		installability := health.InstallabilityUnknown
+		observed := false
+		installed := a.manageInstalled[t.ID()]
+		if typed {
+			if observation, ok := a.installationSnapshot.Tool(t.ID()); ok {
+				presence = observation.Presence()
+				installability = observation.Installability()
+				observed = true
+			}
+			installed = presence == health.PresencePresent
+		} else if installed {
+			presence = health.PresencePresent
+			observed = true
+		}
+
 		items = append(items, manageItem{
 			id:           t.ID(),
 			name:         t.Name(),
 			icon:         icon,
 			description:  t.Description(),
 			category:     t.Category(),
-			installed:    a.manageInstalled[t.ID()],
+			installed:    installed,
 			configurable: t.HasConfig(),
+			presence:     presence,
+			installable:  installability,
+			observed:     observed,
 		})
 	}
 
@@ -621,7 +677,9 @@ func (a *App) renderManageHeader(width int) string {
 	tabs := RenderTabBar(ScreenManage, width)
 
 	subText := "Dual-pane config editor • Click, scroll, and tweak everything"
-	if a.animationsEnabled {
+	if notice := a.manageInstallationNotice(); notice != "" {
+		subText = notice
+	} else if a.animationsEnabled {
 		subText = AnimatedSpinnerDots(a.uiFrame/2) + " " + subText
 	}
 	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(subText, width))
@@ -632,6 +690,16 @@ func (a *App) renderManageHeader(width int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, tabs, sub, divider)
 }
 
+func (a *App) manageInstallationNotice() string {
+	if a.installationSnapshotError != "" {
+		return installationSnapshotUnavailable + " • stale"
+	}
+	if a.installationSnapshotStale {
+		return "stale installation status"
+	}
+	return ""
+}
+
 func (a *App) renderManageFooter(width int, items []manageItem, fields []manageField) string {
 	// Hint line: short and consistent.
 	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
@@ -640,20 +708,6 @@ func (a *App) renderManageFooter(width int, items []manageItem, fields []manageF
 
 	// Status line: either save feedback, or focused field description.
 	statusText := a.manageStatus
-	if a.manageInstalling {
-		name := a.manageInstallID
-		for _, it := range items {
-			if it.id == a.manageInstallID {
-				name = it.name
-				break
-			}
-		}
-		if a.animationsEnabled {
-			statusText = fmt.Sprintf("%s Installing %s…", AnimatedSpinnerDots(a.uiFrame), name)
-		} else {
-			statusText = fmt.Sprintf("Installing %s…", name)
-		}
-	}
 	if statusText == "" && len(items) > 0 && items[clampInt(a.manageIndex, 0, len(items)-1)].id == "lazygit" && lazyGitManageUIBlockReason(a) != "" {
 		statusText = lazyGitManageUIBlockReason(a)
 	}
@@ -785,11 +839,6 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 		borderColor = ColorCyan
 	}
 
-	// If installing, show log panel instead of settings
-	if a.manageInstalling || len(a.installLogs) > 0 {
-		return a.renderManageLogPanel(layout, items)
-	}
-
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
@@ -808,11 +857,16 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("SETTINGS")
 	statusBadge := ""
 	if item.id != "global" {
-		if item.installed {
-			statusBadge = " " + RenderBadge("INSTALLED", ColorBg, ColorGreen)
-		} else {
-			statusBadge = " " + RenderBadge("NOT INSTALLED", ColorText, ColorMuted)
+		badgeColor := ColorMuted
+		switch item.presence {
+		case health.PresencePresent:
+			badgeColor = ColorGreen
+		case health.PresencePartial:
+			badgeColor = ColorYellow
+		case health.PresenceMissing, health.PresenceUnknown:
+			badgeColor = ColorMuted
 		}
+		statusBadge = " " + RenderBadge(strings.ToUpper(item.installationLabel()), ColorBg, badgeColor)
 		statusBadge += a.nativeImportBadge(item.id)
 		if item.id == "lazygit" && a.nativeConfigState.LazyGit.RepoOverridesPossible {
 			statusBadge += " " + RenderBadge("REPO OVERRIDES", ColorBg, ColorYellow)
@@ -857,23 +911,15 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 				fieldLines = append(fieldLines, msgStyle.Render("No configurable settings for this tool."))
 			}
 
-			if !item.installed {
+			switch item.installationAction() {
+			case "install":
 				fieldLines = append(fieldLines, strong.Render("Press I to install"))
-			} else {
+			case "repair":
+				fieldLines = append(fieldLines, strong.Render("Press I to repair"))
+			case "none":
 				fieldLines = append(fieldLines, msgStyle.Render("Installed — press S to save global prefs"))
-			}
-
-			// Show package names for this platform (best-effort).
-			if t, ok := tools.GetRegistry().Get(item.id); ok {
-				platform := pkg.DetectPlatform()
-				pkgs := t.Packages()[platform]
-				if len(pkgs) == 0 {
-					pkgs = t.Packages()["all"]
-				}
-				if len(pkgs) > 0 {
-					pkgLine := msgStyle.Render("Packages: ") + strong.Render(strings.Join(pkgs, ", "))
-					fieldLines = append(fieldLines, pkgLine)
-				}
+			default:
+				fieldLines = append(fieldLines, msgStyle.Render("Installation action blocked"))
 			}
 		}
 	} else {
@@ -903,10 +949,6 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 			text += " • REPO OVERRIDES"
 		}
 		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render(text + " • " + lazyGitManageUIBlockReason(a))
-	} else if item.id != "global" && !item.installed {
-		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
-	} else if item.id != "global" && len(fields) == 0 {
-		actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
 	} else if item.id == "lazygit" {
 		switch {
 		case a.manageConfig.LazyGitPagerPreset == "delta":
@@ -918,7 +960,17 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 			}
 		case a.nativeConfigState.LazyGit.RepoOverridesPossible:
 			actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Global defaults; repository config may override them")
+		case item.installationAction() == "blocked":
+			actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("Installation action blocked")
 		}
+	} else if item.id != "global" && item.installationAction() == "install" {
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
+	} else if item.id != "global" && item.installationAction() == "repair" {
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: repair this tool/app")
+	} else if item.id != "global" && item.installationAction() == "blocked" {
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("Installation action blocked")
+	} else if item.id != "global" && len(fields) == 0 {
+		actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
 	}
 
 	contentLines := []string{
@@ -1046,7 +1098,9 @@ func (a *App) renderCompactManageYazi(layout manageLayout, fields []manageField)
 		blockedReason = fields[focus].readOnlyReason
 	}
 	put(0, compactManageTabLine)
-	if blockedReason != "" {
+	if notice := a.manageInstallationNotice(); notice != "" {
+		put(1, notice)
+	} else if blockedReason != "" {
 		putWrapped(1, layout.bodyY, "Read-only: "+blockedReason)
 	} else {
 		put(1, "Manage terminal tools • Yazi")
@@ -1148,16 +1202,14 @@ func (a *App) renderCompactManageTools(layout manageLayout, items []manageItem) 
 		}
 	}
 	put(0, compactManageTabLine)
+	put(1, a.manageInstallationNotice())
 	put(layout.bodyY, "TOOLS • SETTINGS via Tab")
 	for index := a.manageToolsScroll; index < len(items) && index-a.manageToolsScroll < layout.leftListH; index++ {
 		cursor := "  "
 		if index == a.manageIndex {
 			cursor = "▸ "
 		}
-		status := "available"
-		if items[index].installed {
-			status = "installed"
-		}
+		status := items[index].installationLabel()
 		put(layout.leftListY+(index-a.manageToolsScroll), fmt.Sprintf("%s%s • %s", cursor, items[index].name, status))
 	}
 	if a.manageStatus != "" {
@@ -1468,109 +1520,4 @@ func truncatePlain(s string, width int) string {
 		return "…"
 	}
 	return string(r[:width-1]) + "…"
-}
-
-// renderManageLogPanel renders the log panel when installing/updating
-func (a *App) renderManageLogPanel(layout manageLayout, items []manageItem) string {
-	borderColor := ColorCyan
-	if !a.manageInstalling {
-		borderColor = ColorBorder
-	}
-
-	// Get the tool name for the title
-	toolName := "Install"
-	for _, it := range items {
-		if it.id == a.manageInstallID {
-			toolName = it.name
-			break
-		}
-	}
-
-	// Build title with status
-	var title string
-	if a.manageInstalling {
-		spinner := AnimatedSpinnerDots(a.uiFrame)
-		if !a.animationsEnabled {
-			spinner = "..."
-		}
-		title = fmt.Sprintf("INSTALLING %s %s", strings.ToUpper(toolName), spinner)
-	} else {
-		title = fmt.Sprintf("INSTALL LOG: %s", strings.ToUpper(toolName))
-	}
-
-	// Build the styled log panel to match the dual-pane layout.
-	panel := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Padding(1, 1).
-		Width(maxInt(1, layout.rightW-2)).
-		Height(maxInt(1, layout.bodyH-2))
-
-	// Build content
-	innerWidth := maxInt(0, layout.rightW-4)
-	innerHeight := maxInt(0, layout.bodyH-6)
-
-	// Title line
-	titleStyle := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true)
-	titleLine := titleStyle.Render(title)
-
-	// Calculate visible log range
-	visibleLines := innerHeight
-	totalLines := len(a.installLogs)
-
-	var logLines []string
-	if totalLines == 0 {
-		// Empty state
-		if a.manageInstalling {
-			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Waiting for output..."))
-		} else {
-			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No logs"))
-		}
-	} else {
-		// Calculate range (scroll from bottom)
-		endIdx := totalLines - a.installLogScroll
-		if endIdx > totalLines {
-			endIdx = totalLines
-		}
-		if endIdx < 0 {
-			endIdx = 0
-		}
-		startIdx := endIdx - visibleLines
-		if startIdx < 0 {
-			startIdx = 0
-		}
-
-		for i := startIdx; i < endIdx; i++ {
-			line := a.installLogs[i]
-			if lipgloss.Width(line) > innerWidth {
-				line = truncateVisible(line, innerWidth)
-			}
-			logLines = append(logLines, line)
-		}
-	}
-
-	// Pad to fill height
-	for len(logLines) < visibleLines {
-		logLines = append([]string{""}, logLines...)
-	}
-
-	// Footer with hints
-	var footerText string
-	if a.manageInstalling {
-		footerText = "Installing..."
-	} else if len(a.installLogs) > 0 {
-		footerText = "C: clear • PgUp/PgDn: scroll"
-	}
-	footer := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(footerText)
-
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		titleLine,
-		"",
-		strings.Join(logLines, "\n"),
-		"",
-		footer,
-	)
-
-	return panel.Render(content)
 }

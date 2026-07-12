@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
@@ -32,8 +33,6 @@ type customInstallSentinel struct {
 	started            chan struct{}
 }
 
-type recipeOnlySentinel struct{ *customInstallSentinel }
-
 type caskInstallManager struct {
 	*pkg.MockPackageManager
 	home  string
@@ -46,16 +45,6 @@ func (m *caskInstallManager) InstallCasksStreaming(_ context.Context, casks ...s
 		return nil, err
 	}
 	return nil, nil
-}
-
-func (t *recipeOnlySentinel) InstallRecipe(environment tools.InstallEnvironment) (operation.InstallRecipe, error) {
-	return operation.InstallRecipe{
-		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
-		ToolID:        t.ID(), Platform: string(environment.Platform), Manager: environment.Manager,
-		Steps:    []operation.InstallStep{{Kind: operation.InstallStepPackageManager, Provider: environment.Manager, Packages: []string{"reviewed-package"}}},
-		Detector: operation.InstallDetector{Kind: operation.InstallDetectorPackageReceipt, Values: []string{"reviewed-package"}},
-		Risk:     "test fixture",
-	}, nil
 }
 
 func TestInstallRecipeDetectedAppBundleRequiresDirectory(t *testing.T) {
@@ -168,9 +157,20 @@ func sentinelRuntime(sentinel tools.Tool, mgr pkg.PackageManager) toolInstallRun
 
 func registryRuntime(platform pkg.Platform, installed map[string]bool) toolInstallRuntime {
 	reg := tools.NewRegistry()
+	manager := pkg.NewMockPackageManager()
+	switch platform {
+	case pkg.PlatformMacOS:
+		manager.ManagerName = "brew"
+	case pkg.PlatformArch:
+		manager.ManagerName = "pacman"
+	case pkg.PlatformDebian, pkg.PlatformPi:
+		manager.ManagerName = "apt"
+	case pkg.PlatformUnknown:
+		manager.ManagerName = "unknown"
+	}
 	return toolInstallRuntime{
 		lookupTool:     reg.Get,
-		detectManager:  func() pkg.PackageManager { return pkg.NewMockPackageManager() },
+		detectManager:  func() pkg.PackageManager { return manager },
 		detectPlatform: func() pkg.Platform { return platform },
 		isToolInstalled: func(t tools.Tool) bool {
 			return installed[t.ID()]
@@ -468,11 +468,12 @@ func acceptedSentinelSnapshot(t *testing.T, runtime toolInstallRuntime, manager 
 		t.Fatal(err)
 	}
 	return installExecutionSnapshot{
-		platform: platform,
-		manager:  manager.Name(),
-		recipes:  map[string]operation.InstallRecipe{"custom-sentinel": recipe},
-		detected: map[string]bool{"custom-sentinel": false},
-		digests:  map[string]string{"custom-sentinel": digest},
+		platform:  platform,
+		manager:   manager.Name(),
+		recipes:   map[string]operation.InstallRecipe{"custom-sentinel": recipe},
+		detected:  map[string]bool{"custom-sentinel": false},
+		digests:   map[string]string{"custom-sentinel": digest},
+		authority: map[string]installToolAuthority{"custom-sentinel": {presence: health.PresenceMissing, intent: "install", recipeDigest: digest}},
 	}
 }
 
@@ -508,8 +509,8 @@ func TestAcceptedRecipeFailsClosedOnEnvironmentOrDetectorDrift(t *testing.T) {
 		{name: "manager", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
 			snapshot.manager = "different-manager"
 		}},
-		{name: "detector", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
-			snapshot.detected["custom-sentinel"] = true
+		{name: "authority", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
+			snapshot.authority["custom-sentinel"] = installToolAuthority{presence: health.PresencePresent, intent: "none"}
 		}},
 		{name: "missing recipe", mutate: func(snapshot *installExecutionSnapshot, _ *toolInstallRuntime) {
 			delete(snapshot.recipes, "custom-sentinel")
@@ -565,7 +566,7 @@ func TestAcceptedT3RecipeUsesOnlyHomebrewCaskCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := installExecutionSnapshot{platform: pkg.PlatformMacOS, manager: "brew", recipes: map[string]operation.InstallRecipe{tool.ID(): recipe}, detected: map[string]bool{tool.ID(): false}, digests: map[string]string{tool.ID(): digest}}
+	snapshot := installExecutionSnapshot{platform: pkg.PlatformMacOS, manager: "brew", recipes: map[string]operation.InstallRecipe{tool.ID(): recipe}, detected: map[string]bool{tool.ID(): false}, digests: map[string]string{tool.ID(): digest}, authority: map[string]installToolAuthority{tool.ID(): {presence: health.PresenceMissing, intent: "install", recipeDigest: digest}}}
 	result := runSelectedToolInstalls(context.Background(), []string{tool.ID()}, runtime, func(string) {}, func(string) {}, snapshot)
 	if len(result.failures) != 0 || result.successCount != 1 || !reflect.DeepEqual(mgr.calls, [][]string{{"t3-code"}}) {
 		t.Fatalf("T3 execution result=%#v cask calls=%v", result, mgr.calls)
@@ -742,67 +743,5 @@ func TestContextCustomInstallerCancellationStopsInstallPhase(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("context-aware custom installer did not stop after cancellation")
-	}
-}
-
-func TestManageInstallInvokesCustomToolInstall(t *testing.T) {
-	sentinel := &customInstallSentinel{}
-	mgr := pkg.NewMockPackageManager()
-	a := &App{}
-	rawMsg := a.streamingInstallToolCmdWithRuntime(context.Background(), sentinel.ID(), sentinelRuntime(sentinel, mgr))()
-	msg, ok := rawMsg.(manageInstallWithLogsMsg)
-	if !ok || msg.err != nil {
-		t.Fatalf("Manage custom install returned %#v", rawMsg)
-	}
-	if sentinel.installCalls != 1 || !sentinel.installed {
-		t.Fatalf("Manage custom install calls=%d installed=%v", sentinel.installCalls, sentinel.installed)
-	}
-}
-
-func TestManageRefusesRecipeBackedInstallWithoutReview(t *testing.T) {
-	sentinel := &recipeOnlySentinel{customInstallSentinel: &customInstallSentinel{}}
-	mgr := pkg.NewMockPackageManager()
-	runtime := sentinelRuntime(sentinel, mgr)
-	runtime.isToolInstalled = func(tools.Tool) bool { return false }
-	msg := (&App{}).streamingInstallToolCmdWithRuntime(context.Background(), sentinel.ID(), runtime)().(manageInstallWithLogsMsg)
-	if msg.err == nil || !strings.Contains(msg.err.Error(), "reviewed install plan") {
-		t.Fatalf("Manage recipe-backed result = %#v", msg)
-	}
-	if sentinel.installCalls != 0 || len(mgr.InstallCalls) != 0 {
-		t.Fatalf("Manage mutated before review: legacy=%d manager=%v", sentinel.installCalls, mgr.InstallCalls)
-	}
-}
-
-func TestManageInstallRechecksExistingAndPostcondition(t *testing.T) {
-	a := &App{}
-	installed := &customInstallSentinel{installed: true}
-	msg := a.streamingInstallToolCmdWithRuntime(context.Background(), installed.ID(), sentinelRuntime(installed, nil))().(manageInstallWithLogsMsg)
-	if msg.err != nil || installed.installCalls != 0 || len(msg.logs) != 1 || !strings.Contains(msg.logs[0], "already installed") {
-		t.Fatalf("existing install recheck result: msg=%#v calls=%d", msg, installed.installCalls)
-	}
-
-	missing := &customInstallSentinel{managerIndependent: true, remainMissing: true}
-	msg = a.streamingInstallToolCmdWithRuntime(context.Background(), missing.ID(), sentinelRuntime(missing, nil))().(manageInstallWithLogsMsg)
-	if msg.err == nil || !strings.Contains(msg.err.Error(), "postcondition failed") {
-		t.Fatalf("Manage claimed success despite missing postcondition: %#v", msg)
-	}
-}
-
-func TestManageCustomOutputIsBounded(t *testing.T) {
-	sentinel := &customInstallSentinel{managerIndependent: true, emitLines: maxCollectedInstallLines + 200}
-	msg := (&App{}).streamingInstallToolCmdWithRuntime(context.Background(), sentinel.ID(), sentinelRuntime(sentinel, nil))().(manageInstallWithLogsMsg)
-	if msg.err != nil {
-		t.Fatalf("bounded-output install failed: %v", msg.err)
-	}
-	if len(msg.logs) != maxCollectedInstallLines {
-		t.Fatalf("Manage retained %d log lines, want bound %d", len(msg.logs), maxCollectedInstallLines)
-	}
-	if got := msg.logs[len(msg.logs)-1]; got != fmt.Sprintf("output-%04d", sentinel.emitLines-1) {
-		t.Fatalf("bounded log lost newest output: %q", got)
-	}
-	longLine := strings.Repeat("x", maxCollectedInstallLineBytes+1024)
-	bounded := appendBoundedInstallLine(nil, longLine)
-	if len(bounded) != 1 || len(bounded[0]) > maxCollectedInstallLineBytes+32 || !strings.HasSuffix(bounded[0], "[truncated]") {
-		t.Fatalf("oversized custom output was not byte-bounded: retained=%d", len(bounded[0]))
 	}
 }

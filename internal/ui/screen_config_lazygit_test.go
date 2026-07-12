@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/health"
+	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -218,6 +220,7 @@ func TestManageLazyGitCustomAndNativeDisclosuresAreReadOnly(t *testing.T) {
 
 func TestManageLazyGitDeltaFeedbackStates(t *testing.T) {
 	ctx := newManageContext(t)
+	setManageTruthSnapshot(t, ctx.app, 23, pkg.PlatformMacOS, "brew", manageTruthObservation(t, "lazygit", health.PresencePresent))
 	items := ctx.app.manageItems()
 	for i, item := range items {
 		if item.id == "lazygit" {

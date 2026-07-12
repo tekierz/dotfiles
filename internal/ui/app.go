@@ -177,12 +177,9 @@ type App struct {
 	screenFactory *Factory
 
 	// Animation state
-	animFrame        int
-	postIntroScreen  Screen // where to land after the intro animation
-	uiFrame          int    // global animation frame counter (manager widgets, spinners, etc.)
-	manageInstalling bool
-	manageInstallID  string
-
+	animFrame       int
+	postIntroScreen Screen // where to land after the intro animation
+	uiFrame         int    // global animation frame counter (manager widgets, spinners, etc.)
 	// User selections
 	themeIndex int
 	theme      string
@@ -260,6 +257,11 @@ type App struct {
 	installationSnapshotError      string
 	installationSnapshotUtilities  map[string]bool
 	installationSnapshotCosmetic   map[string]bool
+	// Manage metadata sources are injectable for deterministic tests. Once a
+	// typed snapshot exists, its platform and observations are authoritative and
+	// manageDetectPlatform must not be called.
+	manageToolSource     func() []tools.Tool
+	manageDetectPlatform func() pkg.Platform
 	// Manage screen scrolling
 	manageToolsScroll  int
 	manageFieldsScroll int
@@ -474,6 +476,8 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		updateSelected:       make(map[int]bool),
 		installLogs:          make([]string, 0, 500),
 		installLogAutoScroll: true,
+		manageToolSource:     func() []tools.Tool { return tools.GetRegistry().All() },
+		manageDetectPlatform: pkg.DetectPlatform,
 	}
 
 	// Best-effort: load persisted global settings (theme + nav) if available.
@@ -1064,8 +1068,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Streaming/terminal async messages for the package-update and tool-install
-	// flows are handled GLOBALLY here, before delegating, exactly like
+	// Streaming/terminal async messages for package updates are handled GLOBALLY
+	// here, before delegating, exactly like
 	// installationSnapshotDoneMsg above. Their re-arm/finalize/cache-refresh chain
 	// outlives the originating screen (the worker goroutine + package-manager
 	// subprocess do too), so handling them only in the originating screen's
@@ -1080,14 +1084,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleUpdateStartMsg(m)
 	case updateSudoRequiredMsg:
 		return a, a.handleUpdateSudoRequiredMsg(m)
-	case manageInstallWithLogsMsg:
-		return a, a.handleManageInstallWithLogsMsg(m)
-	case manageInstallDoneMsg:
-		return a, a.handleManageInstallDoneMsg(m)
-	case manageStartInstallMsg:
-		return a, a.handleManageStartInstallMsg(m)
-	case manageSudoRequiredMsg:
-		return a, a.handleManageSudoRequiredMsg(m)
 	}
 
 	// Every live screen is a migrated ScreenHandler, so the ScreenManager owns

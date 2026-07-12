@@ -5,12 +5,14 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/health"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
@@ -87,15 +89,17 @@ func coherentCacheResult(generation uint64, snapshot health.InstallationSnapshot
 // readiness rather than the retired boolean cache alone.
 func seedTypedReadyInstallCache(t *testing.T, app *App, installed map[string]bool) {
 	t.Helper()
-	observations := make([]health.InstallationObservation, 0, len(installed))
+	registry := tools.NewRegistry()
+	all := registry.All()
+	observations := make([]health.InstallationObservation, 0, len(all))
 	cosmetic := make(map[string]bool, len(installed))
 	for id, present := range installed {
-		presence := health.PresenceMissing
-		if present {
-			presence = health.PresencePresent
-		}
-		observations = append(observations, cacheObservation(t, id, presence))
 		cosmetic[id] = present
+	}
+	for _, tool := range all {
+		present := installed[tool.ID()]
+		observations = append(observations, planningCacheObservation(t, tool, present))
+		cosmetic[tool.ID()] = present
 	}
 	snapshot := cacheSnapshot(t, 1, observations...)
 	app.installationSnapshotGeneration = 1
@@ -110,6 +114,47 @@ func seedTypedReadyInstallCache(t *testing.T, app *App, installed map[string]boo
 	app.manageInstalled = maps.Clone(cosmetic)
 	app.manageInstalledReady = true
 	app.installCacheLoading = false
+}
+
+func planningCacheObservation(t *testing.T, tool tools.Tool, present bool) health.InstallationObservation {
+	t.Helper()
+	recipe, err := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
+	if err != nil {
+		t.Fatalf("describe %s test install: %v", tool.ID(), err)
+	}
+	packageFacet := health.PackageFacet{State: health.PackageNotApplicable}
+	directFacet := health.DirectFacet{State: health.ComponentNotApplicable}
+	if recipe.Detector.Kind == operation.InstallDetectorPackageReceipt {
+		receipts := slices.Clone(recipe.Detector.Values)
+		packageFacet = health.PackageFacet{
+			State: health.PackageMissing, Provider: "brew", ExpectedReceipts: receipts,
+			MissingReceipts: receipts, Authoritative: true, Complete: true,
+		}
+		if present {
+			packageFacet.State = health.PackagePresent
+			packageFacet.ObservedReceipts = receipts
+			packageFacet.MissingReceipts = nil
+		}
+	} else {
+		state := health.ComponentMissing
+		if present {
+			state = health.ComponentPresent
+		}
+		kind := health.DirectSourceBinary
+		if recipe.Detector.Kind == operation.InstallDetectorAppBundle {
+			kind = health.DirectSourceAppBundle
+		}
+		directFacet = health.DirectFacet{State: state, Authoritative: true, Alternatives: []health.DirectAlternative{{Kind: kind, Identifiers: slices.Clone(recipe.Detector.Values), State: state}}}
+	}
+	observation, err := health.NewInstallationObservation(health.InstallationObservationSpec{
+		ToolID: tool.ID(), Installability: health.InstallabilitySupported,
+		InstallRecipeDigest: installRecipeDigest(recipe), Package: packageFacet,
+		Direct: directFacet,
+	})
+	if err != nil {
+		t.Fatalf("build %s planning observation: %v", tool.ID(), err)
+	}
+	return observation
 }
 
 func TestInstallationSnapshotCacheRequestGenerationRejectsStaleFutureAndMismatchedResults(t *testing.T) {
@@ -402,7 +447,7 @@ func TestInstallationSnapshotCacheFileTreeSuccessRefreshesReviewedPlanBeforeEnte
 	generation := app.installationSnapshotGeneration
 	observations := make([]health.InstallationObservation, 0, len(tools.GetRegistry().All()))
 	for _, tool := range tools.GetRegistry().All() {
-		observations = append(observations, cacheObservation(t, tool.ID(), health.PresenceMissing))
+		observations = append(observations, planningCacheObservation(t, tool, false))
 	}
 	snapshot := cacheSnapshot(t, generation, observations...)
 	applyCacheSnapshotResult(t, app, coherentCacheResult(generation, snapshot, nil))

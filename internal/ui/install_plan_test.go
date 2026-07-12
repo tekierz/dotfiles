@@ -175,6 +175,7 @@ func TestInstallPlanLazyGitUsesExactConfigDirTargetAndManagedFileOwnership(t *te
 	t.Setenv("LG_CONFIG_FILE", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	app := NewApp(true)
+	seedTypedReadyInstallCache(t, app, map[string]bool{"delta": true})
 	app.manageInstalledReady = true
 	app.installCacheLoading = false
 	app.manageInstalled = map[string]bool{"delta": true}
@@ -208,6 +209,7 @@ func TestInstallPlanLazyGitArbitraryNativeIsVisiblyBlockedAtCurrentBytes(t *test
 		t.Fatal(err)
 	}
 	app := NewApp(true)
+	seedTypedReadyInstallCache(t, app, map[string]bool{"delta": true})
 	app.manageInstalledReady = true
 	app.installCacheLoading = false
 	app.manageInstalled = map[string]bool{"delta": true}
@@ -277,6 +279,7 @@ func TestReviewedInstallerWritesBtopToAcceptedXDGTargets(t *testing.T) {
 		installed[tool.ID()] = true
 	}
 	app := NewApp(true)
+	seedTypedReadyInstallCache(t, app, installed)
 	app.manageInstalledReady = true
 	app.manageInstalled = installed
 	app.deepDiveConfig.CLITools["btop"] = true

@@ -1,11 +1,8 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // TestMainMenuClick verifies geometry-correct click-to-select on the main menu.
@@ -82,7 +79,7 @@ func TestDeepDiveMenuClick(t *testing.T) {
 }
 
 // TestManageRightPaneLogGuard verifies that while the install-log view occupies
-// the right pane (manageInstalling or installLogs present), a click in that
+// the right pane (installLogs present), a click in that
 // region does NOT mutate the hidden settings fields.
 func TestManageRightPaneLogGuard(t *testing.T) {
 	ctx := newManageContext(t)
@@ -98,7 +95,6 @@ func TestManageRightPaneLogGuard(t *testing.T) {
 
 	// Sanity: with no log active, a right-pane click DOES focus a field.
 	ctx.app.installLogs = nil
-	ctx.app.manageInstalling = false
 	ctx.app.configFieldIndex = 99
 	ctx.app.managePane = managePaneTools
 	screen.Update(clickAt(x, y))
@@ -116,129 +112,6 @@ func TestManageRightPaneLogGuard(t *testing.T) {
 	}
 	if ctx.app.managePane == managePaneSettings {
 		t.Errorf("click in log region switched to settings pane; want no field hit-test while log active")
-	}
-}
-
-func TestManageLogPanelSwallowsHiddenSettingsKeys(t *testing.T) {
-	ctx := newManageContext(t)
-	items := ctx.app.manageItems()
-	ghosttyIdx := -1
-	for i, item := range items {
-		if item.id == "ghostty" {
-			ghosttyIdx = i
-			break
-		}
-	}
-	if ghosttyIdx < 0 {
-		t.Fatal("ghostty manage item not found")
-	}
-
-	ctx.app.manageIndex = ghosttyIdx
-	ctx.app.managePane = managePaneSettings
-	ctx.app.configFieldIndex = 1 // Ghostty font size: number field.
-	ctx.app.installLogs = make([]string, 40)
-	for i := range ctx.app.installLogs {
-		ctx.app.installLogs[i] = "line"
-	}
-	ctx.app.installLogScroll = 0
-
-	screen := NewManageScreen(ctx)
-	_ = screen.View(ctx.Width, ctx.Height)
-
-	for _, key := range []string{"up", "down", "left", "right", " ", "enter", "s", "i", "?"} {
-		ctx.app.managePane = managePaneSettings
-		ctx.app.configFieldIndex = 1
-		ctx.app.manageFieldsScroll = 0
-		ctx.app.manageEditing = false
-		ctx.app.manageEditField = nil
-		ctx.app.manageEditValue = ""
-		ctx.app.manageConfig.GhosttyFontSize = 14
-		ctx.app.manageStatus = ""
-
-		_, cmd := screen.Update(keyMsg(key))
-		if cmd != nil {
-			t.Errorf("key %q returned cmd while log panel visible; want swallowed", key)
-		}
-		if ctx.app.managePane != managePaneSettings {
-			t.Errorf("key %q changed managePane to %d, want settings", key, ctx.app.managePane)
-		}
-		if ctx.app.configFieldIndex != 1 {
-			t.Errorf("key %q changed configFieldIndex to %d, want 1", key, ctx.app.configFieldIndex)
-		}
-		if ctx.app.manageFieldsScroll != 0 {
-			t.Errorf("key %q changed manageFieldsScroll to %d, want 0", key, ctx.app.manageFieldsScroll)
-		}
-		if ctx.app.manageConfig.GhosttyFontSize != 14 {
-			t.Errorf("key %q changed GhosttyFontSize to %d, want 14", key, ctx.app.manageConfig.GhosttyFontSize)
-		}
-		if ctx.app.manageEditing {
-			t.Errorf("key %q started hidden field editing", key)
-		}
-		if ctx.app.manageStatus != "" {
-			t.Errorf("key %q changed manageStatus to %q, want empty", key, ctx.app.manageStatus)
-		}
-	}
-
-	_, cmd := screen.Update(keyMsg("pgup"))
-	if cmd != nil {
-		t.Errorf("pgup returned cmd; want nil")
-	}
-	if ctx.app.installLogScroll == 0 {
-		t.Errorf("pgup did not scroll install log")
-	}
-
-	_, cmd = screen.Update(keyMsg("pgdown"))
-	if cmd != nil {
-		t.Errorf("pgdown returned cmd; want nil")
-	}
-	if ctx.app.installLogScroll != 0 {
-		t.Errorf("pgdown left installLogScroll = %d, want 0", ctx.app.installLogScroll)
-	}
-
-	_, cmd = screen.Update(keyMsg("C"))
-	if cmd != nil {
-		t.Errorf("C returned cmd; want nil")
-	}
-	if len(ctx.app.installLogs) != 0 {
-		t.Errorf("C did not clear install logs: %v", ctx.app.installLogs)
-	}
-	if ctx.app.manageStatus != "Logs cleared" {
-		t.Errorf("C set manageStatus = %q, want Logs cleared", ctx.app.manageStatus)
-	}
-}
-
-func TestManageLogPanelFooterAdvertisesWorkingScrollKeys(t *testing.T) {
-	const w, h = 120, 30
-	ctx := newManageContext(t)
-	ctx.Width, ctx.Height = w, h
-	ctx.app.width, ctx.app.height = w, h
-	ctx.app.manageIndex = 0
-	ctx.app.managePane = managePaneSettings
-	ctx.app.installLogs = []string{"installing...", "done"}
-
-	screen := NewManageScreen(ctx)
-	out := screen.View(ctx.Width, ctx.Height)
-	if strings.Contains(out, "↑↓: scroll") {
-		t.Fatalf("log panel footer still advertises non-working arrow scroll\n---\n%s\n---", out)
-	}
-	if !strings.Contains(out, "PgUp/PgDn: scroll") {
-		t.Fatalf("log panel footer does not advertise working page scroll keys\n---\n%s\n---", out)
-	}
-
-	for i, line := range strings.Split(out, "\n") {
-		if got := lipgloss.Width(line); got > w {
-			t.Fatalf("rendered manage view line %d width = %d, want <= %d\n---\n%s\n---", i, got, w, out)
-		}
-	}
-
-	layout := ctx.app.manageLayout()
-	items := ctx.app.manageItems()
-	fields := ctx.app.manageFieldsFor(items[ctx.app.manageIndex].id)
-	right := ctx.app.renderManageSettingsPanel(layout, items, fields)
-	for i, line := range strings.Split(right, "\n") {
-		if got := lipgloss.Width(line); got > layout.rightW {
-			t.Fatalf("log panel line %d width = %d, want <= right panel width %d\n---\n%s\n---", i, got, layout.rightW, right)
-		}
 	}
 }
 

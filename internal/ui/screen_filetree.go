@@ -36,6 +36,12 @@ func (s *fileTreeScreen) ID() Screen { return ScreenFileTree }
 // Init triggers the async install-cache load on entry (idempotent).
 func (s *fileTreeScreen) Init() tea.Cmd {
 	if a := s.App(); a != nil {
+		// Manage may arrive with a one-tool plan that has already been reviewed
+		// against the current typed installation snapshot. Preserve that exact
+		// identity through navigation instead of rebuilding it on screen entry.
+		if a.pendingInstallPlan != nil && a.installPlanError == nil {
+			return nil
+		}
 		a.refreshPendingInstallPlan()
 		return a.startInstallCacheLoad()
 	}

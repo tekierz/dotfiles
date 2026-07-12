@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
@@ -766,6 +767,10 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			finish(fmt.Errorf("create operation journal record: %w", err))
 			return
 		}
+		// The public operation document is only one component of the accepted
+		// plan. Journal the hash that also binds the typed installation snapshot
+		// and pinned recipes so audit records identify the exact reviewed plan.
+		record.PlanHash = plan.hash()
 		createdJournal, err := operation.DefaultJournalWithAuthority(stateAuthority)
 		if err != nil {
 			finish(fmt.Errorf("open operation journal: %w", err))
@@ -791,17 +796,21 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// it only reports a created backup when at least one file was captured and
 	// the manifest persisted, so we never claim a rollback point exists right
 	// before overwriting the user's dotfiles (C5).
-	if persistJournal && installRuntime.backupTargetsWithState != nil {
+	packageOnlyWithoutRollback := false
+	if persistJournal {
 		var targets []backup.Target
 		targets, err = plan.backupTargetSpecs()
-		if err == nil {
+		if err == nil && len(targets) == 0 && plan.packageOnlyReviewedExecution() {
+			packageOnlyWithoutRollback = true
+			warning := "package-only operation has no filesystem mutations; no filesystem rollback point was created"
+			journalWarnings = append(journalWarnings, warning)
+			emitLine("ℹ " + warning)
+		} else if err == nil && installRuntime.backupTargetsWithState != nil {
 			backupRes, err = installRuntime.backupTargetsWithState(stateAuthority, targets)
-		}
-	} else if persistJournal && installRuntime.backupTargets != nil {
-		var targets []backup.Target
-		targets, err = plan.backupTargetSpecs()
-		if err == nil {
+		} else if err == nil && installRuntime.backupTargets != nil {
 			backupRes, err = installRuntime.backupTargets(targets)
+		} else if err == nil {
+			backupRes, err = installRuntime.autoBackup()
 		}
 	} else {
 		backupRes, err = installRuntime.autoBackup()
@@ -809,7 +818,7 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	if err != nil {
 		finish(fmt.Errorf("auto-backup failed; installation stopped before mutation: %w", err))
 		return
-	} else if persistJournal && (!backupRes.enabled || backupRes.backupDir == "" || backupRes.plan == nil) {
+	} else if persistJournal && !packageOnlyWithoutRollback && (!backupRes.enabled || backupRes.backupDir == "" || backupRes.plan == nil) {
 		finish(fmt.Errorf("mandatory rollback point was not created; installation stopped before mutation"))
 		return
 	} else if backupRes.enabled {
@@ -893,6 +902,10 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		// still consume exact authority under their lock/transaction afterward.
 		if err := revalidateInstallPlanWithCreated(plan, stateCreated); err != nil {
 			finish(fmt.Errorf("installation plan changed during package installation: %w", err))
+			return
+		}
+		if plan.packageOnlyReviewedExecution() {
+			finish(aggregateFailures(failures))
 			return
 		}
 		rollbackExpected = make(map[string]backup.ExpectedState)
@@ -1400,11 +1413,12 @@ type selectedToolInstallResult struct {
 }
 
 type installExecutionSnapshot struct {
-	platform pkg.Platform
-	manager  string
-	recipes  map[string]operation.InstallRecipe
-	detected map[string]bool
-	digests  map[string]string
+	platform  pkg.Platform
+	manager   string
+	recipes   map[string]operation.InstallRecipe
+	detected  map[string]bool
+	digests   map[string]string
+	authority map[string]installToolAuthority
 }
 
 func wrapMutationError(prefix string, err error) error {
@@ -1428,7 +1442,7 @@ func runSelectedToolInstalls(
 ) selectedToolInstallResult {
 	result := selectedToolInstallResult{installed: make(map[string]bool, len(selectedTools))}
 	mgr := installRuntime.detectManager()
-	platform := installRuntime.detectPlatform()
+	platform := pkg.Platform("")
 	managerName := ""
 	if mgr != nil {
 		managerName = mgr.Name()
@@ -1436,8 +1450,9 @@ func runSelectedToolInstalls(
 	var accepted *installExecutionSnapshot
 	if len(acceptedSnapshots) != 0 {
 		accepted = &acceptedSnapshots[0]
-		if accepted.platform != platform || accepted.manager != managerName {
-			result.failures = append(result.failures, fmt.Errorf("install environment changed after review: planned %s/%s, found %s/%s", accepted.platform, accepted.manager, platform, managerName))
+		platform = accepted.platform
+		if accepted.platform == "" || accepted.manager != managerName {
+			result.failures = append(result.failures, fmt.Errorf("install environment changed after review: planned %s/%s, found manager %s", accepted.platform, accepted.manager, managerName))
 			return result
 		}
 		seen := make(map[string]struct{}, len(selectedTools))
@@ -1451,11 +1466,19 @@ func runSelectedToolInstalls(
 				result.failures = append(result.failures, fmt.Errorf("selected install %s lacks accepted recipe", toolID))
 				return result
 			}
+			authority, ok := accepted.authority[toolID]
+			if !ok || (authority.intent != "install" && authority.intent != "repair") ||
+				(authority.presence != health.PresenceMissing && authority.presence != health.PresencePartial) {
+				result.failures = append(result.failures, fmt.Errorf("selected install %s lacks accepted typed authority", toolID))
+				return result
+			}
 		}
 		if len(seen) != len(accepted.recipes) {
 			result.failures = append(result.failures, fmt.Errorf("selected installs do not match accepted install actions"))
 			return result
 		}
+	} else {
+		platform = installRuntime.detectPlatform()
 	}
 
 	if mgr != nil {
@@ -1463,8 +1486,6 @@ func runSelectedToolInstalls(
 	} else {
 		emitLine(fmt.Sprintf("Installing %d tools (no package manager detected; manager-independent installers only)...", len(selectedTools)))
 	}
-	installedByReviewedSteps := make(map[string]struct{})
-
 	for _, toolID := range selectedTools {
 		if err := ctx.Err(); err != nil {
 			result.failures = append(result.failures, err)
@@ -1500,27 +1521,6 @@ func runSelectedToolInstalls(
 				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer digest is invalid", toolID))
 				continue
 			}
-			var detectorErr error
-			currentlyInstalled, detectorErr = installRecipeDetected(recipe, mgr)
-			if detectorErr != nil {
-				result.failures = append(result.failures, fmt.Errorf("%s: evaluate reviewed detector: %w", toolID, detectorErr))
-				continue
-			}
-			observed, ok := accepted.detected[toolID]
-			authorizedTransition := !observed && currentlyInstalled && recipe.Detector.Kind == operation.InstallDetectorPackageReceipt
-			if authorizedTransition {
-				for _, name := range recipe.Detector.Values {
-					if _, installed := installedByReviewedSteps[name]; !installed {
-						authorizedTransition = false
-						break
-					}
-				}
-			}
-			if !ok || (observed != currentlyInstalled && !authorizedTransition) {
-				emitLine(fmt.Sprintf("  ✗ Cannot install %s: detector state changed after review", toolID))
-				result.failures = append(result.failures, fmt.Errorf("%s: detector state changed after review", toolID))
-				continue
-			}
 		} else {
 			currentlyInstalled = installRuntime.isToolInstalled(t)
 		}
@@ -1535,13 +1535,6 @@ func runSelectedToolInstalls(
 				emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
 				result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
 				continue
-			}
-			for _, installedStep := range recipe.Steps {
-				if installedStep.Kind == operation.InstallStepPackageManager {
-					for _, name := range installedStep.Packages {
-						installedByReviewedSteps[name] = struct{}{}
-					}
-				}
 			}
 		} else {
 			if !installerAvailable(t, platform) {
@@ -1945,61 +1938,6 @@ func (a *App) collectSelectedToolsWithRuntime(installRuntime toolInstallRuntime)
 	}
 
 	return selected
-}
-
-// streamingInstallToolCmd returns a command that installs a tool with output
-// collection. The cancelable ctx is created and its cancel handle (a.streamCancel)
-// registered by the caller (handleManageStartInstallMsg) on the main loop so
-// teardownStream can stop this (often sudo) subprocess on Ctrl+C / q instead of
-// orphaning it (FIX 3). This closure must not touch App state (it runs on a
-// bubbletea worker goroutine), so it relies on the context for cancellation.
-func (a *App) streamingInstallToolCmd(ctx context.Context, toolID string) tea.Cmd {
-	return a.streamingInstallToolCmdWithRuntime(ctx, toolID, defaultToolInstallRuntime())
-}
-
-// streamingInstallToolCmdWithRuntime is the dependency-injected Manage install
-// command. It shares installTool with the wizard so neither dashboard path can
-// accidentally regress to package-metadata-only execution.
-func (a *App) streamingInstallToolCmdWithRuntime(ctx context.Context, toolID string, installRuntime toolInstallRuntime) tea.Cmd {
-	return func() tea.Msg {
-		t, ok := installRuntime.lookupTool(toolID)
-		if !ok {
-			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("unknown tool: %s", toolID)}
-		}
-
-		mgr := installRuntime.detectManager()
-		if installRuntime.isToolInstalled(t) {
-			return manageInstallWithLogsMsg{toolID: toolID, logs: []string{fmt.Sprintf("✓ %s is already installed", t.Name())}}
-		}
-		if _, reviewedOnly := t.(tools.InstallRecipeProvider); reviewedOnly {
-			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("%s requires a reviewed install plan; use the installer workflow", t.Name())}
-		}
-
-		// Resolve packages via the single source of truth (Pi -> Debian fallback),
-		// consistent with the wizard loop and IsInstalled/cache (FIX 2). The empty
-		// case is already surfaced (manageInstallWithLogsMsg carries the error), so
-		// this path is not silent — but routing through PackagesForPlatform keeps the
-		// Pi behavior correct here too.
-		platform := installRuntime.detectPlatform()
-		if !installerAvailable(t, platform) {
-			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no supported installer for %s on %s", toolID, platform)}
-		}
-		if mgr == nil && requiresPackageManager(t) {
-			return manageInstallWithLogsMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
-		}
-
-		// Dispatch through Tool.Install. streamingInstallManager preserves live
-		// package-manager output/cancellation while allowing custom installers to
-		// run their additional steps.
-		var logs []string
-		err := installTool(ctx, t, mgr, platform, func(line string) {
-			logs = appendBoundedInstallLine(logs, line)
-		})
-		if err == nil && !installRuntime.isToolInstalled(t) {
-			err = fmt.Errorf("install postcondition failed: %s is still not detected", toolID)
-		}
-		return manageInstallWithLogsMsg{toolID: toolID, logs: logs, err: err}
-	}
 }
 
 // listenUpdateStreamCmd reads the next event from the update stream channel and

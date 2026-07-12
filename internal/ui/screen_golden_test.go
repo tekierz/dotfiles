@@ -275,7 +275,7 @@ func TestFileTreeScreenGolden(t *testing.T) {
 	wantSubstrings := []string{
 		"Reviewed Installation Plan",
 		"Plan:",
-		"install or verify",
+		"install ",
 		"Exact Plan",
 		"Blocked",
 	}
@@ -1572,77 +1572,6 @@ func TestManageScreenReachableViaManager(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("managed manageScreen should render %q\n---\n%s\n---", want, view)
 		}
-	}
-}
-
-// TestManageScreenInstallDoneAsyncInHandler proves the global-handler wiring for
-// the manage install completion: feeding a manageInstallDoneMsg to App.Update
-// updates App state and requests an install-status cache reload (Phase B + C10
-// fix). The streaming/terminal install messages are handled globally in
-// App.Update so they survive navigation, so the test drives App.Update.
-func TestManageScreenInstallDoneAsyncInHandler(t *testing.T) {
-	ctx := newManageContext(t)
-	// Simulate an install in progress with a ready cache (so the reload is the
-	// one triggered by the completion, not a pre-existing load).
-	ctx.app.manageInstalling = true
-	ctx.app.manageInstallID = "ghostty"
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
-
-	_, cmd := ctx.app.Update(manageInstallDoneMsg{toolID: "ghostty", err: nil})
-
-	if ctx.app.manageInstalling {
-		t.Error("manageInstallDoneMsg should clear manageInstalling")
-	}
-	if ctx.app.manageInstallID != "" {
-		t.Errorf("manageInstallDoneMsg should clear manageInstallID, got %q", ctx.app.manageInstallID)
-	}
-	if ctx.app.manageStatus != "Installed ✓" {
-		t.Errorf("manageStatus = %q, want \"Installed ✓\"", ctx.app.manageStatus)
-	}
-	// Phase B fix: completion must invalidate the cache and re-issue the reload.
-	if ctx.app.manageInstalledReady {
-		t.Error("manageInstallDoneMsg should set manageInstalledReady=false to force a refresh")
-	}
-	if cmd == nil {
-		t.Fatal("manageInstallDoneMsg should return a cache-reload command (startInstallCacheLoad)")
-	}
-	if !ctx.app.installCacheLoading {
-		t.Error("manageInstallDoneMsg should kick the install-cache reload (installCacheLoading=true)")
-	}
-}
-
-// TestManageScreenInstallWithLogsAsyncInHandler proves the streaming-install
-// terminal message is handled globally in App.Update: manageInstallWithLogsMsg
-// appends the collected logs, clears the installing flag, and (on success)
-// requests a cache reload. Handled in App.Update so it survives navigation.
-func TestManageScreenInstallWithLogsAsyncInHandler(t *testing.T) {
-	ctx := newManageContext(t)
-	ctx.app.manageInstalling = true
-	ctx.app.manageInstallID = "ghostty"
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
-	ctx.app.clearInstallLogs()
-
-	_, cmd := ctx.app.Update(manageInstallWithLogsMsg{
-		toolID: "ghostty",
-		logs:   []string{"Installing ghostty...", "done"},
-		err:    nil,
-	})
-	if ctx.app.manageInstalling {
-		t.Error("manageInstallWithLogsMsg should clear manageInstalling")
-	}
-	if len(ctx.app.installLogs) != 2 || ctx.app.installLogs[0] != "Installing ghostty..." {
-		t.Errorf("manageInstallWithLogsMsg should append collected logs, got %v", ctx.app.installLogs)
-	}
-	if !strings.Contains(ctx.app.manageStatus, "Installed successfully") {
-		t.Errorf("manageStatus = %q, want a success message", ctx.app.manageStatus)
-	}
-	if ctx.app.manageInstalledReady {
-		t.Error("manageInstallWithLogsMsg success should set manageInstalledReady=false")
-	}
-	if cmd == nil {
-		t.Fatal("manageInstallWithLogsMsg success should return a cache-reload command")
 	}
 }
 

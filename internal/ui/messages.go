@@ -52,20 +52,10 @@ type updateRunDoneMsg struct {
 	err     error
 }
 
-// manageSudoRequiredMsg indicates sudo is needed before manage install
-type manageSudoRequiredMsg struct {
-	toolID string
-}
-
 // updateSudoRequiredMsg indicates sudo is needed before update
 type updateSudoRequiredMsg struct {
 	packages []pkg.Package
 	all      bool
-}
-
-// manageStartInstallMsg triggers streaming install after sudo is cached
-type manageStartInstallMsg struct {
-	toolID string
 }
 
 // updateStartMsg triggers streaming update after sudo is cached
@@ -112,13 +102,6 @@ type backupCreateDoneMsg struct {
 	name    string
 	warning string
 	err     error
-}
-
-// manageInstallWithLogsMsg carries install result with collected logs
-type manageInstallWithLogsMsg struct {
-	toolID string
-	logs   []string
-	err    error
 }
 
 // updateWithLogsMsg carries update result with collected logs

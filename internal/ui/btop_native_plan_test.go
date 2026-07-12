@@ -25,6 +25,7 @@ func newNativeBtopTestApp(t *testing.T, content string) (*App, string) {
 		t.Fatal(err)
 	}
 	app := NewApp(true)
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 	app.manageInstalledReady = true
 	app.manageInstalled = map[string]bool{}
 	return app, home

@@ -3,10 +3,12 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/health"
 )
 
 func adjustManageNumber(value, dir, step, minValue, maxValue int) int {
@@ -39,9 +41,7 @@ func adjustManageNumber(value, dir, step, minValue, maxValue int) int {
 // manageInstalledReady / installCacheLoading), the scroll offsets
 // (manageToolsScroll, manageFieldsScroll), the inline-edit fields (manageEditing,
 // manageEditValue, manageEditCursor, manageEditField, manageEditFieldKey), the
-// status line (manageStatus), the install flags (manageInstalling,
-// manageInstallID) and the streaming-install log buffer (installLogs /
-// installLogScroll / installLogAutoScroll) are all read/written through
+// status line (manageStatus) and editable state are all read/written through
 // s.App(). The dual-pane layout, item list, field list and every renderManage*
 // helper remain methods on *App and are reused unchanged.
 //
@@ -52,24 +52,8 @@ func adjustManageNumber(value, dir, step, minValue, maxValue int) int {
 // entered. The cache result (installCacheDoneMsg) is applied globally in
 // App.Update before delegation, so it is intentionally NOT handled here.
 //
-// Save results are handled by the reviewed Manage confirmation screen.
-// The streaming/terminal install messages (manageInstallDoneMsg,
-// manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg) are
-// instead handled GLOBALLY in App.Update before delegation (see streaming.go),
-// so the finalize + cache-refresh chain survives navigation away from this
-// screen (the install worker + package-manager subprocess outlive the screen):
-//   - manageSudoRequiredMsg -> tea.Exec(sudo prompt) -> manageStartInstallMsg
-//   - manageStartInstallMsg -> register cancelable ctx/streamCancel, then
-//     a.streamingInstallToolCmd(ctx, toolID) (FIX 3: so teardownStream cancels it)
-//   - manageInstallWithLogsMsg success -> InvalidateCache + manageInstalledReady
-//     =false + re-issue a.startInstallCacheLoad() so the install-status cache
-//     refreshes (Phase B + C10 fix).
-//
-// Streaming model / no data race: a.streamingInstallToolCmd runs the package
-// install inside a tea.Cmd closure, collects all output into a local slice, and
-// returns a single terminal manageInstallWithLogsMsg carrying the logs. No
-// goroutine touches shared App state, so the manage install is the safe
-// collect-then-message pattern (no per-line stream to re-arm, no race).
+// Installs are routed through the reviewed plan and shared installation worker;
+// Manage has no separate direct package-install message path.
 type manageScreen struct {
 	BaseScreen
 }
@@ -120,14 +104,8 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			return s, tea.Quit
 		}
 		return s, s.handleKey(msg)
-
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
-
-		// The streaming/terminal install messages (manageInstallDoneMsg,
-		// manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg)
-		// are handled GLOBALLY in App.Update before delegation so the
-		// finalize/cache-refresh chain survives navigation; they never reach here.
 	}
 	return s, nil
 }
@@ -300,69 +278,6 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.manageStartEditing(f)
 	}
 
-	// Block navigating away while a tool install is streaming: the terminal
-	// manageInstallWithLogsMsg is only handled by this active screen, so leaving
-	// would drop it, strand manageInstalling=true, and orphan the install
-	// subprocess. (The 'i' install trigger is already guarded.)
-	if a.manageInstalling {
-		if key == "esc" {
-			a.manageStatus = "Install in progress…"
-			return nil
-		}
-		if _, ok := tabNavigationTarget(key); ok {
-			a.manageStatus = "Install in progress…"
-			return nil
-		}
-	}
-
-	logPanelVisible := a.manageInstalling || len(a.installLogs) > 0
-	if logPanelVisible {
-		switch key {
-		case "esc":
-			if a.manageInstalling {
-				a.manageStatus = "Install in progress…"
-				return nil
-			}
-			a.manageStatus = ""
-			a.manageCancelEditing()
-			a.managePane = managePaneTools
-			return NavigateTo(ScreenMainMenu)
-
-		case "c", "C":
-			if !a.manageInstalling && len(a.installLogs) > 0 {
-				a.clearInstallLogs()
-				a.manageStatus = "Logs cleared"
-			}
-			return nil
-
-		case "pgup", "ctrl+u":
-			if len(a.installLogs) > 0 {
-				a.installLogScroll += 10
-				maxScroll := CalculateMaxLogScroll(len(a.installLogs), layout.bodyH-6)
-				if a.installLogScroll > maxScroll {
-					a.installLogScroll = maxScroll
-				}
-				a.installLogAutoScroll = false
-			}
-			return nil
-
-		case "pgdown", "ctrl+d":
-			if len(a.installLogs) > 0 {
-				a.installLogScroll -= 10
-				if a.installLogScroll < 0 {
-					a.installLogScroll = 0
-				}
-			}
-			return nil
-
-		default:
-			// While the install-log view occupies the right pane, the settings
-			// fields are not rendered. Swallow every other key so hidden field
-			// selection/edit state cannot change underneath the log panel.
-			return nil
-		}
-	}
-
 	// Handle tab navigation first (1-5 keys). A number key for the already-active
 	// tab is a no-op.
 	if target, ok := tabNavigationTarget(key); ok {
@@ -404,20 +319,60 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.manageStatus = "Select a tool/app to install"
 			return nil
 		}
-		if a.manageInstalling {
+		if a.installationSnapshotLoading || a.installCacheLoading {
+			a.manageStatus = "Installation status loading"
 			return nil
 		}
-		if item.installed {
+		if a.installationSnapshotError != "" {
+			a.manageStatus = installationSnapshotUnavailable
+			return nil
+		}
+		if a.installationSnapshotStale {
+			a.manageStatus = "Installation status stale"
+			return nil
+		}
+		if !a.installationSnapshotReady {
+			a.manageStatus = "Installation status unknown"
+			return nil
+		}
+		presence, installability := item.installationTruth()
+		if presence == health.PresencePresent {
 			a.manageStatus = "Already installed"
 			return nil
 		}
+		if presence == health.PresenceUnknown {
+			a.manageStatus = "Installation status unknown"
+			return nil
+		}
+		if installability == health.InstallabilityUnsupported {
+			a.manageStatus = "Installation unavailable on " + a.installationSnapshot.Platform()
+			return nil
+		}
+		if installability != health.InstallabilitySupported {
+			a.manageStatus = "Installation availability unknown"
+			return nil
+		}
+		action := item.installationAction()
+		if action != "install" && action != "repair" {
+			a.manageStatus = "Installation status unknown"
+			return nil
+		}
 
-		// Clear logs and start install flow (will check sudo first).
-		a.clearInstallLogs()
-		a.manageStatus = ""
-		a.manageInstalling = true
-		a.manageInstallID = item.id
-		return a.checkSudoAndInstallCmd(item.id)
+		plan, err := buildInstallPlanForTools(a, defaultToolInstallRuntime(), time.Now(), []string{item.id})
+		if err != nil || plan == nil || plan.hasBlocked() {
+			a.pendingInstallPlan = nil
+			if err == nil {
+				err = fmt.Errorf("%s", installationSnapshotUnavailable)
+			}
+			a.installPlanError = err
+			a.manageStatus = installationSnapshotUnavailable
+			return nil
+		}
+		a.pendingInstallPlan = plan
+		a.installPlanError = nil
+		a.installPlanScroll = 0
+		a.manageStatus = strings.ToUpper(action[:1]) + action[1:] + " requested"
+		return NavigateTo(ScreenFileTree)
 
 	case "?":
 		// Jump to hotkeys/cheatsheet for the selected tool.
@@ -556,9 +511,8 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the
 	// already-active tab (this screen). Migrated destinations enter managed mode;
 	// legacy destinations (Users) fall back to legacy mode harmlessly. Both go
-	// through navigateTab (NavigateTo + on-enter load). Blocked while installing
-	// so the streaming install message can't be dropped by a screen switch.
-	if !a.manageInstalling && m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+	// through navigateTab (NavigateTo + on-enter load).
+	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
 		target := a.detectTabClick(m.X)
 		if a.compactManageSinglePaneActive() {
 			target = detectCompactManageTabClick(m.X)
@@ -645,14 +599,6 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 	// Click in right pane fields area: focus + edit/toggle/adjust.
 	if layout.inRightList(m.X, m.Y) {
-		// While the install-log view occupies the right pane, the settings fields
-		// are not rendered (renderManageSettingsPanel swaps to the log panel when
-		// installing or logs exist). Ignore field hit-testing in that state so a
-		// click in the log region does not mutate hidden settings fields.
-		if a.manageInstalling || len(a.installLogs) > 0 {
-			return nil
-		}
-
 		items := a.manageItems()
 		if len(items) == 0 {
 			return nil
@@ -746,7 +692,7 @@ func (s *manageScreen) View(width, height int) string {
 	}
 
 	// Show loading state if the install-status cache is being populated.
-	if a.installCacheLoading {
+	if a.installCacheLoading || a.installationSnapshotLoading {
 		spinner := AnimatedSpinnerDots(a.uiFrame)
 		loadingStyle := lipgloss.NewStyle().
 			Foreground(ColorCyan).

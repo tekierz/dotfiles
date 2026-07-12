@@ -45,6 +45,10 @@ observability land before new integrations or broad UI work.
 ### Batch 3 — truthful UX, settings platform, and CLI contracts
 
 - [ ] Replace boolean install state with structured package/binary/config/service/auth health.
+  - [x] Add the immutable, generation-tagged installation-health domain and collector.
+  - [x] Adopt one atomic installation snapshot in Manage and install planning: reject stale
+        async completions, render Present/Partial/Missing/Unknown truthfully, and fail closed
+        when planning from unknown, unsupported, stale, or environment-mismatched evidence.
 - [ ] Add current-source/provenance, Essentials/Advanced/raw layers, diff, and capability badges.
 - [ ] Make 60x18/80x24/120x40 layouts responsive with viewports, compact tabs, glyph/color
       fallbacks, reduced motion, and explicit Save/Cancel semantics.
@@ -144,6 +148,12 @@ observability land before new integrations or broad UI work.
 
 ### Batch 3 progress
 
+- Manage and reviewed installation now consume one generation-bound, immutable installation
+  snapshot. Missing and Partial tools produce exact install/repair plans; stale, unknown,
+  unsupported, environment-mismatched, or recipe-drifted evidence fails closed. Package-only
+  Manage plans retain journal/lock authority without pretending to have filesystem rollback,
+  while mixed filesystem plans still require a verified backup. The former direct Manage
+  install worker and its pre-probe dispatch route are removed.
 - Install actions now publish a versioned, non-secret recipe in the immutable operation
   plan: platform, package manager, exact package/npm arguments, typed detector,
   authentication expectation, and risk are hash-bound and visible in the confirmation UI.
