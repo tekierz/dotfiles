@@ -684,7 +684,7 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"neovim.go:operation.RemoveStateStagingDirectoryAuthorized":                  {1, "exact private staging cleanup"},
 		"neovim.go:safefile.EnsureShallowDirectoryWithinParentChainTracked":          {1, "authorized staged preference parent creation"},
 		"neovim.go:safefile.RemoveDirectoryWithinSnapshotAuthorized":                 {1, "exact clone metadata removal"},
-		"neovim.go:safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked":          {2, "authorized staged preference writes"},
+		"neovim.go:safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked":          {3, "authorized staged and reviewed live-overlay preference writes"},
 		"neovim.go:safefile.RestoreDirectoryWithinSnapshotNoCreateAuthorizedTracked": {1, "plan-authority preset commit"},
 		"neovim.go:safefile.RestoreDirectoryWithinSnapshotNoCreateTracked":           {1, "revision-only compatibility preset commit"},
 		"neovim.go:safefile.RestoreDirectoryWithinSnapshotTracked":                   {1, "ordinary absent-target preset commit"},

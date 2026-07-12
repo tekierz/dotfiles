@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,14 @@ import (
 	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/theme"
 )
+
+const (
+	neovimManagedStart = "-- >>> dotfiles neovim (managed)"
+	neovimManagedEnd   = "-- <<< dotfiles neovim (managed)"
+	neovimRequireLine  = `pcall(require, "custom.options")`
+)
+
+var neovimLegacyAppend = []byte("\n\n-- User options from dotfiles\n" + neovimRequireLine + "\n")
 
 // NeovimConfig holds Neovim configuration settings
 type NeovimConfig struct {
@@ -523,10 +532,12 @@ func writeNeovimStagedPrefs(staging string, authority *operation.StateStagingAut
 	if !initRevision.Exists() {
 		return errors.New("staged Neovim preset has no init.lua")
 	}
-	requireLine := "pcall(require, \"custom.options\")"
-	if !strings.Contains(string(initContent), requireLine) {
-		updated := string(initContent) + "\n\n-- User options from dotfiles\n" + requireLine + "\n"
-		if _, err := safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, initRel, initRevision, initParents, []byte(updated), 0600); err != nil {
+	updated, err := mergeNeovimInitFragment(initContent)
+	if err != nil {
+		return fmt.Errorf("merge staged init.lua preferences loader: %w", err)
+	}
+	if !bytes.Equal(initContent, updated) {
+		if _, err := safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, initRel, initRevision, initParents, updated, 0600); err != nil {
 			return fmt.Errorf("update staged init.lua: %w", err)
 		}
 	}
@@ -593,6 +604,144 @@ func WriteNeovimUserPrefs(cfg NeovimConfig, theme string) error {
 	return writeNeovimUserPrefs(cfg, theme, nvimDir)
 }
 
+// WriteNeovimUserPrefsAtBoundAuthoritiesTracked applies the reviewed two-file
+// overlay to an existing Neovim config. init.lua remains user-owned outside the
+// exact managed fragment; options.lua is a product-owned whole file.
+func WriteNeovimUserPrefsAtBoundAuthoritiesTracked(cfg NeovimConfig, theme string, initAccepted safefile.Revision, initParents *safefile.ParentChain, optionsAccepted safefile.Revision, optionsParents *safefile.ParentChain, locker operation.Locker) ([]MutationEvidence, error) {
+	return writeNeovimUserPrefsAtBoundAuthoritiesTracked(cfg, theme, initAccepted, initParents, optionsAccepted, optionsParents, locker, safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked)
+}
+
+type neovimAuthorizedReplace func(string, string, safefile.Revision, *safefile.ParentChain, []byte, os.FileMode) (safefile.Revision, error)
+
+func writeNeovimUserPrefsAtBoundAuthoritiesTracked(cfg NeovimConfig, theme string, initAccepted safefile.Revision, initParents *safefile.ParentChain, optionsAccepted safefile.Revision, optionsParents *safefile.ParentChain, locker operation.Locker, replace neovimAuthorizedReplace) (results []MutationEvidence, returnErr error) {
+	if !initAccepted.Tracked() || !optionsAccepted.Tracked() {
+		return nil, fmt.Errorf("%w: accepted Neovim overlay revision is untracked", safefile.ErrRevisionChanged)
+	}
+	if !initParents.Tracked() || !optionsParents.Tracked() || locker == nil {
+		return nil, fmt.Errorf("%w: accepted Neovim overlay authority is incomplete", safefile.ErrParentChanged)
+	}
+	if !initAccepted.Exists() || replace == nil {
+		return nil, errors.New("reviewed Neovim overlay requires an existing init.lua")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	initPath := filepath.Join(home, ".config", "nvim", "init.lua")
+	optionsPath := filepath.Join(home, ".config", "nvim", "lua", "custom", "options.lua")
+	release, err := locker("tool-config", initPath)
+	if err != nil {
+		return nil, fmt.Errorf("lock reviewed Neovim overlay: %w", err)
+	}
+	var committed []MutationEvidence
+	defer func() {
+		if err := release(); err != nil {
+			joined := errors.Join(returnErr, fmt.Errorf("release reviewed Neovim overlay lock: %w", err))
+			if errorReportsCommittedMutation(returnErr) {
+				returnErr = joined
+			} else {
+				returnErr = partialMutationError(joined, committed)
+			}
+			results = nil
+		}
+	}()
+
+	initRoot, initRel, initCreateRoot, err := generatedConfigDestination(initPath)
+	if err != nil || initCreateRoot {
+		return nil, fmt.Errorf("resolve reviewed Neovim init.lua: %w", errors.Join(err, safefile.ErrParentChanged))
+	}
+	optionsRoot, optionsRel, optionsCreateRoot, err := generatedConfigDestination(optionsPath)
+	if err != nil || optionsCreateRoot {
+		return nil, fmt.Errorf("resolve reviewed Neovim options.lua: %w", errors.Join(err, safefile.ErrParentChanged))
+	}
+	initExisting, initCurrent, err := safefile.ReadWithinAuthorized(initRoot, initRel, initParents)
+	if err != nil {
+		return nil, fmt.Errorf("read accepted Neovim init.lua: %w", err)
+	}
+	if initCurrent != initAccepted || !initCurrent.Exists() {
+		return nil, fmt.Errorf("%w: Neovim init.lua changed after plan acceptance", safefile.ErrRevisionChanged)
+	}
+	optionsExisting, optionsCurrent, err := safefile.ReadWithinAuthorized(optionsRoot, optionsRel, optionsParents)
+	if err != nil {
+		return nil, fmt.Errorf("read accepted Neovim options.lua: %w", err)
+	}
+	if optionsCurrent != optionsAccepted {
+		return nil, fmt.Errorf("%w: Neovim options.lua changed after plan acceptance", safefile.ErrRevisionChanged)
+	}
+	if optionsCurrent.Exists() && !hasGeneratedConfigHeader(optionsExisting) {
+		return nil, fmt.Errorf("%w: %s", ErrUnmanagedConfig, optionsPath)
+	}
+	initUpdated, err := mergeNeovimInitFragment(initExisting)
+	if err != nil {
+		return nil, err
+	}
+
+	optionsContent := []byte(GenerateNeovimConfig(cfg, theme))
+	optionsRevision := optionsCurrent
+	if !bytes.Equal(optionsExisting, optionsContent) || !optionsCurrent.Exists() {
+		optionsRevision, err = replace(optionsRoot, optionsRel, optionsCurrent, optionsParents, optionsContent, 0o600)
+		if err != nil {
+			if optionsRevision.Tracked() && optionsRevision.Exists() && errorReportsCommittedMutation(err) {
+				committed = append(committed, MutationEvidence{Path: optionsPath, Revision: optionsRevision, Parents: optionsParents})
+			} else if errorReportsCommittedMutation(err) && len(committed) == 0 {
+				return nil, err
+			}
+			return nil, partialMutationError(err, committed)
+		}
+	}
+	optionsEvidence := MutationEvidence{Path: optionsPath, Revision: optionsRevision, Parents: optionsParents}
+	results = append(results, optionsEvidence)
+	if optionsEvidence.Revision != optionsAccepted {
+		committed = append(committed, optionsEvidence)
+	}
+
+	initRevision := initCurrent
+	if !bytes.Equal(initExisting, initUpdated) {
+		initRevision, err = replace(initRoot, initRel, initCurrent, initParents, initUpdated, 0o600)
+		if err != nil {
+			if initRevision.Tracked() && initRevision.Exists() && errorReportsCommittedMutation(err) {
+				committed = append(committed, MutationEvidence{Path: initPath, Revision: initRevision, Parents: initParents})
+			} else if errorReportsCommittedMutation(err) && len(committed) == 0 {
+				return nil, err
+			}
+			return nil, partialMutationError(err, committed)
+		}
+	}
+	initEvidence := MutationEvidence{Path: initPath, Revision: initRevision, Parents: initParents}
+	if initEvidence.Revision != initAccepted {
+		committed = append(committed, initEvidence)
+	}
+	return append(results, initEvidence), nil
+}
+
+func mergeNeovimInitFragment(existing []byte) ([]byte, error) {
+	base := append([]byte(nil), existing...)
+	managed := wrapManagedConfigSection(neovimManagedStart, neovimManagedEnd, neovimRequireLine)
+	startCount := len(exactManagedMarkerLines(string(base), neovimManagedStart))
+	endCount := len(exactManagedMarkerLines(string(base), neovimManagedEnd))
+	legacyCount := bytes.Count(base, neovimLegacyAppend)
+	if legacyCount > 1 {
+		return nil, errors.New("refusing ambiguous Neovim init.lua with duplicate legacy dotfiles appends")
+	}
+	if legacyCount == 1 && (startCount != 0 || endCount != 0) {
+		return nil, errors.New("refusing ambiguous Neovim init.lua with both legacy and managed dotfiles loaders")
+	}
+	if legacyCount == 1 {
+		return bytes.Replace(base, neovimLegacyAppend, append([]byte("\n\n"), managed...), 1), nil
+	}
+	if startCount == 0 && endCount == 0 {
+		requireLines := exactManagedMarkerLines(string(base), neovimRequireLine)
+		if len(requireLines) == 1 {
+			return base, nil
+		}
+		if len(requireLines) > 1 {
+			return nil, errors.New("refusing ambiguous Neovim init.lua with duplicate unowned options loaders")
+		}
+	}
+	merged, _, err := mergeManagedConfigSection(base, managed, neovimManagedStart, neovimManagedEnd, "Neovim init.lua")
+	return merged, err
+}
+
 // writeNeovimUserPrefs writes user preferences to a separate file
 func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 	initPath := filepath.Join(nvimDir, "init.lua")
@@ -611,6 +760,10 @@ func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 		if err := verifyToolConfigRevision(root, rel, revision); err != nil {
 			return fmt.Errorf("failed to verify neovim init.lua: %w", err)
 		}
+		updated, err := mergeNeovimInitFragment(initContent)
+		if err != nil {
+			return err
+		}
 
 		prefsPath := filepath.Join(nvimDir, "lua", "custom", "options.lua")
 		content := GenerateNeovimConfig(cfg, theme)
@@ -618,13 +771,8 @@ func writeNeovimUserPrefs(cfg NeovimConfig, theme, nvimDir string) error {
 			return err
 		}
 
-		// Add require to init.lua if not already present. The revision check in
-		// replaceToolConfigAtRevision prevents a stale read from erasing edits
-		// made by a non-cooperating process after the preflight above.
-		requireLine := "pcall(require, \"custom.options\")"
-		if !strings.Contains(string(initContent), requireLine) {
-			newContent := string(initContent) + "\n\n-- User options from dotfiles\n" + requireLine + "\n"
-			if err := replaceToolConfigAtRevision(root, rel, revision, []byte(newContent)); err != nil {
+		if !bytes.Equal(initContent, updated) {
+			if err := replaceToolConfigAtRevision(root, rel, revision, updated); err != nil {
 				return fmt.Errorf("failed to update neovim init.lua: %w", err)
 			}
 		}

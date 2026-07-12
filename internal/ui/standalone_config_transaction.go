@@ -381,7 +381,7 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 	case "zsh":
 		spec.targets, spec.ownership, spec.description = []string{".zshrc"}, operation.OwnershipManagedFragment, "merge managed Zsh settings"
 	case "neovim":
-		return spec, "tracked authority and partial-mutation evidence for the Neovim init.lua/options.lua overlay are not implemented yet", nil
+		spec.targets, spec.ownership, spec.description = []string{".config/nvim/init.lua", ".config/nvim/lua/custom/options.lua"}, operation.OwnershipManagedFragment, "merge managed Neovim preferences"
 	case "git":
 		spec.targets, spec.ownership, spec.description = []string{".gitconfig", ".config/dotfiles/git/config"}, operation.OwnershipManagedFragment, "install managed Git include"
 	case "yazi":
@@ -561,6 +561,16 @@ func writeStandaloneConfigAtAuthority(toolID string, cfg DeepDiveConfig, theme s
 			return nil, err
 		}
 		return one(tools.WriteZshConfigAtBoundAuthorityTracked(zshConfigFrom(cfg), theme, revision, parents, locker))
+	case "neovim":
+		initRevision, initParents, err := file(".config/nvim/init.lua")
+		if err != nil {
+			return nil, err
+		}
+		optionsRevision, optionsParents, err := file(".config/nvim/lua/custom/options.lua")
+		if err != nil {
+			return nil, err
+		}
+		return tools.WriteNeovimUserPrefsAtBoundAuthoritiesTracked(neovimConfigFrom(cfg), theme, initRevision, initParents, optionsRevision, optionsParents, locker)
 	case "git":
 		rootRevision, rootParents, err := file(".gitconfig")
 		if err != nil {

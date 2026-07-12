@@ -168,10 +168,6 @@ func buildManageSavePlan(a *App, now time.Time) (*manageSavePlan, error) {
 	authority := make(map[string]map[string]acceptedTarget)
 	configTools := make([]string, 0, len(changed))
 	for _, toolID := range changed {
-		if toolID == "neovim" {
-			actions = append(actions, blockedManageToolAction(toolID, "tracked authority and partial-mutation evidence for the Neovim init.lua/options.lua overlay are not implemented yet"))
-			continue
-		}
 		spec, reason, specErr := standaloneConfigPlanSpec(home, a.theme, deep, toolID)
 		if specErr != nil {
 			return nil, specErr

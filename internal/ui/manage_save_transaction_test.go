@@ -87,24 +87,21 @@ func TestManageSaveThemeOnlySchedulesGlobalAndNoProductWriter(t *testing.T) {
 	}
 }
 
-func TestManageSaveNeovimChangeBlocksAllConfirmation(t *testing.T) {
-	app, _, _ := newPlanTestApp(t)
+func TestManageSaveNeovimChangeSchedulesReviewedOverlay(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	_, optionsPath := seedReviewedNeovimInit(t, home)
 	app.manageConfig.NeovimTabWidth++
 	plan, err := buildManageSavePlan(app, time.Now())
-	if err != nil || !plan.plan.hasBlocked() {
-		t.Fatalf("Neovim plan blocked=%v err=%v", plan != nil && plan.plan.hasBlocked(), err)
+	if err != nil || plan.plan.hasBlocked() || !slices.Equal(plan.plan.configTools, []string{"neovim"}) {
+		t.Fatalf("Neovim plan blocked=%v tools=%v err=%v", plan != nil && plan.plan.hasBlocked(), plan.plan.configTools, err)
 	}
-	app.pendingManageSavePlan = plan
-	ctx := NewTestScreenContext()
-	ctx.app = app
-	screen := NewManageSaveConfirmScreen(ctx)
-	view := screen.View(60, 18)
-	if !strings.Contains(view, "blocked") || !strings.Contains(view, "tracked authority") {
-		t.Fatalf("blocked preview is not truthful/reachable:\n%s", view)
+	result := executeManageSavePlanResult(context.Background(), plan, defaultManageSaveRuntime())
+	if result.err != nil || !result.applied {
+		t.Fatalf("result=%+v", result)
 	}
-	_, cmd := screen.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Fatal("blocked Manage plan allowed confirmation")
+	content, err := os.ReadFile(optionsPath)
+	if err != nil || !strings.Contains(string(content), "vim.opt.tabstop") {
+		t.Fatalf("reviewed Manage overlay options=%q err=%v", content, err)
 	}
 }
 

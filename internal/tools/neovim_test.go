@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,6 +135,9 @@ func TestSetupNeovimPresetStagesPreferencesBeforeTrackedCommit(t *testing.T) {
 	}
 	if !strings.Contains(string(initContent), `pcall(require, "custom.options")`) {
 		t.Fatalf("committed init.lua lacks staged preferences loader:\n%s", initContent)
+	}
+	if bytes.Count(initContent, []byte(neovimManagedStart)) != 1 || bytes.Count(initContent, []byte(neovimManagedEnd)) != 1 || bytes.Contains(initContent, neovimLegacyAppend) {
+		t.Fatalf("committed init.lua lacks one canonical managed block or retained legacy append:\n%s", initContent)
 	}
 	if _, err := os.Stat(filepath.Join(nvimDir, "lua", "custom", "options.lua")); err != nil {
 		t.Fatalf("committed preset lacks staged options.lua: %v", err)

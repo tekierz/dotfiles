@@ -823,6 +823,18 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 		}
 		backups = append(backups, rel)
 		info, statErr := os.Lstat(absolute)
+		if spec.toolID == "neovim" && rel == ".config/nvim/init.lua" {
+			switch {
+			case errors.Is(statErr, os.ErrNotExist):
+				disposition = operation.DispositionBlocked
+				reason = "Neovim settings require an existing regular init.lua; preset installation remains a separate reviewed action"
+			case statErr == nil && !info.Mode().IsRegular():
+				disposition = operation.DispositionBlocked
+				reason = "Neovim settings require init.lua to be a regular file"
+				observations = append(observations, operation.Observation{Source: rel})
+				continue
+			}
+		}
 		if statErr == nil && info.IsDir() {
 			if external {
 				return operation.Action{}, nil, fmt.Errorf("external directory config target is unsupported: %s", absolute)
@@ -876,7 +888,8 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			}
 		}
 		observations = append(observations, operation.Observation{Exists: observed.Exists, Source: rel, Digest: observed.Digest, Managed: observed.Managed})
-		if spec.fullFilePolicy && observed.Exists && !observed.Managed {
+		managedWholeFile := spec.fullFilePolicy || (spec.toolID == "neovim" && rel == ".config/nvim/lua/custom/options.lua")
+		if managedWholeFile && observed.Exists && !observed.Managed {
 			migratable := false
 			if spec.toolID == "yazi" && filepath.Base(rel) == "theme.toml" {
 				migratable = tools.IsLegacyGeneratedYaziThemeContent(content)

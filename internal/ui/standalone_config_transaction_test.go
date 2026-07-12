@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -86,7 +87,7 @@ func TestStandaloneConfigPlansAuthorityCapableWriterTargets(t *testing.T) {
 	}
 }
 
-func TestStandaloneNeovimPlanIsVisiblyBlocked(t *testing.T) {
+func TestStandaloneNeovimMissingInitPlanIsVisiblyBlocked(t *testing.T) {
 	app, _, _ := newPlanTestApp(t)
 	app.startScreen = ScreenConfigNeovim
 	plan, err := buildStandaloneConfigPlan(app, time.Now())
@@ -98,8 +99,227 @@ func TestStandaloneNeovimPlanIsVisiblyBlocked(t *testing.T) {
 	ctx := NewTestScreenContext()
 	ctx.app = viewApp
 	view := NewConfigSaveConfirmScreen(ctx).View(90, 30)
-	if !strings.Contains(view, "tracked authority") {
+	if !strings.Contains(view, "existing regular init.lua") {
 		t.Fatalf("blocked preview omits reason:\n%s", view)
+	}
+}
+
+func seedReviewedNeovimInit(t *testing.T, home string) (string, string) {
+	t.Helper()
+	initPath := filepath.Join(home, ".config", "nvim", "init.lua")
+	optionsPath := filepath.Join(home, ".config", "nvim", "lua", "custom", "options.lua")
+	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(initPath, []byte("-- user init\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return initPath, optionsPath
+}
+
+func TestStandaloneNeovimPlanHasExactTargetsAndMissingParents(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	initPath, _ := seedReviewedNeovimInit(t, home)
+	app.startScreen = ScreenConfigNeovim
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil || plan.hasBlocked() || !slices.Equal(plan.configTools, []string{"neovim"}) {
+		t.Fatalf("plan blocked=%v tools=%v err=%v", plan != nil && plan.hasBlocked(), plan.configTools, err)
+	}
+	wantTargets := []string{".config/nvim/init.lua", ".config/nvim/lua/custom/options.lua"}
+	for _, target := range wantTargets {
+		if !slices.Contains(plan.backupTargets(), target) {
+			t.Errorf("backup targets %v omit %s", plan.backupTargets(), target)
+		}
+	}
+	for _, parent := range []string{".config/nvim/lua", ".config/nvim/lua/custom"} {
+		if !slices.Contains(plan.parentDirs, parent) {
+			t.Errorf("parent plan %v omits %s", plan.parentDirs, parent)
+		}
+	}
+	if got, _ := os.ReadFile(initPath); string(got) != "-- user init\n" {
+		t.Fatalf("planning changed init.lua: %q", got)
+	}
+}
+
+func TestStandaloneNeovimPlanBlocksUnmanagedOptions(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	_, optionsPath := seedReviewedNeovimInit(t, home)
+	if err := os.MkdirAll(filepath.Dir(optionsPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(optionsPath, []byte("vim.opt.wrap = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.startScreen = ScreenConfigNeovim
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil || !plan.hasBlocked() || len(plan.configTools) != 0 {
+		t.Fatalf("plan blocked=%v tools=%v err=%v", plan != nil && plan.hasBlocked(), plan.configTools, err)
+	}
+	if action := planActionByID(t, plan, "config:neovim"); !strings.Contains(action.Reason, "not marked") {
+		t.Fatalf("unmanaged options reason=%q", action.Reason)
+	}
+}
+
+func TestStandaloneNeovimPlanBlocksSymlinkInit(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	victim := filepath.Join(home, "victim.lua")
+	if err := os.WriteFile(victim, []byte("-- victim\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	initPath := filepath.Join(home, ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, initPath); err != nil {
+		t.Fatal(err)
+	}
+	app.startScreen = ScreenConfigNeovim
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil || !plan.hasBlocked() {
+		t.Fatalf("plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+	}
+	if action := planActionByID(t, plan, "config:neovim"); !strings.Contains(action.Reason, "regular file") {
+		t.Fatalf("symlink init reason=%q", action.Reason)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "-- victim\n" {
+		t.Fatalf("planning changed symlink victim: %q", got)
+	}
+}
+
+func TestStandaloneNeovimReviewedOverlayRealSuccess(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	initPath, optionsPath := seedReviewedNeovimInit(t, home)
+	app.startScreen = ScreenConfigNeovim
+	app.deepDiveConfig.NeovimTabWidth = 8
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := executeStandaloneConfigPlanResult(context.Background(), plan, defaultStandaloneConfigRuntime())
+	if result.err != nil || !result.applied {
+		t.Fatalf("result=%+v", result)
+	}
+	initContent, _ := os.ReadFile(initPath)
+	optionsContent, _ := os.ReadFile(optionsPath)
+	if !strings.Contains(string(initContent), ">>> dotfiles neovim (managed)") || !strings.Contains(string(optionsContent), "vim.opt.tabstop = 8") {
+		t.Fatalf("init:\n%s\noptions:\n%s", initContent, optionsContent)
+	}
+}
+
+func TestStandaloneNeovimBackupFailureWritesNothing(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	initPath, optionsPath := seedReviewedNeovimInit(t, home)
+	app.startScreen = ScreenConfigNeovim
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := defaultStandaloneConfigRuntime()
+	runtime.backup = func(*operation.StateAuthority, []backup.Target) (autoBackupResult, error) {
+		return autoBackupResult{}, errors.New("injected backup failure")
+	}
+	result := executeStandaloneConfigPlanResult(context.Background(), plan, runtime)
+	if result.err == nil {
+		t.Fatal("backup failure succeeded")
+	}
+	if got, _ := os.ReadFile(initPath); string(got) != "-- user init\n" {
+		t.Fatalf("backup failure changed init.lua: %q", got)
+	}
+	if _, err := os.Lstat(optionsPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup failure created options.lua: %v", err)
+	}
+}
+
+func TestStandaloneNeovimConcurrentEditBeforeBackupIsPreserved(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	initPath, optionsPath := seedReviewedNeovimInit(t, home)
+	app.startScreen = ScreenConfigNeovim
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := []byte("-- external edit\n")
+	if err := os.WriteFile(initPath, external, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backupCalled := false
+	runtime := defaultStandaloneConfigRuntime()
+	runtime.backup = func(*operation.StateAuthority, []backup.Target) (autoBackupResult, error) {
+		backupCalled = true
+		return autoBackupResult{}, nil
+	}
+	result := executeStandaloneConfigPlanResult(context.Background(), plan, runtime)
+	if result.err == nil || backupCalled {
+		t.Fatalf("result=%+v backupCalled=%v", result, backupCalled)
+	}
+	if got, _ := os.ReadFile(initPath); !bytes.Equal(got, external) {
+		t.Fatalf("stale refusal changed external edit: %q", got)
+	}
+	if _, err := os.Lstat(optionsPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale refusal created options.lua: %v", err)
+	}
+}
+
+func TestStandaloneNeovimPostcommitFailureRollsBackBothTargetsAndParents(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	initPath, optionsPath := seedReviewedNeovimInit(t, home)
+	app.startScreen = ScreenConfigNeovim
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := defaultStandaloneConfigRuntime()
+	actualWrite := runtime.write
+	failure := errors.New("injected failure after Neovim overlay commit")
+	runtime.write = func(toolID string, cfg DeepDiveConfig, theme string, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+		evidence, err := actualWrite(toolID, cfg, theme, authority, locker)
+		if err != nil {
+			return nil, err
+		}
+		return nil, &tools.PartialMutationError{Err: failure, Evidence: evidence}
+	}
+	result := executeStandaloneConfigPlanResult(context.Background(), plan, runtime)
+	if !errors.Is(result.err, failure) || result.manualRecovery || !strings.Contains(result.err.Error(), "automatic rollback completed") {
+		t.Fatalf("result=%+v", result)
+	}
+	if got, _ := os.ReadFile(initPath); string(got) != "-- user init\n" {
+		t.Fatalf("rollback did not restore init.lua: %q", got)
+	}
+	if _, err := os.Lstat(optionsPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rollback left options.lua: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".config", "nvim", "lua")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rollback left created lua parent: %v", err)
+	}
+}
+
+func TestStandaloneNeovimUnprovenInitCommitRollsBackOptionsAndRequiresManualRecovery(t *testing.T) {
+	app, home, _ := newPlanTestApp(t)
+	initPath, optionsPath := seedReviewedNeovimInit(t, home)
+	app.startScreen = ScreenConfigNeovim
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := defaultStandaloneConfigRuntime()
+	actualWrite := runtime.write
+	unknownCommit := &safefile.CommittedError{Operation: "injected unproven init commit", Err: errors.New("revision lost")}
+	runtime.write = func(toolID string, cfg DeepDiveConfig, theme string, authority map[string]acceptedTarget, locker operation.Locker) ([]tools.MutationEvidence, error) {
+		evidence, err := actualWrite(toolID, cfg, theme, authority, locker)
+		if err != nil {
+			return nil, err
+		}
+		return nil, &tools.PartialMutationError{Err: unknownCommit, Evidence: evidence[:1]}
+	}
+	result := executeStandaloneConfigPlanResult(context.Background(), plan, runtime)
+	if !result.manualRecovery || result.err == nil || !strings.Contains(result.err.Error(), "manual recovery required") {
+		t.Fatalf("result=%+v", result)
+	}
+	if _, err := os.Lstat(optionsPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("proven options write was not rolled back: %v", err)
+	}
+	if initContent, _ := os.ReadFile(initPath); !strings.Contains(string(initContent), ">>> dotfiles neovim (managed)") {
+		t.Fatalf("fixture did not leave unproven init mutation for manual review:\n%s", initContent)
 	}
 }
 
