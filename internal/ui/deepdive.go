@@ -375,7 +375,7 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		},
 		{
 			Name:        "CLI Tools",
-			Description: "LazyGit, LazyDocker, btop, Glow",
+			Description: "LazyGit, LazyDocker, btop, Glow, Codex, OpenCode, Pi",
 			Screen:      ScreenConfigCLITools,
 			Icon:        "",
 		},
@@ -408,14 +408,14 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		// Optional Apps
 		{
 			Name:        "GUI Apps",
-			Description: "Zen Browser, Cursor, Sunshine, Moonlight",
+			Description: "Zen Browser, Cursor, Sunshine, Moonlight, LM Studio, OBS",
 			Screen:      ScreenConfigGUIApps,
 			Icon:        "󰏇",
 			Category:    "OPTIONAL APPS",
 		},
 		{
 			Name:        "macOS Apps",
-			Description: "Rectangle, Raycast, Stats, more",
+			Description: "Rectangle, Raycast, IINA, AppCleaner, T3 Code",
 			Screen:      ScreenConfigMacApps,
 			Icon:        "",
 			Platform:    "macos",

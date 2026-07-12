@@ -309,11 +309,10 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.manageStatus = ""
 		return a.prepareManageSave()
 
-	case "i":
-		// Install selected tool/app (settings pane only).
-		if a.managePane != managePaneSettings {
-			return nil
-		}
+	case "i", "I":
+		// Install the selected tool/app from either pane. Both panes consume the
+		// same accepted installation snapshot and build the same reviewed,
+		// single-tool plan; rendering focus must not change install authority.
 		item := items[a.manageIndex]
 		if item.id == "global" {
 			a.manageStatus = "Select a tool/app to install"
