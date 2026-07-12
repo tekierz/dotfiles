@@ -21,7 +21,7 @@ import (
 
 func TestStandaloneConfigFirstEnterBuildsExactNonMutatingPreview(t *testing.T) {
 	app, home, _ := newPlanTestApp(t)
-	app.SetStartScreen(ScreenConfigYazi)
+	prepareStandaloneYaziDirtyApp(app, true, true)
 	before := testTreeState(t, home)
 	cmd := app.prepareStandaloneConfigSave()
 	after := testTreeState(t, home)
@@ -57,9 +57,337 @@ func TestStandaloneSingleSpecYaziFailsClosedToResolvedPerFilePlanner(t *testing.
 	}
 }
 
+func TestStandaloneYaziPlansOnlyDirtyWritableGroups(t *testing.T) {
+	t.Run("keymap only ignores native main", func(t *testing.T) {
+		app, home, _ := newPlanTestApp(t)
+		prepareStandaloneYaziDirtyApp(app, false, true)
+		main := seedStandaloneYaziObservation(t, tools.YaziFileKindMain, "[mgr]\nshow_hidden = true\n")
+		keymap := seedStandaloneYaziObservation(t, tools.YaziFileKindKeymap, tools.GenerateYaziKeymap(yaziConfigFrom(*app.deepDiveConfig), app.theme))
+		app.nativeConfigState.Yazi = tools.YaziConfigImport{Main: main, Keymap: keymap}
+		plan, err := buildStandaloneConfigPlan(app, time.Now())
+		if err != nil || plan.hasBlocked() {
+			t.Fatalf("keymap-only plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+		}
+		assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{"config:yazi:keymap": operation.DispositionApply})
+		assertStandaloneYaziScopeExcludes(t, home, plan, tools.YaziFileKindMain, tools.YaziFileKindTheme)
+	})
+
+	t.Run("main only ignores native keymap", func(t *testing.T) {
+		app, home, _ := newPlanTestApp(t)
+		prepareStandaloneYaziDirtyApp(app, true, false)
+		main := seedStandaloneYaziObservation(t, tools.YaziFileKindMain, tools.GenerateYaziConfig(yaziConfigFrom(*app.deepDiveConfig), app.theme))
+		keymap := seedStandaloneYaziObservation(t, tools.YaziFileKindKeymap, "[mgr]\nprepend_keymap = []\n")
+		app.nativeConfigState.Yazi = tools.YaziConfigImport{Main: main, Keymap: keymap}
+		plan, err := buildStandaloneConfigPlan(app, time.Now())
+		if err != nil || plan.hasBlocked() {
+			t.Fatalf("main-only plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+		}
+		assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{"config:yazi:main": operation.DispositionApply})
+		assertStandaloneYaziScopeExcludes(t, home, plan, tools.YaziFileKindKeymap, tools.YaziFileKindTheme)
+	})
+
+	t.Run("both groups changed omit theme", func(t *testing.T) {
+		app, home, _ := newPlanTestApp(t)
+		prepareStandaloneYaziDirtyApp(app, true, true)
+		plan, err := buildStandaloneConfigPlan(app, time.Now())
+		if err != nil || plan.hasBlocked() {
+			t.Fatalf("combined plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+		}
+		assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{
+			"config:yazi:main": operation.DispositionApply, "config:yazi:keymap": operation.DispositionApply,
+		})
+		assertStandaloneYaziScopeExcludes(t, home, plan, tools.YaziFileKindTheme)
+	})
+
+	t.Run("non-default baseline compares accepted values", func(t *testing.T) {
+		app, home, _ := newPlanTestApp(t)
+		baseline := *NewManageConfig()
+		baseline.YaziKeymap = "emacs"
+		baseline.YaziShowHidden = true
+		baseline.YaziPreviewMode = "never"
+		baseline.YaziSortBy = "size"
+		baseline.YaziSortReverse = true
+		baseline.YaziLineMode = "permissions"
+		baseline.YaziScrollOff = 9
+		app.manageConfigBaseline = baseline
+		app.manageConfigBaselineTheme = app.theme
+		deep := manageConfigToDeepDive(&baseline)
+		app.deepDiveConfig = &deep
+		app.startScreen = ScreenConfigYazi
+		app.deepDiveConfig.YaziKeymap = "vim"
+		plan, err := buildStandaloneConfigPlan(app, time.Now())
+		if err != nil || plan.hasBlocked() {
+			t.Fatalf("non-default baseline plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+		}
+		assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{"config:yazi:keymap": operation.DispositionApply})
+		assertStandaloneYaziScopeExcludes(t, home, plan, tools.YaziFileKindMain, tools.YaziFileKindTheme)
+	})
+
+	t.Run("no edits produce no preview mutation scope", func(t *testing.T) {
+		app, _, _ := newPlanTestApp(t)
+		prepareStandaloneYaziDirtyApp(app, false, false)
+		t.Setenv("YAZI_CONFIG_HOME", "relative-hostile-yazi")
+		t.Setenv("XDG_CONFIG_HOME", "relative-hostile-xdg")
+		app.nativeConfigState.YaziError = "stored resolver failure"
+		plan, err := buildStandaloneConfigPlan(app, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{})
+		if plan.hasBlocked() || len(plan.configTools) != 0 || len(plan.backupTargets()) != 0 || len(plan.authority) != 0 || plan.yaziConfigPaths != (tools.YaziConfigPaths{}) {
+			t.Fatalf("no-edit plan blocked=%v tools=%v backups=%v authority=%v paths=%+v", plan.hasBlocked(), plan.configTools, plan.backupTargets(), plan.authority, plan.yaziConfigPaths)
+		}
+	})
+}
+
+func TestStandaloneYaziBlocksOnlyAffectedOwnedFile(t *testing.T) {
+	tests := []struct {
+		name       string
+		changeMain bool
+		kind       tools.YaziFileKind
+		content    string
+	}{
+		{"native keymap", false, tools.YaziFileKindKeymap, "[mgr]\nprepend_keymap = []\n"},
+		{"malformed main", true, tools.YaziFileKindMain, "[mgr\nshow_hidden = true\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app, home, _ := newPlanTestApp(t)
+			prepareStandaloneYaziDirtyApp(app, test.changeMain, !test.changeMain)
+			observation := seedStandaloneYaziObservation(t, test.kind, test.content)
+			if observation.ReadOnlyReason == "" {
+				t.Fatalf("fixture observation=%+v has no exact reason", observation)
+			}
+			if test.kind == tools.YaziFileKindMain {
+				app.nativeConfigState.Yazi.Main = observation
+			} else {
+				app.nativeConfigState.Yazi.Keymap = observation
+			}
+			plan, err := buildStandaloneConfigPlan(app, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			actionID := "config:yazi:" + string(test.kind)
+			assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{actionID: operation.DispositionBlocked})
+			action := planActionByID(t, plan, actionID)
+			detail := observation.ReadOnlyReason
+			if observation.Error != "" {
+				detail = observation.Error
+			}
+			wantReason := fmt.Sprintf("%s has %s ownership: %s", filepath.Base(observation.Path), observation.Ownership, detail)
+			if action.Reason != wantReason || len(plan.authority[actionID]) != 0 || slices.Contains(plan.backupTargets(), action.Target) {
+				t.Fatalf("affected blocked action=%+v authority=%v backups=%v", action, plan.authority[actionID], plan.backupTargets())
+			}
+			excluded := []tools.YaziFileKind{tools.YaziFileKindMain, tools.YaziFileKindTheme}
+			if test.kind == tools.YaziFileKindMain {
+				excluded = []tools.YaziFileKind{tools.YaziFileKindKeymap, tools.YaziFileKindTheme}
+			}
+			assertStandaloneYaziScopeExcludes(t, home, plan, excluded...)
+			assertStandaloneYaziNoParentAction(t, plan)
+			if len(plan.authority) != 0 || len(plan.parentDirs) != 0 {
+				t.Errorf("blocked per-file plan authority=%v parents=%v, want empty", plan.authority, plan.parentDirs)
+			}
+		})
+	}
+}
+
+func TestStandaloneYaziGlobalErrorsBlockForcedAffectedEdit(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  NativeManageConfigState
+		reason string
+	}{
+		{"preference error", NativeManageConfigState{PreferenceError: "invalid manage.json"}, "saved management preferences could not be read safely: invalid manage.json"},
+		{"Yazi import error", NativeManageConfigState{YaziError: "resolver failed"}, "native Yazi configuration could not be imported safely: resolver failed"},
+		{"preference error wins over Yazi import error", NativeManageConfigState{PreferenceError: "invalid manage.json", YaziError: "resolver failed"}, "saved management preferences could not be read safely: invalid manage.json"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app, _, _ := newPlanTestApp(t)
+			prepareStandaloneYaziDirtyApp(app, true, false)
+			app.nativeConfigState = test.state
+			plan, err := buildStandaloneConfigPlan(app, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{"config:yazi:main": operation.DispositionBlocked})
+			if action := planActionByID(t, plan, "config:yazi:main"); action.Reason != test.reason {
+				t.Fatalf("global block reason=%q want=%q", action.Reason, test.reason)
+			}
+			if len(plan.authority) != 0 || len(plan.parentDirs) != 0 {
+				t.Errorf("globally blocked plan authority=%v parents=%v, want empty", plan.authority, plan.parentDirs)
+			}
+			assertStandaloneYaziNoParentAction(t, plan)
+		})
+	}
+
+	t.Run("both groups use winning preference error without mutation authority", func(t *testing.T) {
+		app, _, _ := newPlanTestApp(t)
+		prepareStandaloneYaziDirtyApp(app, true, true)
+		app.nativeConfigState.PreferenceError = "invalid manage.json"
+		app.nativeConfigState.YaziError = "resolver failed"
+		plan, err := buildStandaloneConfigPlan(app, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantReason := "saved management preferences could not be read safely: invalid manage.json"
+		assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{
+			"config:yazi:main": operation.DispositionBlocked, "config:yazi:keymap": operation.DispositionBlocked,
+		})
+		for _, actionID := range []string{"config:yazi:main", "config:yazi:keymap"} {
+			if action := planActionByID(t, plan, actionID); action.Reason != wantReason {
+				t.Errorf("%s reason=%q want=%q", actionID, action.Reason, wantReason)
+			}
+		}
+		if len(plan.configTools) != 0 || len(plan.authority) != 0 || len(plan.parentDirs) != 0 {
+			t.Fatalf("blocked combined plan tools=%v authority=%v parents=%v", plan.configTools, plan.authority, plan.parentDirs)
+		}
+		assertStandaloneYaziNoParentAction(t, plan)
+	})
+}
+
+func prepareStandaloneYaziDirtyApp(app *App, mainChanged, keymapChanged bool) {
+	baseline := *NewManageConfig()
+	app.manageConfigBaseline = baseline
+	app.manageConfigBaselineTheme = app.theme
+	deep := manageConfigToDeepDive(&baseline)
+	app.deepDiveConfig = &deep
+	app.startScreen = ScreenConfigYazi
+	if mainChanged {
+		app.deepDiveConfig.YaziShowHidden = !app.deepDiveConfig.YaziShowHidden
+	}
+	if keymapChanged {
+		if app.deepDiveConfig.YaziKeymap == "vim" {
+			app.deepDiveConfig.YaziKeymap = "emacs"
+		} else {
+			app.deepDiveConfig.YaziKeymap = "vim"
+		}
+	}
+}
+
+func seedStandaloneYaziObservation(t *testing.T, kind tools.YaziFileKind, content string) tools.YaziFileObservation {
+	t.Helper()
+	paths, err := tools.ResolveYaziConfigPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := map[tools.YaziFileKind]string{
+		tools.YaziFileKindMain: paths.Main, tools.YaziFileKindKeymap: paths.Keymap, tools.YaziFileKindTheme: paths.Theme,
+	}[kind]
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	observation := tools.InspectYaziConfigContent(kind, path, []byte(content), true)
+	if observation.Kind != kind || !observation.Exists {
+		t.Fatalf("seeded Yazi observation=%+v", observation)
+	}
+	return observation
+}
+
+func assertStandaloneYaziActionSet(t *testing.T, plan *installPlan, want map[string]operation.Disposition) {
+	t.Helper()
+	got := make(map[string]operation.Disposition)
+	actualCount := 0
+	applyCount := 0
+	for _, action := range plan.actions() {
+		if action.Kind == operation.KindWriteConfig && action.ToolID == "yazi" {
+			actualCount++
+			got[action.ID] = action.Disposition
+			if action.Disposition == operation.DispositionApply {
+				applyCount++
+			}
+		}
+	}
+	if actualCount != len(want) || !slices.Equal(sortedMapKeys(got), sortedMapKeys(want)) {
+		t.Fatalf("standalone Yazi actions=%v want=%v", got, want)
+	}
+	for actionID, disposition := range want {
+		if got[actionID] != disposition {
+			t.Errorf("standalone Yazi action %s disposition=%s want=%s", actionID, got[actionID], disposition)
+		}
+	}
+	if applyCount > 0 {
+		if !slices.Equal(plan.configTools, []string{"yazi"}) {
+			t.Errorf("applicable Yazi plan configTools=%v, want [yazi]", plan.configTools)
+		}
+	} else if len(plan.configTools) != 0 {
+		t.Errorf("non-applicable Yazi plan configTools=%v, want empty", plan.configTools)
+	}
+}
+
+func assertStandaloneYaziScopeExcludes(t *testing.T, home string, plan *installPlan, kinds ...tools.YaziFileKind) {
+	t.Helper()
+	paths := map[tools.YaziFileKind]string{
+		tools.YaziFileKindMain: plan.yaziConfigPaths.Main, tools.YaziFileKindKeymap: plan.yaziConfigPaths.Keymap, tools.YaziFileKindTheme: plan.yaziConfigPaths.Theme,
+	}
+	for _, kind := range kinds {
+		target := planTargetPath(home, paths[kind])
+		if slices.Contains(plan.backupTargets(), target) {
+			t.Errorf("excluded Yazi %s target leaked into backups: %v", kind, plan.backupTargets())
+		}
+		for actionID, authority := range plan.authority {
+			if _, ok := authority[target]; ok {
+				t.Errorf("excluded Yazi %s target leaked into %s authority", kind, actionID)
+			}
+		}
+	}
+}
+
+func assertStandaloneYaziNoParentAction(t *testing.T, plan *installPlan) {
+	t.Helper()
+	for _, action := range plan.actions() {
+		if action.ID == "state:parents" {
+			t.Errorf("blocked Yazi plan emitted parent action: %+v", action)
+		}
+	}
+	if _, ok := plan.authority["state:parents"]; ok {
+		t.Errorf("blocked Yazi plan emitted parent authority: %+v", plan.authority["state:parents"])
+	}
+}
+
+func sortedMapKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func TestStandaloneYaziThemeOwnershipNeverBlocksOrdinaryDirtyGroups(t *testing.T) {
+	tests := []struct {
+		name       string
+		changeMain bool
+		content    string
+	}{
+		{"native theme with main edit", true, "[flavor]\ndark = \"catppuccin-mocha\"\n"},
+		{"malformed theme with keymap edit", false, "[mgr\ncwd = {}\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app, home, _ := newPlanTestApp(t)
+			prepareStandaloneYaziDirtyApp(app, test.changeMain, !test.changeMain)
+			app.nativeConfigState.Yazi.Theme = seedStandaloneYaziObservation(t, tools.YaziFileKindTheme, test.content)
+			plan, err := buildStandaloneConfigPlan(app, time.Now())
+			if err != nil || plan.hasBlocked() {
+				t.Fatalf("theme-isolated plan blocked=%v err=%v", plan != nil && plan.hasBlocked(), err)
+			}
+			actionID := "config:yazi:keymap"
+			if test.changeMain {
+				actionID = "config:yazi:main"
+			}
+			assertStandaloneYaziActionSet(t, plan, map[string]operation.Disposition{actionID: operation.DispositionApply})
+			assertStandaloneYaziScopeExcludes(t, home, plan, tools.YaziFileKindTheme)
+		})
+	}
+}
+
 func TestStandaloneYaziSavePlansMainAndKeymapButOmitsTheme(t *testing.T) {
 	app, home, _ := newPlanTestApp(t)
-	app.startScreen = ScreenConfigYazi
+	prepareStandaloneYaziDirtyApp(app, true, true)
 	override := filepath.Join(home, "reviewed-yazi-override")
 	t.Setenv("YAZI_CONFIG_HOME", override)
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -156,7 +484,7 @@ func TestStandaloneNonYaziPlanIgnoresHostileYaziEnvironment(t *testing.T) {
 
 func TestStandaloneYaziExecuteUsesFrozenSplitAuthoritiesAndOmitsTheme(t *testing.T) {
 	app, home, _ := newPlanTestApp(t)
-	app.startScreen = ScreenConfigYazi
+	prepareStandaloneYaziDirtyApp(app, true, true)
 	configA := filepath.Join(home, "config-a")
 	t.Setenv("YAZI_CONFIG_HOME", configA)
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -311,6 +639,13 @@ func TestStandaloneConfigPlansAuthorityCapableWriterTargets(t *testing.T) {
 		{ScreenConfigClaudeCode, []string{".claude.json"}},
 	}
 	for _, test := range tests {
+		if test.screen == ScreenConfigYazi {
+			prepareStandaloneYaziDirtyApp(app, true, true)
+			app.deepDiveConfig.CLITools["lazygit"] = true
+			app.deepDiveConfig.CLITools["btop"] = true
+			app.deepDiveConfig.CLITools["glow"] = true
+			app.deepDiveConfig.ClaudeCodeMCPs["context7"] = true
+		}
 		app.startScreen = test.screen
 		plan, err := buildStandaloneConfigPlan(app, time.Now())
 		if err != nil || plan.hasBlocked() {
@@ -642,7 +977,7 @@ func TestStandaloneSupportedWritersExecuteTheirReviewedTargets(t *testing.T) {
 		{"tmux", ScreenConfigTmux, func(app *App) { app.deepDiveConfig.TmuxTPMEnabled = false }},
 		{"zsh", ScreenConfigZsh, nil},
 		{"Git", ScreenConfigGit, nil},
-		{"Yazi", ScreenConfigYazi, nil},
+		{"Yazi", ScreenConfigYazi, func(app *App) { prepareStandaloneYaziDirtyApp(app, true, true) }},
 		{"fzf", ScreenConfigFzf, nil},
 		{"LazyGit", ScreenConfigLazyGit, func(app *App) { app.deepDiveConfig.CLITools["lazygit"] = true }},
 		{"btop", ScreenConfigBtop, func(app *App) { app.deepDiveConfig.CLITools["btop"] = true }},
@@ -682,7 +1017,7 @@ func TestStandaloneSupportedWritersExecuteTheirReviewedTargets(t *testing.T) {
 
 func TestStandaloneConfigBackupFailureStopsBeforeEveryTarget(t *testing.T) {
 	app, home, _ := newPlanTestApp(t)
-	app.startScreen = ScreenConfigYazi
+	prepareStandaloneYaziDirtyApp(app, true, true)
 	plan, err := buildStandaloneConfigPlan(app, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -735,7 +1070,7 @@ func TestStandaloneConfigPostPreviewChangeBlocksBeforeBackup(t *testing.T) {
 
 func TestStandaloneConfigMultiFileFailureRollsBackProvenWrites(t *testing.T) {
 	app, home, _ := newPlanTestApp(t)
-	app.startScreen = ScreenConfigYazi
+	prepareStandaloneYaziDirtyApp(app, true, true)
 	plan, err := buildStandaloneConfigPlan(app, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -762,7 +1097,7 @@ func TestStandaloneConfigMultiFileFailureRollsBackProvenWrites(t *testing.T) {
 
 func TestStandaloneConfigMissingEvidenceRequiresManualRecovery(t *testing.T) {
 	app, home, _ := newPlanTestApp(t)
-	app.startScreen = ScreenConfigYazi
+	prepareStandaloneYaziDirtyApp(app, true, true)
 	plan, err := buildStandaloneConfigPlan(app, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -856,7 +1191,7 @@ func TestStandaloneClaudeNoChangeClosesWithoutMutation(t *testing.T) {
 
 func TestStandaloneParentCommittedErrorRequiresManualRecovery(t *testing.T) {
 	app, _, _ := newPlanTestApp(t)
-	app.startScreen = ScreenConfigYazi
+	prepareStandaloneYaziDirtyApp(app, true, true)
 	plan, err := buildStandaloneConfigPlan(app, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -878,7 +1213,7 @@ func TestStandaloneParentCommittedErrorRequiresManualRecovery(t *testing.T) {
 
 func TestStandalonePrecommitParentErrorDoesNotClaimManualRecovery(t *testing.T) {
 	app, _, _ := newPlanTestApp(t)
-	app.startScreen = ScreenConfigYazi
+	prepareStandaloneYaziDirtyApp(app, true, true)
 	plan, err := buildStandaloneConfigPlan(app, time.Now())
 	if err != nil {
 		t.Fatal(err)

@@ -302,15 +302,19 @@ func buildStandaloneConfigPlan(a *App, now time.Time) (*installPlan, error) {
 		return blockedStandaloneConfigPlan(now, statePlan, cfg, a.theme, "unknown", "the selected screen has no standalone config writer")
 	}
 	var yaziConfigPaths tools.YaziConfigPaths
+	var yaziChangedKinds []tools.YaziFileKind
 	if toolID == "yazi" {
-		yaziConfigPaths, err = tools.ResolveYaziConfigPaths()
-		if err != nil {
-			return nil, fmt.Errorf("resolve Yazi config paths for standalone plan: %w", err)
+		yaziChangedKinds = standaloneYaziChangedKinds(cfg, a.manageConfigBaseline)
+		if len(yaziChangedKinds) > 0 {
+			yaziConfigPaths, err = tools.ResolveYaziConfigPaths()
+			if err != nil {
+				return nil, fmt.Errorf("resolve Yazi config paths for standalone plan: %w", err)
+			}
 		}
 	}
 
 	allowBtopThemeReplacement := a.nativeConfigState.BtopThemeExplicit || cfg.BtopTheme != manageConfigToDeepDive(&a.manageConfigBaseline).BtopTheme || (cfg.BtopTheme == "auto" && a.theme != a.manageConfigBaselineTheme)
-	specs, blockedReason, err := standaloneConfigPlanSpecsAtResolved(home, a.theme, cfg, toolID, allowBtopThemeReplacement, yaziConfigPaths)
+	specs, blockedReason, err := standaloneConfigPlanSpecsAtResolved(home, a.theme, cfg, toolID, allowBtopThemeReplacement, yaziConfigPaths, yaziChangedKinds)
 	if err != nil {
 		return nil, err
 	}
@@ -465,12 +469,35 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 	return spec, "", nil
 }
 
-func standaloneConfigPlanSpecsAtResolved(home, theme string, cfg DeepDiveConfig, toolID string, allowBtopThemeReplacement bool, yaziConfigPaths tools.YaziConfigPaths) ([]configPlanSpec, string, error) {
+func standaloneYaziChangedKinds(cfg DeepDiveConfig, baseline ManageConfig) []tools.YaziFileKind {
+	accepted := manageConfigToDeepDive(&baseline)
+	changed := make([]tools.YaziFileKind, 0, 2)
+	if cfg.YaziShowHidden != accepted.YaziShowHidden ||
+		cfg.YaziPreviewMode != accepted.YaziPreviewMode ||
+		cfg.YaziSortBy != accepted.YaziSortBy ||
+		cfg.YaziSortReverse != accepted.YaziSortReverse ||
+		cfg.YaziLineMode != accepted.YaziLineMode ||
+		cfg.YaziScrollOff != accepted.YaziScrollOff {
+		changed = append(changed, tools.YaziFileKindMain)
+	}
+	if cfg.YaziKeymap != accepted.YaziKeymap {
+		changed = append(changed, tools.YaziFileKindKeymap)
+	}
+	return changed
+}
+
+func standaloneConfigPlanSpecsAtResolved(home, theme string, cfg DeepDiveConfig, toolID string, allowBtopThemeReplacement bool, yaziConfigPaths tools.YaziConfigPaths, yaziChangedKinds []tools.YaziFileKind) ([]configPlanSpec, string, error) {
 	if toolID == "yazi" {
-		return []configPlanSpec{
-			{actionID: "config:yazi:main", toolID: "yazi", yaziKind: tools.YaziFileKindMain, targets: []string{planTargetPath(home, yaziConfigPaths.Main)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi main configuration", fullFilePolicy: true},
-			{actionID: "config:yazi:keymap", toolID: "yazi", yaziKind: tools.YaziFileKindKeymap, targets: []string{planTargetPath(home, yaziConfigPaths.Keymap)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi keymap configuration", fullFilePolicy: true},
-		}, "", nil
+		specs := make([]configPlanSpec, 0, len(yaziChangedKinds))
+		for _, kind := range yaziChangedKinds {
+			switch kind {
+			case tools.YaziFileKindMain:
+				specs = append(specs, configPlanSpec{actionID: "config:yazi:main", toolID: "yazi", yaziKind: kind, targets: []string{planTargetPath(home, yaziConfigPaths.Main)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi main configuration", fullFilePolicy: true})
+			case tools.YaziFileKindKeymap:
+				specs = append(specs, configPlanSpec{actionID: "config:yazi:keymap", toolID: "yazi", yaziKind: kind, targets: []string{planTargetPath(home, yaziConfigPaths.Keymap)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi keymap configuration", fullFilePolicy: true})
+			}
+		}
+		return specs, "", nil
 	}
 	spec, reason, err := standaloneConfigPlanSpec(home, theme, cfg, toolID, allowBtopThemeReplacement)
 	if err != nil {
@@ -480,7 +507,7 @@ func standaloneConfigPlanSpecsAtResolved(home, theme string, cfg DeepDiveConfig,
 }
 
 func standaloneNativeBlockReason(a *App, toolID string, allowBtopThemeReplacement bool) string {
-	if a.nativeConfigState.PreferenceError != "" && (toolID == "ghostty" || toolID == "tmux" || toolID == "git" || toolID == "btop" || toolID == "glow" || toolID == "lazygit") {
+	if a.nativeConfigState.PreferenceError != "" && (toolID == "ghostty" || toolID == "tmux" || toolID == "git" || toolID == "btop" || toolID == "glow" || toolID == "lazygit" || toolID == "yazi") {
 		return "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
 	}
 	switch toolID {
@@ -506,6 +533,10 @@ func standaloneNativeBlockReason(a *App, toolID string, allowBtopThemeReplacemen
 		}
 	case "lazygit":
 		return lazyGitUIBlockReason(a)
+	case "yazi":
+		if a.nativeConfigState.YaziError != "" {
+			return "native Yazi configuration could not be imported safely: " + a.nativeConfigState.YaziError
+		}
 	}
 	return ""
 }
