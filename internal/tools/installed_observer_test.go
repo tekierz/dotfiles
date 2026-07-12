@@ -29,8 +29,10 @@ type countingObservationManager struct {
 }
 
 func newCountingObservationManager() *countingObservationManager {
+	mock := pkg.NewMockPackageManager()
+	mock.ManagerName = "brew"
 	return &countingObservationManager{
-		MockPackageManager: pkg.NewMockPackageManager(),
+		MockPackageManager: mock,
 		queryCalls:         make(map[string]int),
 		queryInstalled:     make(map[string]bool),
 	}
