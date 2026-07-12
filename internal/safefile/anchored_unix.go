@@ -34,6 +34,19 @@ type descriptorSnapshot struct {
 // observable metadata changes during the read, ErrRevisionChanged is returned
 // instead of a revision for potentially torn data.
 func ReadWithin(root, rel string) ([]byte, Revision, error) {
+	return readWithin(root, rel, nil)
+}
+
+// ReadWithinLimit is ReadWithin with an explicit allocation and byte limit.
+// Stable oversized files return ErrSizeLimit without source bytes or revision.
+func ReadWithinLimit(root, rel string, limit int64) ([]byte, Revision, error) {
+	if limit < 0 {
+		return nil, Revision{}, fmt.Errorf("%w: negative limit %d", ErrSizeLimit, limit)
+	}
+	return readWithin(root, rel, &limit)
+}
+
+func readWithin(root, rel string, limit *int64) ([]byte, Revision, error) {
 	directories, target, err := splitRelativePath(rel)
 	if err != nil {
 		return nil, Revision{}, err
@@ -100,8 +113,29 @@ func ReadWithin(root, rel string) ([]byte, Revision, error) {
 			return nil, Revision{}, fmt.Errorf("after opening target: %w", err)
 		}
 	}
+	if limit != nil && before.size > *limit {
+		after, inspectErr := snapshotDescriptor(fd, file)
+		if inspectErr != nil {
+			_ = file.Close()
+			return nil, Revision{}, fmt.Errorf("inspect oversized target %q: %w", target, inspectErr)
+		}
+		if before != after {
+			_ = file.Close()
+			return nil, Revision{}, fmt.Errorf("%w: target %q metadata changed", ErrRevisionChanged, target)
+		}
+		closeErr := file.Close()
+		sizeErr := fmt.Errorf("%w: target %q is %d bytes, limit %d", ErrSizeLimit, target, before.size, *limit)
+		if closeErr != nil {
+			return nil, Revision{}, errors.Join(sizeErr, fmt.Errorf("close target %q: %w", target, closeErr))
+		}
+		return nil, Revision{}, sizeErr
+	}
 
-	data, err := io.ReadAll(file)
+	var reader io.Reader = file
+	if limit != nil && *limit < int64(^uint64(0)>>1) {
+		reader = io.LimitReader(file, *limit+1)
+	}
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		_ = file.Close()
 		return nil, Revision{}, fmt.Errorf("read target %q: %w", target, err)
@@ -114,6 +148,10 @@ func ReadWithin(root, rel string) ([]byte, Revision, error) {
 	if before != after || int64(len(data)) != after.size {
 		_ = file.Close()
 		return nil, Revision{}, fmt.Errorf("%w: target %q metadata changed", ErrRevisionChanged, target)
+	}
+	if limit != nil && int64(len(data)) > *limit {
+		_ = file.Close()
+		return nil, Revision{}, fmt.Errorf("%w: target %q exceeds limit %d", ErrSizeLimit, target, *limit)
 	}
 	if err := file.Close(); err != nil {
 		return nil, Revision{}, fmt.Errorf("close target %q: %w", target, err)

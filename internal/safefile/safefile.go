@@ -36,6 +36,9 @@ var (
 	// ErrRevisionChanged reports that a file changed while ReadWithin held and
 	// read its descriptor, so no stable source revision can be returned.
 	ErrRevisionChanged = errors.New("file changed while reading")
+	// ErrSizeLimit reports that a stable regular file exceeds the caller's
+	// explicit ReadWithinLimit byte budget.
+	ErrSizeLimit = errors.New("file exceeds read size limit")
 	// ErrHardlink reports a lock path with more than one directory entry. Such a
 	// file is refused before chmod or flock can affect another name.
 	ErrHardlink = errors.New("hardlinked lock file refused")

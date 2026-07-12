@@ -129,6 +129,12 @@ func ReadWithin(_ string, _ string) ([]byte, Revision, error) {
 	return nil, Revision{}, ErrUnsupported
 }
 
+// ReadWithinLimit is unavailable on platforms without descriptor-relative
+// open and no-follow operations.
+func ReadWithinLimit(_ string, _ string, _ int64) ([]byte, Revision, error) {
+	return nil, Revision{}, ErrUnsupported
+}
+
 // AcquireLockWithin is unavailable on platforms without descriptor-relative
 // no-follow operations and flock.
 func AcquireLockWithin(_ string, _ string, _ fs.FileMode) (func() error, error) {

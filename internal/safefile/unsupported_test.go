@@ -80,6 +80,9 @@ func TestDescriptorAnchoredOperationsAreTypedUnsupported(t *testing.T) {
 	if _, _, err := ReadWithin(".", "file"); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("ReadWithin error = %v, want ErrUnsupported", err)
 	}
+	if _, _, err := ReadWithinLimit(".", "file", 1); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("ReadWithinLimit error = %v, want ErrUnsupported", err)
+	}
 	if _, err := AcquireLockWithin(".", "lock", 0o600); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("AcquireLockWithin error = %v, want ErrUnsupported", err)
 	}
