@@ -50,7 +50,7 @@ func ApplicationTypeOf(tool Tool) ApplicationType {
 	// Several newer integrations intentionally retain CategoryUtility/CategoryApp
 	// for existing install behavior while presenting a clearer product type.
 	switch tool.ID() {
-	case "claude-code", "codex", "cursor-agent", "pi", "opencode", "t3-code":
+	case "claude-code", "codex", "cursor-agent", "hermes", "pi", "opencode", "t3-code":
 		return ApplicationTypeAIAgent
 	case "ghostty", "tmux":
 		return ApplicationTypeTerminal

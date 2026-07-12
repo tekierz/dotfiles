@@ -328,7 +328,9 @@ func TestRegistryCustomToolsImplementDirectObservation(t *testing.T) {
 	}
 	for _, tool := range registry.All() {
 		if policy, ok := tool.(packageMetadataPolicy); ok && !policy.PackageMetadataIsAuthoritative() {
-			if _, ok := tool.(DirectInstallationDetector); !ok {
+			_, legacy := tool.(DirectInstallationDetector)
+			_, typed := tool.(InstallationDirectAlternativesProvider)
+			if !legacy && !typed {
 				t.Errorf("non-authoritative tool %q has no direct detector", tool.ID())
 			}
 		}

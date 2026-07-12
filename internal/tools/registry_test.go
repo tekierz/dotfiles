@@ -122,6 +122,12 @@ var expectedTools = map[string]toolSpec{
 		hasConfig: true, configPaths: 1,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"glow"}, pkg.PlatformMacOS: {"glow"}},
 	},
+	"hermes": {
+		name: "Hermes Agent", description: "Autonomous AI agent runtime by Nous Research (discovery only)", category: CategoryUtility, icon: "\U000f06a9",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{},
+	},
 	"iina": {
 		name: "IINA", description: "Modern media player for macOS", category: CategoryApp, icon: "\U000f057c",
 		uiGroup: UIGroupMacApps, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: pkg.PlatformMacOS,

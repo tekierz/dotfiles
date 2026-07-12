@@ -70,6 +70,7 @@ func NewRegistry() *Registry {
 	r.Register(NewClaudeCodeTool())
 	r.Register(NewCodexTool())
 	r.Register(NewCursorAgentTool())
+	r.Register(NewHermesAgentTool())
 	r.Register(NewPiTool())
 	r.Register(NewOpenCodeTool())
 	r.Register(NewTailscaleTool())
