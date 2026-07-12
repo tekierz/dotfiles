@@ -386,11 +386,26 @@ func validInstall(install *InstallSpec, platform, manager string) bool {
 		return false
 	}
 	for _, step := range install.Steps {
-		if step.Kind != "package_manager" && step.Kind != "npm_global" {
+		if step.Kind != "package_manager" && step.Kind != "npm_global" && step.Kind != "homebrew_cask" {
 			return false
 		}
 		if !validStructuralAtom(step.Provider) || step.Packages == nil || step.Casks == nil || step.Arguments == nil || len(step.Packages) > maxRecipeItems || len(step.Casks) > maxRecipeItems || len(step.Arguments) > maxRecipeItems {
 			return false
+		}
+		switch step.Kind {
+		case "package_manager":
+			if step.Provider != install.Manager || len(step.Packages) == 0 || len(step.Casks) != 0 || len(step.Arguments) != 0 {
+				return false
+			}
+		case "npm_global":
+			if step.Provider != "npm" || len(step.Packages) != 0 || len(step.Casks) != 0 || !validNPMGlobalArguments(step.Arguments) {
+				return false
+			}
+		case "homebrew_cask":
+			if install.Platform != "macos" || install.Manager != "brew" || step.Provider != "brew" ||
+				len(step.Casks) == 0 || len(step.Packages) != 0 || len(step.Arguments) != 0 {
+				return false
+			}
 		}
 		for _, value := range append(slices.Clone(step.Packages), step.Casks...) {
 			if !validPackageToken(value) {
@@ -419,9 +434,26 @@ func validInstall(install *InstallSpec, platform, manager string) bool {
 	return true
 }
 
+func validNPMGlobalArguments(arguments []string) bool {
+	if len(arguments) != 3 && len(arguments) != 4 {
+		return false
+	}
+	if arguments[0] != "install" || arguments[1] != "-g" {
+		return false
+	}
+	packageIndex := 2
+	if len(arguments) == 4 {
+		if arguments[2] != "--ignore-scripts" {
+			return false
+		}
+		packageIndex = 3
+	}
+	return validPackageToken(arguments[packageIndex])
+}
+
 func validAuthentication(value string) bool {
 	switch value {
-	case "none", "interactive_provider_login", "existing_app_auth", "provider_login_or_api_key":
+	case "none", "interactive_provider_login", "chatgpt_or_openai_api_key", "provider_login_or_api_key", "existing_app_auth":
 		return true
 	default:
 		return false
@@ -430,7 +462,7 @@ func validAuthentication(value string) bool {
 
 func validRisk(value string) bool {
 	switch value {
-	case "package_manager_install", "npm_lifecycle_code", "unpinned_artifact", "package_manager_current_release":
+	case "package_manager_install", "npm_lifecycle_code", "npm_scripts_disabled_runtime_code", "package_manager_current_release_unpinned", "homebrew_cask_unpinned":
 		return true
 	default:
 		return false
