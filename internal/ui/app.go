@@ -350,6 +350,7 @@ type App struct {
 	backupConfirmMode   bool
 	backupConfirmType   string // "restore" or "delete"
 	backupStatus        string // Status message for backup operations
+	backupStatusWarning bool   // successful operation completed with caveats
 	backupRunning       bool   // Currently running a backup operation
 	backupError         error  // Error from backup operation
 
@@ -714,7 +715,11 @@ func createBackupCmd() tea.Cmd {
 		// backup.Create is the single source of truth for the capture loop and
 		// reports an honest result: an error when zero files were captured or
 		// the manifest write fails, instead of silently claiming success (C4).
-		if _, err := backup.Create(home, backupDir, defaultBackupFiles); err != nil {
+		files, omission, err := convenienceBackupFiles(home)
+		if err != nil {
+			return backupCreateDoneMsg{err: err}
+		}
+		if _, err := backup.Create(home, backupDir, files); err != nil {
 			return backupCreateDoneMsg{err: err}
 		}
 
@@ -723,24 +728,73 @@ func createBackupCmd() tea.Cmd {
 		// would falsely claim no rollback point exists and skip the list refresh).
 		// Surface it as a note appended to the success status instead, so the
 		// stalled retention policy is visible rather than silently swallowed.
+		var warnings []string
 		if cerr := cleanupBackups(); cerr != nil {
-			backupName = fmt.Sprintf("%s (retention cleanup failed: %v)", backupName, cerr)
+			warnings = append(warnings, fmt.Sprintf("retention cleanup failed: %v", cerr))
+		}
+		if omission != "" {
+			warnings = append(warnings, omission)
 		}
 
-		return backupCreateDoneMsg{name: backupName, err: nil}
+		return backupCreateDoneMsg{name: backupName, warning: strings.Join(warnings, "; "), err: nil}
 	}
 }
 
-// defaultBackupFiles is the fixed set of dotfiles captured by both the manual
-// "create backup" action and the pre-install auto-backup. Paths are relative
-// to the user's home directory.
+// defaultBackupFiles is the fixed non-Yazi inventory captured by both manual
+// and pre-install convenience backups. Yazi's three files are resolved at the
+// moment of capture because its active directory can come from XDG or
+// YAZI_CONFIG_HOME.
 var defaultBackupFiles = []string{
 	".zshrc",
 	".tmux.conf",
 	".config/nvim/init.lua",
 	".config/ghostty/config",
-	".config/yazi/yazi.toml",
 	".gitconfig",
+}
+
+func convenienceBackupFiles(home string) ([]string, string, error) {
+	home = filepath.Clean(home)
+	if !filepath.IsAbs(home) {
+		return nil, "", fmt.Errorf("convenience backup HOME must be absolute")
+	}
+	files := append([]string(nil), defaultBackupFiles...)
+	paths, err := tools.ResolveYaziConfigPaths()
+	if err != nil {
+		// An invalid override must not disable backup of unrelated dotfiles.
+		return files, "Yazi configs omitted: " + sanitizeLogLine(err.Error()), nil
+	}
+	seen := make(map[string]bool, len(files)+3)
+	for _, file := range files {
+		seen[filepath.Clean(file)] = true
+	}
+	for _, path := range []string{paths.Main, paths.Keymap, paths.Theme} {
+		rel, ok := lexicalConvenienceBackupRelativePath(home, path)
+		if !ok {
+			return files, "Yazi configs omitted: active config is outside HOME", nil
+		}
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		files = append(files, rel)
+	}
+	return files, "", nil
+}
+
+func lexicalConvenienceBackupRelativePath(home, path string) (string, bool) {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return "", false
+	}
+	rel, err := filepath.Rel(home, path)
+	if err != nil || rel == "." || !backup.IsRestorePathSafe(home, rel) {
+		return "", false
+	}
+	cleanRel := filepath.Clean(rel)
+	if filepath.Clean(filepath.Join(home, cleanRel)) != path {
+		return "", false
+	}
+	return cleanRel, true
 }
 
 // cleanupBackups removes old backups based on global config settings. It returns
@@ -857,7 +911,8 @@ type autoBackupResult struct {
 	enabled    bool // auto-backup is on in settings
 	count      int  // number of files actually captured
 	backupDir  string
-	cleanupErr error // non-fatal: retention cleanup after the backup failed
+	cleanupErr error  // non-fatal: retention cleanup after the backup failed
+	omission   string // non-fatal: optional active configs were outside authority
 	plan       *backup.PlanResult
 }
 
@@ -893,9 +948,13 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 	// backup.Create returns an error when zero files were captured or the
 	// manifest write fails, so a "success" here genuinely means a rollback
 	// point exists.
-	count, err := backup.Create(home, backupDir, defaultBackupFiles)
+	files, omission, inventoryErr := convenienceBackupFiles(home)
+	if inventoryErr != nil {
+		return autoBackupResult{enabled: true, backupDir: backupDir}, inventoryErr
+	}
+	count, err := backup.Create(home, backupDir, files)
 	if err != nil {
-		return autoBackupResult{enabled: true, count: count, backupDir: backupDir}, err
+		return autoBackupResult{enabled: true, count: count, backupDir: backupDir, omission: omission}, err
 	}
 
 	// Run cleanup after creating backup. A cleanup failure does not invalidate the
@@ -903,7 +962,7 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 	// and surfaced by the install worker as a warning line instead of being dropped.
 	cleanupErr := cleanupBackups()
 
-	return autoBackupResult{enabled: true, count: count, backupDir: backupDir, cleanupErr: cleanupErr}, nil
+	return autoBackupResult{enabled: true, count: count, backupDir: backupDir, cleanupErr: cleanupErr, omission: omission}, nil
 }
 
 // backupPlanTargets creates a mandatory rollback point for the exact accepted

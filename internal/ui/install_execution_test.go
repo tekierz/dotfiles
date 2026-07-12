@@ -619,6 +619,23 @@ func TestWorkerAutoBackupErrorStopsBeforeEveryMutation(t *testing.T) {
 	}
 }
 
+func TestWorkerSurfacesConvenienceBackupOmission(t *testing.T) {
+	sentinel := &customInstallSentinel{managerIndependent: true}
+	runtime := sentinelRuntime(sentinel, nil)
+	runtime.autoBackup = func() (autoBackupResult, error) {
+		return autoBackupResult{enabled: true, count: 1, omission: "Yazi configs omitted: active config is outside HOME"}, nil
+	}
+	events := make(chan installEventMsg)
+	go runInstallWorkerWithRuntime(context.Background(), events, []string{sentinel.ID()}, DeepDiveConfig{}, "dracula", runtime)
+	found := false
+	for event := range events {
+		found = found || strings.Contains(event.line, "Yazi configs omitted")
+	}
+	if !found || sentinel.installCalls != 1 {
+		t.Fatalf("omission surfaced=%t installCalls=%d", found, sentinel.installCalls)
+	}
+}
+
 func TestInstallStreamClosureAndNilAreFatal(t *testing.T) {
 	for _, tc := range []struct {
 		name string

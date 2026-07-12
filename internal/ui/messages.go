@@ -114,8 +114,9 @@ type backupDeleteDoneMsg struct {
 
 // backupCreateDoneMsg indicates a new backup was created
 type backupCreateDoneMsg struct {
-	name string
-	err  error
+	name    string
+	warning string
+	err     error
 }
 
 // manageInstallWithLogsMsg carries install result with collected logs

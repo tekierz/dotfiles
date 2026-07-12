@@ -833,6 +833,10 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			emitLine(fmt.Sprintf("⚠ Backup retention cleanup failed: %v", backupRes.cleanupErr))
 			journalWarnings = append(journalWarnings, "backup retention cleanup failed: "+backupRes.cleanupErr.Error())
 		}
+		if backupRes.omission != "" {
+			emitLine("⚠ " + backupRes.omission)
+			journalWarnings = append(journalWarnings, backupRes.omission)
+		}
 	}
 	if persistJournal {
 		// Backup reads every planned target, then a second observation check
