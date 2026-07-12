@@ -82,16 +82,17 @@ type manageField struct {
 
 // manageItem is a tool entry in the left pane.
 type manageItem struct {
-	id           string
-	name         string
-	icon         string
-	description  string
-	category     tools.Category
-	installed    bool
-	configurable bool
-	presence     health.Presence
-	installable  health.Installability
-	observed     bool
+	id              string
+	name            string
+	icon            string
+	description     string
+	category        tools.Category
+	applicationType tools.ApplicationType
+	installed       bool
+	configurable    bool
+	presence        health.Presence
+	installable     health.Installability
+	observed        bool
 }
 
 func (item manageItem) installationTruth() (health.Presence, health.Installability) {
@@ -362,24 +363,20 @@ func (a *App) manageItems() []manageItem {
 	all := slices.Clone(toolSource())
 	typed := a.installationSnapshot.Digest() != ""
 
-	// Prefer a stable, human-friendly ordering (category → name).
-	categoryOrder := map[tools.Category]int{
-		tools.CategoryShell:     0,
-		tools.CategoryTerminal:  1,
-		tools.CategoryEditor:    2,
-		tools.CategoryFile:      3,
-		tools.CategoryGit:       4,
-		tools.CategoryContainer: 5,
-		tools.CategoryUtility:   6,
-		tools.CategoryApp:       7,
-	}
+	// ApplicationType is display-only. Category and UIGroup keep their existing
+	// operational meaning and are never rewritten for selector presentation.
 	sort.SliceStable(all, func(i, j int) bool {
-		ci := categoryOrder[all[i].Category()]
-		cj := categoryOrder[all[j].Category()]
+		ci := tools.ApplicationTypeOrder(tools.ApplicationTypeOf(all[i]))
+		cj := tools.ApplicationTypeOrder(tools.ApplicationTypeOf(all[j]))
 		if ci != cj {
 			return ci < cj
 		}
-		return all[i].Name() < all[j].Name()
+		ni := strings.ToLower(all[i].Name())
+		nj := strings.ToLower(all[j].Name())
+		if ni != nj {
+			return ni < nj
+		}
+		return all[i].ID() < all[j].ID()
 	})
 
 	// Install cache should be populated asynchronously via startInstallCacheLoad().
@@ -412,16 +409,17 @@ func (a *App) manageItems() []manageItem {
 	// Add a global section at the top.
 	items := []manageItem{
 		{
-			id:           "global",
-			name:         "Global",
-			icon:         "󰒓",
-			description:  "UI + platform preferences",
-			category:     "global",
-			installed:    true,
-			configurable: true,
-			presence:     health.PresencePresent,
-			installable:  health.InstallabilityUnsupported,
-			observed:     true,
+			id:              "global",
+			name:            "Global",
+			icon:            "󰒓",
+			description:     "UI + platform preferences",
+			category:        "global",
+			applicationType: tools.ApplicationTypeSystem,
+			installed:       true,
+			configurable:    true,
+			presence:        health.PresencePresent,
+			installable:     health.InstallabilityUnsupported,
+			observed:        true,
 		},
 	}
 
@@ -448,16 +446,17 @@ func (a *App) manageItems() []manageItem {
 		}
 
 		items = append(items, manageItem{
-			id:           t.ID(),
-			name:         t.Name(),
-			icon:         icon,
-			description:  t.Description(),
-			category:     t.Category(),
-			installed:    installed,
-			configurable: t.HasConfig(),
-			presence:     presence,
-			installable:  installability,
-			observed:     observed,
+			id:              t.ID(),
+			name:            t.Name(),
+			icon:            icon,
+			description:     t.Description(),
+			category:        t.Category(),
+			applicationType: tools.ApplicationTypeOf(t),
+			installed:       installed,
+			configurable:    t.HasConfig(),
+			presence:        presence,
+			installable:     installability,
+			observed:        observed,
 		})
 	}
 
@@ -784,14 +783,18 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 			icon += " "
 		}
 
-		// Right-aligned category tag (helps scanning without changing selection mapping).
-		cat := strings.ToUpper(string(it.category))
+		// The bounded ASCII type remains legible without color or Nerd Fonts.
+		cat := strings.ToUpper(it.installationLabel())
 		if it.id == "global" {
 			cat = "GLOBAL"
 		}
 		tag := tagStyle.Render(cat)
 
-		left := fmt.Sprintf("%s%s %s%s", cursor, status, icon, nameStyle.Render(it.name))
+		typePrefix := "[" + tools.ApplicationTypeToken(it.applicationType) + "] "
+		if it.id == "global" {
+			typePrefix = "[GLOBAL] "
+		}
+		left := fmt.Sprintf("%s%s %s%s%s", cursor, status, typePrefix, nameStyle.Render(it.name), icon)
 		// Small visual hint that settings exist.
 		if it.id != "global" && it.configurable {
 			left += lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  ")
@@ -1210,7 +1213,11 @@ func (a *App) renderCompactManageTools(layout manageLayout, items []manageItem) 
 			cursor = "▸ "
 		}
 		status := items[index].installationLabel()
-		put(layout.leftListY+(index-a.manageToolsScroll), fmt.Sprintf("%s%s • %s", cursor, items[index].name, status))
+		typeToken := tools.ApplicationTypeToken(items[index].applicationType)
+		if items[index].id == "global" {
+			typeToken = "GLOBAL"
+		}
+		put(layout.leftListY+(index-a.manageToolsScroll), fmt.Sprintf("%s[%s] %s • %s", cursor, typeToken, items[index].name, status))
 	}
 	if a.manageStatus != "" {
 		put(layout.h-2, a.manageStatus)

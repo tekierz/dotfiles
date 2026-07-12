@@ -96,7 +96,11 @@ func selectedManageTruthRow(view, name string) string {
 	wantName := strings.ToUpper(name)
 	for _, line := range strings.Split(visible, "\n") {
 		normalized := strings.Join(strings.Fields(line), " ")
-		if strings.Contains(normalized, "▸ "+wantName) {
+		if !strings.HasPrefix(normalized, "▸ [") {
+			continue
+		}
+		tokenEnd := strings.Index(normalized, "] ")
+		if tokenEnd > len("▸ [") && strings.HasPrefix(normalized[tokenEnd+2:], wantName+" • ") {
 			return normalized
 		}
 	}
@@ -184,7 +188,7 @@ func TestManageInstallationTruthRendersFourStatesAtSupportedSizes(t *testing.T) 
 				if selectedLine == "" {
 					t.Fatalf("selected row for %q not rendered:\n%s", selected.name, visible)
 				}
-				wantRow := "▸ " + strings.ToUpper(selected.name) + " • " + state.label
+				wantRow := "▸ [" + tools.ApplicationTypeToken(selected.applicationType) + "] " + strings.ToUpper(selected.name) + " • " + state.label
 				if size.width == 60 {
 					if selectedLine != wantRow {
 						t.Errorf("compact selected row=%q, want exact %q", selectedLine, wantRow)
@@ -310,7 +314,8 @@ func TestManageInstallationTruthMissingObservationIsUnknownAndBlocked(t *testing
 	selectManageTruthItem(t, app, "ghostty")
 	app.managePane = managePaneTools
 	view := strings.ToUpper(stripANSITest(NewManageScreen(ctx).View(60, 18)))
-	if !strings.Contains(view, "▸ GHOSTTY • STATUS UNKNOWN") || strings.Contains(view, "▸ GHOSTTY • NOT INSTALLED") {
+	selectedRow := selectedManageTruthRow(view, "Ghostty")
+	if selectedRow != "▸ [TERM] GHOSTTY • STATUS UNKNOWN" || strings.Contains(selectedRow, "NOT INSTALLED") {
 		t.Errorf("absent observation did not render fail-closed unknown:\n%s", view)
 	}
 	app.managePane = managePaneSettings

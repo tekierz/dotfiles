@@ -187,6 +187,8 @@ func TestDeepDiveSelectorRegistryParity(t *testing.T) {
 			continue
 		case tools.UIGroupCLITools, tools.UIGroupCLIUtilities, tools.UIGroupGUIApps, tools.UIGroupMacApps:
 			want[group] = append(want[group], tool.ID())
+		case tools.UIGroupUtilities:
+			t.Errorf("registry tool %q uses unrepresented helper-script UIGroup %q", tool.ID(), group)
 		default:
 			t.Errorf("registry tool %q has unknown or unrepresented UIGroup %q", tool.ID(), group)
 		}

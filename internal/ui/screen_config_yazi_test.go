@@ -1633,7 +1633,7 @@ func TestManageYaziCompactPaneSwitchRendersActivePane(t *testing.T) {
 		t.Fatal("Tab did not switch compact Manage to tools pane")
 	}
 	view := normalizedYaziVisibleText(screen.View(width, height))
-	if !strings.Contains(view, "▸ Yazi") || strings.Contains(view, "Keymap:") {
+	if !strings.Contains(view, "▸ [FILE] Yazi •") || strings.Contains(view, "Keymap:") {
 		t.Fatalf("compact tools pane does not match pane state: %q", view)
 	}
 
@@ -1642,9 +1642,10 @@ func TestManageYaziCompactPaneSwitchRendersActivePane(t *testing.T) {
 		if ctx.app.manageIndex != yaziIndex-1 {
 			t.Fatalf("compact tools Up index=%d, want %d", ctx.app.manageIndex, yaziIndex-1)
 		}
-		selected := ctx.app.manageItems()[ctx.app.manageIndex].name
-		if row := normalizedYaziVisibleText(screen.View(width, height)); !strings.Contains(row, "▸ "+selected) {
-			t.Fatalf("moved compact tool selection %q is not visible: %q", selected, row)
+		selected := ctx.app.manageItems()[ctx.app.manageIndex]
+		wantRow := "▸ [" + tools.ApplicationTypeToken(selected.applicationType) + "] " + selected.name + " •"
+		if row := normalizedYaziVisibleText(screen.View(width, height)); !strings.Contains(row, wantRow) {
+			t.Fatalf("moved compact tool selection %q is not visible: %q", selected.name, row)
 		}
 	}
 
