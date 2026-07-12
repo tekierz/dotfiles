@@ -20,3 +20,7 @@
 - After extracting a large function into helpers, run the package compile before
   any other edit so obsolete locals and signatures cannot destabilize the shared
   tree, even briefly.
+- If an implementation agent violates an explicit small, test-first checkpoint
+  twice, interrupt that turn and replace it with a fresh tests-only agent. Do not
+  permit more production growth until the complete failing matrix is visible and
+  independently reviewed.
