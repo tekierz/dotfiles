@@ -80,7 +80,11 @@ func (p *PacmanManager) Uninstall(packages ...string) error {
 }
 
 func (p *PacmanManager) IsInstalled(pkg string) bool {
-	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Q", pkg)
+	return p.IsInstalledContext(context.Background(), pkg)
+}
+
+func (p *PacmanManager) IsInstalledContext(ctx context.Context, pkg string) bool {
+	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, p.pacmanPath, "-Q", pkg)
 	defer cancel()
 	return cmd.Run() == nil
 }

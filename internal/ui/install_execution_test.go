@@ -388,8 +388,9 @@ func TestCustomToolPrerequisitePackageIsNotAuthoritativeObservation(t *testing.T
 	sentinel := &customInstallSentinel{
 		packages: map[pkg.Platform][]string{"all": {"node-prerequisite"}},
 	}
-	installedPkgs := map[string]bool{"node-prerequisite": true}
-	if observeToolInstalled(sentinel, installedPkgs, pkg.DetectPlatform()) {
+	mgr := pkg.NewMockPackageManager()
+	mgr.InstalledPkgs["node-prerequisite"] = "1"
+	if tools.ObserveInstallations(context.Background(), []tools.Tool{sentinel}, mgr, pkg.DetectPlatform())[sentinel.ID()] {
 		t.Fatal("prerequisite package presence incorrectly hid a missing custom-installed binary")
 	}
 }
@@ -398,14 +399,14 @@ func TestClaudeNodePresentWithoutClaudeRemainsMissingInPlan(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	claude := tools.NewClaudeCodeTool()
 	platform := pkg.DetectPlatform()
-	installedPkgs := make(map[string]bool)
+	mgr := pkg.NewMockPackageManager()
 	for _, packageName := range tools.PackagesForPlatform(claude.Packages(), platform) {
-		installedPkgs[packageName] = true
+		mgr.InstalledPkgs[packageName] = "1"
 	}
-	if len(installedPkgs) == 0 {
+	if len(mgr.InstalledPkgs) == 0 {
 		t.Fatal("Claude test requires prerequisite package metadata for this platform")
 	}
-	if observeToolInstalled(claude, installedPkgs, platform) {
+	if tools.ObserveInstallations(context.Background(), []tools.Tool{claude}, mgr, platform)[claude.ID()] {
 		t.Fatal("Node/npm package receipts incorrectly reported a missing Claude CLI as installed")
 	}
 

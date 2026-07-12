@@ -2,12 +2,10 @@ package tools
 
 import (
 	"bufio"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/tekierz/dotfiles/internal/pkg"
@@ -42,6 +40,14 @@ func NewZenBrowserTool() *ZenBrowserTool {
 
 // IsInstalled checks if Zen Browser is available (package, flatpak, app bundle, or command)
 func (t *ZenBrowserTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *ZenBrowserTool) FlatpakApplicationIDs() []string {
+	return []string{"io.github.nicothin.zen_browser", "io.github.nicothined.zen_browser", "app.zen_browser.zen", "zen"}
+}
+
+func (t *ZenBrowserTool) IsInstalledOutsidePackageManager(observation DirectInstallationObservation) bool {
 	// Check command
 	if _, err := exec.LookPath("zen-browser"); err == nil {
 		return true
@@ -49,9 +55,10 @@ func (t *ZenBrowserTool) IsInstalled() bool {
 	if _, err := exec.LookPath("zen"); err == nil {
 		return true
 	}
-	// Check flatpak (Linux) - multiple possible IDs
-	if isFlatpakInstalled("io.github.nicothin.zen_browser", "io.github.nicothined.zen_browser", "app.zen_browser.zen", "zen") {
-		return true
+	for _, applicationID := range t.FlatpakApplicationIDs() {
+		if observation.FlatpakApplications[applicationID] {
+			return true
+		}
 	}
 	// Check AppImage (Linux)
 	if hasAppImage("zen", "zen-browser", "ZenBrowser") {
@@ -65,8 +72,7 @@ func (t *ZenBrowserTool) IsInstalled() bool {
 	if hasMacOSApp("Zen Browser", "Zen") {
 		return true
 	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // CursorTool represents Cursor IDE
@@ -98,6 +104,10 @@ func NewCursorTool() *CursorTool {
 
 // IsInstalled checks if Cursor is available
 func (t *CursorTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *CursorTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("cursor"); err == nil {
 		return true
 	}
@@ -113,7 +123,7 @@ func (t *CursorTool) IsInstalled() bool {
 	if hasMacOSApp("Cursor") {
 		return true
 	}
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // LMStudioTool represents LM Studio
@@ -149,6 +159,10 @@ func NewLMStudioTool() *LMStudioTool {
 
 // IsInstalled checks if LM Studio is available
 func (t *LMStudioTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *LMStudioTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("lm-studio"); err == nil {
 		return true
 	}
@@ -178,7 +192,7 @@ func (t *LMStudioTool) IsInstalled() bool {
 	if hasMacOSApp("LM Studio", "LMStudio") {
 		return true
 	}
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // OBSTool represents OBS Studio
@@ -211,6 +225,10 @@ func NewOBSTool() *OBSTool {
 
 // IsInstalled checks if OBS Studio is available
 func (t *OBSTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *OBSTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("obs"); err == nil {
 		return true
 	}
@@ -222,7 +240,7 @@ func (t *OBSTool) IsInstalled() bool {
 	if hasMacOSApp("OBS", "OBS Studio") {
 		return true
 	}
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // RectangleTool represents Rectangle window manager
@@ -254,12 +272,11 @@ func NewRectangleTool() *RectangleTool {
 
 // IsInstalled checks if Rectangle is available (Homebrew or app bundle)
 func (t *RectangleTool) IsInstalled() bool {
-	// Check macOS app bundle first
-	if hasMacOSApp("Rectangle") {
-		return true
-	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *RectangleTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("Rectangle")
 }
 
 // RaycastTool represents Raycast launcher
@@ -291,12 +308,11 @@ func NewRaycastTool() *RaycastTool {
 
 // IsInstalled checks if Raycast is available (Homebrew or app bundle)
 func (t *RaycastTool) IsInstalled() bool {
-	// Check macOS app bundle first
-	if hasMacOSApp("Raycast") {
-		return true
-	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *RaycastTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("Raycast")
 }
 
 // IINATool represents IINA media player
@@ -328,12 +344,11 @@ func NewIINATool() *IINATool {
 
 // IsInstalled checks if IINA is available (Homebrew or app bundle)
 func (t *IINATool) IsInstalled() bool {
-	// Check macOS app bundle first
-	if hasMacOSApp("IINA") {
-		return true
-	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *IINATool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("IINA")
 }
 
 // AppCleanerTool represents AppCleaner
@@ -365,35 +380,14 @@ func NewAppCleanerTool() *AppCleanerTool {
 
 // IsInstalled checks if AppCleaner is available (Homebrew or app bundle)
 func (t *AppCleanerTool) IsInstalled() bool {
-	// Check macOS app bundle first
-	if hasMacOSApp("AppCleaner") {
-		return true
-	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *AppCleanerTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("AppCleaner")
 }
 
 // Helper functions for detecting installed apps
-
-// isFlatpakInstalled checks if a flatpak app is installed (Linux only)
-func isFlatpakInstalled(appIDs ...string) bool {
-	flatpak, err := exec.LookPath("flatpak")
-	if err != nil {
-		return false
-	}
-
-	for _, appID := range appIDs {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		// #nosec G204 -- flatpak is resolved by exec.LookPath and app IDs come from the tool registry.
-		cmd := exec.CommandContext(ctx, flatpak, "info", appID)
-		if cmd.Run() == nil {
-			cancel()
-			return true
-		}
-		cancel()
-	}
-	return false
-}
 
 // hasDesktopEntry checks if a .desktop file exists for the app (Linux only).
 // It checks both the filename AND the Exec= field content for AppImage entries

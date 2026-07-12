@@ -23,7 +23,10 @@ func NewCodexTool() *CodexTool {
 	}}
 }
 
-func (t *CodexTool) IsInstalled() bool { return binaryAvailable("codex") }
+func (t *CodexTool) IsInstalled() bool { return directInstallationDetected(t) }
+func (t *CodexTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return binaryAvailable("codex")
+}
 
 func (t *CodexTool) Install(pkg.PackageManager) error {
 	return recipeBackedInstallError(t.ID())

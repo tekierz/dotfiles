@@ -673,7 +673,7 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		classification string
 	}
 	expectedMutations := map[string]mutationExpectation{
-		"apps.go:exec.CommandContext":                                                {1, "bounded read-only Flatpak installation observation"},
+		"installed_observer.go:exec.CommandContext":                                  {1, "bounded one-shot read-only Flatpak installation observation"},
 		"claude_code.go:config.SaveClaudeConfigTracked":                              {1, "config-owned revision-evidenced Claude settings writer"},
 		"claude_code.go:config.ApplyClaudeMCPSelectionAtRevisionTracked":             {1, "revision-only compatibility Claude writer"},
 		"claude_code.go:config.ApplyClaudeMCPSelectionAtBoundAuthorityTracked":       {1, "plan parent/lock-authority Claude writer"},

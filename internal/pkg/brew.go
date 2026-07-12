@@ -55,7 +55,11 @@ func (b *BrewManager) Uninstall(packages ...string) error {
 }
 
 func (b *BrewManager) IsInstalled(pkg string) bool {
-	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "list", pkg)
+	return b.IsInstalledContext(context.Background(), pkg)
+}
+
+func (b *BrewManager) IsInstalledContext(ctx context.Context, pkg string) bool {
+	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, b.brewPath, "list", pkg)
 	defer cancel()
 	return cmd.Run() == nil
 }
@@ -281,7 +285,10 @@ func (b *BrewManager) Search(query string) ([]Package, error) {
 }
 
 func (b *BrewManager) ListInstalled() ([]Package, error) {
-	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "list", "--versions")
+	// Scope formulae explicitly. An unscoped list can traverse casks and fail on
+	// unrelated untrusted taps even after emitting otherwise valid formula data.
+	// Casks are captured independently by ListInstalledCasks.
+	cmd, cancel := packageCommand(packageQueryTimeout, b.brewPath, "list", "--formula", "--versions")
 	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -290,8 +297,12 @@ func (b *BrewManager) ListInstalled() ([]Package, error) {
 		return nil, err
 	}
 
+	return parseBrewInstalledFormulae(out.Bytes()), nil
+}
+
+func parseBrewInstalledFormulae(data []byte) []Package {
 	var packages []Package
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	for _, line := range lines {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
@@ -303,7 +314,7 @@ func (b *BrewManager) ListInstalled() ([]Package, error) {
 		}
 	}
 
-	return packages, nil
+	return packages
 }
 
 // ListInstalledCasks returns all installed Homebrew casks as their cask tokens.

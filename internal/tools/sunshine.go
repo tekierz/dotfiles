@@ -38,6 +38,10 @@ func NewSunshineTool() *SunshineTool {
 // Sunshine is a Homebrew cask / GUI app, so detect out-of-band installs the same
 // way the other GUI apps do before falling back to the package manager.
 func (t *SunshineTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *SunshineTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("sunshine"); err == nil {
 		return true
 	}
@@ -49,6 +53,5 @@ func (t *SunshineTool) IsInstalled() bool {
 	if hasMacOSApp("Sunshine") {
 		return true
 	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return false
 }

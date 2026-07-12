@@ -34,13 +34,17 @@ type GhosttyConfig struct {
 // receipts. This matters on Debian/Pi, where no supported package is declared
 // but an externally installed binary may still be safely configured.
 func (t *GhosttyTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *GhosttyTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("ghostty"); err == nil {
 		return true
 	}
 	if ghosttyAppBundleInstalled() {
 		return true
 	}
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 func ghosttyAppBundleInstalled() bool {

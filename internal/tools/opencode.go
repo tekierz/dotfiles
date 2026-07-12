@@ -29,7 +29,10 @@ func NewOpenCodeTool() *OpenCodeTool {
 	}}
 }
 
-func (t *OpenCodeTool) IsInstalled() bool { return binaryAvailable("opencode") }
+func (t *OpenCodeTool) IsInstalled() bool { return directInstallationDetected(t) }
+func (t *OpenCodeTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return binaryAvailable("opencode")
+}
 
 func (t *OpenCodeTool) Install(pkg.PackageManager) error {
 	return recipeBackedInstallError(t.ID())

@@ -23,7 +23,10 @@ func NewPiTool() *PiTool {
 	}}
 }
 
-func (t *PiTool) IsInstalled() bool { return binaryAvailable("pi") }
+func (t *PiTool) IsInstalled() bool { return directInstallationDetected(t) }
+func (t *PiTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return binaryAvailable("pi")
+}
 
 func (t *PiTool) Install(pkg.PackageManager) error {
 	return recipeBackedInstallError(t.ID())

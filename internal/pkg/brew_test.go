@@ -35,6 +35,27 @@ func TestHomebrewCaskTokenValidationRejectsArgumentSmuggling(t *testing.T) {
 	}
 }
 
+func TestBrewListInstalledUsesFormulaBatchAndParsesMultipleVersions(t *testing.T) {
+	dir := t.TempDir()
+	brew := filepath.Join(dir, "brew")
+	script := `#!/bin/sh
+if [ "$#" -ne 3 ] || [ "$1" != "list" ] || [ "$2" != "--formula" ] || [ "$3" != "--versions" ]; then
+  exit 9
+fi
+printf 'alpha 1.0 1.1\nbeta 2.0\n'
+`
+	if err := os.WriteFile(brew, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	packages, err := (&BrewManager{brewPath: brew}).ListInstalled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 2 || packages[0].Name != "alpha" || packages[0].CurrentVersion != "1.0" || packages[1].Name != "beta" || packages[1].CurrentVersion != "2.0" {
+		t.Fatalf("packages=%+v", packages)
+	}
+}
+
 // TestParseBrewOutdated exercises the real parseBrewOutdated helper with
 // sample `brew outdated --json=v2 --greedy` output to verify:
 //   - Pinned formulae are excluded from the actionable list.

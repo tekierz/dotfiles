@@ -38,6 +38,10 @@ func NewMoonlightTool() *MoonlightTool {
 // Moonlight is a Homebrew cask / GUI app, so detect out-of-band installs the same
 // way the other GUI apps do before falling back to the package manager.
 func (t *MoonlightTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *MoonlightTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("moonlight"); err == nil {
 		return true
 	}
@@ -52,6 +56,5 @@ func (t *MoonlightTool) IsInstalled() bool {
 	if hasMacOSApp("Moonlight") {
 		return true
 	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return false
 }

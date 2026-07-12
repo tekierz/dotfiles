@@ -19,7 +19,10 @@ func NewT3CodeTool() *T3CodeTool {
 	}}
 }
 
-func (t *T3CodeTool) IsInstalled() bool { return hasMacOSApp("T3 Code") }
+func (t *T3CodeTool) IsInstalled() bool { return directInstallationDetected(t) }
+func (t *T3CodeTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("T3 Code")
+}
 
 func (t *T3CodeTool) Install(pkg.PackageManager) error { return recipeBackedInstallError(t.ID()) }
 

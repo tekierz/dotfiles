@@ -69,6 +69,10 @@ func NewClaudeCodeTool() *ClaudeCodeTool {
 
 // IsInstalled checks if claude command is available (npm global install)
 func (t *ClaudeCodeTool) IsInstalled() bool {
+	return directInstallationDetected(t)
+}
+
+func (t *ClaudeCodeTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	_, err := exec.LookPath("claude")
 	return err == nil
 }

@@ -54,11 +54,15 @@ func (a *AptManager) Uninstall(packages ...string) error {
 }
 
 func (a *AptManager) IsInstalled(pkg string) bool {
+	return a.IsInstalledContext(context.Background(), pkg)
+}
+
+func (a *AptManager) IsInstalledContext(ctx context.Context, pkg string) bool {
 	// `dpkg -s` exits 0 even for a removed-but-not-purged package (status
 	// "deinstall ok config-files"), which would falsely report it installed.
 	// Query the Status field directly and require "install ok installed",
 	// matching the filter ListInstalled uses (C11).
-	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg-query", "-W", "-f=${Status}", pkg)
+	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, "dpkg-query", "-W", "-f=${Status}", pkg)
 	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out

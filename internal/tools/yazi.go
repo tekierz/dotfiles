@@ -29,10 +29,14 @@ type YaziConfig struct {
 // receipts. This keeps unsupported Debian/Pi package planning separate from an
 // external binary that the dashboard may still configure.
 func (t *YaziTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *YaziTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("yazi"); err == nil {
 		return true
 	}
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // YaziTool represents the Yazi file manager
