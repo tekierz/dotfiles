@@ -339,6 +339,10 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.manageStatus = "Already installed"
 			return nil
 		}
+		if item.unavailableReason != "" {
+			a.manageStatus = item.unavailableReason
+			return nil
+		}
 		if presence == health.PresenceUnknown {
 			a.manageStatus = "Installation status unknown"
 			return nil

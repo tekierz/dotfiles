@@ -198,9 +198,11 @@ observability land before new integrations or broad UI work.
       has passed owner-hardware verification.
 
 The supported deep-dive registry is now exact for Codex, OpenCode, Pi, T3 Code, Cursor
-desktop, and the existing service/app integrations. Cursor Agent CLI and Hermes remain
-deliberately absent until their artifact, authentication, and policy designs are reviewed;
-the dashboard does not present them as installable.
+desktop, and the existing service/app integrations. Cursor Agent CLI is registered as a
+distinct discovery-only integration with unknown presence and unsupported installation;
+the dashboard must not offer an install action until its artifact, architecture,
+authentication, and ownership contracts are reviewed. Hermes remains deliberately absent
+pending the same review and must not be presented as installable.
 
 ## Comprehensive pre-deployment audit — 2026-07-09
 

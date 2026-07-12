@@ -225,10 +225,20 @@ func TestDeepDiveSelectorRegistryParity(t *testing.T) {
 	if claudeCount != 1 || navigableCLIToolCount != len(cliToolItems)-claudeCount {
 		t.Fatalf("Claude dedicated/context exception count=%d navigable=%d rows=%d", claudeCount, navigableCLIToolCount, len(cliToolItems))
 	}
-	for _, id := range []string{"cursor-agent", "hermes"} {
-		if _, registered := registry.Get(id); registered {
-			t.Errorf("unreviewed integration %q was fabricated as supported", id)
+	cursorAgentCount := 0
+	for _, tool := range registry.All() {
+		if tool.ID() == "cursor-agent" {
+			cursorAgentCount++
+			if tool.UIGroup() != tools.UIGroupCLITools {
+				t.Errorf("cursor-agent UIGroup=%q, want CLI Tools", tool.UIGroup())
+			}
 		}
+	}
+	if cursorAgentCount != 1 {
+		t.Errorf("cursor-agent registry count=%d, want exactly one", cursorAgentCount)
+	}
+	if _, registered := registry.Get("hermes"); registered {
+		t.Error("unreviewed integration \"hermes\" was fabricated as supported")
 	}
 	if tool, ok := registry.Get("t3-code"); !ok || tool.PlatformFilter() != pkg.PlatformMacOS || !slices.Contains(rows[tools.UIGroupMacApps], "t3-code") {
 		t.Fatal("T3 Code must remain a macOS-filtered deep-dive integration")
@@ -263,7 +273,7 @@ func TestDeepDiveOverviewMakesSupportedNewIntegrationsDiscoverable(t *testing.T)
 		allDescriptions = append(allDescriptions, item.Description)
 	}
 	for screen, names := range map[Screen][]string{
-		ScreenConfigCLITools: {"Codex", "OpenCode", "Pi"},
+		ScreenConfigCLITools: {"Codex", "Cursor Agent", "OpenCode", "Pi"},
 		ScreenConfigGUIApps:  {"Cursor", "LM Studio", "OBS"},
 		ScreenConfigMacApps:  {"T3 Code"},
 	} {
@@ -274,7 +284,7 @@ func TestDeepDiveOverviewMakesSupportedNewIntegrationsDiscoverable(t *testing.T)
 		}
 	}
 	joined := strings.Join(allDescriptions, "\n")
-	for _, forbidden := range []string{"Cursor Agent", "Hermes"} {
+	for _, forbidden := range []string{"Hermes"} {
 		if strings.Contains(joined, forbidden) {
 			t.Errorf("deep-dive overview fabricated unsupported integration %q", forbidden)
 		}
@@ -293,12 +303,12 @@ func TestDeepDiveSupportedIntegrationRowsRenderAtSupportedSizes(t *testing.T) {
 			stripANSITest(NewConfigMacAppsScreen(ctx).View(size.width, size.height)),
 		}
 		joined := strings.Join(views, "\n")
-		for _, want := range []string{"Codex", "OpenCode", "Pi", "Cursor", "LM Studio", "OBS Studio", "T3 Code"} {
+		for _, want := range []string{"Codex", "Cursor Agent", "OpenCode", "Pi", "Cursor", "LM Studio", "OBS Studio", "T3 Code"} {
 			if !strings.Contains(joined, want) {
 				t.Errorf("%dx%d deep-dive rows omit %q", size.width, size.height, want)
 			}
 		}
-		for _, forbidden := range []string{"Cursor Agent", "Hermes"} {
+		for _, forbidden := range []string{"Hermes"} {
 			if strings.Contains(joined, forbidden) {
 				t.Errorf("%dx%d fabricated unsupported row %q", size.width, size.height, forbidden)
 			}

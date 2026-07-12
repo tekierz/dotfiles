@@ -82,17 +82,30 @@ type manageField struct {
 
 // manageItem is a tool entry in the left pane.
 type manageItem struct {
-	id              string
-	name            string
-	icon            string
-	description     string
-	category        tools.Category
-	applicationType tools.ApplicationType
-	installed       bool
-	configurable    bool
-	presence        health.Presence
-	installable     health.Installability
-	observed        bool
+	id                string
+	name              string
+	icon              string
+	description       string
+	category          tools.Category
+	applicationType   tools.ApplicationType
+	installed         bool
+	configurable      bool
+	presence          health.Presence
+	installable       health.Installability
+	observed          bool
+	unavailableReason string
+}
+
+func installationUnavailableReason(tool tools.Tool) string {
+	provider, ok := tool.(interface{ InstallationUnavailableReason() string })
+	if !ok {
+		return ""
+	}
+	reason := strings.TrimSpace(sanitizeLogLine(provider.InstallationUnavailableReason()))
+	if reason == "" || len(reason) > 96 {
+		return ""
+	}
+	return reason
 }
 
 func (item manageItem) installationTruth() (health.Presence, health.Installability) {
@@ -213,8 +226,13 @@ func (a *App) manageLayout() manageLayout {
 
 	gap := 1
 
-	// Default split: 1/3 tools, 2/3 details.
+	// Compact layouts keep the established one-third split. Wide layouts give
+	// the typed selector enough room for status, icon, type, name, and the full
+	// textual health label without compromising the details pane.
 	leftW := clampInt(a.width/3, 26, 42)
+	if a.width > 80 {
+		leftW = clampInt((a.width*2)/5, 32, 48)
+	}
 	minRight := 38
 	if a.width-leftW-gap < minRight {
 		leftW = maxInt(22, a.width-minRight-gap)
@@ -446,17 +464,18 @@ func (a *App) manageItems() []manageItem {
 		}
 
 		items = append(items, manageItem{
-			id:              t.ID(),
-			name:            t.Name(),
-			icon:            icon,
-			description:     t.Description(),
-			category:        t.Category(),
-			applicationType: tools.ApplicationTypeOf(t),
-			installed:       installed,
-			configurable:    t.HasConfig(),
-			presence:        presence,
-			installable:     installability,
-			observed:        observed,
+			id:                t.ID(),
+			name:              t.Name(),
+			icon:              icon,
+			description:       t.Description(),
+			category:          t.Category(),
+			applicationType:   tools.ApplicationTypeOf(t),
+			installed:         installed,
+			configurable:      t.HasConfig(),
+			presence:          presence,
+			installable:       installability,
+			observed:          observed,
+			unavailableReason: installationUnavailableReason(t),
 		})
 	}
 
@@ -707,6 +726,9 @@ func (a *App) renderManageFooter(width int, items []manageItem, fields []manageF
 
 	// Status line: either save feedback, or focused field description.
 	statusText := a.manageStatus
+	if statusText == "" && len(items) > 0 {
+		statusText = items[clampInt(a.manageIndex, 0, len(items)-1)].unavailableReason
+	}
 	if statusText == "" && len(items) > 0 && items[clampInt(a.manageIndex, 0, len(items)-1)].id == "lazygit" && lazyGitManageUIBlockReason(a) != "" {
 		statusText = lazyGitManageUIBlockReason(a)
 	}
@@ -1157,8 +1179,12 @@ func (a *App) renderCompactManageYazi(layout manageLayout, fields []manageField)
 
 	items := a.manageItems()
 	uninstalled := len(items) > 0 && a.manageIndex >= 0 && a.manageIndex < len(items) && !items[a.manageIndex].installed
-	if a.manageStatus != "" {
-		put(layout.h-2, a.manageStatus)
+	status := a.manageStatus
+	if status == "" && len(items) > 0 {
+		status = items[clampInt(a.manageIndex, 0, len(items)-1)].unavailableReason
+	}
+	if status != "" {
+		put(layout.h-2, status)
 	} else if uninstalled {
 		put(layout.h-2, "I install")
 	}
@@ -1219,8 +1245,12 @@ func (a *App) renderCompactManageTools(layout manageLayout, items []manageItem) 
 		}
 		put(layout.leftListY+(index-a.manageToolsScroll), fmt.Sprintf("%s[%s] %s • %s", cursor, typeToken, items[index].name, status))
 	}
-	if a.manageStatus != "" {
-		put(layout.h-2, a.manageStatus)
+	status := a.manageStatus
+	if status == "" && len(items) > 0 {
+		status = items[clampInt(a.manageIndex, 0, len(items)-1)].unavailableReason
+	}
+	if status != "" {
+		put(layout.h-2, status)
 	}
 	put(layout.h-1, "Tab settings • ↑↓ move • Enter settings • Esc back • q quit")
 	return strings.Join(rows, "\n")

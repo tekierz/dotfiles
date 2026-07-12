@@ -35,12 +35,13 @@ var cliToolItems = []struct {
 	{"codex", "Codex", "OpenAI coding agent (reviewed npm install)"},
 	{"opencode", "OpenCode", "Open-source coding agent (package manager)"},
 	{"pi", "Pi", "Extensible coding agent (npm, scripts disabled)"},
+	{"cursor-agent", "Cursor Agent", "verified artifact support pending"},
 	{"claude-code", "Claude Code", "AI-powered coding assistant (npm)"},
 }
 
 // navigableCLIToolCount is the number of cliToolItems rows the cursor can reach
 // (excludes the trailing claude-code context row).
-const navigableCLIToolCount = 7
+const navigableCLIToolCount = 8
 
 // NewConfigCLIToolsScreen creates a new CLI tools config screen handler.
 func NewConfigCLIToolsScreen(ctx *ScreenContext) *configCLIToolsScreen {
@@ -78,6 +79,7 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 
 	cfg := a.deepDiveConfig
 	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(70))
+	focusedUnavailableReason := ""
 
 	for i, tool := range cliToolItems {
 		// Only the first navigableCLIToolCount rows participate in selection. Mark
@@ -93,6 +95,13 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 		enabled := cfg.CLITools[tool.id]
 		installed := a.manageInstalled[tool.id]
 		available := cliToolAvailableForPlatform(tool.id, pkg.DetectPlatform())
+		unavailableReason := ""
+		if registered, ok := tools.GetRegistry().Get(tool.id); ok {
+			unavailableReason = installationUnavailableReason(registered)
+		}
+		if focused && unavailableReason != "" {
+			focusedUnavailableReason = unavailableReason
+		}
 
 		cursor := "  "
 		if focused && !installed && available {
@@ -116,6 +125,8 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 		suffix := ""
 		if installed {
 			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
+		} else if unavailableReason != "" {
+			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (unavailable)")
 		} else if !available && tool.id != "claude-code" {
 			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (unavailable on " + string(pkg.DetectPlatform()) + ")")
 		}
@@ -131,12 +142,18 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := s.footerInstalled()
-	a.configFieldLayout = rec.finalize(width, height, title, box, help)
+	content := []string{title, "", box}
+	if focusedUnavailableReason != "" {
+		content = append(content, lipgloss.NewStyle().Foreground(ColorTextMuted).Render(focusedUnavailableReason))
+	}
+	content = append(content, "", help)
+	composed := lipgloss.JoinVertical(lipgloss.Center, content...)
+	a.configFieldLayout = rec.finalizeComposed(width, height, composed, box, lipgloss.Height(title)+1)
 
 	return lipgloss.Place(
 		width, height,
 		lipgloss.Center, lipgloss.Center,
-		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
+		composed,
 	)
 }
 

@@ -11,7 +11,7 @@ if an older machine still resolves that command.
 
 ## Registered tools
 
-The registry currently contains 34 tools. Availability is determined from each
+The registry currently contains 35 tools. Availability is determined from each
 tool's platform package metadata; seeing a tool here does not promise that every
 package manager or CPU architecture provides it.
 
@@ -80,6 +80,11 @@ detector, authentication expectation, and risk before execution. Their settings
 are not yet managed. T3 Code is available on macOS through the narrow reviewed
 Homebrew-cask action. Cursor Agent and Hermes remain gated because both require
 a verified-artifact design for mutable vendor scripts.
+
+Cursor Agent is discoverable as an observation-only integration. Its current
+installation status is `verified artifact support pending`, so the dashboard
+offers no automatic install and does not claim ownership of Cursor credentials
+or configuration.
 
 Codex and Pi are currently offered only on macOS. Stock Linux global-npm
 permissions and Pi's Node 22.19+ requirement need an explicit user-owned runtime

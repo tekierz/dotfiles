@@ -120,7 +120,23 @@ func planningCacheObservation(t *testing.T, tool tools.Tool, present bool) healt
 	t.Helper()
 	recipe, err := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
 	if err != nil {
-		t.Fatalf("describe %s test install: %v", tool.ID(), err)
+		alternatives, unavailable := unavailablePlanningDirectAlternatives(tool, err)
+		if !unavailable {
+			t.Fatalf("describe %s test install: %v", tool.ID(), err)
+		}
+		direct := health.DirectFacet{State: health.ComponentUnknown, Authoritative: true, Alternatives: alternatives}
+		if len(alternatives) == 1 {
+			direct.DiagnosticCode = alternatives[0].DiagnosticCode
+			direct.DiagnosticSummary = alternatives[0].DiagnosticSummary
+		}
+		observation, observationErr := health.NewInstallationObservation(health.InstallationObservationSpec{
+			ToolID: tool.ID(), Installability: health.InstallabilityUnsupported,
+			Package: health.PackageFacet{State: health.PackageNotApplicable}, Direct: direct,
+		})
+		if observationErr != nil {
+			t.Fatalf("build unavailable %s planning observation: %v", tool.ID(), observationErr)
+		}
+		return observation
 	}
 	packageFacet := health.PackageFacet{State: health.PackageNotApplicable}
 	directFacet := health.DirectFacet{State: health.ComponentNotApplicable}
@@ -155,6 +171,51 @@ func planningCacheObservation(t *testing.T, tool tools.Tool, present bool) healt
 		t.Fatalf("build %s planning observation: %v", tool.ID(), err)
 	}
 	return observation
+}
+
+func unavailablePlanningDirectAlternatives(tool tools.Tool, describeErr error) ([]health.DirectAlternative, bool) {
+	if tool == nil || describeErr == nil || len(tool.Packages()) != 0 {
+		return nil, false
+	}
+	if _, recipeProvider := tool.(tools.InstallRecipeProvider); recipeProvider {
+		return nil, false
+	}
+	reasonProvider, ok := tool.(interface{ InstallationUnavailableReason() string })
+	if !ok {
+		return nil, false
+	}
+	reason := strings.TrimSpace(reasonProvider.InstallationUnavailableReason())
+	if reason == "" || !strings.Contains(describeErr.Error(), reason) {
+		return nil, false
+	}
+	directProvider, ok := tool.(tools.InstallationDirectAlternativesProvider)
+	if !ok {
+		return nil, false
+	}
+	provided := directProvider.InstallationDirectAlternatives(tools.DirectInstallationObservation{FlatpakApplications: map[string]bool{}})
+	if len(provided) == 0 {
+		return nil, false
+	}
+	alternatives := make([]health.DirectAlternative, len(provided))
+	for index, alternative := range provided {
+		if alternative.State != health.ComponentUnknown {
+			return nil, false
+		}
+		alternative.Identifiers = slices.Clone(alternative.Identifiers)
+		alternatives[index] = alternative
+	}
+	return alternatives, true
+}
+
+func TestPlanningCacheUnavailableToolIgnoresCosmeticPresent(t *testing.T) {
+	observation := planningCacheObservation(t, tools.NewCursorAgentTool(), true)
+	if observation.Presence() != health.PresenceUnknown || observation.Installability() != health.InstallabilityUnsupported || observation.InstallRecipeDigest() != "" {
+		t.Fatalf("unavailable cosmetic-present observation=(%q,%q,%q), want unknown/unsupported/empty digest", observation.Presence(), observation.Installability(), observation.InstallRecipeDigest())
+	}
+	direct := observation.Direct()
+	if !direct.Authoritative || direct.State != health.ComponentUnknown || len(direct.Alternatives) != 1 || direct.Alternatives[0].State != health.ComponentUnknown {
+		t.Fatalf("unavailable direct fixture=%+v", direct)
+	}
 }
 
 func TestInstallationSnapshotCacheRequestGenerationRejectsStaleFutureAndMismatchedResults(t *testing.T) {
