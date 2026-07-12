@@ -300,7 +300,7 @@ func TestCursorAgentDocumentationIsObservationOnlyAndCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := strings.ToLower(string(content))
-	for _, want := range []string{"35 tools", "cursor agent", "observation-only", cursorAgentPendingReason, "no automatic install"} {
+	for _, want := range []string{"36 tools", "cursor agent", "observation-only", cursorAgentPendingReason, "no automatic install"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("docs/tools.md omits Cursor Agent contract %q", want)
 		}

@@ -201,8 +201,9 @@ The supported deep-dive registry is now exact for Codex, OpenCode, Pi, T3 Code, 
 desktop, and the existing service/app integrations. Cursor Agent CLI is registered as a
 distinct discovery-only integration with unknown presence and unsupported installation;
 the dashboard must not offer an install action until its artifact, architecture,
-authentication, and ownership contracts are reviewed. Hermes remains deliberately absent
-pending the same review and must not be presented as installable.
+authentication, and ownership contracts are reviewed. Hermes discovery-only is now
+registered with unknown/unsupported health and must not be presented as installable.
+Installation profiles remain deferred under the unchecked installation-profile item above.
 
 ## Comprehensive pre-deployment audit — 2026-07-09
 

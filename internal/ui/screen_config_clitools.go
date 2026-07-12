@@ -36,12 +36,13 @@ var cliToolItems = []struct {
 	{"opencode", "OpenCode", "Open-source coding agent (package manager)"},
 	{"pi", "Pi", "Extensible coding agent (npm, scripts disabled)"},
 	{"cursor-agent", "Cursor Agent", "verified artifact support pending"},
+	{"hermes", "Hermes Agent", "verified artifact and architecture support pending"},
 	{"claude-code", "Claude Code", "AI-powered coding assistant (npm)"},
 }
 
 // navigableCLIToolCount is the number of cliToolItems rows the cursor can reach
 // (excludes the trailing claude-code context row).
-const navigableCLIToolCount = 8
+const navigableCLIToolCount = 9
 
 // NewConfigCLIToolsScreen creates a new CLI tools config screen handler.
 func NewConfigCLIToolsScreen(ctx *ScreenContext) *configCLIToolsScreen {

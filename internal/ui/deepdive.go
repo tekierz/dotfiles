@@ -375,7 +375,7 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		},
 		{
 			Name:        "CLI Tools",
-			Description: "LazyGit, LazyDocker, btop, Glow, Codex, Cursor Agent, OpenCode, Pi",
+			Description: "LazyGit, LazyDocker, btop, Glow, Codex, Cursor Agent, Hermes Agent, OpenCode, Pi",
 			Screen:      ScreenConfigCLITools,
 			Icon:        "",
 		},
