@@ -30,3 +30,7 @@
 - Terminal category styling must preserve meaning without color or decorative glyphs. Treat
   narrow layouts, plain-ASCII terminals, and reduced-color environments as first-class
   acceptance cases rather than visual polish deferred until release.
+- If two consecutive Terra implementation turns fail to persist an explicitly requested
+  tests-first checkpoint, Sol may make the smallest tests-only persistence change after root
+  approval. Production work must return to the Sol-orchestrator/Terra-implementer split, and
+  the directly persisted contract still requires independent adversarial review.

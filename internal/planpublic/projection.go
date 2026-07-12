@@ -1,0 +1,608 @@
+package planpublic
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"slices"
+	"strings"
+	"unicode"
+)
+
+const (
+	planSchemaVersion = 1
+	planKind          = "dotfiles.plan"
+	maxPublicActions  = 256
+	maxRecipeItems    = 128
+)
+
+var ErrInvalidDocument = errors.New("invalid public plan document")
+
+type Status string
+
+const (
+	StatusReady          Status = "ready"
+	StatusNoChanges      Status = "no_changes"
+	StatusBlocked        Status = "blocked"
+	StatusIntentRequired Status = "intent_required"
+)
+
+type Snapshot struct {
+	SchemaVersion int    `json:"schema_version"`
+	Generation    uint64 `json:"generation"`
+	PublicDigest  string `json:"public_digest"`
+}
+
+type Capabilities struct {
+	Installation string `json:"installation"`
+	Config       string `json:"config"`
+	Service      string `json:"service"`
+	Auth         string `json:"auth"`
+	Apply        string `json:"apply"`
+}
+
+type Summary struct {
+	Apply         int `json:"apply"`
+	Skip          int `json:"skip"`
+	Blocked       int `json:"blocked"`
+	BackupTargets int `json:"backup_targets"`
+}
+
+type ObservationSpec struct {
+	Exists  bool `json:"exists"`
+	Managed bool `json:"managed"`
+}
+
+type DetectorSpec struct {
+	Kind   string   `json:"kind"`
+	Values []string `json:"values"`
+}
+
+type InstallStepSpec struct {
+	Kind      string   `json:"kind"`
+	Provider  string   `json:"provider"`
+	Packages  []string `json:"packages"`
+	Casks     []string `json:"casks"`
+	Arguments []string `json:"arguments"`
+}
+
+type InstallSpec struct {
+	SchemaVersion  int               `json:"schema_version"`
+	Platform       string            `json:"platform"`
+	Manager        string            `json:"manager"`
+	Steps          []InstallStepSpec `json:"steps"`
+	Detector       DetectorSpec      `json:"detector"`
+	Authentication string            `json:"authentication"`
+	Risk           string            `json:"risk"`
+	RecipeDigest   string            `json:"recipe_digest"`
+}
+
+type ActionSpec struct {
+	ActionID      string           `json:"action_id"`
+	Kind          string           `json:"kind"`
+	ToolID        string           `json:"tool_id"`
+	Description   string           `json:"description"`
+	Disposition   string           `json:"disposition"`
+	ReasonCode    string           `json:"reason_code"`
+	Reason        string           `json:"reason"`
+	Ownership     string           `json:"ownership"`
+	Reversibility string           `json:"reversibility"`
+	Observation   *ObservationSpec `json:"observation,omitempty"`
+	Install       *InstallSpec     `json:"install,omitempty"`
+}
+
+type DocumentSpec struct {
+	Status       Status
+	Platform     string
+	Manager      string
+	Intent       Intent
+	Snapshot     *Snapshot
+	Capabilities Capabilities
+	Summary      Summary
+	Actions      []ActionSpec
+}
+
+// Document is a defensive, already-redacted public projection. It contains no
+// executable planning authority.
+type Document struct {
+	status       Status
+	platform     string
+	manager      string
+	intent       Intent
+	snapshot     *Snapshot
+	capabilities Capabilities
+	summary      Summary
+	actions      []ActionSpec
+	publicDigest string
+}
+
+type publicAuthority struct {
+	PublicDigest string `json:"public_digest"`
+}
+
+type publicAction struct {
+	Ordinal       int              `json:"ordinal"`
+	ActionID      string           `json:"action_id"`
+	Kind          string           `json:"kind"`
+	ToolID        string           `json:"tool_id"`
+	Description   string           `json:"description"`
+	Disposition   string           `json:"disposition"`
+	ReasonCode    string           `json:"reason_code"`
+	Reason        string           `json:"reason"`
+	Ownership     string           `json:"ownership"`
+	Reversibility string           `json:"reversibility"`
+	Observation   *ObservationSpec `json:"observation,omitempty"`
+	Install       *InstallSpec     `json:"install,omitempty"`
+}
+
+type publicDocument struct {
+	SchemaVersion int             `json:"schema_version"`
+	Kind          string          `json:"kind"`
+	Status        Status          `json:"status"`
+	Platform      string          `json:"platform,omitempty"`
+	Manager       string          `json:"manager,omitempty"`
+	Intent        Intent          `json:"intent"`
+	Snapshot      *Snapshot       `json:"snapshot,omitempty"`
+	Authority     publicAuthority `json:"authority"`
+	Capabilities  Capabilities    `json:"capabilities"`
+	Summary       Summary         `json:"summary"`
+	Actions       []publicAction  `json:"actions"`
+}
+
+func NewDocument(spec DocumentSpec) (Document, error) {
+	if !validStatus(spec.Status) || !validDocumentIntent(spec.Status, spec.Intent) {
+		return Document{}, ErrInvalidDocument
+	}
+	if !validStatusShape(spec) || !validSnapshot(spec.Snapshot) || !validCapabilities(spec.Status, spec.Capabilities) || !validSummary(spec.Summary, spec.Actions) || !validActions(spec) {
+		return Document{}, ErrInvalidDocument
+	}
+
+	doc := Document{
+		status:       spec.Status,
+		platform:     spec.Platform,
+		manager:      spec.Manager,
+		intent:       cloneIntent(spec.Intent),
+		snapshot:     cloneSnapshot(spec.Snapshot),
+		capabilities: spec.Capabilities,
+		summary:      spec.Summary,
+		actions:      clonePublicActions(spec.Actions),
+	}
+	if doc.intent.Tools == nil {
+		doc.intent.Tools = []string{}
+	}
+	digest, err := digestPublicDocument(doc.publicDocument(""))
+	if err != nil {
+		return Document{}, ErrInvalidDocument
+	}
+	doc.publicDigest = digest
+	return doc, nil
+}
+
+func (d Document) Actions() []ActionSpec {
+	return cloneActions(d.actions)
+}
+
+func MarshalDocument(document Document) ([]byte, error) {
+	if !validStatus(document.status) || document.publicDigest == "" {
+		return nil, ErrInvalidDocument
+	}
+	encoded, err := json.Marshal(document.publicDocument(document.publicDigest))
+	if err != nil {
+		return nil, ErrInvalidDocument
+	}
+	return append(encoded, '\n'), nil
+}
+
+func (d Document) publicDocument(digest string) publicDocument {
+	actions := make([]publicAction, len(d.actions))
+	for index, action := range d.actions {
+		actions[index] = publicAction{
+			Ordinal: index, ActionID: action.ActionID, Kind: action.Kind, ToolID: action.ToolID,
+			Description: action.Description, Disposition: action.Disposition, ReasonCode: action.ReasonCode,
+			Reason: action.Reason, Ownership: action.Ownership, Reversibility: action.Reversibility,
+			Observation: cloneObservation(action.Observation), Install: cloneInstall(action.Install),
+		}
+	}
+	return publicDocument{
+		SchemaVersion: planSchemaVersion, Kind: planKind, Status: d.status,
+		Platform: d.platform, Manager: d.manager, Intent: cloneIntent(d.intent),
+		Snapshot: cloneSnapshot(d.snapshot), Authority: publicAuthority{PublicDigest: digest},
+		Capabilities: d.capabilities, Summary: d.summary, Actions: actions,
+	}
+}
+
+func digestPublicDocument(document publicDocument) (string, error) {
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return "", err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var canonical map[string]any
+	if err := decoder.Decode(&canonical); err != nil {
+		return "", err
+	}
+	authority, ok := canonical["authority"].(map[string]any)
+	if !ok {
+		return "", ErrInvalidDocument
+	}
+	delete(authority, "public_digest")
+	encoded, err = json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func validStatus(status Status) bool {
+	switch status {
+	case StatusReady, StatusNoChanges, StatusBlocked, StatusIntentRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+func validDocumentIntent(status Status, intent Intent) bool {
+	if status == StatusIntentRequired {
+		return intent.Source == "explicit_tools" && len(intent.Tools) == 0 && intent.Digest == ""
+	}
+	if len(intent.Tools) == 0 {
+		return status == StatusBlocked && intent.Source == "explicit_tools" && intent.Digest == ""
+	}
+	normalized, err := NormalizeExplicitTools(intent.Tools, intent.Tools)
+	return err == nil && intent.Source == normalized.Source && intent.Digest == normalized.Digest && slices.Equal(intent.Tools, normalized.Tools)
+}
+
+func validStatusShape(spec DocumentSpec) bool {
+	switch spec.Status {
+	case StatusIntentRequired:
+		return spec.Platform == "" && spec.Manager == "" && spec.Snapshot == nil && len(spec.Actions) == 0 && spec.Summary == (Summary{}) && spec.Capabilities == (Capabilities{})
+	case StatusReady, StatusNoChanges, StatusBlocked:
+		return validStructuralAtom(spec.Platform) && validStructuralAtom(spec.Manager) && spec.Snapshot != nil
+	default:
+		return false
+	}
+}
+
+func validSnapshot(snapshot *Snapshot) bool {
+	if snapshot == nil {
+		return true
+	}
+	return snapshot.SchemaVersion == planSchemaVersion && validSHA256(snapshot.PublicDigest)
+}
+
+func validCapabilities(status Status, capabilities Capabilities) bool {
+	if status == StatusIntentRequired {
+		return capabilities == (Capabilities{})
+	}
+	return capabilities.Installation == "planned" && capabilities.Config == "not_planned" &&
+		capabilities.Service == "not_collected" && capabilities.Auth == "not_collected" &&
+		capabilities.Apply == "not_available"
+}
+
+func validSummary(summary Summary, actions []ActionSpec) bool {
+	if summary.Apply < 0 || summary.Skip < 0 || summary.Blocked < 0 || summary.BackupTargets < 0 {
+		return false
+	}
+	apply, skip, blocked := 0, 0, 0
+	for _, action := range actions {
+		switch action.Disposition {
+		case "apply":
+			apply++
+		case "skip":
+			skip++
+		case "blocked":
+			blocked++
+		default:
+			return false
+		}
+	}
+	return summary.Apply == apply && summary.Skip == skip && summary.Blocked == blocked
+}
+
+func validActions(spec DocumentSpec) bool {
+	if len(spec.Actions) > maxPublicActions {
+		return false
+	}
+	if spec.Status == StatusIntentRequired {
+		return len(spec.Actions) == 0
+	}
+	if spec.Status == StatusBlocked && (len(spec.Actions) == 0 || spec.Summary.Blocked != len(spec.Actions)) {
+		return false
+	}
+	if spec.Status == StatusReady && (spec.Summary.Apply == 0 || spec.Summary.Blocked != 0) {
+		return false
+	}
+	if spec.Status == StatusNoChanges && (spec.Summary.Apply != 0 || spec.Summary.Blocked != 0) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(spec.Actions))
+	for _, action := range spec.Actions {
+		if !validAction(action, spec.Platform, spec.Manager) {
+			return false
+		}
+		if _, duplicate := seen[action.ActionID]; duplicate {
+			return false
+		}
+		seen[action.ActionID] = struct{}{}
+		if spec.Status == StatusBlocked && action.Disposition != "blocked" {
+			return false
+		}
+	}
+	return true
+}
+
+func validAction(action ActionSpec, platform, manager string) bool {
+	if !validActionID(action.ActionID) || !validToolID(action.ToolID) || action.Kind != "install_tool" {
+		return false
+	}
+	if action.Disposition != "apply" && action.Disposition != "skip" && action.Disposition != "blocked" {
+		return false
+	}
+	if action.Ownership != "package_manager" || action.Reversibility != "external" {
+		return false
+	}
+	if action.Description != "install "+action.ToolID || !validReason(action.Disposition, action.ReasonCode, action.Reason) {
+		return false
+	}
+	if action.Disposition == "apply" && action.Install == nil {
+		return false
+	}
+	if action.Disposition != "apply" && action.Install != nil {
+		return false
+	}
+	if action.Install != nil && !validInstall(action.Install, platform, manager) {
+		return false
+	}
+	return true
+}
+
+func validReason(disposition, code, reason string) bool {
+	if disposition == "apply" {
+		return code == "" && reason == ""
+	}
+	messages := map[string]string{
+		"present":              "already present",
+		"unsupported":          "installation unsupported",
+		"unknown":              "installation status unknown",
+		"stale":                "installation evidence stale",
+		"environment_mismatch": "installation environment changed",
+		"recipe_drift":         "installation recipe changed",
+		"ownership_conflict":   "configuration ownership conflict",
+	}
+	want, ok := messages[code]
+	return ok && reason == want
+}
+
+func validInstall(install *InstallSpec, platform, manager string) bool {
+	if install.SchemaVersion != planSchemaVersion || install.Platform != platform || install.Manager != manager || !validSHA256(install.RecipeDigest) || len(install.Steps) == 0 || len(install.Steps) > 16 {
+		return false
+	}
+	if !validAuthentication(install.Authentication) || !validRisk(install.Risk) {
+		return false
+	}
+	for _, step := range install.Steps {
+		if step.Kind != "package_manager" && step.Kind != "npm_global" {
+			return false
+		}
+		if !validStructuralAtom(step.Provider) || step.Packages == nil || step.Casks == nil || step.Arguments == nil || len(step.Packages) > maxRecipeItems || len(step.Casks) > maxRecipeItems || len(step.Arguments) > maxRecipeItems {
+			return false
+		}
+		for _, value := range append(slices.Clone(step.Packages), step.Casks...) {
+			if !validPackageToken(value) {
+				return false
+			}
+		}
+		for _, value := range step.Arguments {
+			if !validRecipeToken(value) {
+				return false
+			}
+		}
+	}
+	if install.Detector.Values == nil || len(install.Detector.Values) == 0 || len(install.Detector.Values) > 32 {
+		return false
+	}
+	switch install.Detector.Kind {
+	case "binary", "package_receipt", "app_bundle":
+	default:
+		return false
+	}
+	for _, value := range install.Detector.Values {
+		if !validDetectorValue(install.Detector.Kind, value) {
+			return false
+		}
+	}
+	return true
+}
+
+func validAuthentication(value string) bool {
+	switch value {
+	case "none", "interactive_provider_login", "existing_app_auth", "provider_login_or_api_key":
+		return true
+	default:
+		return false
+	}
+}
+
+func validRisk(value string) bool {
+	switch value {
+	case "package_manager_install", "npm_lifecycle_code", "unpinned_artifact", "package_manager_current_release":
+		return true
+	default:
+		return false
+	}
+}
+
+func validDetectorValue(kind, value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	if kind == "app_bundle" {
+		if !strings.HasSuffix(value, ".app") {
+			return false
+		}
+		for _, character := range value {
+			if unicode.IsLetter(character) || unicode.IsDigit(character) || strings.ContainsRune(" ._+-", character) {
+				continue
+			}
+			return false
+		}
+		return true
+	}
+	return validPackageToken(value)
+}
+
+func validPackageToken(value string) bool {
+	return validRecipeToken(value) && !strings.HasPrefix(value, "-")
+}
+
+func validSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func validActionID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && !strings.ContainsRune("-._:", character) {
+			return false
+		}
+	}
+	return true
+}
+
+func validStructuralAtom(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' && character != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func validRecipeToken(value string) bool {
+	if value == "" || len(value) > 256 || unsafeRecipeToken(value) || strings.HasPrefix(value, "/") || strings.HasPrefix(value, "~") || strings.HasPrefix(value, ".") || strings.Contains(value, "\\") {
+		return false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+		for _, character := range segment {
+			if unicode.IsLetter(character) || unicode.IsDigit(character) || strings.ContainsRune("@._+-=", character) {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
+func unsafeRecipeToken(value string) bool {
+	lower := strings.ToLower(value)
+	for _, marker := range []string{"authorization", "bearer ", "sk-proj", "api_key", "api-key", "token=", "password=", "secret=", "credential=", "file:"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) || isBidiControl(character) {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneIntent(intent Intent) Intent {
+	intent.Tools = append([]string(nil), intent.Tools...)
+	if intent.Tools == nil {
+		intent.Tools = []string{}
+	}
+	return intent
+}
+
+func cloneSnapshot(snapshot *Snapshot) *Snapshot {
+	if snapshot == nil {
+		return nil
+	}
+	copy := *snapshot
+	return &copy
+}
+
+func cloneActions(actions []ActionSpec) []ActionSpec {
+	result := make([]ActionSpec, len(actions))
+	for index, action := range actions {
+		result[index] = action
+		result[index].Observation = cloneObservation(action.Observation)
+		result[index].Install = cloneInstall(action.Install)
+	}
+	return result
+}
+
+func clonePublicActions(actions []ActionSpec) []ActionSpec {
+	result := cloneActions(actions)
+	if result == nil {
+		return []ActionSpec{}
+	}
+	return result
+}
+
+func cloneObservation(observation *ObservationSpec) *ObservationSpec {
+	if observation == nil {
+		return nil
+	}
+	copy := *observation
+	return &copy
+}
+
+func cloneInstall(install *InstallSpec) *InstallSpec {
+	if install == nil {
+		return nil
+	}
+	copy := *install
+	copy.Steps = make([]InstallStepSpec, len(install.Steps))
+	for index, step := range install.Steps {
+		copy.Steps[index] = step
+		copy.Steps[index].Packages = append([]string(nil), step.Packages...)
+		copy.Steps[index].Casks = append([]string(nil), step.Casks...)
+		copy.Steps[index].Arguments = append([]string(nil), step.Arguments...)
+		if copy.Steps[index].Packages == nil {
+			copy.Steps[index].Packages = []string{}
+		}
+		if copy.Steps[index].Casks == nil {
+			copy.Steps[index].Casks = []string{}
+		}
+		if copy.Steps[index].Arguments == nil {
+			copy.Steps[index].Arguments = []string{}
+		}
+	}
+	if copy.Steps == nil {
+		copy.Steps = []InstallStepSpec{}
+	}
+	copy.Detector.Values = append([]string(nil), install.Detector.Values...)
+	if copy.Detector.Values == nil {
+		copy.Detector.Values = []string{}
+	}
+	return &copy
+}
+
+func isBidiControl(value rune) bool {
+	return value == '\u061c' || value == '\u200e' || value == '\u200f' ||
+		(value >= '\u202a' && value <= '\u202e') || (value >= '\u2066' && value <= '\u2069')
+}
