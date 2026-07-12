@@ -11,6 +11,9 @@
   batch is a checkpoint, not a release verdict.
 - Keep logical commits flowing after each independently verified layer, but never mix the
   user's untracked planning files into staging.
+- During long architectural remediation, commit each reviewed contract, neutral foundation,
+  adapter adoption, and command surface separately before beginning the next layer; a green
+  worktree checkpoint is part of traceability, not cleanup deferred to the end.
 - After converting an if/else chain to a condition switch, run `gofmt` on that
   file immediately before touching another file; a partial mechanical rewrite
   must never leave the shared multi-agent tree syntactically invalid.
