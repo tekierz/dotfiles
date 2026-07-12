@@ -115,6 +115,21 @@ observability land before new integrations or broad UI work.
 - Existing Yazi, LazyGit, btop, and Glow generator settings are now exposed consistently in
   both Manage and standalone editors, eliminating cross-surface resets from hidden modeled
   fields; LazyGit's width control is labeled for what it actually changes.
+- Yazi now pins generation/import to the v26.5.6 schema and classifies `yazi.toml`,
+  `keymap.toml`, and `theme.toml` independently. Missing and exact-current product forms are
+  writable; native, malformed, and exact-historical files remain read-only with per-file
+  provenance and reasons preserved through planning.
+- Yazi keymap generation is non-destructive: Vim mode retains upstream defaults with a
+  compatibility/style header only, while Emacs mode prepends five bounded bindings. Import
+  recognizes current and historical product forms without granting historical bytes write
+  authority.
+- Reviewed installer execution now uses three deterministic Yazi actions with independent
+  evidence, journal, and rollback scope. Standalone saves are limited to main plus keymap;
+  Manage schedules only the affected main/keymap files; ordinary saves do not synthesize a
+  theme file.
+- Reviewed execution freezes the selected Yazi directory, active Ghostty source candidate,
+  global `global.json`, and Manage `tools/manage.json` paths at plan time. Environment drift
+  cannot redirect those writes after confirmation.
 - The LazyGit safety slice now pins compatibility to v0.62.1 and manages only four bounded
   global concepts in an exact product-owned file. Missing or exact current product files can
   be planned and written at the active CONFIG_DIR/XDG/platform path; arbitrary, malformed,
@@ -309,6 +324,8 @@ Retired Bash installer (historical findings; source and execution docs removed):
 - [ ] Deferred from prior remediation: interactive install cancellation (Esc);
       EvalSymlinks hardening in backup path guard; coordinated bubbletea/lipgloss v2
       dependency migration.
+- [ ] Retire the dormant accepted-triple Yazi writer APIs after the compatibility harness
+      confirms no supported caller still depends on aggregate three-file authority.
 
 ## Pre-release checklist (run in order, after P0–P2 land)
 

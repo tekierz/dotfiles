@@ -130,9 +130,9 @@ shown before apply is authoritative for a particular machine.
 |------|---------|
 | `~/.zshrc` | Zsh integration |
 | `~/.tmux.conf` or `${XDG_CONFIG_HOME:-~/.config}/tmux/tmux.conf` | Active native tmux config preserved outside one bounded managed section |
-| `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` | XDG Ghostty settings |
-| `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` | macOS Ghostty settings |
-| `~/.config/yazi/` | Yazi settings |
+| `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` (and legacy `config`) | Ghostty XDG candidates; the reviewed plan freezes the active candidate before mutation |
+| `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` (and legacy `config`) | Higher-precedence macOS candidates; the last existing source in Ghostty's order is the frozen target |
+| `${YAZI_CONFIG_HOME}` when set and absolute; else `${XDG_CONFIG_HOME}/yazi` when XDG is set and absolute; else `~/.config/yazi/` | Exact Yazi directory frozen by the reviewed plan; set relative overrides fail closed |
 | `~/.config/bat/config` | bat settings |
 | `~/.config/btop/btop.conf` | btop settings |
 | Active LazyGit `config.yml` selected by `CONFIG_DIR`, XDG, or platform user-config precedence | LazyGit settings; the reviewed plan shows the exact writable target |
@@ -141,13 +141,25 @@ shown before apply is authoritative for a particular machine.
 | `~/.claude.json` | Claude Code user-scope MCP servers |
 | `~/.gitconfig` | Native Git configuration with a bounded managed include |
 | `~/.config/dotfiles/git/config` | Product-owned Git and diff settings |
-| `~/.config/dotfiles/settings` | Product theme, navigation, and active user |
-| `~/.config/dotfiles/users/` | Product user profiles |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/global.json` | Versioned global theme, navigation, active-user, animation, and backup preferences |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/tools/manage.json` | Versioned dashboard settings state used by Manage |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/users/` | Product user profiles |
 | `~/.sshh` | SSH host entries used by `sshh` |
 
 Git and Ghostty adoption preserves existing native content inside bounded
 managed sections. Recovery comes from the reviewed operation backup; writers do
 not create or overwrite ambiguous sibling `*.dotfiles.bak` files.
+
+Yazi management is pinned to the v26.5.6 configuration schema. `yazi.toml`,
+`keymap.toml`, and `theme.toml` are classified independently: a missing file or
+the exact current product form is writable, while native, malformed, or exact
+historical content remains read-only with its reason exposed. Vim mode preserves
+Yazi's default keymap and writes only the product compatibility/style header;
+Emacs mode prepends five bounded navigation/selection bindings without replacing
+upstream defaults. The installer reviews and writes all three files as separate
+actions. Standalone Yazi saves review only main and keymap, while Manage reviews
+only the affected main/keymap file or files. Ordinary standalone and Manage
+saves never synthesize or rewrite `theme.toml`.
 
 Glow management is pinned to Glow v2.1.2. It exposes `style`, `mouse`, `pager`,
 `width`, `all`, `showLineNumbers`, and `preserveNewLines` in one trailing managed

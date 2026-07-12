@@ -178,7 +178,7 @@ Choose between two navigation styles:
 |------|------------|
 | Zsh | `Ctrl-a/e` start/end, `Alt-b/f` word nav, `Ctrl-x Ctrl-e` edit in nvim |
 | Tmux | Arrow keys for pane navigation, `Alt-Arrow` without prefix |
-| Yazi | Arrow keys, `Ctrl-c/x/v` copy/cut/paste, `F2` rename |
+| Yazi | Yazi defaults plus prepended `Ctrl-p/n` movement, `Ctrl-b/f` leave/enter, and `Space` selection |
 | Nvim | Arrow keys work alongside standard vim keys |
 
 #### Vim Style
@@ -187,7 +187,7 @@ Choose between two navigation styles:
 |------|------------|
 | Zsh | `Esc` for normal mode, `hjkl` navigation, `Ctrl-e` edit in nvim |
 | Tmux | `hjkl` pane navigation, `Alt-hjkl` without prefix |
-| Yazi | `hjkl` navigation, `y/x/p` yank/cut/paste, `r` rename |
+| Yazi | Yazi's built-in default bindings; dotfiles writes only its compatibility/style header |
 | Nvim | Full vim keybindings |
 
 ### Multi-User Support
@@ -213,7 +213,7 @@ dotfiles restore 20240102_143052  # Restore specific backup
 ```
 
 User-created convenience backups are stored in
-`~/.config/dotfiles/backups/` with timestamps. Mandatory plan rollback points
+`${XDG_CONFIG_HOME:-~/.config}/dotfiles/backups/` with timestamps. Mandatory plan rollback points
 live in the private operation-state backup area and are validated internally;
 they are not presented as ordinary user-managed backup sessions.
 
@@ -267,17 +267,19 @@ After running, configs are placed in:
 |------|---------|
 | `~/.zshrc` | Zsh configuration |
 | `~/.tmux.conf` or `${XDG_CONFIG_HOME:-~/.config}/tmux/tmux.conf` | Active Tmux configuration; existing native settings are preserved outside a managed block |
-| `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` (and legacy `config`) | Ghostty terminal; existing settings are preserved outside a managed block |
-| `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` (and legacy `config`) | Higher-precedence Ghostty sources on macOS; the latest existing source is updated |
-| `~/.config/yazi/` | Yazi file manager |
+| `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` (and legacy `config`) | Ghostty XDG candidates; the reviewed plan freezes the active candidate before writing its managed block |
+| `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` (and legacy `config`) | Higher-precedence macOS candidates; the last existing candidate in Ghostty's source order becomes the frozen target |
+| `${YAZI_CONFIG_HOME}` when set and absolute; else `${XDG_CONFIG_HOME}/yazi` when XDG is set and absolute; else `~/.config/yazi/` | Exact Yazi directory frozen by the reviewed plan; set relative overrides fail closed |
 | `~/.gitconfig` | Native Git configuration, preserved with one bounded managed include |
 | `~/.config/dotfiles/git/config` | Product-owned Git/delta settings loaded by that include |
-| `~/.config/dotfiles/settings` | Theme, navigation, and active user |
-| `~/.config/dotfiles/users/` | User profile settings |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/global.json` | Versioned global theme, navigation, active-user, animation, and backup preferences |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/tools/manage.json` | Versioned dashboard settings state used by Manage |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/users/` | User profile settings |
 | `~/.sshh` | SSH hosts for sshh |
 
-On first Git or Ghostty adoption, the existing native file is copied byte-for-byte
-to a sibling `*.dotfiles.bak` file. An existing different backup is never overwritten.
+Git and Ghostty preserve native content outside their bounded managed sections.
+Recovery is provided by the reviewed operation backup; writers do not create
+ambiguous sibling `*.dotfiles.bak` files.
 
 ## Migrating from `dotfiles-setup`
 
