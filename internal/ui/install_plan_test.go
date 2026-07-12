@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -143,6 +144,63 @@ func TestInstallPlanTargetsMatchDynamicWriters(t *testing.T) {
 		if !slices.Contains(tmux.BackupTargets, target) {
 			t.Errorf("tmux side-effect target %q missing from %v", target, tmux.BackupTargets)
 		}
+	}
+}
+
+func TestInstallPlanLazyGitUsesExactConfigDirTargetAndManagedFileOwnership(t *testing.T) {
+	home := withTempHome(t)
+	configDir := filepath.Join(home, "reviewed", "lazygit")
+	t.Setenv("CONFIG_DIR", configDir)
+	t.Setenv("LG_CONFIG_FILE", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	app := NewApp(true)
+	app.manageInstalledReady = true
+	app.installCacheLoading = false
+	app.manageInstalled = map[string]bool{"delta": true}
+	app.deepDiveConfig.CLITools["lazygit"] = true
+	runtime := registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := planActionByID(t, plan, "config:lazygit")
+	want := "reviewed/lazygit/config.yml"
+	if action.Disposition != operation.DispositionApply || action.Ownership != operation.OwnershipManagedFile || !slices.Equal(action.BackupTargets, []string{want}) {
+		t.Fatalf("LazyGit action = %+v", action)
+	}
+	if accepted := plan.authority[action.ID][want]; accepted.kind != acceptedFileTarget || !accepted.file.Tracked() || !accepted.parents.Tracked() {
+		t.Fatalf("LazyGit authority = %+v", accepted)
+	}
+}
+
+func TestInstallPlanLazyGitArbitraryNativeIsVisiblyBlockedAtCurrentBytes(t *testing.T) {
+	home := withTempHome(t)
+	configDir := filepath.Join(home, ".config", "lazygit")
+	t.Setenv("CONFIG_DIR", configDir)
+	t.Setenv("LG_CONFIG_FILE", "")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(configDir, "config.yml")
+	native := []byte("gui:\n  mouseEvents: false\ncustom: keep\n")
+	if err := os.WriteFile(path, native, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(true)
+	app.manageInstalledReady = true
+	app.installCacheLoading = false
+	app.manageInstalled = map[string]bool{"delta": true}
+	app.deepDiveConfig.CLITools["lazygit"] = true
+	plan, err := buildInstallPlan(app, registryRuntime(pkg.PlatformMacOS, app.manageInstalled), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := planActionByID(t, plan, "config:lazygit")
+	if action.Disposition != operation.DispositionBlocked || !strings.Contains(action.Reason, "arbitrary native LazyGit YAML") {
+		t.Fatalf("LazyGit action = %+v", action)
+	}
+	if got, readErr := os.ReadFile(path); readErr != nil || !bytes.Equal(got, native) {
+		t.Fatalf("blocked plan mutated native bytes: %q, %v", got, readErr)
 	}
 }
 

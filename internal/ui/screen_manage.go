@@ -137,6 +137,16 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	a := s.App()
 	key := msg.String()
+	lazyGitBlockReason := ""
+	itemsAtInput := a.manageItems()
+	if len(itemsAtInput) > 0 && itemsAtInput[clampInt(a.manageIndex, 0, len(itemsAtInput)-1)].id == "lazygit" {
+		lazyGitBlockReason = lazyGitManageUIBlockReason(a)
+	}
+	if a.manageEditing && lazyGitBlockReason != "" {
+		a.manageCancelEditing()
+		a.manageStatus = "LazyGit settings are read-only: " + lazyGitBlockReason
+		return nil
+	}
 
 	// Inline string editor captures keys first so typing doesn't trigger global
 	// bindings.
@@ -244,6 +254,10 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		switch f.kind {
 		case manageFieldOption:
 			if f.str != nil && len(f.options) > 0 {
+				if f.unknownReadOnly && !oneOf(*f.str, f.options...) {
+					a.manageStatus = "Custom native LazyGit values are read-only"
+					return
+				}
 				*f.str = cycleStringOption(f.options, *f.str, dir > 0)
 				if f.key == "theme" {
 					a.syncThemeIndex()
@@ -446,6 +460,10 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	// Settings pane.
+	if lazyGitBlockReason != "" && oneOf(key, "left", "right", "h", "l", " ", "enter") {
+		a.manageStatus = "LazyGit settings are read-only: " + lazyGitBlockReason
+		return nil
+	}
 	switch key {
 	case "up", "k":
 		if a.configFieldIndex > 0 {
@@ -626,6 +644,12 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		a.managePane = managePaneSettings
 		a.configFieldIndex = fieldIdx
 		a.manageEnsureFieldsVisible(layout, len(fields))
+		if items[a.manageIndex].id == "lazygit" {
+			if reason := lazyGitManageUIBlockReason(a); reason != "" {
+				a.manageStatus = "LazyGit settings are read-only: " + reason
+				return nil
+			}
+		}
 
 		f := fields[fieldIdx]
 		switch f.kind {
@@ -642,6 +666,10 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			// Click on left half cycles backward, right half cycles forward.
 			forward := m.X >= (layout.rightX + layout.rightW/2)
 			if f.str != nil && len(f.options) > 0 {
+				if f.unknownReadOnly && !oneOf(*f.str, f.options...) {
+					a.manageStatus = "Custom native LazyGit values are read-only"
+					return nil
+				}
 				*f.str = cycleStringOption(f.options, *f.str, forward)
 				if f.key == "theme" {
 					a.syncThemeIndex()

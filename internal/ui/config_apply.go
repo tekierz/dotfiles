@@ -220,10 +220,10 @@ func fzfConfigFrom(cfg DeepDiveConfig) tools.FzfConfig {
 // lazygitConfigFrom is the single mapping of DeepDiveConfig to tools.LazyGitConfig.
 func lazygitConfigFrom(cfg DeepDiveConfig) tools.LazyGitConfig {
 	return tools.LazyGitConfig{
-		SideBySide: cfg.LazyGitSideBySide,
-		MouseMode:  cfg.LazyGitMouseMode,
-		Theme:      cfg.LazyGitTheme,
-		Paging:     cfg.LazyGitPaging,
+		SidePanelWidth: cfg.LazyGitSidePanelWidth,
+		MouseEvents:    cfg.LazyGitMouseEvents,
+		ColorPreset:    cfg.LazyGitColorPreset,
+		PagerPreset:    cfg.LazyGitPagerPreset,
 	}
 }
 
@@ -490,10 +490,10 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.FzfPreviewWindow = mc.FzfPreviewWindow
 
 	// LazyGit
-	dd.LazyGitSideBySide = mc.LazyGitSideBySide
-	dd.LazyGitMouseMode = mc.LazyGitMouseMode
-	dd.LazyGitTheme = mc.LazyGitGuiTheme
-	dd.LazyGitPaging = mc.LazyGitPaging
+	dd.LazyGitSidePanelWidth = mc.LazyGitSidePanelWidth
+	dd.LazyGitMouseEvents = mc.LazyGitMouseEvents
+	dd.LazyGitColorPreset = mc.LazyGitColorPreset
+	dd.LazyGitPagerPreset = mc.LazyGitPagerPreset
 
 	// LazyDocker: NO generator/config file exists for lazydocker (see
 	// manageNotAppliedFields). Its Manage fields are intentionally not applied; the

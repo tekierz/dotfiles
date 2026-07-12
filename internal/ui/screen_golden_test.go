@@ -801,10 +801,10 @@ func TestConfigLazyGitScreenGolden(t *testing.T) {
 
 	wantSubstrings := []string{
 		"LazyGit",
-		"Wide Side Panel",
-		"Paging",
-		"Mouse Mode",
-		"Theme",
+		"Side Panel Fraction",
+		"Pager Preset",
+		"Mouse Events",
+		"Color Preset",
 		"navigate",
 	}
 	for _, want := range wantSubstrings {
@@ -822,19 +822,19 @@ func TestConfigLazyGitScreenGolden(t *testing.T) {
 // toggles the focused boolean field and esc navigates back, resetting the index.
 func TestConfigLazyGitToggleAndBack(t *testing.T) {
 	ctx := newDeepDiveContext(t)
-	ctx.app.configFieldIndex = 0 // Wide Side Panel
-	before := ctx.app.deepDiveConfig.LazyGitSideBySide
+	ctx.app.configFieldIndex = 1 // Mouse Events
+	before := ctx.app.deepDiveConfig.LazyGitMouseEvents
 
 	screen := NewConfigLazyGitScreen(ctx)
-	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.LazyGitSideBySide == before {
-		t.Errorf("space should toggle LazyGitSideBySide from %v", before)
+	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.LazyGitMouseEvents == before {
+		t.Errorf("space should toggle LazyGitMouseEvents from %v", before)
 	}
 
 	// Move to the Theme field and adjust it with 'right'.
 	ctx.app.configFieldIndex = 2
-	themeBefore := ctx.app.deepDiveConfig.LazyGitTheme
-	if _, _ = screen.Update(keyMsg("right")); ctx.app.deepDiveConfig.LazyGitTheme == themeBefore {
-		t.Errorf("right should cycle LazyGitTheme from %q", themeBefore)
+	themeBefore := ctx.app.deepDiveConfig.LazyGitColorPreset
+	if _, _ = screen.Update(keyMsg("right")); ctx.app.deepDiveConfig.LazyGitColorPreset == themeBefore {
+		t.Errorf("right should cycle LazyGitColorPreset from %q", themeBefore)
 	}
 
 	_, cmd := screen.Update(keyMsg("esc"))

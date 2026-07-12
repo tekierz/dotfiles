@@ -31,7 +31,7 @@ package manager or CPU architecture provides it.
 |------|----------------|
 | Git | Git defaults and bounded delta/difftastic integration |
 | Git Delta | Syntax-highlighted Git diffs |
-| LazyGit | Terminal Git interface |
+| LazyGit | Terminal Git interface with bounded, ownership-safe global presets |
 | LazyDocker | Terminal Docker interface |
 | fzf | Fuzzy finding and shell integration |
 | bat | Syntax-highlighted file viewing |
@@ -135,7 +135,7 @@ shown before apply is authoritative for a particular machine.
 | `~/.config/yazi/` | Yazi settings |
 | `~/.config/bat/config` | bat settings |
 | `~/.config/btop/btop.conf` | btop settings |
-| `~/.config/lazygit/config.yml` | LazyGit settings |
+| Active LazyGit `config.yml` selected by `CONFIG_DIR`, XDG, or platform user-config precedence | LazyGit settings; the reviewed plan shows the exact writable target |
 | `~/.config/lazydocker/config.yml` | LazyDocker settings |
 | Active `glow.{yaml,yml}` under `GLOW_CONFIG_HOME`, `XDG_CONFIG_HOME/glow`, or Glow's platform user-config directory | Glow settings; the first Viper-compatible source wins |
 | `~/.claude.json` | Claude Code user-scope MCP servers |
@@ -157,3 +157,29 @@ higher-precedence non-YAML source or environment setting override is active.
 The eight built-in styles are writable. Existing custom style strings are
 imported and displayed read-only; choose a built-in before saving other Glow
 changes. Width `0` is Glow's automatic mode (maximum 120, fallback 80).
+
+LazyGit management is pinned to LazyGit v0.62.1 (`f2788e4`) and deliberately
+models four global concepts: side-panel width fraction, mouse events, one of two
+color presets, and the builtin-or-Delta pager preset. The Delta pager may be
+selected only when Git Delta is selected in the installer or already installed
+for Manage and standalone saves. Product-generated files are managed as exact
+whole files; arbitrary native YAML and custom color or pager shapes are imported
+for display but remain read-only.
+
+LazyGit target discovery follows upstream precedence:
+
+1. `LG_CONFIG_FILE` source chains are observed and hydrated read-only; this
+   release does not rewrite a chain of configuration files.
+2. `CONFIG_DIR`, when set to an absolute path, is the exact config directory.
+3. `XDG_CONFIG_HOME/lazygit/config.yml` is used when XDG is explicitly set.
+4. Without overrides, macOS uses
+   `~/Library/Application Support/lazygit/config.yml`; Unix uses
+   `~/.config/lazygit/config.yml`.
+
+The historical `jesseduffield/lazygit/config.yml` fallback can still be read for
+native hydration, but it is intentionally read-only; migrate it to the modern
+directory before dashboard writes. Relative overrides and active targets outside
+the user's home directory fail closed. Repository-local `.git/lazygit.yml` or a
+parent `.lazygit.yml` can override global values, so the dashboard discloses that
+its four settings are global defaults rather than guaranteed per-repository
+effective values.

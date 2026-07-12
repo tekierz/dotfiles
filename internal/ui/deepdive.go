@@ -130,10 +130,10 @@ type DeepDiveConfig struct {
 	CLIUtilities map[string]bool
 
 	// LazyGit settings
-	LazyGitSideBySide bool
-	LazyGitMouseMode  bool
-	LazyGitTheme      string
-	LazyGitPaging     string // delta/diff-so-fancy/never
+	LazyGitSidePanelWidth string
+	LazyGitMouseEvents    bool
+	LazyGitColorPreset    string
+	LazyGitPagerPreset    string
 
 	// LazyDocker settings
 	LazyDockerMouseMode bool
@@ -290,10 +290,10 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		CLIUtilities: buildToolGroupDefaults(tools.UIGroupCLIUtilities),
 
 		// LazyGit defaults
-		LazyGitSideBySide: true,
-		LazyGitMouseMode:  true,
-		LazyGitTheme:      "auto",
-		LazyGitPaging:     "delta",
+		LazyGitSidePanelWidth: "0.3333",
+		LazyGitMouseEvents:    true,
+		LazyGitColorPreset:    "standard",
+		LazyGitPagerPreset:    "builtin",
 
 		// LazyDocker defaults
 		LazyDockerMouseMode: true,

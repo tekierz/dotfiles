@@ -190,6 +190,13 @@ func buildManageSavePlan(a *App, now time.Time) (*manageSavePlan, error) {
 			action.Reason = nativeReason
 			accepted = nil
 		}
+		if action.Disposition != operation.DispositionBlocked && toolID == "lazygit" && deep.LazyGitPagerPreset == "delta" {
+			if deltaReason := lazyGitDeltaAvailabilityReason(a); deltaReason != "" {
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = deltaReason
+				accepted = nil
+			}
+		}
 		if toolID == "claude-code" {
 			changes, compareErr := claudeSelectionChanges(deep.ClaudeCodeMCPs)
 			if compareErr != nil {

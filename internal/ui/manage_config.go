@@ -1,6 +1,6 @@
 package ui
 
-const currentNativeImportSchemaVersion = 4
+const currentNativeImportSchemaVersion = 5
 
 // ManageConfig holds detailed management configuration for all tools
 type ManageConfig struct {
@@ -89,10 +89,10 @@ type ManageConfig struct {
 	FzfPreviewWindow string
 
 	// LazyGit detailed settings
-	LazyGitSideBySide bool
-	LazyGitPaging     string
-	LazyGitMouseMode  bool
-	LazyGitGuiTheme   string
+	LazyGitSidePanelWidth string
+	LazyGitPagerPreset    string
+	LazyGitMouseEvents    bool
+	LazyGitColorPreset    string
 
 	// LazyDocker detailed settings
 	LazyDockerMouseMode bool
@@ -217,10 +217,10 @@ func NewManageConfig() *ManageConfig {
 		FzfPreviewWindow: "right:50%",
 
 		// LazyGit
-		LazyGitSideBySide: true,
-		LazyGitPaging:     "delta",
-		LazyGitMouseMode:  true,
-		LazyGitGuiTheme:   "auto",
+		LazyGitSidePanelWidth: "0.3333",
+		LazyGitPagerPreset:    "builtin",
+		LazyGitMouseEvents:    true,
+		LazyGitColorPreset:    "standard",
 
 		// LazyDocker
 		LazyDockerMouseMode: true,

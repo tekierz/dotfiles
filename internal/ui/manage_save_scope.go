@@ -70,8 +70,8 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 		}
 	case "lazygit":
 		return []any{
-			cfg.LazyGitSideBySide, cfg.LazyGitMouseMode, cfg.LazyGitTheme,
-			cfg.LazyGitPaging,
+			cfg.LazyGitSidePanelWidth, cfg.LazyGitMouseEvents, cfg.LazyGitColorPreset,
+			cfg.LazyGitPagerPreset,
 		}
 	case "btop":
 		return []any{

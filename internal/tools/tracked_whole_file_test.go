@@ -33,7 +33,11 @@ func TestTrackedWholeFileWritersReturnExactPrivateRevision(t *testing.T) {
 				return filepath.Join(home, ".config", "lazygit", "config.yml"), nil
 			},
 			write: func(theme string) (MutationEvidence, error) {
-				return WriteLazyGitConfigTracked(LazyGitConfig{SideBySide: true, Theme: "dark", Paging: "never"}, theme)
+				preset := "standard"
+				if theme == "nord" {
+					preset = "light-high-contrast"
+				}
+				return WriteLazyGitConfigTracked(LazyGitConfig{SidePanelWidth: "0.3333", MouseEvents: true, ColorPreset: preset, PagerPreset: "builtin"}, theme)
 			},
 		},
 	}

@@ -115,6 +115,15 @@ observability land before new integrations or broad UI work.
 - Existing Yazi, LazyGit, btop, and Glow generator settings are now exposed consistently in
   both Manage and standalone editors, eliminating cross-surface resets from hidden modeled
   fields; LazyGit's width control is labeled for what it actually changes.
+- The LazyGit safety slice now pins compatibility to v0.62.1 and manages only four bounded
+  global concepts in an exact product-owned file. Missing or exact current product files can
+  be planned and written at the active CONFIG_DIR/XDG/platform path; arbitrary, malformed,
+  custom, legacy-fallback, external, and `LG_CONFIG_FILE` sources hydrate read-only and block
+  mutation with their reason preserved in installer, Manage, and standalone previews.
+- LazyGit planning, backup, execution, and rollback authority now bind the same dynamic target,
+  and the Delta pager requires a proven installer selection or cached installed dependency.
+  Repository-local LazyGit configuration may still override these global defaults and is
+  disclosed as such rather than treated as writable dashboard state.
 - The Batch 2 theme/settings item remains open until omitted modeled settings are preserved
   and Manage/standalone saves have reviewed preview, backup, and rollback parity.
 

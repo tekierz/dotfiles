@@ -1268,7 +1268,12 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	if cfg.CLITools["lazygit"] {
 		toolConfigPhase("lazygit", "\n▶ Configuring LazyGit...", func() ([]tools.MutationEvidence, error) {
 			if persistJournal {
-				accepted, err := executionTarget("config:lazygit", ".config/lazygit/config.yml")
+				path, err := tools.LazyGitConfigMutationPath()
+				if err != nil {
+					return nil, err
+				}
+				rel := planTargetPath(home, path)
+				accepted, err := executionTarget("config:lazygit", rel)
 				if err != nil {
 					return nil, err
 				}

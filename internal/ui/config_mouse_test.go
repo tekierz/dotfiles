@@ -194,7 +194,7 @@ func TestConfigFieldClickFamily(t *testing.T) {
 		{
 			name:  "lazygit",
 			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigLazyGitScreen(ctx) },
-			want:  []fieldCase{{"Wide Side Panel", 0}, {"Mouse Mode", 1}, {"Theme", 2}, {"Paging", 3}},
+			want:  []fieldCase{{"Side Panel Fraction", 0}, {"Mouse Events", 1}, {"Color Preset", 2}, {"Pager Preset", 3}},
 		},
 		{
 			name:  "glow",

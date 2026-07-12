@@ -259,6 +259,7 @@ type App struct {
 	manageEditCursor      int
 	manageEditField       *string
 	manageEditNumber      *int
+	manageEditValidate    func(string) error
 	manageEditMin         int
 	manageEditMax         int
 	manageEditFieldKey    string // human label for the field being edited

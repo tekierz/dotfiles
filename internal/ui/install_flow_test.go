@@ -68,7 +68,7 @@ func TestConfigGating_DeselectedToolSkipsConfig(t *testing.T) {
 	lines := collectLines(events)
 
 	// Lazygit config should NOT be written.
-	lazygitPath := filepath.Join(home, ".config", "lazygit", "config.yml")
+	lazygitPath := filepath.Join(home, filepath.FromSlash(lazyGitTestRelPath()))
 	if _, err := os.Stat(lazygitPath); err == nil {
 		t.Errorf("lazygit config written even though lazygit was deselected: %s", lazygitPath)
 	}
@@ -121,7 +121,7 @@ func TestConfigGating_SelectedToolWritesConfig(t *testing.T) {
 	_ = drainWorker(t, nil, cfg)
 
 	// lazygit config should exist.
-	lazygitPath := filepath.Join(home, ".config", "lazygit", "config.yml")
+	lazygitPath := filepath.Join(home, filepath.FromSlash(lazyGitTestRelPath()))
 	if _, err := os.Stat(lazygitPath); err != nil {
 		t.Errorf("lazygit config not written even though lazygit was selected: %v", lazygitPath)
 	}

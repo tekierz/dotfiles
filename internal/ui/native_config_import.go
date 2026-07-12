@@ -20,15 +20,58 @@ type NativeManageConfigState struct {
 	Tmux                 tools.TmuxConfigImport
 	Btop                 tools.BtopConfigImport
 	Glow                 tools.GlowConfigImport
+	LazyGit              tools.LazyGitConfigImport
 	GitError             string
 	GhosttyError         string
 	TmuxError            string
 	BtopError            string
 	GlowError            string
+	LazyGitError         string
 	BtopThemeExplicit    bool
 	BtopThemeUnsupported bool
 	Applied              bool
 	PreferenceError      string
+}
+
+// lazyGitUIBlockReason is the single presentation and interaction policy for
+// LazyGit whole-source read-only state.
+func lazyGitUIBlockReason(a *App) string {
+	if a == nil {
+		return ""
+	}
+	if a.nativeConfigState.PreferenceError != "" {
+		return "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
+	}
+	if a.nativeConfigState.LazyGitError != "" {
+		return "native LazyGit configuration could not be imported safely: " + a.nativeConfigState.LazyGitError
+	}
+	return a.nativeConfigState.LazyGit.ReadOnlyReason
+}
+
+func lazyGitStandaloneUIBlockReason(a *App) string {
+	if reason := lazyGitUIBlockReason(a); reason != "" {
+		return reason
+	}
+	if a == nil || a.deepDiveConfig == nil {
+		return ""
+	}
+	if err := tools.ValidateLazyGitConfig(lazygitConfigFrom(*a.deepDiveConfig), a.theme); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func lazyGitManageUIBlockReason(a *App) string {
+	if reason := lazyGitUIBlockReason(a); reason != "" {
+		return reason
+	}
+	if a == nil || a.manageConfig == nil {
+		return ""
+	}
+	if err := tools.ValidateLazyGitConfig(lazygitConfigFrom(manageConfigToDeepDive(a.manageConfig)), a.theme); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // NativeConfigState returns a defensive copy suitable for status/provenance UI.
@@ -50,6 +93,9 @@ func (a *App) NativeConfigState() NativeManageConfigState {
 	state.Glow.Fields = cloneConfigProvenance(state.Glow.Fields)
 	state.Glow.Sources = append([]tools.ConfigImportSource(nil), state.Glow.Sources...)
 	state.Glow.Warnings = append([]string(nil), state.Glow.Warnings...)
+	state.LazyGit.Fields = cloneConfigProvenance(state.LazyGit.Fields)
+	state.LazyGit.Sources = append([]tools.ConfigImportSource(nil), state.LazyGit.Sources...)
+	state.LazyGit.Warnings = append([]string(nil), state.LazyGit.Warnings...)
 	return state
 }
 
@@ -65,10 +111,12 @@ func cloneConfigProvenance(source map[string]tools.ConfigFieldProvenance) map[st
 }
 
 type managePreferencePresence struct {
-	exists bool
-	fields map[string]bool
-	schema int
-	err    error
+	exists              bool
+	fields              map[string]bool
+	schema              int
+	legacyLazyGitTheme  string
+	legacyLazyGitPaging string
+	err                 error
 }
 
 func inspectManagePreferencePresence() managePreferencePresence {
@@ -102,12 +150,19 @@ func inspectManagePreferencePresence() managePreferencePresence {
 			return managePreferencePresence{exists: true, fields: fields, err: errors.New("unsupported native import schema version")}
 		}
 	}
+	var legacyTheme, legacyPaging string
+	if encoded, ok := raw["LazyGitTheme"]; ok {
+		_ = json.Unmarshal(encoded, &legacyTheme)
+	}
+	if encoded, ok := raw["LazyGitPaging"]; ok {
+		_ = json.Unmarshal(encoded, &legacyPaging)
+	}
 	switch schemaVersion {
 	case 0:
 		// One-time adoption migration for prototype-era full-struct saves. Those
 		// files had no way to distinguish deliberate choices from copied defaults.
 		for key := range fields {
-			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") || strings.HasPrefix(key, "Btop") || strings.HasPrefix(key, "Glow") {
+			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") || strings.HasPrefix(key, "Btop") || strings.HasPrefix(key, "Glow") || strings.HasPrefix(key, "LazyGit") {
 				delete(fields, key)
 			}
 		}
@@ -138,8 +193,19 @@ func inspectManagePreferencePresence() managePreferencePresence {
 				delete(fields, key)
 			}
 		}
+		fallthrough
+	case 4:
+		// LazyGit native hydration and honest preset names are schema v5.
+		for key := range fields {
+			if strings.HasPrefix(key, "LazyGit") {
+				delete(fields, key)
+			}
+		}
 	}
-	return managePreferencePresence{exists: true, fields: fields, schema: schemaVersion}
+	return managePreferencePresence{
+		exists: true, fields: fields, schema: schemaVersion,
+		legacyLazyGitTheme: legacyTheme, legacyLazyGitPaging: legacyPaging,
+	}
 }
 
 func observeNativeManageConfig(target *ManageConfig, preferences managePreferencePresence, theme string) NativeManageConfigState {
@@ -218,6 +284,23 @@ func observeNativeManageConfig(target *ManageConfig, preferences managePreferenc
 			overlayImportedGlowConfig(target, glowImport, preferences.fields, preferences.schema)
 		}
 	}
+	lazyGitImport, err := tools.ImportLazyGitConfig()
+	switch {
+	case err != nil:
+		state.LazyGitError = err.Error()
+	case len(lazyGitImport.Warnings) != 0:
+		state.LazyGit = lazyGitImport
+		state.LazyGitError = "refusing ambiguous LazyGit import: " + strings.Join(lazyGitImport.Warnings, "; ")
+	default:
+		state.LazyGit = lazyGitImport
+		if preferences.err == nil {
+			explicit := preferences.fields
+			if lazyGitImport.ReadOnlyReason != "" {
+				explicit = map[string]bool{}
+			}
+			overlayImportedLazyGitConfig(target, lazyGitImport, explicit, preferences)
+		}
+	}
 	state.Applied = preferences.err == nil && target != nil && *target != before
 	if preferences.err == nil && target != nil {
 		target.NativeImportSchemaVersion = currentNativeImportSchemaVersion
@@ -226,6 +309,45 @@ func observeNativeManageConfig(target *ManageConfig, preferences managePreferenc
 		state.PreferenceError = preferences.err.Error()
 	}
 	return state
+}
+
+func overlayImportedLazyGitConfig(target *ManageConfig, imported tools.LazyGitConfigImport, explicit map[string]bool, preferences managePreferencePresence) {
+	if target == nil {
+		return
+	}
+	if preferences.schema < 5 {
+		switch preferences.legacyLazyGitTheme {
+		case "auto", "dark":
+			target.LazyGitColorPreset = "standard"
+		case "light":
+			target.LazyGitColorPreset = "light-high-contrast"
+		}
+		switch preferences.legacyLazyGitPaging {
+		case "never":
+			target.LazyGitPagerPreset = "builtin"
+		case "delta":
+			target.LazyGitPagerPreset = "delta"
+		case "diff-so-fancy":
+			target.LazyGitPagerPreset = "custom"
+		}
+	}
+	hasNative := false
+	for _, source := range imported.Sources {
+		hasNative = hasNative || (source.Active && source.Exists)
+	}
+	if !hasNative {
+		return
+	}
+	for key, apply := range map[string]func(){
+		"LazyGitSidePanelWidth": func() { target.LazyGitSidePanelWidth = imported.Config.SidePanelWidth },
+		"LazyGitMouseEvents":    func() { target.LazyGitMouseEvents = imported.Config.MouseEvents },
+		"LazyGitColorPreset":    func() { target.LazyGitColorPreset = imported.Config.ColorPreset },
+		"LazyGitPagerPreset":    func() { target.LazyGitPagerPreset = imported.Config.PagerPreset },
+	} {
+		if !explicit[key] {
+			apply()
+		}
+	}
 }
 
 func overlayImportedGlowConfig(target *ManageConfig, imported tools.GlowConfigImport, explicit map[string]bool, schema int) {

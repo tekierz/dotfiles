@@ -307,6 +307,13 @@ func buildStandaloneConfigPlan(a *App, now time.Time) (*installPlan, error) {
 		action.Reason = reason
 		actionAuthority = nil
 	}
+	if action.Disposition != operation.DispositionBlocked && toolID == "lazygit" && cfg.LazyGitPagerPreset == "delta" {
+		if reason := lazyGitDeltaAvailabilityReason(a); reason != "" {
+			action.Disposition = operation.DispositionBlocked
+			action.Reason = reason
+			actionAuthority = nil
+		}
+	}
 	if toolID == "claude-code" {
 		changed, err := claudeSelectionChanges(cfg.ClaudeCodeMCPs)
 		if err != nil {
@@ -390,7 +397,11 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 	case "fzf":
 		spec.targets, spec.ownership, spec.description, spec.fullFilePolicy = []string{".config/fzf/fzf.zsh"}, operation.OwnershipManagedFile, "write managed fzf configuration", true
 	case "lazygit":
-		spec.targets, spec.ownership, spec.description, spec.fullFilePolicy = []string{".config/lazygit/config.yml"}, operation.OwnershipManagedFile, "write managed LazyGit configuration", true
+		path, blockReason := lazyGitPlanTarget(home)
+		if err := tools.ValidateLazyGitConfig(lazygitConfigFrom(cfg), theme); err != nil && blockReason == "" {
+			blockReason = err.Error()
+		}
+		spec.targets, spec.ownership, spec.description, spec.fullFilePolicy, spec.preflightBlockReason = []string{path}, operation.OwnershipManagedFile, "write managed LazyGit configuration", true, blockReason
 	case "btop":
 		btopCfg := btopConfigFrom(cfg)
 		if err := tools.ValidateBtopConfig(btopCfg, theme); err != nil {
@@ -427,7 +438,7 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 }
 
 func standaloneNativeBlockReason(a *App, toolID string, allowBtopThemeReplacement bool) string {
-	if a.nativeConfigState.PreferenceError != "" && (toolID == "ghostty" || toolID == "tmux" || toolID == "git" || toolID == "btop" || toolID == "glow") {
+	if a.nativeConfigState.PreferenceError != "" && (toolID == "ghostty" || toolID == "tmux" || toolID == "git" || toolID == "btop" || toolID == "glow" || toolID == "lazygit") {
 		return "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
 	}
 	switch toolID {
@@ -451,6 +462,18 @@ func standaloneNativeBlockReason(a *App, toolID string, allowBtopThemeReplacemen
 		if a.nativeConfigState.GlowError != "" {
 			return "native Glow configuration could not be imported safely: " + a.nativeConfigState.GlowError
 		}
+	case "lazygit":
+		return lazyGitUIBlockReason(a)
+	}
+	return ""
+}
+
+func lazyGitDeltaAvailabilityReason(a *App) string {
+	if a == nil || !a.manageInstalledReady || a.installCacheLoading {
+		return "Delta installation status is not ready; refresh installed tools before selecting the LazyGit Delta pager preset"
+	}
+	if !a.manageInstalled["delta"] {
+		return "install the Delta CLI utility before using the LazyGit Delta pager preset"
 	}
 	return ""
 }
@@ -622,7 +645,12 @@ func writeStandaloneConfigAtAuthority(toolID string, cfg DeepDiveConfig, theme s
 		}
 		return one(tools.WriteFzfConfigAtAuthorityTracked(fzfConfigFrom(cfg), theme, revision, parents, locker))
 	case "lazygit":
-		revision, parents, err := file(".config/lazygit/config.yml")
+		path, err := tools.LazyGitConfigMutationPath()
+		if err != nil {
+			return nil, err
+		}
+		rel := planTargetPath(home, path)
+		revision, parents, err := file(rel)
 		if err != nil {
 			return nil, err
 		}

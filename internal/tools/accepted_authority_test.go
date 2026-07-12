@@ -35,10 +35,10 @@ func TestAcceptedWholeFileWritersRejectIdenticalNamespaceReplacement(t *testing.
 			name: "lazygit",
 			path: func() (string, error) { return filepath.Join(home, ".config", "lazygit", "config.yml"), nil },
 			seed: func() error {
-				return WriteLazyGitConfig(LazyGitConfig{SideBySide: true, Theme: "dark", Paging: "never"}, theme)
+				return WriteLazyGitConfig(LazyGitConfig{SidePanelWidth: "0.3333", MouseEvents: true, ColorPreset: "standard", PagerPreset: "builtin"}, theme)
 			},
 			apply: func(accepted safefile.Revision) error {
-				_, err := WriteLazyGitConfigAtRevisionTracked(LazyGitConfig{SideBySide: true, Theme: "dark", Paging: "never"}, theme, accepted)
+				_, err := WriteLazyGitConfigAtRevisionTracked(LazyGitConfig{SidePanelWidth: "0.3333", MouseEvents: true, ColorPreset: "standard", PagerPreset: "builtin"}, theme, accepted)
 				return err
 			},
 		},

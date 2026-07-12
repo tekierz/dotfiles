@@ -134,6 +134,10 @@ func TestStandaloneConfigPlansAuthorityCapableWriterTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact := tools.BtopThemeArtifactName(btopConfigFrom(*app.deepDiveConfig), app.theme) + ".theme"
+	lazyGitPath, err := tools.LazyGitConfigMutationPath()
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		screen Screen
 		want   []string
@@ -144,7 +148,7 @@ func TestStandaloneConfigPlansAuthorityCapableWriterTargets(t *testing.T) {
 		{ScreenConfigGit, []string{".gitconfig", ".config/dotfiles/git/config"}},
 		{ScreenConfigYazi, []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml", ".config/yazi/theme.toml"}},
 		{ScreenConfigFzf, []string{".config/fzf/fzf.zsh"}},
-		{ScreenConfigLazyGit, []string{".config/lazygit/config.yml"}},
+		{ScreenConfigLazyGit, []string{planTargetPath(home, lazyGitPath)}},
 		{ScreenConfigBtop, []string{".config/btop/btop.conf", filepath.ToSlash(filepath.Join(".config", "btop", "themes", artifact))}},
 		{ScreenConfigGlow, []string{planTargetPath(home, tools.NewGlowTool().ConfigPaths()[0])}},
 		{ScreenConfigClaudeCode, []string{".claude.json"}},

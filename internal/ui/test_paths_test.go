@@ -10,3 +10,12 @@ func glowTestRelPath() string {
 	}
 	return ".config/glow/glow.yml"
 }
+
+// lazyGitTestRelPath mirrors LazyGit's platform default when tests do not set
+// CONFIG_DIR or XDG_CONFIG_HOME explicitly.
+func lazyGitTestRelPath() string {
+	if runtime.GOOS == "darwin" {
+		return "Library/Application Support/lazygit/config.yml"
+	}
+	return ".config/lazygit/config.yml"
+}

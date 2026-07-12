@@ -66,12 +66,18 @@ type manageField struct {
 	unit string
 
 	// For option fields (kind == manageFieldOption).
-	options []string
+	options         []string
+	unknownReadOnly bool
 
 	// For numeric fields (kind == manageFieldNumber).
 	min  int
 	max  int
 	step int
+
+	// Optional exact validation for text fields. The editor keeps focus and
+	// leaves the model unchanged when validation fails.
+	validateText   func(string) error
+	readOnlyReason string
 }
 
 // manageItem is a tool entry in the left pane.
@@ -530,11 +536,12 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 		}
 
 	case "lazygit":
+		readOnlyReason := lazyGitManageUIBlockReason(a)
 		return []manageField{
-			{key: "side", label: "Wide Side Panel", description: "Use a wider LazyGit side panel", kind: manageFieldToggle, b: &cfg.LazyGitSideBySide},
-			{key: "paging", label: "Paging", description: "Paging backend", kind: manageFieldOption, str: &cfg.LazyGitPaging, options: []string{"delta", "diff-so-fancy", "never"}},
-			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.LazyGitMouseMode},
-			{key: "gui_theme", label: "GUI Theme", description: "GUI theme selection", kind: manageFieldOption, str: &cfg.LazyGitGuiTheme, options: []string{"auto", "light", "dark"}},
+			{key: "side_fraction", label: "Panel Fraction", description: "Exact global panel-width fraction (0 through 1); per-repo config may override it", kind: manageFieldText, str: &cfg.LazyGitSidePanelWidth, validateText: tools.ValidateLazyGitSidePanelWidth, readOnlyReason: readOnlyReason},
+			{key: "mouse", label: "Mouse Events", description: "Enable global mouse events; per-repo config may override it", kind: manageFieldToggle, b: &cfg.LazyGitMouseEvents, readOnlyReason: readOnlyReason},
+			{key: "color_preset", label: "Color Preset", description: "Standard or light high contrast; custom native colors remain read-only", kind: manageFieldOption, str: &cfg.LazyGitColorPreset, options: []string{"standard", "light-high-contrast"}, unknownReadOnly: true, readOnlyReason: readOnlyReason},
+			{key: "pager_preset", label: "Pager Preset", description: "Builtin or Delta dark pager (requires git-delta); custom native pagers remain read-only", kind: manageFieldOption, str: &cfg.LazyGitPagerPreset, options: []string{"builtin", "delta"}, unknownReadOnly: true, readOnlyReason: readOnlyReason},
 		}
 
 	case "lazydocker":
@@ -615,6 +622,9 @@ func (a *App) renderManageFooter(width int, items []manageItem, fields []manageF
 		} else {
 			statusText = fmt.Sprintf("Installing %s…", name)
 		}
+	}
+	if statusText == "" && len(items) > 0 && items[clampInt(a.manageIndex, 0, len(items)-1)].id == "lazygit" && lazyGitManageUIBlockReason(a) != "" {
+		statusText = lazyGitManageUIBlockReason(a)
 	}
 	if statusText == "" && a.managePane == managePaneSettings && len(fields) > 0 {
 		idx := clampInt(a.configFieldIndex, 0, len(fields)-1)
@@ -773,6 +783,9 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 			statusBadge = " " + RenderBadge("NOT INSTALLED", ColorText, ColorMuted)
 		}
 		statusBadge += a.nativeImportBadge(item.id)
+		if item.id == "lazygit" && a.nativeConfigState.LazyGit.RepoOverridesPossible {
+			statusBadge += " " + RenderBadge("REPO OVERRIDES", ColorBg, ColorYellow)
+		}
 	}
 	metaName := item.name
 	if item.icon != "" {
@@ -848,10 +861,28 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 
 	// Exactly 3 header lines before the fields area (matches manageLayout.rightHeaderLines).
 	actionLine := ""
-	if item.id != "global" && !item.installed {
+	if item.id == "lazygit" && lazyGitManageUIBlockReason(a) != "" {
+		text := "READ-ONLY"
+		if a.nativeConfigState.LazyGit.RepoOverridesPossible {
+			text += " • REPO OVERRIDES"
+		}
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render(text + " • " + lazyGitManageUIBlockReason(a))
+	} else if item.id != "global" && !item.installed {
 		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
 	} else if item.id != "global" && len(fields) == 0 {
 		actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
+	} else if item.id == "lazygit" {
+		switch {
+		case a.manageConfig.LazyGitPagerPreset == "delta":
+			reason := lazyGitDeltaAvailabilityReason(a)
+			if reason == "" {
+				actionLine = lipgloss.NewStyle().Foreground(ColorGreen).Render("Delta installed • uses delta --dark --paging=never")
+			} else {
+				actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render(reason)
+			}
+		case a.nativeConfigState.LazyGit.RepoOverridesPossible:
+			actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Global defaults; repository config may override them")
+		}
 	}
 
 	contentLines := []string{
@@ -894,6 +925,11 @@ func (a *App) nativeImportBadge(toolID string) string {
 		sources, fields, errText = a.nativeConfigState.Btop.Sources, len(a.nativeConfigState.Btop.Fields), a.nativeConfigState.BtopError
 	case "glow":
 		sources, fields, errText = a.nativeConfigState.Glow.Sources, len(a.nativeConfigState.Glow.Fields), a.nativeConfigState.GlowError
+	case "lazygit":
+		sources, fields, errText = a.nativeConfigState.LazyGit.Sources, len(a.nativeConfigState.LazyGit.Fields), a.nativeConfigState.LazyGitError
+		if errText == "" {
+			errText = a.nativeConfigState.LazyGit.ReadOnlyReason
+		}
 	default:
 		return ""
 	}
@@ -944,6 +980,39 @@ func renderManageFieldLineBase(f manageField, focused bool) string {
 		labelStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Width(18)
 		valueStyle = lipgloss.NewStyle().Foreground(ColorText).Bold(true)
 	}
+	if f.readOnlyReason != "" {
+		value := "—"
+		switch f.kind {
+		case manageFieldToggle:
+			value = "OFF"
+			if f.b != nil && *f.b {
+				value = "ON"
+			}
+		case manageFieldText, manageFieldOption:
+			if f.str != nil && *f.str != "" {
+				value = *f.str
+			}
+			if f.kind == manageFieldOption {
+				switch f.key + ":" + value {
+				case "color_preset:custom", "pager_preset:custom":
+					value = "Custom"
+				case "color_preset:standard":
+					value = "Standard"
+				case "color_preset:light-high-contrast":
+					value = "Light High Contrast"
+				case "pager_preset:builtin":
+					value = "Builtin"
+				case "pager_preset:delta":
+					value = "Delta (dark)"
+				}
+			}
+		case manageFieldNumber:
+			if f.n != nil {
+				value = fmt.Sprintf("%d%s", *f.n, f.unit)
+			}
+		}
+		return fmt.Sprintf("%s%s %s %s", cursor, labelStyle.Render(f.label), valueStyle.Render(value), lipgloss.NewStyle().Foreground(ColorYellow).Render("(read-only)"))
+	}
 
 	switch f.kind {
 	case manageFieldToggle:
@@ -973,6 +1042,9 @@ func renderManageFieldLineBase(f manageField, focused bool) string {
 	case manageFieldOption:
 		if f.str == nil || len(f.options) == 0 {
 			return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), valueStyle.Render("—"))
+		}
+		if f.unknownReadOnly && !oneOf(*f.str, f.options...) {
+			return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), lipgloss.NewStyle().Foreground(ColorYellow).Render("Custom (read-only)"))
 		}
 		leftArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("◀")
 		rightArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("▶")
@@ -1037,11 +1109,13 @@ func (a *App) manageStartEditing(field manageField) {
 	a.manageEditing = true
 	a.manageEditField = nil
 	a.manageEditNumber = nil
+	a.manageEditValidate = nil
 	if field.kind == manageFieldText {
 		if field.str == nil {
 			return
 		}
 		a.manageEditField = field.str
+		a.manageEditValidate = field.validateText
 		a.manageEditValue = *field.str
 	} else {
 		if field.n == nil {
@@ -1061,6 +1135,12 @@ func (a *App) manageCommitEditing() bool {
 		return false
 	}
 	if a.manageEditField != nil {
+		if a.manageEditValidate != nil {
+			if err := a.manageEditValidate(a.manageEditValue); err != nil {
+				a.manageStatus = err.Error()
+				return false
+			}
+		}
 		*a.manageEditField = a.manageEditValue
 	} else if a.manageEditNumber != nil {
 		n, err := strconv.ParseInt(strings.TrimSpace(a.manageEditValue), 10, strconv.IntSize)
@@ -1076,6 +1156,7 @@ func (a *App) manageCommitEditing() bool {
 	a.manageEditField = nil
 	a.manageEditNumber = nil
 	a.manageEditFieldKey = ""
+	a.manageEditValidate = nil
 	return true
 }
 
@@ -1084,6 +1165,7 @@ func (a *App) manageCancelEditing() {
 	a.manageEditField = nil
 	a.manageEditNumber = nil
 	a.manageEditFieldKey = ""
+	a.manageEditValidate = nil
 	a.manageEditValue = ""
 	a.manageEditCursor = 0
 }

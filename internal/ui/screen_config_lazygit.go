@@ -1,23 +1,26 @@
 package ui
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-// configLazyGitScreen is the migrated ScreenHandler for the LazyGit config
-// screen. Navigation + the back-to-menu transition are inherited from
-// configFieldNav; only the field layout (View) and value adjustment (adjust)
-// are screen-specific.
-//
-// Fields: 0=wide side panel (toggle), 1=mouse mode (toggle), 2=theme,
-// 3=paging backend.
+// configLazyGitScreen edits the four deliberately bounded global LazyGit
+// concepts. Arbitrary/custom native YAML is displayed but remains read-only.
+// Fields: 0=side-panel fraction, 1=mouse events, 2=color preset, 3=pager preset.
 type configLazyGitScreen struct {
 	configFieldNav
+	editing    bool
+	editValue  string
+	editCursor int
+	editError  string
 }
 
-// NewConfigLazyGitScreen creates a new LazyGit config screen handler.
 func NewConfigLazyGitScreen(ctx *ScreenContext) *configLazyGitScreen {
 	s := &configLazyGitScreen{}
 	s.id = ScreenConfigLazyGit
@@ -27,84 +30,238 @@ func NewConfigLazyGitScreen(ctx *ScreenContext) *configLazyGitScreen {
 	return s
 }
 
-// lazyGitAdjust applies a left/right/space change to the focused field. The
-// toggles (fields 0/1) respond to space; the theme (field 2) cycles on
-// left/right (h/l). Mirrors the legacy handleDeepDiveKey behavior exactly.
 func lazyGitAdjust(a *App, key string, fwd bool) {
 	cfg := a.deepDiveConfig
 	switch key {
 	case "left", "right", "h", "l":
 		switch a.configFieldIndex {
 		case 2:
-			opts := []string{"auto", "dark", "light"}
-			cfg.LazyGitTheme = cycleOption(opts, cfg.LazyGitTheme, fwd)
+			if oneOf(cfg.LazyGitColorPreset, "standard", "light-high-contrast") {
+				cfg.LazyGitColorPreset = cycleOption([]string{"standard", "light-high-contrast"}, cfg.LazyGitColorPreset, fwd)
+			}
 		case 3:
-			opts := []string{"delta", "diff-so-fancy", "never"}
-			cfg.LazyGitPaging = cycleOption(opts, cfg.LazyGitPaging, fwd)
+			if oneOf(cfg.LazyGitPagerPreset, "builtin", "delta") {
+				cfg.LazyGitPagerPreset = cycleOption([]string{"builtin", "delta"}, cfg.LazyGitPagerPreset, fwd)
+			}
 		}
 	case " ":
-		switch a.configFieldIndex {
-		case 0:
-			cfg.LazyGitSideBySide = !cfg.LazyGitSideBySide
-		case 1:
-			cfg.LazyGitMouseMode = !cfg.LazyGitMouseMode
+		if a.configFieldIndex == 1 {
+			cfg.LazyGitMouseEvents = !cfg.LazyGitMouseEvents
 		}
 	}
 }
 
-// Update delegates to the shared field-navigation handler.
 func (s *configLazyGitScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
+	blockedReason := lazyGitStandaloneUIBlockReason(s.App())
+	if blockedReason != "" && s.editing {
+		s.editing = false
+		s.editError = ""
+	}
+	if s.editing {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			s.updateEdit(key)
+		}
+		// Mouse and global hotkeys are deliberately inert while editing.
+		return s, nil
+	}
+	if blockedReason != "" {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "e", "left", "right", "h", "l", " ":
+				return s, nil
+			}
+		}
+		// Mouse still changes focus through the shared geometry handler, but never
+		// mutates a value. Enter still opens the reviewable blocked preview.
+		return s, s.handleMsg(msg)
+	}
+	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "e" && s.App().configFieldIndex == 0 {
+		s.startEdit()
+		return s, nil
+	}
 	return s, s.handleMsg(msg)
 }
 
-// View renders the LazyGit configuration screen.
+func (s *configLazyGitScreen) startEdit() {
+	s.editing = true
+	s.editValue = s.App().deepDiveConfig.LazyGitSidePanelWidth
+	s.editCursor = len([]rune(s.editValue))
+	s.editError = ""
+}
+
+func (s *configLazyGitScreen) updateEdit(key tea.KeyMsg) {
+	runes := []rune(s.editValue)
+	switch key.String() {
+	case "esc":
+		s.editing = false
+		s.editError = ""
+		return
+	case "left":
+		if s.editCursor > 0 {
+			s.editCursor--
+		}
+		return
+	case "right":
+		if s.editCursor < len(runes) {
+			s.editCursor++
+		}
+		return
+	case "home":
+		s.editCursor = 0
+		return
+	case "end":
+		s.editCursor = len(runes)
+		return
+	case "backspace":
+		if s.editCursor > 0 {
+			runes = append(runes[:s.editCursor-1], runes[s.editCursor:]...)
+			s.editCursor--
+		}
+	case "delete":
+		if s.editCursor < len(runes) {
+			runes = append(runes[:s.editCursor], runes[s.editCursor+1:]...)
+		}
+	case "enter":
+		if err := tools.ValidateLazyGitSidePanelWidth(s.editValue); err != nil {
+			s.editError = err.Error()
+			return
+		}
+		s.App().deepDiveConfig.LazyGitSidePanelWidth = s.editValue
+		s.editing = false
+		s.editError = ""
+		return
+	default:
+		if key.Type != tea.KeyRunes || key.Alt || len(key.Runes) == 0 {
+			return
+		}
+		for _, r := range key.Runes {
+			if (r < '0' || r > '9') && r != '.' {
+				return
+			}
+		}
+		next := make([]rune, 0, len(runes)+len(key.Runes))
+		next = append(next, runes[:s.editCursor]...)
+		next = append(next, key.Runes...)
+		next = append(next, runes[s.editCursor:]...)
+		runes = next
+		s.editCursor += len(key.Runes)
+	}
+	s.editValue = string(runes)
+	s.editError = ""
+}
+
+func (s *configLazyGitScreen) editDisplay() string {
+	runes := []rune(s.editValue)
+	cursor := clampInt(s.editCursor, 0, len(runes))
+	return string(runes[:cursor]) + "█" + string(runes[cursor:])
+}
+
+func lazyGitPresetDisplay(value string, labels map[string]string, focused, readOnly bool) string {
+	style := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	if focused {
+		style = style.Foreground(ColorCyan).Bold(true)
+	}
+	if label, ok := labels[value]; ok {
+		if readOnly {
+			return "    " + style.Render(label) + " " + lipgloss.NewStyle().Foreground(ColorYellow).Render("(read-only)")
+		}
+		return fmt.Sprintf("    ◀ %s ▶", style.Render(label))
+	}
+	return "    " + lipgloss.NewStyle().Foreground(ColorYellow).Render("Custom (read-only)")
+}
+
 func (s *configLazyGitScreen) View(width, height int) string {
 	a := s.App()
-	title := renderConfigTitle("", "LazyGit", "Simple terminal UI for Git commands")
-
+	compact := height < 30
+	title := renderConfigTitle("", "LazyGit", "Global Git terminal UI defaults")
+	if compact {
+		title = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("LazyGit")
+	}
 	cfg := a.deepDiveConfig
-	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(50))
+	blockedReason := lazyGitStandaloneUIBlockReason(a)
+	readOnly := blockedReason != ""
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(54))
+	separator := "\n\n"
+	if compact {
+		separator = "\n"
+	}
 
-	// Side panel width
 	rec.field(0)
-	rec.write(renderFieldLabel("Wide Side Panel", a.configFieldIndex == 0))
-	rec.write(renderToggle(cfg.LazyGitSideBySide, a.configFieldIndex == 0))
-	rec.write("\n\n")
+	rec.write(renderFieldLabel("Side Panel Fraction (e exact)", a.configFieldIndex == 0))
+	fraction := cfg.LazyGitSidePanelWidth
+	if s.editing {
+		fraction = s.editDisplay()
+	}
+	rec.write("    " + lipgloss.NewStyle().Foreground(ColorCyan).Render(fraction))
+	if readOnly {
+		rec.write(" " + lipgloss.NewStyle().Foreground(ColorYellow).Render("(read-only)"))
+	}
+	rec.write(separator)
 
-	// Mouse mode
 	rec.field(1)
-	rec.write(renderFieldLabel("Mouse Mode", a.configFieldIndex == 1))
-	rec.write(renderToggle(cfg.LazyGitMouseMode, a.configFieldIndex == 1))
-	rec.write("\n\n")
+	rec.write(renderFieldLabel("Mouse Events", a.configFieldIndex == 1))
+	if readOnly {
+		mouse := "OFF"
+		if cfg.LazyGitMouseEvents {
+			mouse = "ON"
+		}
+		rec.write("    " + mouse + " " + lipgloss.NewStyle().Foreground(ColorYellow).Render("(read-only)"))
+	} else {
+		rec.write(renderToggle(cfg.LazyGitMouseEvents, a.configFieldIndex == 1))
+	}
+	rec.write(separator)
 
-	// Theme
 	rec.field(2)
-	rec.write(renderFieldLabel("Theme", a.configFieldIndex == 2))
-	rec.write(renderOptionSelector(
-		[]string{"auto", "dark", "light"},
-		[]string{"Auto", "Dark", "Light"},
-		cfg.LazyGitTheme,
-		a.configFieldIndex == 2,
-	))
-	rec.write("\n\n")
+	rec.write(renderFieldLabel("Color Preset", a.configFieldIndex == 2))
+	rec.write(lazyGitPresetDisplay(cfg.LazyGitColorPreset, map[string]string{"standard": "Standard", "light-high-contrast": "Light High Contrast"}, a.configFieldIndex == 2, readOnly))
+	rec.write(separator)
 
-	// Paging backend
 	rec.field(3)
-	rec.write(renderFieldLabel("Paging", a.configFieldIndex == 3))
-	rec.write(renderOptionSelector(
-		[]string{"delta", "diff-so-fancy", "never"},
-		[]string{"Delta", "diff-so-fancy", "Disabled"},
-		cfg.LazyGitPaging,
-		a.configFieldIndex == 3,
-	))
+	rec.write(renderFieldLabel("Pager Preset", a.configFieldIndex == 3))
+	rec.write(lazyGitPresetDisplay(cfg.LazyGitPagerPreset, map[string]string{"builtin": "Builtin", "delta": "Delta (dark)"}, a.configFieldIndex == 3, readOnly))
+
+	notices := make([]string, 0, 3)
+	if blockedReason != "" {
+		notices = append(notices, lipgloss.NewStyle().Foreground(ColorYellow).Width(rec.innerWidth).Render("Read-only: "+blockedReason))
+	}
+	if a.nativeConfigState.LazyGit.RepoOverridesPossible {
+		notices = append(notices, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Repository config may override these global values."))
+	}
+	if cfg.LazyGitPagerPreset == "delta" {
+		if reason := lazyGitDeltaAvailabilityReason(a); reason != "" {
+			notices = append(notices, lipgloss.NewStyle().Foreground(ColorYellow).Render(truncatePlain(reason, 66)))
+		} else {
+			notices = append(notices, lipgloss.NewStyle().Foreground(ColorGreen).Render("Delta installed • delta --dark --paging=never"))
+		}
+	}
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
 	help := s.footer()
-	a.configFieldLayout = rec.finalize(width, height, title, box, help)
-
-	return lipgloss.Place(
-		width, height,
-		lipgloss.Center, lipgloss.Center,
-		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
-	)
+	if readOnly {
+		if a.configStandalone {
+			help = HelpStyle.Render("↑↓ navigate • enter blocked preview • esc/q cancel")
+		} else {
+			help = HelpStyle.Render("↑↓ navigate • enter/esc back • LazyGit settings read-only")
+		}
+	} else if !s.editing && a.configFieldIndex == 0 {
+		if a.configStandalone {
+			help = HelpStyle.Render("↑↓ navigate • e edit exact fraction • enter preview • esc/q cancel")
+		} else {
+			help = HelpStyle.Render("↑↓ navigate • ←→/space change • enter/esc back • e edit exact fraction")
+		}
+	}
+	if s.editing {
+		help = HelpStyle.Render("digits/dot edit • ←→ cursor • enter commit • esc cancel")
+		if s.editError != "" {
+			help = lipgloss.JoinVertical(lipgloss.Center, lipgloss.NewStyle().Foreground(ColorYellow).Render(s.editError), help)
+		}
+	}
+	parts := []string{title, "", box}
+	if len(notices) > 0 {
+		parts = append(parts, strings.Join(notices, "\n"))
+	}
+	parts = append(parts, "", help)
+	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
+	a.configFieldLayout = rec.finalizeComposed(width, height, content, box, lipgloss.Height(title)+1)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }

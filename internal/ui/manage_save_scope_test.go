@@ -136,7 +136,7 @@ func TestManageSaveThemeChangeCreatesNoToolConfigs(t *testing.T) {
 		".gitconfig",
 		".config/yazi/yazi.toml",
 		".config/fzf/fzf.zsh",
-		".config/lazygit/config.yml",
+		lazyGitTestRelPath(),
 		".config/btop/btop.conf",
 	} {
 		if _, err := os.Lstat(filepath.Join(home, filepath.FromSlash(rel))); !os.IsNotExist(err) {

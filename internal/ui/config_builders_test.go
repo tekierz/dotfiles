@@ -89,10 +89,10 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 	dd.FzfBorderStyle = "rounded"
 	dd.FzfPreviewWindow = "up:50%"
 
-	dd.LazyGitSideBySide = false
-	dd.LazyGitMouseMode = false
-	dd.LazyGitTheme = "dark"
-	dd.LazyGitPaging = "less"
+	dd.LazyGitSidePanelWidth = "0.42"
+	dd.LazyGitMouseEvents = false
+	dd.LazyGitColorPreset = "light-high-contrast"
+	dd.LazyGitPagerPreset = "delta"
 
 	dd.BtopTheme = "tokyo-night"
 	dd.BtopUpdateMs = 500
@@ -225,10 +225,10 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 	}
 
 	if got, want := lazygitConfigFrom(cfg), (tools.LazyGitConfig{
-		SideBySide: cfg.LazyGitSideBySide,
-		MouseMode:  cfg.LazyGitMouseMode,
-		Theme:      cfg.LazyGitTheme,
-		Paging:     cfg.LazyGitPaging,
+		SidePanelWidth: cfg.LazyGitSidePanelWidth,
+		MouseEvents:    cfg.LazyGitMouseEvents,
+		ColorPreset:    cfg.LazyGitColorPreset,
+		PagerPreset:    cfg.LazyGitPagerPreset,
 	}); got != want {
 		t.Errorf("lazygitConfigFrom mismatch:\n got %+v\nwant %+v", got, want)
 	}
@@ -297,7 +297,7 @@ func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 		{"fzf", ".config/fzf/fzf.zsh", func(th string) error {
 			return tools.WriteFzfConfig(fzfConfigFrom(cfg), th)
 		}},
-		{"lazygit", ".config/lazygit/config.yml", func(th string) error {
+		{"lazygit", lazyGitTestRelPath(), func(th string) error {
 			return tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), th)
 		}},
 		{"btop", ".config/btop/btop.conf", func(th string) error {

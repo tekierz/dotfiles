@@ -263,6 +263,7 @@ type configPlanSpec struct {
 	targetOwnership           map[string]operation.Ownership
 	currentTheme              string
 	allowBtopThemeReplacement bool
+	preflightBlockReason      string
 }
 
 func (a *App) refreshPendingInstallPlan() {
@@ -489,6 +490,22 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 			} else if a.nativeConfigState.GlowError != "" {
 				action.Disposition = operation.DispositionBlocked
 				action.Reason = "native Glow configuration could not be imported safely: " + a.nativeConfigState.GlowError
+			}
+		}
+		if spec.toolID == "lazygit" {
+			switch {
+			case a.nativeConfigState.PreferenceError != "":
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
+			case a.nativeConfigState.LazyGitError != "":
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "native LazyGit configuration could not be imported safely: " + a.nativeConfigState.LazyGitError
+			case a.nativeConfigState.LazyGit.ReadOnlyReason != "":
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = a.nativeConfigState.LazyGit.ReadOnlyReason
+			case cfg.LazyGitPagerPreset == "delta" && !cfg.CLIUtilities["delta"]:
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "select the Delta CLI utility before using the LazyGit Delta pager preset"
 			}
 		}
 		actions = append(actions, action)
@@ -797,7 +814,11 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig, allowBtopTheme
 		configPlanSpec{toolID: "fzf", targets: []string{".config/fzf/fzf.zsh"}, ownership: operation.OwnershipManagedFile, description: "write managed fzf configuration", fullFilePolicy: true},
 	)
 	if cfg.CLITools["lazygit"] {
-		specs = append(specs, configPlanSpec{toolID: "lazygit", targets: []string{".config/lazygit/config.yml"}, ownership: operation.OwnershipManagedFile, description: "write managed LazyGit configuration", fullFilePolicy: true})
+		path, blockReason := lazyGitPlanTarget(home)
+		if err := tools.ValidateLazyGitConfig(lazygitConfigFrom(cfg), theme); err != nil && blockReason == "" {
+			blockReason = err.Error()
+		}
+		specs = append(specs, configPlanSpec{toolID: "lazygit", targets: []string{path}, ownership: operation.OwnershipManagedFile, description: "write managed LazyGit configuration", fullFilePolicy: true, preflightBlockReason: blockReason})
 	}
 	if cfg.CLITools["btop"] {
 		btopCfg := btopConfigFrom(cfg)
@@ -828,6 +849,25 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig, allowBtopTheme
 	return specs, nil
 }
 
+// lazyGitPlanTarget keeps reviewed planning on the same dynamic global target
+// as the writer. When source discovery itself is unsafe, the action is still
+// rendered as blocked instead of turning the confirmation screen into an
+// opaque planning error; the fallback is observed only and can never execute.
+func lazyGitPlanTarget(home string) (string, string) {
+	path, err := tools.LazyGitConfigMutationPath()
+	if err == nil {
+		return planTargetPath(home, path), ""
+	}
+	if imported, importErr := tools.ImportLazyGitConfig(); importErr == nil {
+		for _, source := range imported.Sources {
+			if source.Active && source.Path != "" {
+				return planTargetPath(home, source.Path), err.Error()
+			}
+		}
+	}
+	return ".config/lazygit/config.yml", err.Error()
+}
+
 func planTargetPath(home, absolute string) string {
 	rel, err := filepath.Rel(home, absolute)
 	if err == nil && rel != "." && rel != "" && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
@@ -844,12 +884,18 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 	allExistingManaged := true
 	disposition := operation.DispositionApply
 	reason := ""
+	if spec.preflightBlockReason != "" {
+		disposition = operation.DispositionBlocked
+		reason = spec.preflightBlockReason
+	}
 	for _, rel := range spec.targets {
 		external := filepath.IsAbs(rel)
 		absolute := filepath.Join(home, filepath.FromSlash(rel))
 		if external {
 			disposition = operation.DispositionBlocked
-			reason = "configuration outside HOME cannot yet receive a verified rollback point"
+			if reason == "" {
+				reason = "configuration outside HOME cannot yet receive a verified rollback point"
+			}
 			continue
 		}
 		backups = append(backups, rel)
@@ -939,6 +985,18 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			}
 			observed.Managed = imported.Managed
 		}
+		if spec.toolID == "lazygit" {
+			imported, importErr := tools.InspectLazyGitConfigContent(absolute, content, revision.Exists())
+			switch {
+			case importErr != nil:
+				disposition = operation.DispositionBlocked
+				reason = "native LazyGit configuration cannot be replaced safely: " + importErr.Error()
+			case imported.ReadOnlyReason != "":
+				disposition = operation.DispositionBlocked
+				reason = imported.ReadOnlyReason
+			}
+			observed.Managed = imported.Managed
+		}
 		if observed.Exists {
 			combined.Exists = true
 			if !observed.Managed {
@@ -952,7 +1010,7 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			if spec.toolID == "yazi" && filepath.Base(rel) == "theme.toml" {
 				migratable = tools.IsLegacyGeneratedYaziThemeContent(content)
 			}
-			if !migratable {
+			if !migratable && disposition != operation.DispositionBlocked {
 				disposition = operation.DispositionBlocked
 				reason = "an existing config is not marked as a dotfiles-managed file"
 			}

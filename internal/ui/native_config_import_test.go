@@ -153,6 +153,244 @@ func TestNewAppHydratesNativeGlowSevenFieldsForManageAndStandalone(t *testing.T)
 	}
 }
 
+func TestNewAppHydratesNativeLazyGitFourFieldsForManageAndInstaller(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CONFIG_DIR", filepath.Join(home, ".config", "lazygit"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("LG_CONFIG_FILE", "")
+	path := filepath.Join(home, ".config", "lazygit", "config.yml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := `gui:
+  sidePanelWidth: 0.42
+  mouseEvents: false
+  theme:
+    activeBorderColor: [blue, bold]
+    inactiveBorderColor: [default]
+    selectedLineBgColor: [reverse]
+    defaultFgColor: [black]
+git:
+  pagers:
+    - colorArg: always
+      pager: delta --dark --paging=never
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(true)
+	if got := app.manageConfig; got.LazyGitSidePanelWidth != "0.42" || got.LazyGitMouseEvents || got.LazyGitColorPreset != "light-high-contrast" || got.LazyGitPagerPreset != "delta" {
+		t.Fatalf("Manage LazyGit hydration = %+v", got)
+	}
+	if got := app.deepDiveConfig; got.LazyGitSidePanelWidth != "0.42" || got.LazyGitMouseEvents || got.LazyGitColorPreset != "light-high-contrast" || got.LazyGitPagerPreset != "delta" {
+		t.Fatalf("installer LazyGit hydration = %+v", got)
+	}
+	state := app.NativeConfigState()
+	if len(state.LazyGit.Fields) != 4 || state.LazyGit.Fields[tools.LazyGitFieldSidePanelWidth].Path != path || !state.LazyGit.RepoOverridesPossible {
+		t.Fatalf("LazyGit native state = %+v", state.LazyGit)
+	}
+	if state.LazyGit.ReadOnlyReason == "" || !strings.Contains(state.LazyGit.ReadOnlyReason, "arbitrary native") {
+		t.Fatalf("arbitrary native source was not disclosed read-only: %+v", state.LazyGit)
+	}
+}
+
+func TestNewAppHydratesLazyGitConfigFileChainReadOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CONFIG_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	one, two := filepath.Join(home, "one.yml"), filepath.Join(home, "two.yml")
+	if err := os.WriteFile(one, []byte("gui:\n  sidePanelWidth: 0.4\n  mouseEvents: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(two, []byte("git:\n  pagers: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LG_CONFIG_FILE", one+","+two)
+
+	app := NewApp(true)
+	if got := app.manageConfig; got.LazyGitSidePanelWidth != "0.4" || got.LazyGitMouseEvents || got.LazyGitPagerPreset != "builtin" {
+		t.Fatalf("LG_CONFIG_FILE hydration = %+v", got)
+	}
+	state := app.NativeConfigState().LazyGit
+	if len(state.Sources) != 2 || !state.Sources[0].Active || !state.Sources[1].Active || !strings.Contains(state.ReadOnlyReason, "LG_CONFIG_FILE") {
+		t.Fatalf("LG_CONFIG_FILE state = %+v", state)
+	}
+}
+
+func TestNewAppDisplaysCustomLazyGitValuesReadOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CONFIG_DIR", filepath.Join(home, ".config", "lazygit"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("LG_CONFIG_FILE", "")
+	path := filepath.Join(home, ".config", "lazygit", "config.yml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := `gui:
+  theme:
+    activeBorderColor: [red, bold]
+    inactiveBorderColor: [yellow]
+git:
+  pagers:
+    - pager: bat --paging=never
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(true)
+	if got := app.manageConfig; got.LazyGitColorPreset != "custom" || got.LazyGitPagerPreset != "custom" {
+		t.Fatalf("custom native values were hidden: %+v", got)
+	}
+	if got := app.deepDiveConfig; got.LazyGitColorPreset != "custom" || got.LazyGitPagerPreset != "custom" {
+		t.Fatalf("custom installer values were hidden: %+v", got)
+	}
+	state := app.NativeConfigState().LazyGit
+	if !strings.Contains(state.ReadOnlyReason, "custom LazyGit colors") || !strings.Contains(state.ReadOnlyReason, "custom LazyGit pagers") {
+		t.Fatalf("custom read-only disclosure = %q", state.ReadOnlyReason)
+	}
+}
+
+func TestLazyGitSchemaFourMigratesUnambiguousPrototypePreferencesWithoutNativeSource(t *testing.T) {
+	for _, tc := range []struct {
+		name, theme, paging, wantColor, wantPager string
+	}{
+		{"dark and delta", "dark", "delta", "standard", "delta"},
+		{"light and disabled", "light", "never", "light-high-contrast", "builtin"},
+		{"custom prototype pager", "auto", "diff-so-fancy", "standard", "custom"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("CONFIG_DIR", filepath.Join(home, ".config", "lazygit"))
+			t.Setenv("XDG_CONFIG_HOME", "")
+			t.Setenv("LG_CONFIG_FILE", "")
+			path := filepath.Join(config.ToolsDir(), "manage.json")
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte(fmt.Sprintf(`{"NativeImportSchemaVersion":4,"LazyGitTheme":%q,"LazyGitPaging":%q,"LazyGitSideBySide":false}`, tc.theme, tc.paging))
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			app := NewApp(true)
+			if got := app.manageConfig; got.LazyGitColorPreset != tc.wantColor || got.LazyGitPagerPreset != tc.wantPager || got.LazyGitSidePanelWidth != "0.3333" {
+				t.Fatalf("migration = %+v", got)
+			}
+		})
+	}
+}
+
+func TestLazyGitSchemaFiveExplicitPreferencesWinForManagedWritableSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CONFIG_DIR", filepath.Join(home, ".config", "lazygit"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("LG_CONFIG_FILE", "")
+	native := filepath.Join(home, ".config", "lazygit", "config.yml")
+	if err := os.MkdirAll(filepath.Dir(native), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	generated := tools.GenerateLazyGitConfig(tools.LazyGitConfig{SidePanelWidth: "0.4", MouseEvents: false, ColorPreset: "standard", PagerPreset: "builtin"}, "ignored")
+	if err := os.WriteFile(native, []byte(generated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manage := filepath.Join(config.ToolsDir(), "manage.json")
+	if err := os.MkdirAll(filepath.Dir(manage), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manage, []byte(`{"NativeImportSchemaVersion":5,"LazyGitSidePanelWidth":"0.75","LazyGitMouseEvents":true,"LazyGitColorPreset":"light-high-contrast","LazyGitPagerPreset":"delta"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(true)
+	if got := app.manageConfig; got.LazyGitSidePanelWidth != "0.75" || !got.LazyGitMouseEvents || got.LazyGitColorPreset != "light-high-contrast" || got.LazyGitPagerPreset != "delta" {
+		t.Fatalf("schema five explicit preferences = %+v", got)
+	}
+	state := app.NativeConfigState().LazyGit
+	if !state.Managed || state.ReadOnlyReason != "" || !state.RepoOverridesPossible {
+		t.Fatalf("managed source state = %+v", state)
+	}
+}
+
+func TestLazyGitSchemaFiveExplicitPreferencesWinWhenNativeMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CONFIG_DIR", filepath.Join(home, ".config", "lazygit"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("LG_CONFIG_FILE", "")
+	manage := filepath.Join(config.ToolsDir(), "manage.json")
+	if err := os.MkdirAll(filepath.Dir(manage), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manage, []byte(`{"NativeImportSchemaVersion":5,"LazyGitSidePanelWidth":"0.75","LazyGitMouseEvents":false,"LazyGitColorPreset":"light-high-contrast","LazyGitPagerPreset":"delta"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(true)
+	if got := app.manageConfig; got.LazyGitSidePanelWidth != "0.75" || got.LazyGitMouseEvents || got.LazyGitColorPreset != "light-high-contrast" || got.LazyGitPagerPreset != "delta" {
+		t.Fatalf("missing native source replaced explicit preferences: %+v", got)
+	}
+}
+
+func TestLazyGitSchemaFiveArbitraryNativeHydrationOutranksSavedPreferences(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CONFIG_DIR", filepath.Join(home, ".config", "lazygit"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("LG_CONFIG_FILE", "")
+	native := filepath.Join(home, ".config", "lazygit", "config.yml")
+	if err := os.MkdirAll(filepath.Dir(native), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("gui:\n  sidePanelWidth: 0.42\n  mouseEvents: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manage := filepath.Join(config.ToolsDir(), "manage.json")
+	if err := os.MkdirAll(filepath.Dir(manage), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manage, []byte(`{"NativeImportSchemaVersion":5,"LazyGitSidePanelWidth":"0.75","LazyGitMouseEvents":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(true)
+	if got := app.manageConfig; got.LazyGitSidePanelWidth != "0.42" || got.LazyGitMouseEvents {
+		t.Fatalf("arbitrary native source was masked by stale saved preferences: %+v", got)
+	}
+	if app.NativeConfigState().LazyGit.ReadOnlyReason == "" {
+		t.Fatal("arbitrary native source was not disclosed read-only")
+	}
+}
+
+func TestMalformedLazyGitYAMLIsVisibleAndDoesNotOverlayDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CONFIG_DIR", filepath.Join(home, ".config", "lazygit"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("LG_CONFIG_FILE", "")
+	path := filepath.Join(home, ".config", "lazygit", "config.yml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("gui:\n  sidePanelWidth: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(true)
+	defaults := NewManageConfig()
+	if got := app.manageConfig; got.LazyGitSidePanelWidth != defaults.LazyGitSidePanelWidth || got.LazyGitMouseEvents != defaults.LazyGitMouseEvents || got.LazyGitColorPreset != defaults.LazyGitColorPreset || got.LazyGitPagerPreset != defaults.LazyGitPagerPreset {
+		t.Fatalf("malformed LazyGit YAML changed desired state: %+v", got)
+	}
+	if app.NativeConfigState().LazyGitError == "" {
+		t.Fatal("malformed LazyGit YAML error was not exposed")
+	}
+}
+
 func TestGlowSchemaFourExplicitWinsAndLegacyPagerMigratesWithoutNativeSource(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -476,15 +714,30 @@ func TestNativeConfigStateReturnsDefensiveCopies(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("CONFIG_DIR", filepath.Join(home, ".config", "lazygit"))
+	t.Setenv("LG_CONFIG_FILE", "")
 	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[init]\n\tdefaultBranch = develop\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lazyGitPath := filepath.Join(home, ".config", "lazygit", "config.yml")
+	if err := os.MkdirAll(filepath.Dir(lazyGitPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lazyGitPath, []byte("gui:\n  sidePanelWidth: 0.42\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	app := NewApp(true)
 	first := app.NativeConfigState()
 	delete(first.Git.Fields, tools.GitFieldDefaultBranch)
 	first.Git.Sources[0].Path = "mutated"
+	delete(first.LazyGit.Fields, tools.LazyGitFieldSidePanelWidth)
+	first.LazyGit.Sources[0].Path = "mutated"
+	first.LazyGit.Warnings = append(first.LazyGit.Warnings, "mutated")
 	second := app.NativeConfigState()
 	if _, ok := second.Git.Fields[tools.GitFieldDefaultBranch]; !ok || second.Git.Sources[0].Path == "mutated" {
 		t.Fatal("NativeConfigState exposed mutable internal maps or slices")
+	}
+	if _, ok := second.LazyGit.Fields[tools.LazyGitFieldSidePanelWidth]; !ok || second.LazyGit.Sources[0].Path == "mutated" || len(second.LazyGit.Warnings) != 0 || !second.LazyGit.RepoOverridesPossible {
+		t.Fatal("NativeConfigState exposed mutable LazyGit state")
 	}
 }
