@@ -59,6 +59,13 @@ observability land before new integrations or broad UI work.
   - [x] Add deterministic, versioned `status --json` v1 directly from the installation-health
         collector, with redacted public evidence, explicit uncollected capabilities, and stable
         success/failure exit behavior. `plan --json`, apply, and the support bundle remain open.
+  - [ ] **Active:** implement the reviewed `plan --json` contract in
+        `tasks/plan-json-contract.md`: public projection tests first, then a neutral headless
+        install-only planner accepting explicit repeated `--tool` intent with no defaults or
+        `App`, followed by a complete private authority fingerprint and the Cobra command.
+        Directly marshaling `operation.Plan` or wrapping the private TUI planner is prohibited.
+  - [ ] Add hash-bound noninteractive apply only after the complete authority fingerprint;
+        preserve fresh replan, lock, journal, mandatory backup, revalidation, and rollback.
 - [ ] Generate settings/help/hotkeys/docs/tests from tool manifests where practical.
 
 ### Batch 4 — integrations, distribution, and deployment gates
@@ -196,6 +203,9 @@ observability land before new integrations or broad UI work.
 - [ ] Specify installation-profile loading, validation, versioning, portability, preview, and
       failure behavior now, but defer implementation until installer and integration behavior
       has passed owner-hardware verification.
+  - Profiles remain explicitly deferred until deterministic `plan --json`, hash-bound apply,
+    and owner-hardware install/repair/drift/rollback verification are complete. A future profile
+    is an explicit intent source and may not bypass the reviewed plan/apply authority chain.
 
 The supported deep-dive registry is now exact for Codex, OpenCode, Pi, T3 Code, Cursor
 desktop, and the existing service/app integrations. Cursor Agent CLI is registered as a
