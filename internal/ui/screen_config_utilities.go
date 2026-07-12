@@ -38,7 +38,8 @@ func NewConfigUtilitiesScreen(ctx *ScreenContext) *configUtilitiesScreen {
 	s.setIndex = func(a *App, v int) { a.utilityIndex = v }
 	s.toggle = func(a *App, id string) {
 		// Don't allow toggling if already installed.
-		if !a.manageInstalled[id] {
+		installed, _ := a.installationUtilityInstalled(id)
+		if !installed {
 			a.deepDiveConfig.Utilities[id] = !a.deepDiveConfig.Utilities[id]
 		}
 	}
@@ -67,7 +68,7 @@ func (s *configUtilitiesScreen) View(width, height int) string {
 		rec.field(i)
 		focused := a.utilityIndex == i
 		enabled := cfg.Utilities[util.id]
-		installed := a.manageInstalled[util.id]
+		installed, _ := a.installationUtilityInstalled(util.id)
 
 		cursor := "  "
 		if focused && !installed {

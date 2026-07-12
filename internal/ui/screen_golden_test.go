@@ -50,6 +50,7 @@ func newGoldenContext(t *testing.T) *ScreenContext {
 	withTempHome(t)
 
 	app := NewApp(true)
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 
 	ctx := &ScreenContext{
 		app:               app,
@@ -260,8 +261,7 @@ func TestFileTreeScreenGolden(t *testing.T) {
 
 	// Pre-populate the install cache so the pure View reads deterministic state
 	// regardless of the host environment.
-	ctx.app.manageInstalled = map[string]bool{}
-	ctx.app.manageInstalledReady = true
+	seedTypedReadyInstallCache(t, ctx.app, map[string]bool{})
 
 	screen := NewFileTreeScreen(ctx)
 	_ = screen.Init()
@@ -341,9 +341,7 @@ func newDeepDiveContext(t *testing.T) *ScreenContext {
 	if ctx.app.deepDiveConfig == nil {
 		ctx.app.deepDiveConfig = NewDeepDiveConfig()
 	}
-	ctx.app.manageInstalled = map[string]bool{}
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
+	seedTypedReadyInstallCache(t, ctx.app, map[string]bool{})
 	return ctx
 }
 
@@ -633,8 +631,7 @@ func TestConfigGhosttyReachableViaManager(t *testing.T) {
 	}
 	app.screenMgr.SetSize(80, 24)
 	// Pre-populate cache so any install-aware screens render deterministically.
-	app.manageInstalled = map[string]bool{}
-	app.manageInstalledReady = true
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenConfigGhostty)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenConfigGhostty")
@@ -1445,12 +1442,10 @@ func newManageContext(t *testing.T) *ScreenContext {
 		ctx.app.manageConfig = NewManageConfig()
 	}
 	// Seeded install-status cache (deterministic; no package-manager calls).
-	ctx.app.manageInstalled = map[string]bool{
+	seedTypedReadyInstallCache(t, ctx.app, map[string]bool{
 		"ghostty": true,
 		"tmux":    true,
-	}
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
+	})
 	// The dual-pane layout/render reads a.width/a.height directly.
 	ctx.app.width = ctx.Width
 	ctx.app.height = ctx.Height
@@ -1560,9 +1555,7 @@ func TestManageScreenReachableViaManager(t *testing.T) {
 	app.screenMgr.SetSize(80, 24)
 	app.width, app.height = 80, 24
 	// Seed the cache so the render shows the panes, not the loading spinner.
-	app.manageInstalled = map[string]bool{"ghostty": true}
-	app.manageInstalledReady = true
-	app.installCacheLoading = false
+	seedTypedReadyInstallCache(t, app, map[string]bool{"ghostty": true})
 
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenManage)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenManage")

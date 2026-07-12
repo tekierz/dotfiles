@@ -51,9 +51,7 @@ func newPlanTestApp(t *testing.T) (*App, string, toolInstallRuntime) {
 	t.Helper()
 	home := withTempHome(t)
 	app := NewApp(true)
-	app.manageInstalledReady = true
-	app.installCacheLoading = false
-	app.manageInstalled = map[string]bool{}
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 	runtime := registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
 	runtime.backupTargets = func([]backup.Target) (autoBackupResult, error) { return autoBackupResult{}, nil }
 	return app, home, runtime
@@ -891,8 +889,7 @@ func TestBuildInstallPlanBlocksHelperCollisionButAcceptsExactOwnedBytes(t *testi
 
 func TestFileTreeRefusesBlockedPlan(t *testing.T) {
 	ctx := newGoldenContext(t)
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
+	seedTypedReadyInstallCache(t, ctx.app, map[string]bool{})
 	path := filepath.Join(os.Getenv("HOME"), ".config", "yazi", "yazi.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
@@ -916,8 +913,7 @@ func TestFileTreeRefusesBlockedPlan(t *testing.T) {
 
 func TestFileTreeViewportCanReachFinalReviewedLine(t *testing.T) {
 	ctx := newGoldenContext(t)
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
+	seedTypedReadyInstallCache(t, ctx.app, map[string]bool{})
 	screen := NewFileTreeScreen(ctx)
 	_ = screen.Init()
 	if ctx.app.pendingInstallPlan == nil || ctx.app.pendingInstallPlan.hasBlocked() {

@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
@@ -247,9 +248,18 @@ type App struct {
 	manageConfigBaselineTheme string
 	managePane                int // 0 = tools pane, 1 = settings pane (ScreenManage)
 	// Cached install status for tools to avoid running package-manager checks every render.
-	manageInstalled      map[string]bool
-	manageInstalledReady bool
-	installCacheLoading  bool // Currently loading cache asynchronously
+	manageInstalled                map[string]bool
+	manageInstalledReady           bool
+	installCacheLoading            bool // Currently loading cache asynchronously
+	installationSnapshot           health.InstallationSnapshot
+	installationSnapshotGeneration uint64
+	installationSnapshotReady      bool
+	installationSnapshotLoading    bool
+	installationSnapshotStale      bool
+	installationSnapshotTerminal   bool
+	installationSnapshotError      string
+	installationSnapshotUtilities  map[string]bool
+	installationSnapshotCosmetic   map[string]bool
 	// Manage screen scrolling
 	manageToolsScroll  int
 	manageFieldsScroll int
@@ -1047,24 +1057,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tickUI()
 	}
 
-	// installCacheDoneMsg carries the result of the app-wide install-status cache,
-	// which is preloaded at startup and shared by the deep-dive/manage screens. It
-	// can complete while ANY screen is active, so apply it globally before
-	// delegating to the manager (managed screens would otherwise drop it and the
-	// cache would never mark ready).
-	if m, ok := msg.(installCacheDoneMsg); ok {
-		a.manageInstalled = m.installed
-		a.manageInstalledReady = true
-		a.installCacheLoading = false
-		if a.screen == ScreenFileTree {
-			a.refreshPendingInstallPlan()
-		}
+	// Installation snapshot results can complete while any screen is active, so
+	// apply the single generation-bound reducer before delegating to a screen.
+	if m, ok := msg.(installationSnapshotDoneMsg); ok {
+		a.applyInstallationSnapshotDone(m)
 		return a, nil
 	}
 
 	// Streaming/terminal async messages for the package-update and tool-install
 	// flows are handled GLOBALLY here, before delegating, exactly like
-	// installCacheDoneMsg above. Their re-arm/finalize/cache-refresh chain
+	// installationSnapshotDoneMsg above. Their re-arm/finalize/cache-refresh chain
 	// outlives the originating screen (the worker goroutine + package-manager
 	// subprocess do too), so handling them only in the originating screen's
 	// Update would drop the message when the user has navigated away — wedging

@@ -46,11 +46,6 @@ type updateCheckDoneMsg struct {
 	err     error
 }
 
-// installCacheDoneMsg indicates the async install cache loading completed
-type installCacheDoneMsg struct {
-	installed map[string]bool
-}
-
 // updateRunDoneMsg indicates an update operation completed
 type updateRunDoneMsg struct {
 	results []pkg.UpdateResult

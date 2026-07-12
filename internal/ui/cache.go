@@ -18,33 +18,6 @@ func checkUpdatesCmd() tea.Cmd {
 	}
 }
 
-// loadInstallCacheCmd loads installation status for all tools asynchronously
-// This uses batch checking where supported (brew list --versions) for better performance
-func loadInstallCacheCmd() tea.Cmd {
-	return func() tea.Msg {
-		reg := tools.GetRegistry()
-		all := reg.All()
-		mgr := pkg.DetectManager()
-		platform := pkg.DetectPlatform()
-		installed := tools.ObserveInstallations(context.Background(), all, mgr, platform)
-
-		// Check utility scripts in ~/.local/bin (always fast - just file existence)
-		home := os.Getenv("HOME")
-		if home == "" {
-			home, _ = os.UserHomeDir()
-		}
-		if home != "" {
-			binDir := filepath.Join(home, ".local", "bin")
-			for _, util := range []string{"hk", "caff", "sshh"} {
-				_, err := os.Stat(filepath.Join(binDir, util))
-				installed[util] = err == nil
-			}
-		}
-
-		return installCacheDoneMsg{installed: installed}
-	}
-}
-
 // appendInstallLog adds a line to the install log buffer (max 500 lines)
 func (a *App) appendInstallLog(line string) {
 	const maxLogLines = 500
@@ -107,9 +80,8 @@ func (a *App) ensureInstallCache() {
 // startInstallCacheLoad begins async cache loading if not already loading or ready.
 // Returns a command to start loading, or nil if cache is ready/loading.
 func (a *App) startInstallCacheLoad() tea.Cmd {
-	if a.manageInstalledReady || a.installCacheLoading {
+	if a.installationSnapshotLoading || (a.installationSnapshotReady && a.manageInstalledReady) {
 		return nil
 	}
-	a.installCacheLoading = true
-	return loadInstallCacheCmd()
+	return a.beginInstallationSnapshotLoad(defaultInstallationSnapshotCacheRuntime())
 }
