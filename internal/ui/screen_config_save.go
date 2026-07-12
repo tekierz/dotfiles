@@ -112,6 +112,9 @@ func (s *configSaveConfirmScreen) View(width, height int) string {
 				continue
 			}
 			body = append(body, "", fmt.Sprintf("Ownership: %s", action.Ownership))
+			for _, detail := range orderedTargetOwnership(action) {
+				body = append(body, fmt.Sprintf("  %s: %s", detail.target, detail.ownership))
+			}
 			if action.Disposition == operation.DispositionApply && len(plan.backupTargets()) != 0 {
 				body = append(body, "Backup: mandatory before mutation")
 			}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -16,7 +17,7 @@ import (
 	"unicode"
 )
 
-const CurrentPlanSchemaVersion = 1
+const CurrentPlanSchemaVersion = 2
 
 var ErrInvalidPlan = errors.New("invalid operation plan")
 
@@ -44,6 +45,7 @@ const (
 	OwnershipPackageManager  Ownership = "package_manager"
 	OwnershipManagedFile     Ownership = "managed_file"
 	OwnershipManagedFragment Ownership = "managed_fragment"
+	OwnershipManagedSet      Ownership = "managed_set"
 	OwnershipUser            Ownership = "user"
 )
 
@@ -115,22 +117,23 @@ type Observation struct {
 // Existing file mutations must carry a durable backup target and proven
 // ownership. Blocked actions remain in the plan so omissions are visible.
 type Action struct {
-	ID              string         `json:"id"`
-	Kind            Kind           `json:"kind"`
-	ToolID          string         `json:"tool_id,omitempty"`
-	Target          string         `json:"target"`
-	Description     string         `json:"description"`
-	Disposition     Disposition    `json:"disposition"`
-	Reason          string         `json:"reason,omitempty"`
-	DesiredDigest   string         `json:"desired_digest"`
-	Ownership       Ownership      `json:"ownership"`
-	Reversibility   Reversibility  `json:"reversibility"`
-	BackupTarget    string         `json:"backup_target,omitempty"`
-	BackupTargets   []string       `json:"backup_targets,omitempty"`
-	Observation     Observation    `json:"observation"`
-	Observations    []Observation  `json:"observations,omitempty"`
-	InstallRecipe   *InstallRecipe `json:"install_recipe,omitempty"`
-	InstallDetected *bool          `json:"install_detected,omitempty"`
+	ID              string               `json:"id"`
+	Kind            Kind                 `json:"kind"`
+	ToolID          string               `json:"tool_id,omitempty"`
+	Target          string               `json:"target"`
+	Description     string               `json:"description"`
+	Disposition     Disposition          `json:"disposition"`
+	Reason          string               `json:"reason,omitempty"`
+	DesiredDigest   string               `json:"desired_digest"`
+	Ownership       Ownership            `json:"ownership"`
+	TargetOwnership map[string]Ownership `json:"target_ownership,omitempty"`
+	Reversibility   Reversibility        `json:"reversibility"`
+	BackupTarget    string               `json:"backup_target,omitempty"`
+	BackupTargets   []string             `json:"backup_targets,omitempty"`
+	Observation     Observation          `json:"observation"`
+	Observations    []Observation        `json:"observations,omitempty"`
+	InstallRecipe   *InstallRecipe       `json:"install_recipe,omitempty"`
+	InstallDetected *bool                `json:"install_detected,omitempty"`
 }
 
 type planDocument struct {
@@ -201,12 +204,53 @@ func validateDocument(doc planDocument) error {
 			return fmt.Errorf("%w: %s must explain %s disposition", ErrInvalidPlan, prefix, action.Disposition)
 		}
 		if action.Disposition == DispositionApply && action.Kind == KindWriteConfig {
-			if action.Ownership != OwnershipManagedFile && action.Ownership != OwnershipManagedFragment {
+			if action.Ownership != OwnershipManagedFile && action.Ownership != OwnershipManagedFragment && action.Ownership != OwnershipManagedSet {
 				return fmt.Errorf("%w: %s cannot apply config without managed ownership", ErrInvalidPlan, prefix)
 			}
 			if action.Observation.Exists && action.BackupTarget == "" && len(action.BackupTargets) == 0 {
 				return fmt.Errorf("%w: %s mutates an existing config without a backup target", ErrInvalidPlan, prefix)
 			}
+		}
+		if action.Ownership == OwnershipManagedSet {
+			if action.Kind != KindWriteConfig {
+				return fmt.Errorf("%w: %s managed set is only valid for config writes", ErrInvalidPlan, prefix)
+			}
+			if len(action.TargetOwnership) < 2 {
+				return fmt.Errorf("%w: %s managed set requires at least two target ownership entries", ErrInvalidPlan, prefix)
+			}
+			observed := make(map[string]bool, len(action.Observations))
+			for _, observation := range action.Observations {
+				observed[observation.Source] = true
+			}
+			backupCoverage := make(map[string]bool, len(action.BackupTargets)+1)
+			if action.BackupTarget != "" {
+				backupCoverage[action.BackupTarget] = true
+			}
+			for _, target := range action.BackupTargets {
+				backupCoverage[target] = true
+			}
+			hasFile, hasFragment := false, false
+			for target, ownership := range action.TargetOwnership {
+				if target == "" || strings.ContainsRune(target, '\x00') || (ownership != OwnershipManagedFile && ownership != OwnershipManagedFragment) {
+					return fmt.Errorf("%w: %s has invalid managed-set target ownership", ErrInvalidPlan, prefix)
+				}
+				if action.Disposition == DispositionApply && !observed[target] {
+					return fmt.Errorf("%w: %s managed-set target %q has no matching observation", ErrInvalidPlan, prefix, target)
+				}
+				if action.Disposition == DispositionApply && !backupCoverage[target] {
+					return fmt.Errorf("%w: %s managed-set target %q has no exact rollback target", ErrInvalidPlan, prefix, target)
+				}
+				hasFile = hasFile || ownership == OwnershipManagedFile
+				hasFragment = hasFragment || ownership == OwnershipManagedFragment
+			}
+			if !hasFile || !hasFragment {
+				return fmt.Errorf("%w: %s managed set must mix managed_file and managed_fragment ownership", ErrInvalidPlan, prefix)
+			}
+			if action.Disposition == DispositionApply && len(observed) != len(action.TargetOwnership) {
+				return fmt.Errorf("%w: %s managed-set ownership does not cover every observed target", ErrInvalidPlan, prefix)
+			}
+		} else if len(action.TargetOwnership) != 0 {
+			return fmt.Errorf("%w: %s target ownership requires managed_set summary ownership", ErrInvalidPlan, prefix)
 		}
 		if action.Kind == KindInstallTool {
 			if action.InstallRecipe == nil || action.InstallDetected == nil {
@@ -408,7 +452,7 @@ func validDisposition(value Disposition) bool {
 
 func validOwnership(value Ownership) bool {
 	return value == OwnershipUnknown || value == OwnershipPackageManager || value == OwnershipManagedFile ||
-		value == OwnershipManagedFragment || value == OwnershipUser
+		value == OwnershipManagedFragment || value == OwnershipManagedSet || value == OwnershipUser
 }
 
 func validReversibility(value Reversibility) bool {
@@ -425,6 +469,7 @@ func cloneActions(actions []Action) []Action {
 	for index := range cloned {
 		cloned[index].BackupTargets = slices.Clone(actions[index].BackupTargets)
 		cloned[index].Observations = slices.Clone(actions[index].Observations)
+		cloned[index].TargetOwnership = maps.Clone(actions[index].TargetOwnership)
 		if actions[index].InstallRecipe != nil {
 			recipe := CloneInstallRecipe(*actions[index].InstallRecipe)
 			cloned[index].InstallRecipe = &recipe

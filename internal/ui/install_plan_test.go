@@ -136,6 +136,81 @@ func TestInstallPlanTargetsMatchDynamicWriters(t *testing.T) {
 	}
 }
 
+func TestReviewedInstallerWritesBtopToAcceptedXDGTargets(t *testing.T) {
+	home := withTempHome(t)
+	xdg := filepath.Join(home, "xdg-config")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if err := os.MkdirAll(filepath.Join(xdg, "btop", "themes"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	installed := make(map[string]bool)
+	for _, tool := range tools.GetRegistry().All() {
+		installed[tool.ID()] = true
+	}
+	app := NewApp(true)
+	app.manageInstalledReady = true
+	app.manageInstalled = installed
+	app.deepDiveConfig.CLITools["btop"] = true
+	runtime := registryRuntime(pkg.PlatformMacOS, installed)
+	plan, err := buildInstallPlan(app, runtime, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	btopAction := planActionByID(t, plan, "config:btop")
+	wantConfigRel := "xdg-config/btop/btop.conf"
+	wantThemeRel := "xdg-config/btop/themes/catppuccin-mocha.theme"
+	if !slices.Contains(btopAction.BackupTargets, wantConfigRel) || !slices.Contains(btopAction.BackupTargets, wantThemeRel) {
+		t.Fatalf("reviewed XDG targets = %v", btopAction.BackupTargets)
+	}
+	keep := map[string]bool{"state:parents": true, "state:global": true, "config:btop": true}
+	var actions []operation.Action
+	authority := make(map[string]map[string]acceptedTarget)
+	for _, action := range plan.actions() {
+		if keep[action.ID] || action.Kind == operation.KindInstallFile {
+			actions = append(actions, action)
+			authority[action.ID] = plan.authority[action.ID]
+		}
+	}
+	document, err := operation.NewPlan(time.Now(), actions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed := &installPlan{
+		document:      document,
+		configTools:   []string{"btop"},
+		selectedTools: []string{},
+		config:        plan.config,
+		theme:         plan.theme,
+		navStyle:      plan.navStyle,
+		animations:    plan.animations,
+		globalConfig:  plan.globalConfig,
+		authority:     authority,
+		parentDirs:    plan.parentDirs,
+		statePlan:     plan.statePlan,
+	}
+	runtime.backupTargetsWithState = backupPlanTargetsWithState
+	runtime.backupTargets = nil
+	events := make(chan installEventMsg, 256)
+	runInstallWorkerFromPlanWithRuntime(context.Background(), events, reviewed, runtime, true)
+	var terminal installEventMsg
+	for event := range events {
+		if event.done {
+			terminal = event
+		}
+	}
+	if terminal.err != nil {
+		t.Fatalf("reviewed installer result = %v\n%s", terminal.err, terminal.context)
+	}
+	for _, path := range []string{filepath.Join(home, filepath.FromSlash(wantConfigRel)), filepath.Join(home, filepath.FromSlash(wantThemeRel))} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("reviewed XDG target was not written: %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "btop", "btop.conf")); !os.IsNotExist(err) {
+		t.Fatalf("installer wrote inactive HOME fallback: %v", err)
+	}
+}
+
 func TestInstallExecutionUsesExactAcceptedGhosttyTarget(t *testing.T) {
 	app, home, runtime := newPlanTestApp(t)
 	plan, err := buildInstallPlan(app, runtime, time.Now())

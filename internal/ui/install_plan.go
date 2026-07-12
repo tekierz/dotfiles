@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -254,11 +255,14 @@ func (p *installPlan) acceptedGhosttyConfigTarget() (string, error) {
 }
 
 type configPlanSpec struct {
-	toolID         string
-	targets        []string
-	ownership      operation.Ownership
-	description    string
-	fullFilePolicy bool
+	toolID                    string
+	targets                   []string
+	ownership                 operation.Ownership
+	description               string
+	fullFilePolicy            bool
+	targetOwnership           map[string]operation.Ownership
+	currentTheme              string
+	allowBtopThemeReplacement bool
 }
 
 func (a *App) refreshPendingInstallPlan() {
@@ -416,7 +420,8 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 		}
 	}
 
-	configSpecs, err := installerConfigSpecs(home, a.theme, cfg)
+	allowBtopThemeReplacement := a.nativeConfigState.BtopThemeExplicit || cfg.BtopTheme != manageConfigToDeepDive(&a.manageConfigBaseline).BtopTheme || (cfg.BtopTheme == "auto" && a.theme != a.manageConfigBaselineTheme)
+	configSpecs, err := installerConfigSpecs(home, a.theme, cfg, allowBtopThemeReplacement)
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +471,15 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 			} else if a.nativeConfigState.TmuxError != "" {
 				action.Disposition = operation.DispositionBlocked
 				action.Reason = "native tmux configuration could not be imported safely: " + a.nativeConfigState.TmuxError
+			}
+		}
+		if spec.toolID == "btop" {
+			if a.nativeConfigState.PreferenceError != "" {
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
+			} else if a.nativeConfigState.BtopError != "" && (!a.nativeConfigState.BtopThemeUnsupported || !spec.allowBtopThemeReplacement) {
+				action.Disposition = operation.DispositionBlocked
+				action.Reason = "native btop configuration could not be imported safely: " + a.nativeConfigState.BtopError
 			}
 		}
 		actions = append(actions, action)
@@ -743,7 +757,7 @@ func scriptsForPlan(name string) []byte {
 	return []byte(scripts.GetScript(name))
 }
 
-func installerConfigSpecs(home, theme string, cfg DeepDiveConfig) ([]configPlanSpec, error) {
+func installerConfigSpecs(home, theme string, cfg DeepDiveConfig, allowBtopThemeReplacement bool) ([]configPlanSpec, error) {
 	tmuxPath, err := tools.TmuxConfigMutationPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve tmux mutation path: %w", err)
@@ -752,9 +766,9 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig) ([]configPlanS
 	if cfg.TmuxTPMEnabled {
 		tmuxTargets = append(tmuxTargets, ".tmux/plugins/tpm")
 	}
-	specs := []configPlanSpec{{"tmux", tmuxTargets, operation.OwnershipManagedFragment, "merge managed tmux settings and install selected TPM plugins", false}}
+	specs := []configPlanSpec{{toolID: "tmux", targets: tmuxTargets, ownership: operation.OwnershipManagedFragment, description: "merge managed tmux settings and install selected TPM plugins"}}
 	if cfg.CLITools["claude-code"] || cfg.Utilities["claude-code"] {
-		specs = append(specs, configPlanSpec{"claude-code", []string{".claude.json"}, operation.OwnershipManagedFragment, "merge selected Claude Code MCP servers", false})
+		specs = append(specs, configPlanSpec{toolID: "claude-code", targets: []string{".claude.json"}, ownership: operation.OwnershipManagedFragment, description: "merge selected Claude Code MCP servers"})
 	}
 	ghosttyPath, err := tools.GhosttyConfigMutationPath()
 	if err != nil {
@@ -762,27 +776,35 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig) ([]configPlanS
 	}
 	ghosttyTarget := planTargetPath(home, ghosttyPath)
 	specs = append(specs,
-		configPlanSpec{"ghostty", []string{ghosttyTarget}, operation.OwnershipManagedFragment, "merge managed Ghostty settings", false},
-		configPlanSpec{"zsh", []string{".zshrc"}, operation.OwnershipManagedFragment, "merge managed Zsh settings", false},
+		configPlanSpec{toolID: "ghostty", targets: []string{ghosttyTarget}, ownership: operation.OwnershipManagedFragment, description: "merge managed Ghostty settings"},
+		configPlanSpec{toolID: "zsh", targets: []string{".zshrc"}, ownership: operation.OwnershipManagedFragment, description: "merge managed Zsh settings"},
 	)
 	if cfg.NeovimConfig != "custom" {
-		specs = append(specs, configPlanSpec{"neovim", []string{".config/nvim"}, operation.OwnershipManagedFile, "install selected Neovim preset", true})
+		specs = append(specs, configPlanSpec{toolID: "neovim", targets: []string{".config/nvim"}, ownership: operation.OwnershipManagedFile, description: "install selected Neovim preset", fullFilePolicy: true})
 	}
 	specs = append(specs,
-		configPlanSpec{"git", []string{".gitconfig", ".config/dotfiles/git/config"}, operation.OwnershipManagedFragment, "install managed Git include", false},
-		configPlanSpec{"yazi", []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml", ".config/yazi/theme.toml"}, operation.OwnershipManagedFile, "write managed Yazi configuration", true},
-		configPlanSpec{"fzf", []string{".config/fzf/fzf.zsh"}, operation.OwnershipManagedFile, "write managed fzf configuration", true},
+		configPlanSpec{toolID: "git", targets: []string{".gitconfig", ".config/dotfiles/git/config"}, ownership: operation.OwnershipManagedFragment, description: "install managed Git include"},
+		configPlanSpec{toolID: "yazi", targets: []string{".config/yazi/yazi.toml", ".config/yazi/keymap.toml", ".config/yazi/theme.toml"}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi configuration", fullFilePolicy: true},
+		configPlanSpec{toolID: "fzf", targets: []string{".config/fzf/fzf.zsh"}, ownership: operation.OwnershipManagedFile, description: "write managed fzf configuration", fullFilePolicy: true},
 	)
 	if cfg.CLITools["lazygit"] {
-		specs = append(specs, configPlanSpec{"lazygit", []string{".config/lazygit/config.yml"}, operation.OwnershipManagedFile, "write managed LazyGit configuration", true})
+		specs = append(specs, configPlanSpec{toolID: "lazygit", targets: []string{".config/lazygit/config.yml"}, ownership: operation.OwnershipManagedFile, description: "write managed LazyGit configuration", fullFilePolicy: true})
 	}
 	if cfg.CLITools["btop"] {
 		btopCfg := btopConfigFrom(cfg)
 		if err := tools.ValidateBtopConfig(btopCfg, theme); err != nil {
 			return nil, fmt.Errorf("validate planned btop configuration: %w", err)
 		}
-		artifactName := tools.BtopThemeArtifactName(btopCfg, theme)
-		specs = append(specs, configPlanSpec{"btop", []string{".config/btop/btop.conf", filepath.ToSlash(filepath.Join(".config", "btop", "themes", artifactName+".theme"))}, operation.OwnershipManagedFile, "write managed btop configuration", true})
+		configPath, err := tools.BtopConfigMutationPath()
+		if err != nil {
+			return nil, fmt.Errorf("resolve planned btop config: %w", err)
+		}
+		themePath, err := tools.BtopThemeMutationPath(btopCfg, theme)
+		if err != nil {
+			return nil, fmt.Errorf("resolve planned btop theme: %w", err)
+		}
+		configTarget, themeTarget := planTargetPath(home, configPath), planTargetPath(home, themePath)
+		specs = append(specs, configPlanSpec{toolID: "btop", targets: []string{configTarget, themeTarget}, ownership: operation.OwnershipManagedSet, description: "merge managed btop settings and write generated theme", targetOwnership: map[string]operation.Ownership{configTarget: operation.OwnershipManagedFragment, themeTarget: operation.OwnershipManagedFile}, currentTheme: theme, allowBtopThemeReplacement: allowBtopThemeReplacement})
 	}
 	if cfg.CLITools["glow"] {
 		if err := tools.ValidateGlowConfig(glowConfigFrom(cfg), theme); err != nil {
@@ -792,7 +814,7 @@ func installerConfigSpecs(home, theme string, cfg DeepDiveConfig) ([]configPlanS
 		if len(paths) != 1 {
 			return nil, fmt.Errorf("glow registry returned %d config paths", len(paths))
 		}
-		specs = append(specs, configPlanSpec{"glow", []string{planTargetPath(home, paths[0])}, operation.OwnershipManagedFile, "write managed Glow configuration", true})
+		specs = append(specs, configPlanSpec{toolID: "glow", targets: []string{planTargetPath(home, paths[0])}, ownership: operation.OwnershipManagedFile, description: "write managed Glow configuration", fullFilePolicy: true})
 	}
 	return specs, nil
 }
@@ -881,6 +903,21 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			observed.Managed = tools.IsManagedGeneratedConfigContent(content)
 		}
 		authority[rel] = acceptedTarget{kind: acceptedFileTarget, file: revision, parents: parents, data: slices.Clone(content)}
+		if spec.toolID == "btop" && spec.targetOwnership[rel] == operation.OwnershipManagedFragment {
+			imported, importErr := tools.InspectBtopConfigContent(absolute, content, revision.Exists())
+			switch {
+			case importErr != nil:
+				disposition = operation.DispositionBlocked
+				reason = "native btop configuration cannot be merged safely: " + importErr.Error()
+			case len(imported.Warnings) != 0:
+				disposition = operation.DispositionBlocked
+				reason = "native btop configuration cannot be merged safely: " + strings.Join(imported.Warnings, "; ")
+			case btopImportedThemeNeedsReplacement(imported, spec.currentTheme) && !spec.allowBtopThemeReplacement:
+				disposition = operation.DispositionBlocked
+				reason = "native btop color_theme cannot be represented by the dashboard without explicit replacement"
+			}
+			observed.Managed = imported.Managed
+		}
 		if observed.Exists {
 			combined.Exists = true
 			if !observed.Managed {
@@ -888,7 +925,7 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 			}
 		}
 		observations = append(observations, operation.Observation{Exists: observed.Exists, Source: rel, Digest: observed.Digest, Managed: observed.Managed})
-		managedWholeFile := spec.fullFilePolicy || (spec.toolID == "neovim" && rel == ".config/nvim/lua/custom/options.lua")
+		managedWholeFile := spec.fullFilePolicy || spec.targetOwnership[rel] == operation.OwnershipManagedFile || (spec.toolID == "neovim" && rel == ".config/nvim/lua/custom/options.lua")
 		if managedWholeFile && observed.Exists && !observed.Managed {
 			migratable := false
 			if spec.toolID == "yazi" && filepath.Base(rel) == "theme.toml" {
@@ -903,19 +940,20 @@ func planConfigAction(home string, spec configPlanSpec, desiredDigest string) (o
 	combined.Managed = combined.Exists && allExistingManaged
 	combined.Digest = digestPlanValue(observations)
 	return operation.Action{
-		ID:            "config:" + spec.toolID,
-		Kind:          operation.KindWriteConfig,
-		ToolID:        spec.toolID,
-		Target:        strings.Join(spec.targets, ", "),
-		Description:   spec.description,
-		Disposition:   disposition,
-		Reason:        reason,
-		DesiredDigest: desiredDigest,
-		Ownership:     spec.ownership,
-		Reversibility: operation.ReversibilityBackup,
-		BackupTargets: backups,
-		Observation:   combined,
-		Observations:  observations,
+		ID:              "config:" + spec.toolID,
+		Kind:            operation.KindWriteConfig,
+		ToolID:          spec.toolID,
+		Target:          strings.Join(spec.targets, ", "),
+		Description:     spec.description,
+		Disposition:     disposition,
+		Reason:          reason,
+		DesiredDigest:   desiredDigest,
+		Ownership:       spec.ownership,
+		TargetOwnership: maps.Clone(spec.targetOwnership),
+		Reversibility:   operation.ReversibilityBackup,
+		BackupTargets:   backups,
+		Observation:     combined,
+		Observations:    observations,
 	}, authority, nil
 }
 

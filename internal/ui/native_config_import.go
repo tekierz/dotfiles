@@ -15,14 +15,18 @@ import (
 // per-field provenance to the UI model. Applied is true only on first adoption,
 // when no manage.json exists; explicit saved product preferences always win.
 type NativeManageConfigState struct {
-	Git             tools.GitConfigImport
-	Ghostty         tools.GhosttyConfigImport
-	Tmux            tools.TmuxConfigImport
-	GitError        string
-	GhosttyError    string
-	TmuxError       string
-	Applied         bool
-	PreferenceError string
+	Git                  tools.GitConfigImport
+	Ghostty              tools.GhosttyConfigImport
+	Tmux                 tools.TmuxConfigImport
+	Btop                 tools.BtopConfigImport
+	GitError             string
+	GhosttyError         string
+	TmuxError            string
+	BtopError            string
+	BtopThemeExplicit    bool
+	BtopThemeUnsupported bool
+	Applied              bool
+	PreferenceError      string
 }
 
 // NativeConfigState returns a defensive copy suitable for status/provenance UI.
@@ -38,6 +42,9 @@ func (a *App) NativeConfigState() NativeManageConfigState {
 	state.Tmux.Fields = cloneConfigProvenance(state.Tmux.Fields)
 	state.Tmux.Sources = append([]tools.ConfigImportSource(nil), state.Tmux.Sources...)
 	state.Tmux.Warnings = append([]string(nil), state.Tmux.Warnings...)
+	state.Btop.Fields = cloneConfigProvenance(state.Btop.Fields)
+	state.Btop.Sources = append([]tools.ConfigImportSource(nil), state.Btop.Sources...)
+	state.Btop.Warnings = append([]string(nil), state.Btop.Warnings...)
 	return state
 }
 
@@ -94,7 +101,7 @@ func inspectManagePreferencePresence() managePreferencePresence {
 		// One-time adoption migration for prototype-era full-struct saves. Those
 		// files had no way to distinguish deliberate choices from copied defaults.
 		for key := range fields {
-			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") {
+			if strings.HasPrefix(key, "Git") || strings.HasPrefix(key, "Ghostty") || strings.HasPrefix(key, "Ghossty") || strings.HasPrefix(key, "Tmux") || strings.HasPrefix(key, "Btop") {
 				delete(fields, key)
 			}
 		}
@@ -107,12 +114,22 @@ func inspectManagePreferencePresence() managePreferencePresence {
 				delete(fields, key)
 			}
 		}
+		fallthrough
+	case 2:
+		// Native btop import was introduced in schema v3. Older serialized
+		// defaults are not proof of an explicit btop preference.
+		for key := range fields {
+			if strings.HasPrefix(key, "Btop") {
+				delete(fields, key)
+			}
+		}
 	}
 	return managePreferencePresence{exists: true, fields: fields}
 }
 
-func observeNativeManageConfig(target *ManageConfig, preferences managePreferencePresence) NativeManageConfigState {
+func observeNativeManageConfig(target *ManageConfig, preferences managePreferencePresence, theme string) NativeManageConfigState {
 	state := NativeManageConfigState{}
+	state.BtopThemeExplicit = preferences.fields["BtopTheme"]
 	var before ManageConfig
 	if target != nil {
 		before = *target
@@ -156,11 +173,69 @@ func observeNativeManageConfig(target *ManageConfig, preferences managePreferenc
 			overlayImportedTmuxConfig(target, tmuxImport, preferences.fields)
 		}
 	}
+	btopImport, err := tools.ImportBtopConfig()
+	switch {
+	case err != nil:
+		state.BtopError = err.Error()
+	case len(btopImport.Warnings) != 0:
+		state.Btop = btopImport
+		state.BtopError = "refusing ambiguous btop import: " + strings.Join(btopImport.Warnings, "; ")
+	case btopImportedThemeNeedsReplacement(btopImport, theme) && !preferences.fields["BtopTheme"]:
+		state.Btop = btopImport
+		state.BtopThemeUnsupported = true
+		state.BtopError = "native btop color_theme cannot be represented by the dashboard without changing it"
+	default:
+		state.Btop = btopImport
+		if preferences.err == nil {
+			overlayImportedBtopConfig(target, btopImport, preferences.fields, theme)
+		}
+	}
 	state.Applied = preferences.err == nil && target != nil && *target != before
 	if preferences.err != nil {
 		state.PreferenceError = preferences.err.Error()
 	}
 	return state
+}
+
+func btopImportedThemeNeedsReplacement(imported tools.BtopConfigImport, theme string) bool {
+	if _, ok := imported.Fields[tools.BtopFieldTheme]; !ok {
+		for _, source := range imported.Sources {
+			if source.Active && source.Exists && !source.Managed {
+				return true
+			}
+		}
+		return false
+	}
+	value := imported.Config.Theme
+	return value != theme && !oneOf(value, "dracula", "gruvbox", "nord", "tokyo-night")
+}
+
+func overlayImportedBtopConfig(target *ManageConfig, imported tools.BtopConfigImport, explicit map[string]bool, theme string) {
+	if target == nil {
+		return
+	}
+	if _, ok := imported.Fields[tools.BtopFieldTheme]; ok && !explicit["BtopTheme"] {
+		if imported.Config.Theme == theme {
+			target.BtopTheme = "auto"
+		} else if oneOf(imported.Config.Theme, "dracula", "gruvbox", "nord", "tokyo-night") {
+			target.BtopTheme = imported.Config.Theme
+		}
+	}
+	if _, ok := imported.Fields[tools.BtopFieldUpdateMs]; ok && !explicit["BtopUpdateMs"] {
+		target.BtopUpdateMs = imported.Config.UpdateMs
+	}
+	if _, ok := imported.Fields[tools.BtopFieldShowTemp]; ok && !explicit["BtopShowTemp"] {
+		target.BtopShowTemp = imported.Config.ShowTemp
+	}
+	if _, ok := imported.Fields[tools.BtopFieldGraphType]; ok && !explicit["BtopGraphSymbol"] {
+		target.BtopGraphSymbol = imported.Config.GraphType
+	}
+	if _, ok := imported.Fields[tools.BtopFieldTempScale]; ok && !explicit["BtopTempScale"] {
+		target.BtopTempScale = imported.Config.TempScale
+	}
+	if _, ok := imported.Fields[tools.BtopFieldShownBoxes]; ok && !explicit["BtopShownBoxes"] {
+		target.BtopShownBoxes = imported.Config.ShownBoxes
+	}
 }
 
 func overlayImportedTmuxConfig(target *ManageConfig, imported tools.TmuxConfigImport, explicit map[string]bool) {

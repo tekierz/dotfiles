@@ -168,7 +168,8 @@ func buildManageSavePlan(a *App, now time.Time) (*manageSavePlan, error) {
 	authority := make(map[string]map[string]acceptedTarget)
 	configTools := make([]string, 0, len(changed))
 	for _, toolID := range changed {
-		spec, reason, specErr := standaloneConfigPlanSpec(home, a.theme, deep, toolID)
+		allowBtopThemeReplacement := a.nativeConfigState.BtopThemeExplicit || snapshot.BtopTheme != baseline.BtopTheme || (snapshot.BtopTheme == "auto" && a.theme != a.manageConfigBaselineTheme)
+		spec, reason, specErr := standaloneConfigPlanSpec(home, a.theme, deep, toolID, allowBtopThemeReplacement)
 		if specErr != nil {
 			return nil, specErr
 		}
@@ -184,7 +185,7 @@ func buildManageSavePlan(a *App, now time.Time) (*manageSavePlan, error) {
 		if actionErr != nil {
 			return nil, actionErr
 		}
-		if nativeReason := standaloneNativeBlockReason(a, toolID); nativeReason != "" {
+		if nativeReason := standaloneNativeBlockReason(a, toolID, allowBtopThemeReplacement); nativeReason != "" {
 			action.Disposition = operation.DispositionBlocked
 			action.Reason = nativeReason
 			accepted = nil

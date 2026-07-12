@@ -121,6 +121,10 @@ func (s *manageSaveConfirmScreen) View(width, height int) string {
 			lines = append(lines, strings.Split(ansi.Wrap(label, lineWidth, " /-_"), "\n")...)
 			meta := fmt.Sprintf("    ownership: %s • rollback: %s", action.Ownership, action.Reversibility)
 			lines = append(lines, strings.Split(ansi.Wrap(meta, lineWidth, " /-_"), "\n")...)
+			for _, target := range orderedTargetOwnership(action) {
+				detail := fmt.Sprintf("      %s: %s", target.target, target.ownership)
+				lines = append(lines, strings.Split(ansi.Wrap(detail, lineWidth, " /-_"), "\n")...)
+			}
 			if action.Reason != "" {
 				lines = append(lines, strings.Split(ansi.Wrap("    "+action.Reason, lineWidth, " /-_"), "\n")...)
 			}

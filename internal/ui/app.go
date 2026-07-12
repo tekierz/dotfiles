@@ -484,7 +484,7 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 	if cfg, err := config.LoadToolConfig("manage", NewManageConfig); err == nil && cfg != nil {
 		app.manageConfig = cfg
 	}
-	app.nativeConfigState = observeNativeManageConfig(app.manageConfig, managePreferences)
+	app.nativeConfigState = observeNativeManageConfig(app.manageConfig, managePreferences, app.theme)
 	// The installer and Manage dashboard must share one hydrated desired model;
 	// otherwise the wizard would write compiled defaults over imported values.
 	hydrated := manageConfigToDeepDive(app.manageConfig)

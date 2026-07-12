@@ -285,7 +285,8 @@ func buildStandaloneConfigPlan(a *App, now time.Time) (*installPlan, error) {
 		return blockedStandaloneConfigPlan(now, statePlan, cfg, a.theme, "unknown", "the selected screen has no standalone config writer")
 	}
 
-	spec, blockedReason, err := standaloneConfigPlanSpec(home, a.theme, cfg, toolID)
+	allowBtopThemeReplacement := a.nativeConfigState.BtopThemeExplicit || cfg.BtopTheme != manageConfigToDeepDive(&a.manageConfigBaseline).BtopTheme || (cfg.BtopTheme == "auto" && a.theme != a.manageConfigBaselineTheme)
+	spec, blockedReason, err := standaloneConfigPlanSpec(home, a.theme, cfg, toolID, allowBtopThemeReplacement)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +302,7 @@ func buildStandaloneConfigPlan(a *App, now time.Time) (*installPlan, error) {
 		return nil, err
 	}
 
-	if reason := standaloneNativeBlockReason(a, toolID); reason != "" {
+	if reason := standaloneNativeBlockReason(a, toolID, allowBtopThemeReplacement); reason != "" {
 		action.Disposition = operation.DispositionBlocked
 		action.Reason = reason
 		actionAuthority = nil
@@ -363,7 +364,7 @@ func blockedStandaloneConfigPlan(now time.Time, statePlan *operation.StatePlan, 
 	return &installPlan{document: document, config: cfg, theme: theme, authority: map[string]map[string]acceptedTarget{}, statePlan: statePlan}, nil
 }
 
-func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID string) (configPlanSpec, string, error) {
+func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID string, allowBtopThemeReplacement bool) (configPlanSpec, string, error) {
 	spec := configPlanSpec{toolID: toolID}
 	switch toolID {
 	case "ghostty":
@@ -395,8 +396,19 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 		if err := tools.ValidateBtopConfig(btopCfg, theme); err != nil {
 			return spec, "", err
 		}
-		artifact := tools.BtopThemeArtifactName(btopCfg, theme) + ".theme"
-		spec.targets, spec.ownership, spec.description, spec.fullFilePolicy = []string{".config/btop/btop.conf", filepath.ToSlash(filepath.Join(".config", "btop", "themes", artifact))}, operation.OwnershipManagedFile, "write managed btop configuration", true
+		configPath, err := tools.BtopConfigMutationPath()
+		if err != nil {
+			return spec, "", err
+		}
+		themePath, err := tools.BtopThemeMutationPath(btopCfg, theme)
+		if err != nil {
+			return spec, "", err
+		}
+		configTarget, themeTarget := planTargetPath(home, configPath), planTargetPath(home, themePath)
+		spec.targets, spec.ownership, spec.description = []string{configTarget, themeTarget}, operation.OwnershipManagedSet, "merge managed btop settings and write generated theme"
+		spec.targetOwnership = map[string]operation.Ownership{configTarget: operation.OwnershipManagedFragment, themeTarget: operation.OwnershipManagedFile}
+		spec.currentTheme = theme
+		spec.allowBtopThemeReplacement = allowBtopThemeReplacement
 	case "glow":
 		if err := tools.ValidateGlowConfig(glowConfigFrom(cfg), theme); err != nil {
 			return spec, "", err
@@ -414,8 +426,8 @@ func standaloneConfigPlanSpec(home, theme string, cfg DeepDiveConfig, toolID str
 	return spec, "", nil
 }
 
-func standaloneNativeBlockReason(a *App, toolID string) string {
-	if a.nativeConfigState.PreferenceError != "" && (toolID == "ghostty" || toolID == "tmux" || toolID == "git") {
+func standaloneNativeBlockReason(a *App, toolID string, allowBtopThemeReplacement bool) string {
+	if a.nativeConfigState.PreferenceError != "" && (toolID == "ghostty" || toolID == "tmux" || toolID == "git" || toolID == "btop") {
 		return "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
 	}
 	switch toolID {
@@ -430,6 +442,10 @@ func standaloneNativeBlockReason(a *App, toolID string) string {
 	case "git":
 		if a.nativeConfigState.GitError != "" {
 			return "native Git configuration could not be imported safely: " + a.nativeConfigState.GitError
+		}
+	case "btop":
+		if a.nativeConfigState.BtopError != "" && (!a.nativeConfigState.BtopThemeUnsupported || !allowBtopThemeReplacement) {
+			return "native btop configuration could not be imported safely: " + a.nativeConfigState.BtopError
 		}
 	}
 	return ""
@@ -609,8 +625,16 @@ func writeStandaloneConfigAtAuthority(toolID string, cfg DeepDiveConfig, theme s
 		return one(tools.WriteLazyGitConfigAtAuthorityTracked(lazygitConfigFrom(cfg), theme, revision, parents, locker))
 	case "btop":
 		btopCfg := btopConfigFrom(cfg)
-		configRel := ".config/btop/btop.conf"
-		themeRel := filepath.ToSlash(filepath.Join(".config", "btop", "themes", tools.BtopThemeArtifactName(btopCfg, theme)+".theme"))
+		configPath, err := tools.BtopConfigMutationPath()
+		if err != nil {
+			return nil, err
+		}
+		themePath, err := tools.BtopThemeMutationPath(btopCfg, theme)
+		if err != nil {
+			return nil, err
+		}
+		configRel := planTargetPath(home, configPath)
+		themeRel := planTargetPath(home, themePath)
 		configRevision, configParents, err := file(configRel)
 		if err != nil {
 			return nil, err

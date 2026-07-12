@@ -660,6 +660,7 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"neovim.go": 1,
 	}
 	expectedLockedUpdates := map[string]int{
+		"btop.go":    1,
 		"ghostty.go": 1,
 		"git.go":     2,
 		"neovim.go":  1,
@@ -763,9 +764,9 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"unix.Unlinkat":                                                    true,
 	}
 	expectedProtectedHelperCalls := map[string]int{
-		"btop.go:preflightToolConfigAtAuthority":                          1,
-		"btop.go:writeToolConfigAtAuthorityTracked":                       2,
-		"btop.go:writeToolConfigTracked":                                  2,
+		"btop.go:replaceToolConfigAtRevisionTracked":                      1,
+		"btop.go:replaceToolConfigAtRevisionNoCreateAuthorizedTracked":    2,
+		"btop.go:writeToolConfigTracked":                                  1,
 		"fzf.go:writeToolConfigAtRevisionTracked":                         1,
 		"fzf.go:writeToolConfigAtAuthorityTracked":                        1,
 		"fzf.go:writeToolConfigTracked":                                   1,

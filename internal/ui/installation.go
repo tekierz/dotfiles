@@ -1285,17 +1285,25 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	if cfg.CLITools["btop"] {
 		toolConfigPhase("btop", "\n▶ Configuring Btop...", func() ([]tools.MutationEvidence, error) {
 			if persistJournal {
-				artifactName := tools.BtopThemeArtifactName(btopConfigFrom(cfg), theme)
-				themeRel := filepath.ToSlash(filepath.Join(".config", "btop", "themes", artifactName+".theme"))
+				btopCfg := btopConfigFrom(cfg)
+				configPath, err := tools.BtopConfigMutationPath()
+				if err != nil {
+					return nil, err
+				}
+				themePath, err := tools.BtopThemeMutationPath(btopCfg, theme)
+				if err != nil {
+					return nil, err
+				}
+				themeRel := planTargetPath(home, themePath)
 				themeAccepted, err := executionTarget("config:btop", themeRel)
 				if err != nil {
 					return nil, err
 				}
-				configAccepted, err := executionTarget("config:btop", ".config/btop/btop.conf")
+				configAccepted, err := executionTarget("config:btop", planTargetPath(home, configPath))
 				if err != nil {
 					return nil, err
 				}
-				evidence, err := tools.WriteBtopConfigAtAuthoritiesTracked(btopConfigFrom(cfg), theme, themeAccepted.file, themeAccepted.parents, configAccepted.file, configAccepted.parents, boundLocker)
+				evidence, err := tools.WriteBtopConfigAtAuthoritiesTracked(btopCfg, theme, themeAccepted.file, themeAccepted.parents, configAccepted.file, configAccepted.parents, boundLocker)
 				return evidence, wrapMutationError("failed to configure Btop", err)
 			}
 			evidence, err := tools.WriteBtopConfigTracked(btopConfigFrom(cfg), theme)

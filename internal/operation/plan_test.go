@@ -82,6 +82,71 @@ func TestInstallRecipeIsPublicImmutableAndDigestBound(t *testing.T) {
 	}
 }
 
+func TestManagedSetOwnershipIsValidatedHashedAndImmutable(t *testing.T) {
+	action := validConfigAction()
+	action.Target = "btop.conf, theme"
+	action.Ownership = OwnershipManagedSet
+	action.BackupTarget = ""
+	action.BackupTargets = []string{"btop.conf", "theme"}
+	action.Observations = []Observation{{Source: "btop.conf", Exists: true, Digest: strings.Repeat("c", 64)}, {Source: "theme"}}
+	action.TargetOwnership = map[string]Ownership{"btop.conf": OwnershipManagedFragment, "theme": OwnershipManagedFile}
+	plan, err := NewPlan(time.Now(), []Action{action})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := plan.Hash()
+	action.TargetOwnership["theme"] = OwnershipManagedFragment
+	copyOne := plan.Actions()
+	copyOne[0].TargetOwnership["theme"] = OwnershipManagedFragment
+	if got := plan.Actions()[0].TargetOwnership["theme"]; got != OwnershipManagedFile || plan.Hash() != hash {
+		t.Fatalf("managed-set ownership was mutable: %s hash=%s", got, plan.Hash())
+	}
+	changed := plan.Actions()[0]
+	changed.TargetOwnership["theme"] = OwnershipManagedFragment
+	changed.TargetOwnership["btop.conf"] = OwnershipManagedFile
+	changedPlan, err := NewPlan(plan.CreatedAt(), []Action{changed})
+	if err != nil || changedPlan.Hash() == hash {
+		t.Fatalf("target ownership did not affect plan hash: %v", err)
+	}
+}
+
+func TestManagedSetOwnershipRejectsIncompleteOrMisclassifiedMaps(t *testing.T) {
+	base := validConfigAction()
+	base.Ownership = OwnershipManagedSet
+	base.BackupTarget = ""
+	base.BackupTargets = []string{"one", "two"}
+	base.Observations = []Observation{{Source: "one"}, {Source: "two"}}
+	for name, ownership := range map[string]map[string]Ownership{
+		"missing target": {"one": OwnershipManagedFragment},
+		"unknown target": {"one": OwnershipManagedFragment, "other": OwnershipManagedFile},
+		"invalid child":  {"one": OwnershipManagedFragment, "two": OwnershipUser},
+	} {
+		t.Run(name, func(t *testing.T) {
+			action := base
+			action.TargetOwnership = ownership
+			if _, err := NewPlan(time.Now(), []Action{action}); !errors.Is(err, ErrInvalidPlan) {
+				t.Fatalf("managed set error = %v", err)
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*Action){
+		"homogeneous set": func(action *Action) {
+			action.TargetOwnership = map[string]Ownership{"one": OwnershipManagedFile, "two": OwnershipManagedFile}
+		},
+		"wrong kind":     func(action *Action) { action.Kind = KindUpdateState },
+		"missing backup": func(action *Action) { action.BackupTargets = []string{"one"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			action := base
+			action.TargetOwnership = map[string]Ownership{"one": OwnershipManagedFragment, "two": OwnershipManagedFile}
+			mutate(&action)
+			if _, err := NewPlan(time.Now(), []Action{action}); !errors.Is(err, ErrInvalidPlan) {
+				t.Fatalf("managed set error = %v", err)
+			}
+		})
+	}
+}
+
 func TestInstallRecipeRejectsGenericOrAmbiguousExecution(t *testing.T) {
 	for _, mutate := range []func(*Action){
 		func(a *Action) { a.InstallRecipe.Steps[0].Kind = "shell" },

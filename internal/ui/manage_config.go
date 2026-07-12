@@ -1,6 +1,6 @@
 package ui
 
-const currentNativeImportSchemaVersion = 2
+const currentNativeImportSchemaVersion = 3
 
 // ManageConfig holds detailed management configuration for all tools
 type ManageConfig struct {

@@ -32,7 +32,7 @@ func TestWriteBtopConfigFailsClosedOnUnmarkedLegacyTheme(t *testing.T) {
 	assertOwnershipPathAbsent(t, filepath.Join(home, ".config", "btop", "btop.conf"))
 }
 
-func TestWriteBtopConfigPreflightsWholeSetBeforeChangingTheme(t *testing.T) {
+func TestWriteBtopConfigAdoptsNativeConfigWithoutReplacingItsBytes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -48,10 +48,14 @@ func TestWriteBtopConfigPreflightsWholeSetBeforeChangingTheme(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("# user-owned btop config\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteBtopConfig(BtopConfig{}, "dracula"); !errors.Is(err, ErrUnmanagedConfig) {
-		t.Fatalf("WriteBtopConfig error = %v, want ErrUnmanagedConfig", err)
+	if err := WriteBtopConfig(BtopConfig{}, "dracula"); err != nil {
+		t.Fatalf("WriteBtopConfig error = %v", err)
 	}
-	if got := mustReadOwnershipFile(t, themePath); !bytes.Equal(got, originalTheme) {
-		t.Fatalf("theme changed before later config ownership failure: %q", got)
+	if got := mustReadOwnershipFile(t, themePath); bytes.Equal(got, originalTheme) {
+		t.Fatal("managed theme did not update")
+	}
+	got := mustReadOwnershipFile(t, configPath)
+	if !bytes.HasPrefix(got, []byte("# user-owned btop config\n")) || bytes.Count(got, []byte(btopManagedStart)) != 1 {
+		t.Fatalf("native config was not preserved during fragment adoption: %q", got)
 	}
 }

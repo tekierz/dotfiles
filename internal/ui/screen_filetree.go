@@ -142,6 +142,12 @@ func (s *fileTreeScreen) View(width, height int) string {
 				line = fmt.Sprintf("  %s %-14s %s", marker, "state", action.Description)
 			}
 			lines = append(lines, style.Render(line))
+			if len(action.TargetOwnership) != 0 {
+				lines = append(lines, mutedStyle.Render("      ownership: "+string(action.Ownership)))
+				for _, target := range orderedTargetOwnership(action) {
+					lines = append(lines, mutedStyle.Render(fmt.Sprintf("        %s: %s", target.target, target.ownership)))
+				}
+			}
 			if action.InstallRecipe != nil {
 				recipe := action.InstallRecipe
 				lines = append(lines, mutedStyle.Render(fmt.Sprintf("      %s on %s · detector %s:%s", recipe.Manager, recipe.Platform, recipe.Detector.Kind, strings.Join(recipe.Detector.Values, ", "))))

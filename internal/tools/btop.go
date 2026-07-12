@@ -1,10 +1,10 @@
 package tools
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/operation"
@@ -31,7 +31,11 @@ type BtopTool struct {
 
 // NewBtopTool creates a new btop tool
 func NewBtopTool() *BtopTool {
-	home, _ := os.UserHomeDir()
+	configPath, err := BtopConfigMutationPath()
+	var configPaths []string
+	if err == nil {
+		configPaths = []string{configPath}
+	}
 	return &BtopTool{
 		BaseTool: BaseTool{
 			id:          "btop",
@@ -44,10 +48,8 @@ func NewBtopTool() *BtopTool {
 				pkg.PlatformArch:   {"btop"},
 				pkg.PlatformDebian: {"btop"},
 			},
-			configPaths: []string{
-				filepath.Join(home, ".config", "btop", "btop.conf"),
-			},
-			heavyTool: true, // Skip on low-memory systems (Pi Zero 2)
+			configPaths: configPaths,
+			heavyTool:   true, // Skip on low-memory systems (Pi Zero 2)
 			// UI metadata
 			uiGroup:        UIGroupCLITools,
 			configScreen:   30, // ScreenConfigBtop - has dedicated config screen
@@ -55,6 +57,16 @@ func NewBtopTool() *BtopTool {
 		},
 	}
 }
+
+func (t *BtopTool) ConfigPaths() []string {
+	path, err := BtopConfigMutationPath()
+	if err != nil {
+		return nil
+	}
+	return []string{path}
+}
+
+func (t *BtopTool) HasConfig() bool { return true }
 
 // btopColorTheme resolves btop's color_theme: an explicit per-tool override
 // (the Manage "btop/theme" field) when the user set one, otherwise the global
@@ -286,23 +298,26 @@ func WriteBtopConfigTracked(cfg BtopConfig, theme string) ([]MutationEvidence, e
 		return nil, err
 	}
 	cfg = normalizeBtopConfig(cfg)
-	home, err := os.UserHomeDir()
+	configPath, err := BtopConfigMutationPath()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
+		return nil, err
 	}
-
-	artifactName := BtopThemeArtifactName(cfg, theme)
-	themePath := filepath.Join(home, ".config", "btop", "themes", artifactName+".theme")
-	configPath := filepath.Join(home, ".config", "btop", "btop.conf")
-	for _, target := range []string{themePath, configPath} {
-		if err := preflightWholeFileConfig(target, false); err != nil {
-			if target == themePath && errors.Is(err, ErrUnmanagedConfig) {
-				return nil, fmt.Errorf("%w; legacy btop theme files carried no verifiable ownership marker and require explicit adoption", err)
-			}
-			return nil, fmt.Errorf("preflight btop config set: %w", err)
+	themePath, err := BtopThemeMutationPath(cfg, theme)
+	if err != nil {
+		return nil, err
+	}
+	if err := preflightWholeFileConfig(themePath, false); err != nil {
+		if errors.Is(err, ErrUnmanagedConfig) {
+			return nil, fmt.Errorf("%w; legacy btop theme files carried no verifiable ownership marker and require explicit adoption", err)
 		}
+		return nil, fmt.Errorf("preflight btop config set: %w", err)
 	}
-	themeContent := GenerateBtopTheme(btopThemePaletteName(artifactName))
+	if imported, importErr := ImportBtopConfig(); importErr != nil {
+		return nil, fmt.Errorf("preflight btop config set: %w", importErr)
+	} else if len(imported.Warnings) != 0 {
+		return nil, fmt.Errorf("preflight btop config set: %s", strings.Join(imported.Warnings, "; "))
+	}
+	themeContent := GenerateBtopTheme(btopThemePaletteName(BtopThemeArtifactName(cfg, theme)))
 	var committed []MutationEvidence
 	evidence, err := writeToolConfigTracked(themePath, []byte(themeContent))
 	if err != nil {
@@ -313,8 +328,7 @@ func WriteBtopConfigTracked(cfg BtopConfig, theme string) ([]MutationEvidence, e
 	}
 	committed = append(committed, evidence)
 
-	content := GenerateBtopConfig(cfg, theme)
-	evidence, err = writeToolConfigTracked(configPath, []byte(content))
+	evidence, err = writeBtopManagedConfigTracked(configPath, cfg, theme)
 	if err != nil {
 		return nil, partialMutationError(err, committed)
 	}
@@ -327,59 +341,157 @@ func WriteBtopConfigAtRevisionsTracked(cfg BtopConfig, theme string, themeAccept
 		return nil, err
 	}
 	cfg = normalizeBtopConfig(cfg)
-	home, err := os.UserHomeDir()
+	configPath, err := BtopConfigMutationPath()
 	if err != nil {
 		return nil, err
 	}
-	artifactName := BtopThemeArtifactName(cfg, theme)
-	themeParents, err := compatibilityToolConfigParents(filepath.Join(home, ".config", "btop", "themes", artifactName+".theme"))
+	themePath, err := BtopThemeMutationPath(cfg, theme)
 	if err != nil {
 		return nil, err
 	}
-	configParents, err := compatibilityToolConfigParents(filepath.Join(home, ".config", "btop", "btop.conf"))
+	themeParents, err := compatibilityToolConfigParents(themePath)
+	if err != nil {
+		return nil, err
+	}
+	configParents, err := compatibilityToolConfigParents(configPath)
 	if err != nil {
 		return nil, err
 	}
 	return WriteBtopConfigAtAuthoritiesTracked(cfg, theme, themeAccepted, themeParents, configAccepted, configParents, operation.DefaultLocker)
 }
 
-func WriteBtopConfigAtAuthoritiesTracked(cfg BtopConfig, theme string, themeAccepted safefile.Revision, themeParents *safefile.ParentChain, configAccepted safefile.Revision, configParents *safefile.ParentChain, locker operation.Locker) ([]MutationEvidence, error) {
+func WriteBtopConfigAtAuthoritiesTracked(cfg BtopConfig, theme string, themeAccepted safefile.Revision, themeParents *safefile.ParentChain, configAccepted safefile.Revision, configParents *safefile.ParentChain, locker operation.Locker) (results []MutationEvidence, returnErr error) {
 	if err := ValidateBtopConfig(cfg, theme); err != nil {
 		return nil, err
 	}
 	cfg = normalizeBtopConfig(cfg)
-	home, err := os.UserHomeDir()
+	configPath, err := BtopConfigMutationPath()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
+		return nil, err
 	}
-	artifactName := BtopThemeArtifactName(cfg, theme)
-	themePath := filepath.Join(home, ".config", "btop", "themes", artifactName+".theme")
-	configPath := filepath.Join(home, ".config", "btop", "btop.conf")
-	for _, target := range []struct {
-		path     string
-		accepted safefile.Revision
-		parents  *safefile.ParentChain
-	}{{themePath, themeAccepted, themeParents}, {configPath, configAccepted, configParents}} {
-		if err := preflightToolConfigAtAuthority(target.path, target.accepted, target.parents, locker, nil); err != nil {
-			if target.path == themePath && errors.Is(err, ErrUnmanagedConfig) {
-				return nil, fmt.Errorf("%w; legacy btop theme files carried no verifiable ownership marker and require explicit adoption", err)
+	themePath, err := BtopThemeMutationPath(cfg, theme)
+	if err != nil {
+		return nil, err
+	}
+	if !themeAccepted.Tracked() || !configAccepted.Tracked() || !themeParents.Tracked() || !configParents.Tracked() || locker == nil {
+		return nil, fmt.Errorf("%w: accepted btop config-set authority is incomplete", safefile.ErrParentChanged)
+	}
+	var committed []MutationEvidence
+	lockPaths := []string{configPath, themePath}
+	sort.Strings(lockPaths)
+	releases := make([]func() error, 0, len(lockPaths))
+	for _, path := range lockPaths {
+		release, lockErr := locker("tool-config", path)
+		if lockErr != nil {
+			for index := len(releases) - 1; index >= 0; index-- {
+				lockErr = errors.Join(lockErr, releases[index]())
 			}
-			return nil, fmt.Errorf("preflight accepted btop config set: %w", err)
+			return nil, lockErr
 		}
+		releases = append(releases, release)
 	}
+	defer func() {
+		var releaseErr error
+		for index := len(releases) - 1; index >= 0; index-- {
+			if err := releases[index](); err != nil {
+				releaseErr = errors.Join(releaseErr, fmt.Errorf("release btop config-set lock: %w", err))
+			}
+		}
+		if releaseErr != nil {
+			joined := errors.Join(returnErr, releaseErr)
+			if len(committed) != 0 {
+				results = nil
+				returnErr = partialMutationError(joined, committed)
+			} else {
+				returnErr = joined
+			}
+		}
+	}()
 
-	var results, committed []MutationEvidence
-	evidence, err := writeToolConfigAtAuthorityTracked(themePath, []byte(GenerateBtopTheme(btopThemePaletteName(artifactName))), themeAccepted, themeParents, locker)
+	themeRoot, themeRel, _, err := generatedConfigDestination(themePath)
 	if err != nil {
-		return nil, partialMutationError(err, committed)
+		return nil, err
 	}
-	results = append(results, evidence)
-	if evidence.Revision != themeAccepted {
-		committed = append(committed, evidence)
-	}
-	evidence, err = writeToolConfigAtAuthorityTracked(configPath, []byte(GenerateBtopConfig(cfg, theme)), configAccepted, configParents, locker)
+	configRoot, configRel, _, err := generatedConfigDestination(configPath)
 	if err != nil {
-		return nil, partialMutationError(err, committed)
+		return nil, err
 	}
-	return append(results, evidence), nil
+	themeExisting, themeCurrent, err := safefile.ReadWithinAuthorized(themeRoot, themeRel, themeParents)
+	if err != nil {
+		return nil, err
+	}
+	configExisting, configCurrent, err := safefile.ReadWithinAuthorized(configRoot, configRel, configParents)
+	if err != nil {
+		return nil, err
+	}
+	if themeCurrent != themeAccepted || configCurrent != configAccepted {
+		return nil, fmt.Errorf("%w: btop config set changed after plan acceptance", safefile.ErrRevisionChanged)
+	}
+	if themeCurrent.Exists() && !hasGeneratedConfigHeader(themeExisting) {
+		return nil, fmt.Errorf("%w: %s; legacy btop theme files carried no verifiable ownership marker and require explicit adoption", ErrUnmanagedConfig, themePath)
+	}
+	parsed, err := parseBtopConfigImport(configPath, configExisting, configCurrent.Exists())
+	if err != nil {
+		return nil, fmt.Errorf("preflight accepted btop config set: %w", err)
+	}
+	if len(parsed.Warnings) != 0 {
+		return nil, fmt.Errorf("preflight accepted btop config set: %s", strings.Join(parsed.Warnings, "; "))
+	}
+	merged, _, err := mergeBtopManagedSection(configExisting, cfg, theme)
+	if err != nil {
+		return nil, err
+	}
+	themeContent := []byte(GenerateBtopTheme(btopThemePaletteName(BtopThemeArtifactName(cfg, theme))))
+
+	themeEvidence := MutationEvidence{Path: themePath, Revision: themeCurrent, Parents: themeParents}
+	if !themeCurrent.Exists() || !bytes.Equal(themeExisting, themeContent) {
+		committedRevision, replaceErr := replaceToolConfigAtRevisionNoCreateAuthorizedTracked(themeRoot, themeRel, themeAccepted, themeParents, themeContent)
+		if replaceErr != nil {
+			return nil, partialMutationError(replaceErr, committed)
+		}
+		themeEvidence.Revision = committedRevision
+		committed = append(committed, themeEvidence)
+	}
+	results = append(results, themeEvidence)
+	configEvidence := MutationEvidence{Path: configPath, Revision: configCurrent, Parents: configParents}
+	if !configCurrent.Exists() || !bytes.Equal(configExisting, merged) {
+		committedRevision, replaceErr := replaceToolConfigAtRevisionNoCreateAuthorizedTracked(configRoot, configRel, configAccepted, configParents, merged)
+		if replaceErr != nil {
+			return nil, partialMutationError(replaceErr, committed)
+		}
+		configEvidence.Revision = committedRevision
+		committed = append(committed, configEvidence)
+	}
+	return append(results, configEvidence), nil
+}
+
+func writeBtopManagedConfigTracked(path string, cfg BtopConfig, theme string) (MutationEvidence, error) {
+	var evidence MutationEvidence
+	err := withToolConfigLock(path, func(root, rel string) error {
+		existing, revision, err := readToolConfig(root, rel)
+		if err != nil {
+			return err
+		}
+		parsed, err := parseBtopConfigImport(path, existing, revision.Exists())
+		if err != nil {
+			return err
+		}
+		if len(parsed.Warnings) != 0 {
+			return fmt.Errorf("refusing ambiguous btop config: %s", strings.Join(parsed.Warnings, "; "))
+		}
+		merged, _, err := mergeBtopManagedSection(existing, cfg, theme)
+		if err != nil {
+			return err
+		}
+		if revision.Exists() && bytes.Equal(existing, merged) {
+			evidence = MutationEvidence{Path: path, Revision: revision}
+			return nil
+		}
+		committed, err := replaceToolConfigAtRevisionTracked(root, rel, revision, merged)
+		if err == nil {
+			evidence = MutationEvidence{Path: path, Revision: committed}
+		}
+		return err
+	})
+	return evidence, err
 }

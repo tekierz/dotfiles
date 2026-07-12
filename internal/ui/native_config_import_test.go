@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,67 @@ setw -g aggressive-resize off
 	}
 	if badge := app.nativeImportBadge("tmux"); !strings.Contains(badge, "NATIVE SOURCE") {
 		t.Fatalf("tmux provenance badge = %q", badge)
+	}
+}
+
+func TestNewAppHydratesNativeBtopForManageAndStandalone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path := filepath.Join(home, ".config", "btop", "btop.conf")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := "color_theme = \"catppuccin-mocha\"\nupdate_ms = 2750\ngraph_symbol = \"block\"\nshown_boxes = \"cpu mem\"\nshow_coretemp = false\ntemp_scale = \"fahrenheit\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(true)
+	if got := app.manageConfig; got.BtopTheme != "auto" || got.BtopUpdateMs != 2750 || got.BtopGraphSymbol != "block" || got.BtopShownBoxes != "cpu mem" || got.BtopShowTemp || got.BtopTempScale != "fahrenheit" {
+		t.Fatalf("native btop Manage hydration = %+v", got)
+	}
+	if got := app.deepDiveConfig; got.BtopTheme != "auto" || got.BtopUpdateMs != 2750 || got.BtopGraphType != "block" || got.BtopShownBoxes != "cpu mem" || got.BtopShowTemp || got.BtopTempScale != "fahrenheit" {
+		t.Fatalf("native btop standalone hydration = %+v", got)
+	}
+	state := app.NativeConfigState()
+	if state.BtopError != "" || len(state.Btop.Fields) != 6 || state.Btop.Fields[tools.BtopFieldUpdateMs].Path != path {
+		t.Fatalf("btop native state = %+v", state.Btop)
+	}
+}
+
+func TestBtopSchemaThreeExplicitPreferenceWinsAndSchemaTwoMigrates(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path := filepath.Join(home, ".config", "btop", "btop.conf")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("color_theme = \"catppuccin-mocha\"\nupdate_ms = 2750\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		schema int
+		want   int
+	}{{"schema two migrates", 2, 2750}, {"schema three explicit wins", 3, 5000}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", home)
+			managePath := filepath.Join(config.ToolsDir(), "manage.json")
+			if err := os.MkdirAll(filepath.Dir(managePath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte(fmt.Sprintf(`{"NativeImportSchemaVersion":%d,"BtopUpdateMs":5000}`, tc.schema))
+			if err := os.WriteFile(managePath, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			app := NewApp(true)
+			if app.manageConfig.BtopUpdateMs != tc.want {
+				t.Fatalf("BtopUpdateMs = %d, want %d", app.manageConfig.BtopUpdateMs, tc.want)
+			}
+		})
 	}
 }
 
