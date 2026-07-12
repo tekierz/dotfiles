@@ -68,6 +68,12 @@ var expectedTools = map[string]toolSpec{
 		hasConfig: false, configPaths: 0,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"cursor-bin"}, pkg.PlatformMacOS: {"cursor"}},
 	},
+	"cursor-agent": {
+		name: "Cursor Agent", description: "Cursor's coding agent for the terminal", category: CategoryUtility, icon: "\U000f06a9",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{},
+	},
 	"delta": {
 		name: "Delta", description: "Syntax-highlighting pager for git diffs", category: CategoryGit, icon: "\U000f0627",
 		uiGroup: UIGroupCLIUtilities, configScreen: 0, isHeavy: false, defaultEnabled: true, platformFilter: "",

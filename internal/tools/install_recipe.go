@@ -32,6 +32,11 @@ func DescribeInstall(tool Tool, environment InstallEnvironment) (operation.Insta
 		}
 		return operation.CloneInstallRecipe(recipe), nil
 	}
+	if unavailable, ok := tool.(interface{ InstallationUnavailableReason() string }); ok {
+		if reason := unavailable.InstallationUnavailableReason(); reason != "" {
+			return operation.InstallRecipe{}, fmt.Errorf("%s: %s", tool.ID(), reason)
+		}
+	}
 	packages := slices.Clone(PackagesForPlatform(tool.Packages(), environment.Platform))
 	if len(packages) == 0 {
 		return operation.InstallRecipe{}, fmt.Errorf("%s has no package recipe for %s", tool.ID(), environment.Platform)

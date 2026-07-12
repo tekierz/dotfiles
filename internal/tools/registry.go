@@ -69,6 +69,7 @@ func NewRegistry() *Registry {
 	r.Register(NewGlowTool())
 	r.Register(NewClaudeCodeTool())
 	r.Register(NewCodexTool())
+	r.Register(NewCursorAgentTool())
 	r.Register(NewPiTool())
 	r.Register(NewOpenCodeTool())
 	r.Register(NewTailscaleTool())
