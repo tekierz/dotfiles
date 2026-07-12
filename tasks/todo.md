@@ -56,6 +56,9 @@ observability land before new integrations or broad UI work.
       detection from input handlers.
 - [ ] Add `doctor`, `plan --json`, noninteractive apply, deterministic exit codes, and a
       redacted support bundle.
+  - [x] Add deterministic, versioned `status --json` v1 directly from the installation-health
+        collector, with redacted public evidence, explicit uncollected capabilities, and stable
+        success/failure exit behavior. `plan --json`, apply, and the support bundle remain open.
 - [ ] Generate settings/help/hotkeys/docs/tests from tool manifests where practical.
 
 ### Batch 4 — integrations, distribution, and deployment gates
@@ -148,6 +151,12 @@ observability land before new integrations or broad UI work.
 
 ### Batch 3 progress
 
+- `dotfiles status --json` now publishes a deterministic v1 installation-health document
+  directly from the shared collector. It binds the requested platform, manager, generation,
+  and current health schema; exposes typed package/direct evidence with explicit
+  config/service/auth `not_collected` capability markers; redacts paths and credentials before
+  computing its public digest; and fails atomically with a stable nonzero contract. The default
+  human-readable `dotfiles status` output remains compatible.
 - Manage and reviewed installation now consume one generation-bound, immutable installation
   snapshot. Missing and Partial tools produce exact install/repair plans; stale, unknown,
   unsupported, environment-mismatched, or recipe-drifted evidence fails closed. Package-only

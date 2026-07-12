@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,14 +135,8 @@ var hotkeysCmd = &cobra.Command{
 	},
 }
 
-// statusCmd shows current status
-var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show current configuration status",
-	Run: func(cmd *cobra.Command, args []string) {
-		showStatus()
-	},
-}
+// statusCmd shows current status.
+var statusCmd = newRegisteredStatusCommand()
 
 // backupsCmd lists available backups
 var backupsCmd = &cobra.Command{
@@ -345,10 +340,27 @@ func main() {
 		}
 	}
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if code := executeRoot(os.Args[1:], os.Stdout, os.Stderr); code != 0 {
+		os.Exit(code)
 	}
+}
+
+func executeRoot(args []string, stdout, stderr io.Writer) int {
+	previousSilenceErrors, previousSilenceUsage := rootCmd.SilenceErrors, rootCmd.SilenceUsage
+	rootCmd.SilenceErrors, rootCmd.SilenceUsage = true, true
+	defer func() {
+		rootCmd.SilenceErrors, rootCmd.SilenceUsage = previousSilenceErrors, previousSilenceUsage
+	}()
+	rootCmd.SetArgs(args)
+	rootCmd.SetOut(stdout)
+	rootCmd.SetErr(stderr)
+	if err := rootCmd.Execute(); err != nil {
+		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+			return 1
+		}
+		return 1
+	}
+	return 0
 }
 
 // launchTUI launches the TUI at a specific screen
@@ -453,31 +465,29 @@ func listThemesWithConfig(cfg *config.GlobalConfig) {
 	}
 }
 
-// showStatus prints current configuration status
-func showStatus() {
+// writeHumanStatus prints the legacy human-readable configuration status.
+func writeHumanStatus(writer io.Writer) error {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error loading config: %w", err)
 	}
 
-	fmt.Println("Dotfiles Status")
-	fmt.Println("===============")
+	output := make([]byte, 0, 1024)
+	output = append(output, "Dotfiles Status\n===============\n"...)
 	if cfg.ActiveUser != "" {
-		fmt.Printf("User:       %s\n", cfg.ActiveUser)
+		output = fmt.Appendf(output, "User:       %s\n", cfg.ActiveUser)
 	}
-	fmt.Printf("Theme:      %s\n", cfg.Theme)
-	fmt.Printf("Navigation: %s\n", cfg.NavStyle)
-	fmt.Printf("Config dir: %s\n", config.ConfigDir())
-	fmt.Println()
+	output = fmt.Appendf(output, "Theme:      %s\n", cfg.Theme)
+	output = fmt.Appendf(output, "Navigation: %s\n", cfg.NavStyle)
+	output = fmt.Appendf(output, "Config dir: %s\n\n", config.ConfigDir())
 
 	// Show installed tools (filtered by platform)
 	registry := tools.GetRegistry()
 	installed := registry.Installed()
 	notInstalled := registry.NotInstalledForPlatform()
 
-	fmt.Printf("Installed Tools: %d/%d\n", len(installed), registry.CountForPlatform())
-	fmt.Println("─────────────────────────")
+	output = fmt.Appendf(output, "Installed Tools: %d/%d\n", len(installed), registry.CountForPlatform())
+	output = append(output, "─────────────────────────\n"...)
 
 	// Group by category
 	byCategory := make(map[tools.Category][]tools.Tool)
@@ -512,19 +522,27 @@ func showStatus() {
 			}
 			categoryName := string(cat)
 			categoryName = strings.ToUpper(categoryName[:1]) + categoryName[1:]
-			fmt.Printf("  %s: %s\n", categoryName, strings.Join(names, ", "))
+			output = fmt.Appendf(output, "  %s: %s\n", categoryName, strings.Join(names, ", "))
 		}
 	}
 
 	if len(notInstalled) > 0 {
-		fmt.Println()
-		fmt.Printf("Not Installed: %d tools\n", len(notInstalled))
+		output = append(output, '\n')
+		output = fmt.Appendf(output, "Not Installed: %d tools\n", len(notInstalled))
 		names := make([]string, 0, len(notInstalled))
 		for _, t := range notInstalled {
 			names = append(names, t.Name())
 		}
-		fmt.Printf("  %s\n", strings.Join(names, ", "))
+		output = fmt.Appendf(output, "  %s\n", strings.Join(names, ", "))
 	}
+	written, err := writer.Write(output)
+	if err != nil {
+		return err
+	}
+	if written != len(output) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // checkUpdates prints outdated packages (CLI mode)

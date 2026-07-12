@@ -34,7 +34,7 @@ make build
 | `dotfiles manage` | Configure installed tools |
 | `dotfiles hotkeys` | View keybindings cheatsheet |
 | `dotfiles update` | Check for package updates |
-| `dotfiles status` | Show current configuration |
+| `dotfiles status [--json]` | Show current configuration, or versioned installation health JSON |
 | `dotfiles doctor [--json]` | Diagnose which build is running, PATH collisions, Homebrew ownership, and stale legacy binaries |
 | `dotfiles doctor repair [--json]` | Preview or quarantine one ownership-proven stale `~/.local/bin/dotfiles` entry |
 | `dotfiles theme list` | List available themes |
@@ -157,6 +157,7 @@ dotfiles theme set dracula  # Set theme to Dracula
 dotfiles theme set nord     # Set theme to Nord
 dotfiles theme list         # Show all themes
 dotfiles status             # Show current settings
+dotfiles status --json      # Print deterministic, redacted installation health JSON v1
 ```
 
 > Setting a theme saves it to your config; run `dotfiles install` to apply it across all tools.
