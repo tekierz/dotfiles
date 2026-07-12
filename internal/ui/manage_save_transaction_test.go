@@ -627,6 +627,70 @@ func TestManageSaveRunningIgnoresQuitAndNavigation(t *testing.T) {
 	}
 }
 
+func TestCompactManageSaveLongPlanConsumesScrollState(t *testing.T) {
+	app, _, _ := newPlanTestApp(t)
+	app.manageConfig.GhosttyFontSize++
+	app.manageConfig.TmuxHistoryLimit++
+	app.manageConfig.ZshHistorySize++
+	app.manageConfig.NeovimTabWidth++
+	app.manageConfig.GitAliasStatus = !app.manageConfig.GitAliasStatus
+	app.manageConfig.YaziShowHidden = !app.manageConfig.YaziShowHidden
+	app.manageConfig.BtopUpdateMs++
+	app.manageConfig.GlowMouse = !app.manageConfig.GlowMouse
+	plan, err := buildManageSavePlan(app, time.Now())
+	if err != nil || plan == nil || plan.plan == nil {
+		t.Fatalf("long compact Manage plan=%#v err=%v", plan, err)
+	}
+	app.pendingManageSavePlan = plan
+	ctx := NewTestScreenContext()
+	ctx.app = app
+	screen := NewManageSaveConfirmScreen(ctx)
+	const width, height = 60, 18
+	hash := plan.plan.hash()
+
+	first := screen.View(width, height)
+	_, _ = screen.Update(keyMsg("down"))
+	second := screen.View(width, height)
+	if app.manageSaveScroll != 1 || second == first {
+		t.Fatalf("compact long-plan Down scroll=%d changedView=%t", app.manageSaveScroll, second != first)
+	}
+	if plan.plan.hash() != hash {
+		t.Fatal("compact long-plan scroll mutated reviewed plan")
+	}
+
+	_, _ = screen.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	last := screen.View(width, height)
+	if last == first || last == second {
+		t.Fatal("compact long-plan End did not expose the viewport end")
+	}
+	maxScroll := app.manageSaveScroll
+	if maxScroll <= 1 || maxScroll == 1<<20 {
+		t.Fatalf("compact long-plan End normalized scroll=%d", maxScroll)
+	}
+	_, _ = screen.Update(keyMsg("up"))
+	beforeEnd := screen.View(width, height)
+	if app.manageSaveScroll != maxScroll-1 || beforeEnd == last {
+		t.Fatalf("compact long-plan Up from normalized end scroll=%d want=%d changed=%t", app.manageSaveScroll, maxScroll-1, beforeEnd != last)
+	}
+	for index := 0; index < maxScroll+10; index++ {
+		_, _ = screen.Update(keyMsg("down"))
+	}
+	if bottom := screen.View(width, height); app.manageSaveScroll != maxScroll || bottom != last {
+		t.Fatalf("repeated Down normalized scroll=%d want=%d bottomMatches=%t", app.manageSaveScroll, maxScroll, bottom == last)
+	}
+	_, _ = screen.Update(tea.KeyMsg{Type: tea.KeyHome})
+	if home := screen.View(width, height); home != first || app.manageSaveScroll != 0 {
+		t.Fatalf("compact long-plan Home did not restore start: scroll=%d equal=%t", app.manageSaveScroll, home == first)
+	}
+	wantHelp := manageSaveHelp(app)
+	for _, view := range []string{first, second, last} {
+		lines := strings.Split(stripANSITest(view), "\n")
+		if len(lines) != height || !strings.Contains(lines[len(lines)-1], wantHelp) {
+			t.Fatal("compact long-plan viewport displaced pinned state-aware help")
+		}
+	}
+}
+
 func TestManageSaveStateOnlySkipsProductWriter(t *testing.T) {
 	app, _, _ := newPlanTestApp(t)
 	app.manageConfig.LazyDockerMouseMode = !app.manageConfig.LazyDockerMouseMode

@@ -226,7 +226,7 @@ func (a *App) manageLayout() manageLayout {
 		rightGlobeY = rightListY + rightListH + 1
 	}
 
-	return manageLayout{
+	layout := manageLayout{
 		w: a.width,
 		h: a.height,
 
@@ -255,6 +255,37 @@ func (a *App) manageLayout() manageLayout {
 		rightGlobeY: rightGlobeY,
 		rightGlobeH: rightGlobeH,
 	}
+	if a.compactManageSinglePaneActive() {
+		// Compact Manage is a single full-width pane. Keep the legacy vertical
+		// anchors, but make rendering and hit-testing share the visible X span.
+		layout.gap = 0
+		layout.rightGlobeY = 0
+		layout.rightGlobeH = 0
+		if a.managePane == managePaneTools {
+			layout.leftX = 0
+			layout.leftW = layout.w
+			layout.leftListY = layout.rightListY
+			layout.leftListH = layout.rightListH
+			layout.rightX = layout.w
+			layout.rightW = 0
+		} else {
+			layout.leftW = 0
+			layout.rightX = 0
+			layout.rightW = layout.w
+		}
+	}
+	return layout
+}
+
+func (a *App) compactManageSinglePaneActive() bool {
+	if a == nil || a.width > 80 {
+		return false
+	}
+	if a.managePane == managePaneTools {
+		return true
+	}
+	items := a.manageItems()
+	return len(items) > 0 && a.manageIndex >= 0 && a.manageIndex < len(items) && items[a.manageIndex].id == "yazi"
 }
 
 func (a *App) manageEnsureToolsVisible(layout manageLayout, itemsLen int) {
@@ -516,13 +547,13 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 
 	case "yazi":
 		return []manageField{
-			{key: "keymap", label: "Keymap", description: "Keyboard navigation style", kind: manageFieldOption, str: &cfg.YaziKeymap, options: []string{"vim", "emacs"}, readOnlyReason: yaziUIFieldBlockReason(a, "keymap")},
-			{key: "hidden", label: "Show Hidden", description: "Show dotfiles by default", kind: manageFieldToggle, b: &cfg.YaziShowHidden, readOnlyReason: yaziUIFieldBlockReason(a, "hidden")},
-			{key: "preview_mode", label: "Preview Mode", description: "File preview behavior", kind: manageFieldOption, str: &cfg.YaziPreviewMode, options: []string{"auto", "always", "never"}, readOnlyReason: yaziUIFieldBlockReason(a, "preview_mode")},
-			{key: "sort_by", label: "Sort By", description: "Sort order", kind: manageFieldOption, str: &cfg.YaziSortBy, options: []string{"alphabetical", "modified", "size", "natural"}, readOnlyReason: yaziUIFieldBlockReason(a, "sort_by")},
-			{key: "sort_rev", label: "Sort Reverse", description: "Reverse sort direction", kind: manageFieldToggle, b: &cfg.YaziSortReverse, readOnlyReason: yaziUIFieldBlockReason(a, "sort_rev")},
-			{key: "linemode", label: "Line Mode", description: "Line metadata style", kind: manageFieldOption, str: &cfg.YaziLineMode, options: []string{"size", "permissions", "mtime", "none"}, readOnlyReason: yaziUIFieldBlockReason(a, "linemode")},
-			{key: "scrolloff", label: "Scroll Offset", description: "Keep N items visible above/below cursor", kind: manageFieldNumber, n: &cfg.YaziScrollOff, min: 0, max: 20, step: 1, unit: " lines", readOnlyReason: yaziUIFieldBlockReason(a, "scrolloff")},
+			{key: "keymap", label: "Keymap", description: yaziManageFieldDescription(cfg, "keymap"), kind: manageFieldOption, str: &cfg.YaziKeymap, options: []string{"vim", "emacs"}, readOnlyReason: yaziUIFieldBlockReason(a, "keymap")},
+			{key: "hidden", label: "Show Hidden", description: yaziManageFieldDescription(cfg, "hidden"), kind: manageFieldToggle, b: &cfg.YaziShowHidden, readOnlyReason: yaziUIFieldBlockReason(a, "hidden")},
+			{key: "preview_mode", label: "Preview Mode", description: yaziManageFieldDescription(cfg, "preview_mode"), kind: manageFieldOption, str: &cfg.YaziPreviewMode, options: []string{"auto", "always", "never"}, readOnlyReason: yaziUIFieldBlockReason(a, "preview_mode")},
+			{key: "sort_by", label: "Sort By", description: yaziManageFieldDescription(cfg, "sort_by"), kind: manageFieldOption, str: &cfg.YaziSortBy, options: []string{"alphabetical", "modified", "size", "natural"}, readOnlyReason: yaziUIFieldBlockReason(a, "sort_by")},
+			{key: "sort_rev", label: "Sort Reverse", description: yaziManageFieldDescription(cfg, "sort_rev"), kind: manageFieldToggle, b: &cfg.YaziSortReverse, readOnlyReason: yaziUIFieldBlockReason(a, "sort_rev")},
+			{key: "linemode", label: "Line Mode", description: yaziManageFieldDescription(cfg, "linemode"), kind: manageFieldOption, str: &cfg.YaziLineMode, options: []string{"size", "permissions", "mtime", "none"}, readOnlyReason: yaziUIFieldBlockReason(a, "linemode")},
+			{key: "scrolloff", label: "Scroll Offset", description: yaziManageFieldDescription(cfg, "scrolloff"), kind: manageFieldNumber, n: &cfg.YaziScrollOff, min: 0, max: 20, step: 1, unit: " lines", readOnlyReason: yaziUIFieldBlockReason(a, "scrolloff")},
 		}
 
 	case "fzf":
@@ -792,8 +823,13 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 		metaName = item.icon + " " + metaName
 	}
 	meta := lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(metaName) +
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description) +
-		statusBadge
+		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description) + statusBadge
+	if item.id == "yazi" {
+		// Source ownership is primary metadata; keep it before the descriptive
+		// tail so narrow full layouts cannot truncate the truth badge.
+		meta = lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(metaName) + statusBadge +
+			lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description)
+	}
 
 	innerW := maxInt(0, layout.rightW-(layout.border*2)-(layout.padX*2))
 
@@ -930,6 +966,35 @@ func (a *App) nativeImportBadge(toolID string) string {
 		if errText == "" {
 			errText = a.nativeConfigState.LazyGit.ReadOnlyReason
 		}
+	case "yazi":
+		imported := a.nativeConfigState.Yazi
+		if a.nativeConfigState.PreferenceError != "" || a.nativeConfigState.YaziError != "" || imported.Main.Ownership == tools.YaziOwnershipMalformed || imported.Keymap.Ownership == tools.YaziOwnershipMalformed {
+			return " " + RenderBadge("IMPORT BLOCKED", ColorBg, ColorYellow)
+		}
+		managed, native := false, false
+		for _, observation := range []tools.YaziFileObservation{imported.Main, imported.Keymap} {
+			switch observation.Ownership {
+			case tools.YaziOwnershipExactCurrent, tools.YaziOwnershipExactHistorical:
+				managed = true
+			case tools.YaziOwnershipNative:
+				native = true
+			case tools.YaziOwnershipMalformed:
+				// Defensive fail-closed handling if the precheck above changes.
+				return " " + RenderBadge("IMPORT BLOCKED", ColorBg, ColorYellow)
+			case tools.YaziOwnershipMissing, "":
+				// Missing sources contribute no badge.
+			}
+		}
+		switch {
+		case native && managed:
+			return " " + RenderBadge("NATIVE SOURCE", ColorBg, ColorCyan) + " " + RenderBadge("MANAGED SOURCE", ColorBg, ColorCyan)
+		case native:
+			return " " + RenderBadge("NATIVE SOURCE", ColorBg, ColorCyan)
+		case managed:
+			return " " + RenderBadge("MANAGED SOURCE", ColorBg, ColorCyan)
+		default:
+			return ""
+		}
 	default:
 		return ""
 	}
@@ -955,6 +1020,151 @@ func (a *App) nativeImportBadge(toolID string) string {
 		label = "MANAGED SOURCE"
 	}
 	return " " + RenderBadge(label, ColorBg, ColorCyan)
+}
+
+func (a *App) renderCompactManageYazi(layout manageLayout, fields []manageField) string {
+	rows := make([]string, layout.h)
+	put := func(y int, value string) {
+		if y < 0 || y >= len(rows) {
+			return
+		}
+		rows[y] = ansi.Truncate(sanitizeLogLine(value), layout.w, "…")
+	}
+	putWrapped := func(start, limit int, value string) {
+		wrapped := strings.Split(ansi.Wrap(sanitizeLogLine(value), layout.w, " /•:-"), "\n")
+		for index, line := range wrapped {
+			if start+index >= limit {
+				break
+			}
+			put(start+index, line)
+		}
+	}
+
+	focus := clampInt(a.configFieldIndex, 0, len(fields)-1)
+	blockedReason := ""
+	if len(fields) > 0 {
+		blockedReason = fields[focus].readOnlyReason
+	}
+	put(0, compactManageTabLine)
+	if blockedReason != "" {
+		putWrapped(1, layout.bodyY, "Read-only: "+blockedReason)
+	} else {
+		put(1, "Manage terminal tools • Yazi")
+	}
+	put(layout.bodyY, "YAZI SETTINGS"+ansi.Strip(a.nativeImportBadge("yazi")))
+
+	if theme := compactYaziThemeObservationText(a); theme != "" {
+		putWrapped(layout.bodyY+1, layout.bodyY+3, theme)
+	}
+	if provenance := yaziFocusedObservationText(a, focus); provenance != "" {
+		putWrapped(layout.bodyY+3, layout.rightListY, provenance)
+	} else if len(fields) > 0 {
+		put(layout.bodyY+3, yaziManageFieldDescription(a.manageConfig, fields[focus].key))
+	}
+
+	for index := a.manageFieldsScroll; index < len(fields) && index-a.manageFieldsScroll < layout.rightListH; index++ {
+		field := fields[index]
+		focused := a.managePane == managePaneSettings && index == focus
+		cursor := "  "
+		if focused {
+			cursor = "▸ "
+		}
+		value := ""
+		switch field.kind {
+		case manageFieldToggle:
+			if field.b != nil && *field.b {
+				value = "ON"
+			} else {
+				value = "OFF"
+			}
+		case manageFieldNumber:
+			if field.n != nil {
+				value = fmt.Sprintf("%d%s", *field.n, field.unit)
+			}
+		case manageFieldOption, manageFieldText:
+			if field.str != nil {
+				value = sanitizeLogLine(*field.str)
+			}
+		}
+		value = sanitizeLogLine(value)
+		marker := ""
+		if field.readOnlyReason != "" {
+			marker = " (read-only)"
+		}
+		prefix := cursor + field.label + ": "
+		if marker != "" {
+			value = ansi.Truncate(value, max(1, layout.w-lipgloss.Width(prefix)-lipgloss.Width(marker)), "…")
+		}
+		put(layout.rightListY+(index-a.manageFieldsScroll), prefix+value+marker)
+	}
+
+	items := a.manageItems()
+	uninstalled := len(items) > 0 && a.manageIndex >= 0 && a.manageIndex < len(items) && !items[a.manageIndex].installed
+	if a.manageStatus != "" {
+		put(layout.h-2, a.manageStatus)
+	} else if uninstalled {
+		put(layout.h-2, "I install")
+	}
+	help := "Tab tools ↑↓ ←→ Space S save Esc back q quit"
+	if blockedReason != "" {
+		help = "Tab tools ↑↓ focused read-only S save Esc back q quit"
+	}
+	if layout.w >= 80 {
+		help += " • ? hotkeys"
+	}
+	put(layout.h-1, help)
+	return strings.Join(rows, "\n")
+}
+
+const compactManageTabLine = "1 Manage  2 Users  3 Hotkeys  4 Update  5 Backups"
+
+func detectCompactManageTabClick(x int) Screen {
+	labels := []struct {
+		text   string
+		screen Screen
+	}{
+		{"1 Manage", ScreenManage},
+		{"2 Users", ScreenUsers},
+		{"3 Hotkeys", ScreenHotkeys},
+		{"4 Update", ScreenUpdate},
+		{"5 Backups", ScreenBackups},
+	}
+	start := 0
+	for _, label := range labels {
+		end := start + lipgloss.Width(label.text)
+		if x >= start && x < end {
+			return label.screen
+		}
+		start = end + 2
+	}
+	return 0
+}
+
+func (a *App) renderCompactManageTools(layout manageLayout, items []manageItem) string {
+	rows := make([]string, layout.h)
+	put := func(y int, value string) {
+		if y >= 0 && y < len(rows) {
+			rows[y] = ansi.Truncate(sanitizeLogLine(value), layout.w, "…")
+		}
+	}
+	put(0, compactManageTabLine)
+	put(layout.bodyY, "TOOLS • SETTINGS via Tab")
+	for index := a.manageToolsScroll; index < len(items) && index-a.manageToolsScroll < layout.leftListH; index++ {
+		cursor := "  "
+		if index == a.manageIndex {
+			cursor = "▸ "
+		}
+		status := "available"
+		if items[index].installed {
+			status = "installed"
+		}
+		put(layout.leftListY+(index-a.manageToolsScroll), fmt.Sprintf("%s%s • %s", cursor, items[index].name, status))
+	}
+	if a.manageStatus != "" {
+		put(layout.h-2, a.manageStatus)
+	}
+	put(layout.h-1, "Tab settings • ↑↓ move • Enter settings • Esc back • q quit")
+	return strings.Join(rows, "\n")
 }
 
 // renderManageFieldLine renders one settings row. applied=false means the field is

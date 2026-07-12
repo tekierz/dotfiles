@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/tekierz/dotfiles/internal/tools"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +22,117 @@ type configYaziScreen struct {
 	configFieldNav
 }
 
+type yaziFieldDescriptor struct {
+	key   string
+	label string
+}
+
+var yaziFieldDescriptors = [...]yaziFieldDescriptor{
+	{key: "keymap", label: "Keymap Style"},
+	{key: "hidden", label: "Show Hidden Files"},
+	{key: "preview_mode", label: "File Preview"},
+	{key: "sort_by", label: "Sort By"},
+	{key: "sort_rev", label: "Reverse Sort"},
+	{key: "linemode", label: "Line Metadata"},
+	{key: "scrolloff", label: "Scroll Offset"},
+}
+
+func yaziFieldDisplayValue(cfg tools.YaziConfig, index int) string {
+	switch index {
+	case 0:
+		if cfg.Keymap == "emacs" {
+			return "Emacs Ctrl-P/N/B/F + Space"
+		}
+		if cfg.Keymap == "vim" {
+			return "Vim/Yazi defaults"
+		}
+		return cfg.Keymap
+	case 1:
+		if cfg.ShowHidden {
+			return "ON"
+		}
+		return "OFF"
+	case 2:
+		switch cfg.PreviewMode {
+		case "auto":
+			return "Default image-preview delay (30ms)"
+		case "always":
+			return "Immediate image previews (0ms delay)"
+		case "never":
+			return "Disable previewers + preloaders"
+		default:
+			return cfg.PreviewMode
+		}
+	case 3:
+		switch cfg.SortBy {
+		case "alphabetical":
+			return "Alphabetical"
+		case "modified":
+			return "Modified (mtime)"
+		case "size":
+			return "Size"
+		case "natural":
+			return "Natural"
+		default:
+			return cfg.SortBy
+		}
+	case 4:
+		if cfg.SortReverse {
+			return "ON"
+		}
+		return "OFF"
+	case 5:
+		switch cfg.LineMode {
+		case "size":
+			return "Size"
+		case "permissions":
+			return "Permissions"
+		case "mtime":
+			return "Modified metadata (mtime)"
+		case "none":
+			return "None"
+		default:
+			return cfg.LineMode
+		}
+	case 6:
+		return fmt.Sprintf("%d lines", cfg.ScrollOff)
+	default:
+		return ""
+	}
+}
+
+func yaziFieldDescription(cfg tools.YaziConfig, index int) string {
+	switch index {
+	case 0, 2, 3, 5:
+		return yaziFieldDisplayValue(cfg, index)
+	case 1:
+		return "Show dotfiles by default"
+	case 4:
+		return "Reverse selected sort order"
+	case 6:
+		return "Keep entries above and below cursor"
+	default:
+		return ""
+	}
+}
+
+func yaziManageFieldDescription(cfg *ManageConfig, key string) string {
+	if cfg == nil {
+		return ""
+	}
+	index := -1
+	for candidate, descriptor := range yaziFieldDescriptors {
+		if descriptor.key == key {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		return ""
+	}
+	return sanitizeLogLine(yaziFieldDescription(yaziConfigFrom(manageConfigToDeepDive(cfg)), index))
+}
+
 // NewConfigYaziScreen creates a new Yazi config screen handler.
 func NewConfigYaziScreen(ctx *ScreenContext) *configYaziScreen {
 	s := &configYaziScreen{}
@@ -32,24 +144,10 @@ func NewConfigYaziScreen(ctx *ScreenContext) *configYaziScreen {
 }
 
 func yaziUIFieldKey(index int) string {
-	switch index {
-	case 0:
-		return "keymap"
-	case 1:
-		return "hidden"
-	case 2:
-		return "preview_mode"
-	case 3:
-		return "sort_by"
-	case 4:
-		return "sort_rev"
-	case 5:
-		return "linemode"
-	case 6:
-		return "scrolloff"
-	default:
-		return ""
+	if index >= 0 && index < len(yaziFieldDescriptors) {
+		return yaziFieldDescriptors[index].key
 	}
+	return ""
 }
 
 func yaziUIFieldID(index int) string {
@@ -181,6 +279,150 @@ func renderYaziReadOnlyLiteral(value string, focused bool, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(line)
 }
 
+func yaziRawDisplayValue(cfg tools.YaziConfig, index int) string {
+	switch index {
+	case 0:
+		return cfg.Keymap
+	case 1:
+		if cfg.ShowHidden {
+			return "ON"
+		}
+		return "OFF"
+	case 2:
+		return cfg.PreviewMode
+	case 3:
+		return cfg.SortBy
+	case 4:
+		if cfg.SortReverse {
+			return "ON"
+		}
+		return "OFF"
+	case 5:
+		return cfg.LineMode
+	case 6:
+		return fmt.Sprintf("%d lines", cfg.ScrollOff)
+	default:
+		return ""
+	}
+}
+
+func yaziEditorFooter(a *App, blocked bool) string {
+	if a != nil && a.configStandalone {
+		if blocked {
+			return HelpStyle.Render("↑↓ • focused read-only • enter preview • esc/q cancel")
+		}
+		return HelpStyle.Render("↑↓ • ←→/space change • enter preview • esc/q cancel")
+	}
+	if blocked {
+		return HelpStyle.Render("↑↓ navigate • focused read-only • enter/esc back • q quit")
+	}
+	return HelpStyle.Render("↑↓ navigate • ←→/space change • enter/esc back • q quit")
+}
+
+func compactYaziThemeObservationText(a *App) string {
+	if a == nil {
+		return ""
+	}
+	theme := a.nativeConfigState.Yazi.Theme
+	if theme.Kind != tools.YaziFileKindTheme || theme.Path == "" || theme.Ownership == "" {
+		return ""
+	}
+	return fmt.Sprintf("Theme file: %s • %s • display-only",
+		compactYaziDisplayPath(theme.Path), sanitizeLogLine(string(theme.Ownership)))
+}
+
+func wrapYaziCompactLine(value string, width int, style lipgloss.Style) string {
+	if width < 1 {
+		width = 1
+	}
+	return style.Render(ansi.Wrap(sanitizeLogLine(value), width, " /•:-"))
+}
+
+func (s *configYaziScreen) compactView(width, height int) string {
+	a := s.App()
+	cfg := yaziConfigFrom(*a.deepDiveConfig)
+	focus := clampInt(a.configFieldIndex, 0, len(yaziFieldDescriptors)-1)
+	const capacity = 3
+	start := clampInt(focus-1, 0, len(yaziFieldDescriptors)-capacity)
+	end := min(len(yaziFieldDescriptors), start+capacity)
+	blockedReason := yaziUIFieldBlockReason(a, yaziUIFieldKey(focus))
+
+	innerWidth := max(20, width-4)
+	rows := make([]string, 0, capacity+2)
+	rowFields := make([]int, 0, capacity)
+	if start > 0 {
+		rows = append(rows, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("↑ more above"))
+	}
+	for index := start; index < end; index++ {
+		descriptor := yaziFieldDescriptors[index]
+		focused := index == focus
+		cursor := "  "
+		labelStyle := lipgloss.NewStyle().Foreground(ColorText)
+		valueStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("▸ ")
+			labelStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+			valueStyle = labelStyle
+		}
+		blocked := yaziUIFieldBlockReason(a, descriptor.key) != ""
+		value := yaziFieldDisplayValue(cfg, index)
+		marker := ""
+		if blocked {
+			value = yaziRawDisplayValue(cfg, index)
+			marker = " " + lipgloss.NewStyle().Foreground(ColorYellow).Render("(read-only)")
+		}
+		prefix := cursor + labelStyle.Render(descriptor.label) + ": "
+		value = sanitizeLogLine(value)
+		if blocked {
+			valueBudget := max(1, innerWidth-lipgloss.Width(prefix)-lipgloss.Width(marker))
+			value = truncateVisible(value, valueBudget)
+		}
+		line := prefix + valueStyle.Render(value) + marker
+		rows = append(rows, truncateVisible(line, innerWidth))
+		rowFields = append(rowFields, index)
+	}
+	if end < len(yaziFieldDescriptors) {
+		rows = append(rows, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("↓ more below"))
+	}
+	for index := range rows {
+		rows[index] = lipgloss.NewStyle().Width(innerWidth).Render(rows[index])
+	}
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).Render(strings.Join(rows, "\n"))
+	title := renderConfigTitle("󰉋", "Yazi", "File manager settings")
+	parts := []string{title, box}
+	if blockedReason != "" {
+		parts = append(parts, wrapYaziCompactLine("Read-only: "+blockedReason, width, lipgloss.NewStyle().Foreground(ColorYellow)))
+	}
+	if observation := yaziFocusedObservationText(a, focus); observation != "" {
+		parts = append(parts, wrapYaziCompactLine(observation, width, lipgloss.NewStyle().Foreground(ColorTextMuted)))
+	}
+	if theme := compactYaziThemeObservationText(a); theme != "" {
+		parts = append(parts, wrapYaziCompactLine(theme, width, lipgloss.NewStyle().Foreground(ColorTextMuted)))
+	}
+	footer := yaziEditorFooter(a, blockedReason != "")
+	parts = append(parts, footer)
+	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
+
+	contentH, contentW := lipgloss.Height(content), lipgloss.Width(content)
+	topPad := max(0, (height-contentH)/2)
+	leftPad := max(0, (width-contentW)/2)
+	boxW := lipgloss.Width(box)
+	boxLeftInContent := max(0, (contentW-boxW)/2)
+	boxTop := topPad + lipgloss.Height(title)
+	boxContentTop := boxTop + 1
+	boxLeft := leftPad + boxLeftInContent + 2
+	rowOffset := 0
+	if start > 0 {
+		rowOffset++
+	}
+	layout := fieldLayout{boxLeft: boxLeft, boxRight: boxLeft + innerWidth - 1, hasXBounds: true}
+	for offset, field := range rowFields {
+		layout.extents = append(layout.extents, fieldExtent{index: field, startY: boxContentTop + rowOffset + offset, height: 1})
+	}
+	a.configFieldLayout = layout
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+}
+
 func yaziAdjust(a *App, key string, fwd bool) {
 	if yaziUIFieldBlockReason(a, yaziUIFieldKey(a.configFieldIndex)) != "" {
 		return
@@ -229,6 +471,9 @@ func (s *configYaziScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // View renders the Yazi configuration screen.
 func (s *configYaziScreen) View(width, height int) string {
 	a := s.App()
+	if width <= 80 || height <= 24 {
+		return s.compactView(width, height)
+	}
 	title := renderConfigTitle("󰉋", "Yazi", "File manager settings")
 	blockedReason := yaziUIFieldBlockReason(a, yaziUIFieldKey(a.configFieldIndex))
 
@@ -243,7 +488,7 @@ func (s *configYaziScreen) View(width, height int) string {
 	} else {
 		rec.write(renderOptionSelector(
 			[]string{"vim", "emacs"},
-			[]string{"Vim (hjkl)", "Emacs (arrows)"},
+			[]string{"Vim", "Emacs"},
 			cfg.YaziKeymap,
 			keymapFocused,
 		))
@@ -268,7 +513,7 @@ func (s *configYaziScreen) View(width, height int) string {
 	} else {
 		rec.write(renderOptionSelector(
 			[]string{"auto", "always", "never"},
-			[]string{"Auto", "Always", "Never"},
+			[]string{"Default", "Immediate", "Disabled"},
 			cfg.YaziPreviewMode,
 			previewFocused,
 		))
@@ -329,8 +574,11 @@ func (s *configYaziScreen) View(width, height int) string {
 	}
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
-	help := s.footer()
-	notices := make([]string, 0, 3)
+	help := yaziEditorFooter(a, blockedReason != "")
+	notices := make([]string, 0, 4)
+	if description := yaziFieldDescription(yaziConfigFrom(*cfg), a.configFieldIndex); description != "" {
+		notices = append(notices, lipgloss.NewStyle().Foreground(ColorTextMuted).Render(sanitizeLogLine(description)))
+	}
 	if blockedReason != "" {
 		notice := lipgloss.NewStyle().
 			Foreground(ColorYellow).

@@ -5,11 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -1037,6 +1040,1764 @@ func TestCompactYaziDisplayTextRespectsHomeBoundaries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStandaloneYaziKnownValuesExplainGeneratedBehavior(t *testing.T) {
+	keymapCases := []struct {
+		value string
+		want  string
+	}{
+		{value: "vim", want: "Vim/Yazi defaults"},
+		{value: "emacs", want: "Emacs Ctrl-P/N/B/F + Space"},
+	}
+	for _, test := range keymapCases {
+		t.Run("keymap/"+test.value, func(t *testing.T) {
+			ctx, screen := newStandaloneYaziPolicyScreen(t, tools.YaziFileObservation{}, tools.YaziFileObservation{})
+			ctx.app.deepDiveConfig.YaziKeymap = test.value
+			ctx.app.configFieldIndex = 0
+			visible := normalizedYaziVisibleText(screen.View(ctx.Width, ctx.Height))
+			if !strings.Contains(visible, test.want) {
+				t.Errorf("keymap %q copy missing %q", test.value, test.want)
+			}
+			if strings.Contains(visible, "Emacs (arrows)") {
+				t.Error("standalone Yazi still advertises stale Emacs arrows semantics")
+			}
+		})
+	}
+
+	previewCases := []struct {
+		value string
+		want  string
+	}{
+		{value: "auto", want: "Default image-preview delay (30ms)"},
+		{value: "always", want: "Immediate image previews (0ms delay)"},
+		{value: "never", want: "Disable previewers + preloaders"},
+	}
+	misleadingPreview := regexp.MustCompile(`\b(?:Always|Never)\b`)
+	for _, test := range previewCases {
+		t.Run("preview/"+test.value, func(t *testing.T) {
+			ctx, screen := newStandaloneYaziPolicyScreen(t, tools.YaziFileObservation{}, tools.YaziFileObservation{})
+			ctx.app.deepDiveConfig.YaziPreviewMode = test.value
+			ctx.app.configFieldIndex = 2
+			visible := normalizedYaziVisibleText(screen.View(ctx.Width, ctx.Height))
+			if !strings.Contains(visible, test.want) {
+				t.Errorf("preview %q copy missing %q", test.value, test.want)
+			}
+			if misleadingPreview.MatchString(visible) {
+				t.Error("standalone Yazi still exposes bare Always/Never preview labels")
+			}
+		})
+	}
+
+	fieldCases := []struct {
+		name  string
+		index int
+		set   func(*DeepDiveConfig)
+		want  string
+	}{
+		{name: "modified sort", index: 3, set: func(cfg *DeepDiveConfig) { cfg.YaziSortBy = "modified" }, want: "Modified (mtime)"},
+		{name: "modified line metadata", index: 5, set: func(cfg *DeepDiveConfig) { cfg.YaziLineMode = "mtime" }, want: "Modified metadata (mtime)"},
+		{name: "scroll context", index: 6, set: func(*DeepDiveConfig) {}, want: "entries above and below cursor"},
+		{name: "hidden files", index: 1, set: func(*DeepDiveConfig) {}, want: "Show dotfiles by default"},
+		{name: "reverse sort", index: 4, set: func(*DeepDiveConfig) {}, want: "Reverse selected sort order"},
+	}
+	for _, test := range fieldCases {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, screen := newStandaloneYaziPolicyScreen(t, tools.YaziFileObservation{}, tools.YaziFileObservation{})
+			test.set(ctx.app.deepDiveConfig)
+			ctx.app.configFieldIndex = test.index
+			visible := normalizedYaziVisibleText(screen.View(ctx.Width, ctx.Height))
+			if !strings.Contains(visible, test.want) {
+				t.Errorf("focused field copy missing %q", test.want)
+			}
+		})
+	}
+}
+
+func TestManageYaziFocusedDescriptionsExplainGeneratedBehavior(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		set   func(*ManageConfig)
+		want  string
+	}{
+		{name: "vim keymap", field: "keymap", set: func(cfg *ManageConfig) { cfg.YaziKeymap = "vim" }, want: "Vim/Yazi defaults"},
+		{name: "emacs keymap", field: "keymap", set: func(cfg *ManageConfig) { cfg.YaziKeymap = "emacs" }, want: "Emacs Ctrl-P/N/B/F + Space"},
+		{name: "default previews", field: "preview_mode", set: func(cfg *ManageConfig) { cfg.YaziPreviewMode = "auto" }, want: "Default image-preview delay (30ms)"},
+		{name: "immediate previews", field: "preview_mode", set: func(cfg *ManageConfig) { cfg.YaziPreviewMode = "always" }, want: "Immediate image previews (0ms delay)"},
+		{name: "disabled previews", field: "preview_mode", set: func(cfg *ManageConfig) { cfg.YaziPreviewMode = "never" }, want: "Disable previewers + preloaders"},
+		{name: "modified sort", field: "sort_by", set: func(cfg *ManageConfig) { cfg.YaziSortBy = "modified" }, want: "Modified (mtime)"},
+		{name: "modified line metadata", field: "linemode", set: func(cfg *ManageConfig) { cfg.YaziLineMode = "mtime" }, want: "Modified metadata (mtime)"},
+		{name: "scroll context", field: "scrolloff", set: func(*ManageConfig) {}, want: "entries above and below cursor"},
+		{name: "hidden files", field: "hidden", set: func(*ManageConfig) {}, want: "Show dotfiles by default"},
+		{name: "reverse sort", field: "sort_rev", set: func(*ManageConfig) {}, want: "Reverse selected sort order"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, screen := newManageYaziPolicyScreen(t, false, false)
+			test.set(ctx.app.manageConfig)
+			ctx.app.configFieldIndex = manageYaziFieldIndex(t, ctx.app, test.field)
+			visible := normalizedYaziVisibleText(screen.View(ctx.Width, ctx.Height))
+			if !strings.Contains(visible, test.want) {
+				t.Errorf("Manage focused description missing %q", test.want)
+			}
+		})
+	}
+}
+
+func TestManageYaziCompactWritableRowsAndFooter(t *testing.T) {
+	dimensions := []struct{ width, height int }{{80, 24}, {60, 18}}
+	fields := []struct {
+		key   string
+		label string
+		value string
+	}{
+		{"keymap", "Keymap", "vim"},
+		{"hidden", "Show Hidden", "OFF"},
+		{"preview_mode", "Preview Mode", "auto"},
+		{"sort_by", "Sort By", "alphabetical"},
+		{"sort_rev", "Sort Reverse", "OFF"},
+		{"linemode", "Line Mode", "none"},
+		{"scrolloff", "Scroll Offset", "5 lines"},
+	}
+	for _, size := range dimensions {
+		for _, field := range fields {
+			t.Run(fmt.Sprintf("%dx%d/%s", size.width, size.height, field.key), func(t *testing.T) {
+				ctx, screen := newManageYaziPolicyScreen(t, false, false)
+				ctx.Width, ctx.Height = size.width, size.height
+				ctx.app.width, ctx.app.height = size.width, size.height
+				ctx.app.configFieldIndex = manageYaziFieldIndex(t, ctx.app, field.key)
+				view := screen.View(size.width, size.height)
+				assertYaziRenderBounds(t, view, size.width, size.height)
+				row := manageYaziFocusedRowText(t, view, field.label)
+				for _, want := range []string{"▸", field.label, field.value} {
+					if !strings.Contains(row, want) {
+						t.Errorf("focused Manage row missing %q", want)
+					}
+				}
+				help := manageYaziHelpLineText(t, view)
+				wants := []string{"Tab tools", "↑↓", "S save", "Esc back", "q quit"}
+				if size.width == 80 {
+					wants = append(wants, "? hotkeys")
+				}
+				for _, want := range wants {
+					if !strings.Contains(help, want) {
+						t.Errorf("compact Manage help missing %q", want)
+					}
+				}
+				if !strings.Contains(help, "change") && (!strings.Contains(help, "←→") || !strings.Contains(help, "Space")) {
+					t.Error("writable Manage help omitted edit/change route")
+				}
+			})
+		}
+	}
+}
+
+func TestManageYaziCompactReadOnlyRawRowsExposeCause(t *testing.T) {
+	dimensions := []struct{ width, height int }{{80, 24}, {60, 18}}
+	const reason = "arbitrary native Yazi TOML is read-only in this release"
+	fields := []struct {
+		key   string
+		label string
+		value string
+	}{{"keymap", "Keymap", "custom"}, {"sort_by", "Sort By", "extension"}, {"scrolloff", "Scroll Offset", "99 lines"}}
+	for _, size := range dimensions {
+		for _, field := range fields {
+			t.Run(fmt.Sprintf("%dx%d/%s", size.width, size.height, field.key), func(t *testing.T) {
+				ctx, screen := newManageYaziPolicyScreen(t, true, true)
+				ctx.app.manageConfig.YaziKeymap = "custom"
+				ctx.app.manageConfig.YaziSortBy = "extension"
+				ctx.app.manageConfig.YaziScrollOff = 99
+				ctx.Width, ctx.Height = size.width, size.height
+				ctx.app.width, ctx.app.height = size.width, size.height
+				ctx.app.configFieldIndex = manageYaziFieldIndex(t, ctx.app, field.key)
+				before := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig))
+				view := screen.View(size.width, size.height)
+				assertYaziRenderBounds(t, view, size.width, size.height)
+				row := manageYaziFocusedRowText(t, view, field.label)
+				for _, want := range []string{"▸", field.label, field.value, "(read-only)"} {
+					if !strings.Contains(row, want) {
+						t.Errorf("focused read-only Manage row missing %q", want)
+					}
+				}
+				if !strings.Contains(normalizedYaziVisibleText(view), reason) {
+					t.Error("read-only Manage view omitted exact cause before interaction")
+				}
+				if !strings.Contains(normalizedYaziVisibleText(view), "focused read-only") {
+					t.Error("read-only Manage view omitted focused read-only status")
+				}
+				help := manageYaziHelpLineText(t, view)
+				wants := []string{"Tab tools", "↑↓", "S save", "Esc back", "q quit"}
+				if size.width == 80 {
+					wants = append(wants, "? hotkeys")
+				}
+				for _, want := range wants {
+					if !strings.Contains(help, want) {
+						t.Errorf("compact read-only Manage help missing %q", want)
+					}
+				}
+				for _, forbidden := range []string{"←→", "Space", "change"} {
+					if strings.Contains(help, forbidden) {
+						t.Errorf("read-only Manage help advertises %q", forbidden)
+					}
+				}
+				if got := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig)); got != before {
+					t.Errorf("read-only Manage render mutated config from %+v to %+v", before, got)
+				}
+			})
+		}
+	}
+}
+
+func TestManageYaziNativeImportBadgesAreTruthful(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     func(*App)
+		wants     []string
+		forbidden []string
+	}{
+		{name: "native", state: func(*App) {}, wants: []string{"NATIVE SOURCE"}},
+		{name: "managed", state: func(app *App) {
+			app.nativeConfigState.Yazi = tools.YaziConfigImport{
+				Main:   yaziObservation(tools.YaziFileKindMain, tools.YaziOwnershipExactCurrent, ""),
+				Keymap: yaziObservation(tools.YaziFileKindKeymap, tools.YaziOwnershipExactCurrent, ""),
+			}
+		}, wants: []string{"MANAGED SOURCE"}},
+		{name: "mixed native and managed", state: func(app *App) {
+			app.nativeConfigState.Yazi = tools.YaziConfigImport{
+				Main:   yaziObservation(tools.YaziFileKindMain, tools.YaziOwnershipNative, "arbitrary native Yazi TOML is read-only in this release"),
+				Keymap: yaziObservation(tools.YaziFileKindKeymap, tools.YaziOwnershipExactCurrent, ""),
+			}
+		}, wants: []string{"NATIVE SOURCE", "MANAGED SOURCE"}},
+		{name: "malformed", state: func(app *App) {
+			app.nativeConfigState.Yazi = tools.YaziConfigImport{
+				Main: tools.YaziFileObservation{Kind: tools.YaziFileKindMain, Path: filepath.Join(os.Getenv("HOME"), ".config/yazi/yazi.toml"), Exists: true, Ownership: tools.YaziOwnershipMalformed, ReadOnlyReason: "malformed or unreadable Yazi TOML is read-only", Error: "parse failed"},
+			}
+		}, wants: []string{"IMPORT BLOCKED"}},
+		{name: "missing", state: func(app *App) {
+			app.nativeConfigState.Yazi = tools.YaziConfigImport{
+				Main:   tools.YaziFileObservation{Kind: tools.YaziFileKindMain, Path: filepath.Join(os.Getenv("HOME"), ".config/yazi/yazi.toml"), Ownership: tools.YaziOwnershipMissing},
+				Keymap: tools.YaziFileObservation{Kind: tools.YaziFileKindKeymap, Path: filepath.Join(os.Getenv("HOME"), ".config/yazi/keymap.toml"), Ownership: tools.YaziOwnershipMissing},
+			}
+		}, forbidden: []string{"NATIVE SOURCE", "MANAGED SOURCE", "IMPORT BLOCKED"}},
+		{name: "Yazi error", state: func(app *App) { app.nativeConfigState = NativeManageConfigState{YaziError: "resolver failed"} }, wants: []string{"IMPORT BLOCKED"}},
+		{name: "preference error", state: func(app *App) { app.nativeConfigState.PreferenceError = "invalid manage.json" }, wants: []string{"IMPORT BLOCKED"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, screen := newManageYaziPolicyScreen(t, true, true)
+			test.state(ctx.app)
+			visible := normalizedYaziVisibleText(screen.View(ctx.Width, ctx.Height))
+			for _, want := range test.wants {
+				if !strings.Contains(visible, want) {
+					t.Errorf("Yazi Manage badge missing %q", want)
+				}
+			}
+			for _, forbidden := range test.forbidden {
+				if strings.Contains(visible, forbidden) {
+					t.Errorf("Yazi Manage badge unexpectedly contains %q", forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestManageYaziCompactScrolledMouseMapsToLogicalScrollOffset(t *testing.T) {
+	const width, height = 60, 18
+	tests := []struct {
+		name  string
+		x     func(manageLayout) int
+		delta int
+	}{
+		{name: "right half increments", x: func(layout manageLayout) int { return layout.rightX + 3*layout.rightW/4 }, delta: 1},
+		{name: "left half decrements", x: func(layout manageLayout) int { return layout.rightX + layout.rightW/4 }, delta: -1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, screen := newManageYaziPolicyScreen(t, false, false)
+			ctx.Width, ctx.Height = width, height
+			ctx.app.width, ctx.app.height = width, height
+			ctx.app.configFieldIndex = manageYaziFieldIndex(t, ctx.app, "scrolloff")
+
+			view := screen.View(width, height)
+			assertYaziRenderBounds(t, view, width, height)
+			if ctx.app.manageFieldsScroll <= 0 {
+				t.Fatalf("focused Scroll Offset did not establish a scrolled viewport: scroll=%d", ctx.app.manageFieldsScroll)
+			}
+			if !strings.Contains(manageYaziFocusedRowText(t, view, "Scroll Offset"), "Scroll Offset") {
+				t.Fatal("scrolled Scroll Offset row is not visible")
+			}
+
+			layout := ctx.app.manageLayout()
+			scroll := ctx.app.manageFieldsScroll
+			rowY := layout.rightListY + (6 - scroll)
+			before := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig))
+			ctx.app.configFieldIndex = 0 // Deliberately stale focus; do not rerender before clicking.
+			screen.Update(clickAt(test.x(layout), rowY))
+
+			if ctx.app.configFieldIndex != 6 {
+				t.Fatalf("scrolled row click focused logical field %d, want 6 (scroll=%d rowY=%d)", ctx.app.configFieldIndex, scroll, rowY)
+			}
+			if got, want := ctx.app.manageConfig.YaziScrollOff, before.ScrollOff+test.delta; got != want {
+				t.Fatalf("scrolled row click changed Scroll Offset to %d, want exact %d", got, want)
+			}
+			wantConfig := before
+			wantConfig.ScrollOff += test.delta
+			if got := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig)); got != wantConfig {
+				t.Fatalf("scrolled row click changed wrong field: got %+v want %+v", got, wantConfig)
+			}
+		})
+	}
+}
+
+func TestManageYaziCompactMaximumPressureNative(t *testing.T) {
+	const width, height = 60, 18
+	const nativeReason = "arbitrary native Yazi TOML is read-only in this release"
+	ctx, screen, imported := newManageYaziPressureScreen(t)
+	ctx.app.manageConfig.YaziKeymap = imported.Config.Keymap
+	ctx.app.manageConfig.YaziShowHidden = imported.Config.ShowHidden
+	ctx.app.manageConfig.YaziPreviewMode = imported.Config.PreviewMode
+	ctx.app.manageConfig.YaziSortBy = imported.Config.SortBy
+	ctx.app.manageConfig.YaziSortReverse = imported.Config.SortReverse
+	ctx.app.manageConfig.YaziLineMode = imported.Config.LineMode
+	ctx.app.manageConfig.YaziScrollOff = imported.Config.ScrollOff
+	ctx.app.configFieldIndex = manageYaziFieldIndex(t, ctx.app, "sort_by")
+	before := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig))
+	stateBefore := fmt.Sprintf("%#v", ctx.app.nativeConfigState.Yazi)
+
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	row := manageYaziFocusedRowText(t, view, "Sort By")
+	for _, want := range []string{"▸", "Sort By", "extension", "(read-only)"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("maximum-pressure native focused row missing %q", want)
+		}
+	}
+	visible := normalizedYaziVisibleText(view)
+	for _, want := range []string{nativeReason, "NATIVE SOURCE", "Observed at", "mgr.sort_by", "native", "Theme", "malformed", "display-only"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("maximum-pressure native Manage view missing %q", want)
+		}
+	}
+	assertStandaloneYaziNearbyCopy(t, view, "mgr.sort_by", []string{"Observed at", "native"})
+	assertManageYaziPressureHelp(t, view)
+	if got := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig)); got != before {
+		t.Errorf("maximum-pressure native render mutated config from %+v to %+v", before, got)
+	}
+	if got := fmt.Sprintf("%#v", ctx.app.nativeConfigState.Yazi); got != stateBefore {
+		t.Error("maximum-pressure native render mutated imported observation state")
+	}
+}
+
+func TestManageYaziCompactMaximumPressurePreferenceError(t *testing.T) {
+	const width, height = 60, 18
+	const preferenceReason = "saved management preferences could not be read safely: invalid manage.json"
+	const nativeReason = "arbitrary native Yazi TOML is read-only in this release"
+	ctx, screen, imported := newManageYaziPressureScreen(t)
+	ctx.app.nativeConfigState.PreferenceError = "invalid manage.json"
+	ctx.app.manageConfig = NewManageConfig()
+	wantDefaults := yaziConfigFrom(manageConfigToDeepDive(NewManageConfig()))
+	if got := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig)); got != wantDefaults {
+		t.Fatalf("preference fixture did not reset all seven Yazi values: got %+v want %+v", got, wantDefaults)
+	}
+	if ctx.app.manageConfig.YaziSortBy == imported.Config.SortBy {
+		t.Fatal("preference fixture did not distinguish displayed and observed sort values")
+	}
+	ctx.app.configFieldIndex = manageYaziFieldIndex(t, ctx.app, "sort_by")
+	before := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig))
+	stateBefore := fmt.Sprintf("%#v", ctx.app.nativeConfigState.Yazi)
+
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	row := manageYaziFocusedRowText(t, view, "Sort By")
+	for _, want := range []string{"▸", "Sort By", "alphabetical", "(read-only)"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("maximum-pressure preference focused row missing %q", want)
+		}
+	}
+	visible := normalizedYaziVisibleText(view)
+	for _, want := range []string{"IMPORT BLOCKED", preferenceReason, "Observed only (not applied)", "mgr.sort_by", "native", "Theme", "malformed", "display-only"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("maximum-pressure preference Manage view missing %q", want)
+		}
+	}
+	if strings.Contains(visible, nativeReason) {
+		t.Error("maximum-pressure preference view exposed lower-precedence native cause")
+	}
+	assertStandaloneYaziNearbyCopy(t, view, "mgr.sort_by", []string{"Observed only (not applied)", "native"})
+	assertManageYaziPressureHelp(t, view)
+	if got := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig)); got != before {
+		t.Errorf("maximum-pressure preference render mutated config from %+v to %+v", before, got)
+	}
+	if got := fmt.Sprintf("%#v", ctx.app.nativeConfigState.Yazi); got != stateBefore {
+		t.Error("maximum-pressure preference render mutated imported observation state")
+	}
+}
+
+func newManageYaziPressureScreen(t *testing.T) (*ScreenContext, *manageScreen, tools.YaziConfigImport) {
+	t.Helper()
+	ctx, screen := newManageYaziPolicyScreen(t, false, false)
+	const width, height = 60, 18
+	ctx.Width, ctx.Height = width, height
+	ctx.app.width, ctx.app.height = width, height
+	dir := filepath.Join(os.Getenv("HOME"), ".config", "yazi-manage-pressure")
+	t.Setenv("YAZI_CONFIG_HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mainContent := "[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n"
+	keymapContent := "[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n"
+	if err := os.WriteFile(filepath.Join(dir, tools.YaziFileMain), []byte(mainContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, tools.YaziFileKeymap), []byte(keymapContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := tools.ImportYaziConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imported.Main.Ownership != tools.YaziOwnershipNative || imported.Keymap.Ownership != tools.YaziOwnershipNative {
+		t.Fatalf("pressure fixtures must import as native: main=%s keymap=%s", imported.Main.Ownership, imported.Keymap.Ownership)
+	}
+	if provenance, ok := imported.Fields[tools.YaziFieldSortBy]; !ok || provenance.Key != "mgr.sort_by" || provenance.Scope != tools.ConfigValueNative {
+		t.Fatalf("pressure fixture sort provenance=%#v exists=%t", provenance, ok)
+	}
+	imported.Theme = tools.InspectYaziConfigContent(tools.YaziFileKindTheme, imported.Paths.Theme, []byte("[flavor\ndark = \"nord\"\n"), true)
+	ctx.app.nativeConfigState.Yazi = imported
+	return ctx, screen, imported
+}
+
+func assertManageYaziPressureHelp(t *testing.T, view string) {
+	t.Helper()
+	help := manageYaziHelpLineText(t, view)
+	for _, want := range []string{"Tab tools", "↑↓", "focused read-only", "S save", "Esc back", "q quit"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("maximum-pressure Manage help missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"←→", "Space", "change"} {
+		if strings.Contains(help, forbidden) {
+			t.Errorf("maximum-pressure read-only Manage help advertises %q", forbidden)
+		}
+	}
+}
+
+func TestManageYaziCompactWheelMaintainsCoherentSelection(t *testing.T) {
+	const width, height = 60, 18
+	ctx, screen := newManageYaziPolicyScreen(t, false, false)
+	ctx.Width, ctx.Height = width, height
+	ctx.app.width, ctx.app.height = width, height
+	ctx.app.configFieldIndex = 0
+	before := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig))
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	if ctx.app.manageFieldsScroll != 0 {
+		t.Fatalf("wheel fixture initial scroll=%d, want 0", ctx.app.manageFieldsScroll)
+	}
+	layout := ctx.app.manageLayout()
+	wheelX := layout.rightX + layout.rightW/2
+
+	screen.Update(tea.MouseMsg{X: wheelX, Y: layout.rightListY, Button: tea.MouseButtonWheelDown})
+	view = screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	if ctx.app.manageFieldsScroll != 1 || ctx.app.configFieldIndex != 1 {
+		t.Errorf("wheel down + rerender scroll/focus=%d/%d, want 1/1", ctx.app.manageFieldsScroll, ctx.app.configFieldIndex)
+	}
+	if !strings.Contains(manageYaziFocusedRowText(t, view, "Show Hidden"), "▸") {
+		t.Error("wheel-down selected logical field is not visibly focused")
+	}
+	if got := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig)); got != before {
+		t.Fatalf("wheel down mutated config from %+v to %+v", before, got)
+	}
+
+	screen.Update(tea.MouseMsg{X: wheelX, Y: layout.rightListY, Button: tea.MouseButtonWheelUp})
+	view = screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	if ctx.app.manageFieldsScroll != 0 || ctx.app.configFieldIndex != 0 {
+		t.Errorf("wheel up + rerender scroll/focus=%d/%d, want 0/0", ctx.app.manageFieldsScroll, ctx.app.configFieldIndex)
+	}
+	if !strings.Contains(manageYaziFocusedRowText(t, view, "Keymap"), "▸") {
+		t.Error("wheel-up selected logical field is not visibly focused")
+	}
+	if got := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig)); got != before {
+		t.Fatalf("wheel up mutated config from %+v to %+v", before, got)
+	}
+}
+
+func TestManageYaziCompactHeaderAndFooterClicksPreserveState(t *testing.T) {
+	const width, height = 60, 18
+	tests := []struct {
+		name string
+		y    func(t *testing.T, view string, layout manageLayout) int
+	}{
+		{name: "panel header", y: func(_ *testing.T, _ string, layout manageLayout) int { return layout.rightListY - 2 }},
+		{name: "help footer", y: func(t *testing.T, view string, _ manageLayout) int {
+			y := labelLineY(t, view, "S save")
+			if y < 0 {
+				t.Fatal("compact Manage help/footer row is not visible")
+			}
+			return y
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, screen := newManageYaziPolicyScreen(t, false, false)
+			ctx.Width, ctx.Height = width, height
+			ctx.app.width, ctx.app.height = width, height
+			ctx.app.configFieldIndex = manageYaziFieldIndex(t, ctx.app, "scrolloff")
+			ctx.app.manageStatus = "sentinel status"
+			view := screen.View(width, height)
+			assertYaziRenderBounds(t, view, width, height)
+			layout := ctx.app.manageLayout()
+			y := test.y(t, view, layout)
+			before := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig))
+			focusBefore := ctx.app.configFieldIndex
+			scrollBefore := ctx.app.manageFieldsScroll
+			paneBefore := ctx.app.managePane
+			statusBefore := ctx.app.manageStatus
+			editingBefore := ctx.app.manageEditing
+
+			_, cmd := screen.Update(clickAt(layout.rightX+3*layout.rightW/4, y))
+			if cmd != nil {
+				t.Errorf("%s click returned non-nil command", test.name)
+			}
+			if ctx.app.configFieldIndex != focusBefore || ctx.app.manageFieldsScroll != scrollBefore {
+				t.Errorf("%s click changed focus/scroll from %d/%d to %d/%d", test.name, focusBefore, scrollBefore, ctx.app.configFieldIndex, ctx.app.manageFieldsScroll)
+			}
+			if ctx.app.managePane != paneBefore || ctx.app.manageStatus != statusBefore || ctx.app.manageEditing != editingBefore {
+				t.Errorf("%s click changed pane/status/editing from %d/%q/%t to %d/%q/%t", test.name, paneBefore, statusBefore, editingBefore, ctx.app.managePane, ctx.app.manageStatus, ctx.app.manageEditing)
+			}
+			if got := yaziConfigFrom(manageConfigToDeepDive(ctx.app.manageConfig)); got != before {
+				t.Errorf("%s click mutated config from %+v to %+v", test.name, before, got)
+			}
+		})
+	}
+}
+
+func TestManageYaziCompactFullWidthSettingsGeometry(t *testing.T) {
+	const width, height = 60, 18
+	for _, test := range []struct {
+		name      string
+		x         int
+		wantValue int
+	}{
+		{name: "left edge", x: 1, wantValue: 4},
+		{name: "right edge", x: width - 1, wantValue: 6},
+	} {
+		t.Run("click/"+test.name, func(t *testing.T) {
+			ctx, screen := newManageYaziPolicyScreen(t, false, false)
+			ctx.Width, ctx.Height = width, height
+			ctx.app.width, ctx.app.height = width, height
+			ctx.app.configFieldIndex = 6
+			_ = screen.View(width, height)
+			layout := ctx.app.manageLayout()
+			if layout.rightX != 0 || layout.rightW != width || layout.leftW != 0 {
+				t.Fatalf("compact Yazi geometry left/right=%d/%d+%d, want inactive left and full-width right", layout.leftW, layout.rightX, layout.rightW)
+			}
+			rowY := layout.rightListY + (6 - ctx.app.manageFieldsScroll)
+			ctx.app.configFieldIndex = 0 // Preserve rendered scroll geometry.
+			screen.Update(clickAt(test.x, rowY))
+			if ctx.app.configFieldIndex != 6 || ctx.app.manageConfig.YaziScrollOff != test.wantValue {
+				t.Fatalf("full-span click x=%d focused/value=%d/%d, want 6/%d", test.x, ctx.app.configFieldIndex, ctx.app.manageConfig.YaziScrollOff, test.wantValue)
+			}
+		})
+
+		t.Run("wheel/"+test.name, func(t *testing.T) {
+			ctx, screen := newManageYaziPolicyScreen(t, false, false)
+			ctx.Width, ctx.Height = width, height
+			ctx.app.width, ctx.app.height = width, height
+			ctx.app.configFieldIndex = 0
+			_ = screen.View(width, height)
+			screen.Update(tea.MouseMsg{X: test.x, Y: ctx.app.manageLayout().rightListY, Button: tea.MouseButtonWheelDown})
+			_ = screen.View(width, height)
+			if ctx.app.manageFieldsScroll != 1 || ctx.app.configFieldIndex != 1 {
+				t.Fatalf("full-span wheel x=%d scroll/focus=%d/%d, want 1/1", test.x, ctx.app.manageFieldsScroll, ctx.app.configFieldIndex)
+			}
+		})
+	}
+}
+
+func TestManageYaziCompactPaneSwitchRendersActivePane(t *testing.T) {
+	const width, height = 60, 18
+	ctx, screen := newManageYaziPolicyScreen(t, false, false)
+	ctx.Width, ctx.Height = width, height
+	ctx.app.width, ctx.app.height = width, height
+	yaziIndex := ctx.app.manageIndex
+
+	screen.Update(keyMsg("tab"))
+	if ctx.app.managePane != managePaneTools {
+		t.Fatal("Tab did not switch compact Manage to tools pane")
+	}
+	view := normalizedYaziVisibleText(screen.View(width, height))
+	if !strings.Contains(view, "▸ Yazi") || strings.Contains(view, "Keymap:") {
+		t.Fatalf("compact tools pane does not match pane state: %q", view)
+	}
+
+	if yaziIndex > 0 {
+		screen.Update(keyMsg("up"))
+		if ctx.app.manageIndex != yaziIndex-1 {
+			t.Fatalf("compact tools Up index=%d, want %d", ctx.app.manageIndex, yaziIndex-1)
+		}
+		selected := ctx.app.manageItems()[ctx.app.manageIndex].name
+		if row := normalizedYaziVisibleText(screen.View(width, height)); !strings.Contains(row, "▸ "+selected) {
+			t.Fatalf("moved compact tool selection %q is not visible: %q", selected, row)
+		}
+	}
+
+	ctx.app.manageIndex = yaziIndex
+	_ = screen.View(width, height)
+	layout := ctx.app.manageLayout()
+	clickIndex := ctx.app.manageToolsScroll
+	screen.Update(clickAt(width-1, layout.leftListY))
+	if ctx.app.manageIndex != clickIndex || ctx.app.managePane != managePaneTools {
+		t.Fatalf("full-width compact tool click index/pane=%d/%d, want %d/tools", ctx.app.manageIndex, ctx.app.managePane, clickIndex)
+	}
+	ctx.app.manageIndex = 0
+	ctx.app.manageToolsScroll = 0
+	_ = screen.View(width, height)
+	screen.Update(tea.MouseMsg{X: width - 1, Y: layout.leftListY, Button: tea.MouseButtonWheelDown})
+	_ = screen.View(width, height)
+	if ctx.app.manageToolsScroll != 1 || ctx.app.manageIndex != 1 {
+		t.Fatalf("full-width compact tool wheel scroll/index=%d/%d, want 1/1", ctx.app.manageToolsScroll, ctx.app.manageIndex)
+	}
+
+	ctx.app.manageIndex = yaziIndex
+	screen.Update(keyMsg("tab"))
+	if ctx.app.managePane != managePaneSettings || !strings.Contains(normalizedYaziVisibleText(screen.View(width, height)), "Keymap:") {
+		t.Fatal("Tab did not restore visible compact Yazi settings pane")
+	}
+}
+
+func TestManageYaziCompactTabSpansRouteExactly(t *testing.T) {
+	tests := []struct {
+		label  string
+		target Screen
+	}{
+		{"1 Manage", ScreenManage},
+		{"2 Users", ScreenUsers},
+		{"3 Hotkeys", ScreenHotkeys},
+		{"4 Update", ScreenUpdate},
+		{"5 Backups", ScreenBackups},
+	}
+	for _, test := range tests {
+		start := strings.Index(compactManageTabLine, test.label)
+		if start < 0 {
+			t.Fatalf("compact tab line missing %q", test.label)
+		}
+		for _, x := range []int{start, start + lipgloss.Width(test.label) - 1} {
+			if got := detectCompactManageTabClick(x); got != test.target {
+				t.Errorf("compact tab %q x=%d routed to %v, want %v", test.label, x, got, test.target)
+			}
+		}
+	}
+}
+
+func TestManageYaziCompactSanitizesStatusBeforeLayout(t *testing.T) {
+	const width, height = 60, 18
+	ctx, screen := newManageYaziPolicyScreen(t, false, false)
+	ctx.Width, ctx.Height = width, height
+	ctx.app.width, ctx.app.height = width, height
+	ctx.app.manageStatus = "safe\x1b[31m\nINJECTED\rstatus"
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	if strings.Contains(view, "\x1b[31m") || strings.Contains(stripANSITest(view), "\nINJECTED") {
+		t.Fatal("compact Manage status injected terminal controls or a new row")
+	}
+	lines := strings.Split(stripANSITest(view), "\n")
+	if !strings.Contains(lines[len(lines)-1], "q quit") {
+		t.Fatal("injected status displaced the pinned compact help row")
+	}
+}
+
+func TestManageYaziCompactTabsInstallAndSourceMetadataAreTruthful(t *testing.T) {
+	ctx, screen := newManageYaziPolicyScreen(t, false, false)
+	ctx.Width, ctx.Height = 60, 18
+	ctx.app.width, ctx.app.height = 60, 18
+	view := screen.View(60, 18)
+	first := strings.TrimSpace(strings.Split(stripANSITest(view), "\n")[0])
+	if first != "1 Manage  2 Users  3 Hotkeys  4 Update  5 Backups" {
+		t.Fatalf("compact Manage tabs=%q", first)
+	}
+	visible := normalizedYaziVisibleText(view)
+	for _, want := range []string{"I install", "MANAGED SOURCE"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("compact uninstalled Yazi view missing %q", want)
+		}
+	}
+
+	ctx.Width, ctx.Height = 100, 40
+	ctx.app.width, ctx.app.height = 100, 40
+	view = screen.View(100, 40)
+	visible = normalizedYaziVisibleText(view)
+	for _, want := range []string{"I: install this tool/app", "MANAGED SOURCE"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("full uninstalled Yazi view missing %q", want)
+		}
+	}
+}
+
+func TestManageYaziCompactProvenanceIncludesPathAndLine(t *testing.T) {
+	ctx, screen, imported := newManageYaziPressureScreen(t)
+	ctx.app.configFieldIndex = manageYaziFieldIndex(t, ctx.app, "sort_by")
+	view := normalizedYaziVisibleText(screen.View(60, 18))
+	provenance := imported.Fields[tools.YaziFieldSortBy]
+	for _, want := range []string{"Observed at", filepath.Base(provenance.Path) + fmt.Sprintf(":%d", provenance.Line), provenance.Key, string(provenance.Scope), filepath.Base(imported.Paths.Theme)} {
+		if !strings.Contains(view, want) {
+			t.Errorf("compact provenance/theme context missing %q", want)
+		}
+	}
+}
+
+func TestManageYaziHistoricalProductSourceUsesManagedBadge(t *testing.T) {
+	ctx, screen := newManageYaziPolicyScreen(t, false, false)
+	ctx.app.nativeConfigState.Yazi.Main.Ownership = tools.YaziOwnershipExactHistorical
+	ctx.app.nativeConfigState.Yazi.Keymap.Ownership = tools.YaziOwnershipExactHistorical
+	visible := normalizedYaziVisibleText(screen.View(ctx.Width, ctx.Height))
+	if !strings.Contains(visible, "MANAGED SOURCE") || strings.Contains(visible, "NATIVE SOURCE") {
+		t.Fatalf("historical product source badge is not managed-only: %q", visible)
+	}
+}
+
+func TestManageYaziSaveKeyFreezesReviewedSnapshotWithoutWriting(t *testing.T) {
+	app, home, paths, _ := newManageYaziConfirmFixture(t, true, false)
+	oldPlan := app.pendingManageSavePlan
+	app.pendingManageSavePlan = nil
+	app.manageSavePlanErr = nil
+	app.manageStatus = ""
+	ctx := NewTestScreenContext()
+	ctx.app = app
+	screen := NewManageScreen(ctx)
+	before := snapshotManageYaziDisk(t, home, paths)
+
+	_, cmd := screen.Update(keyMsg("s"))
+	if cmd == nil {
+		t.Fatal("Manage S returned no confirmation navigation")
+	}
+	if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenManageSaveConfirm {
+		t.Fatalf("Manage S navigation=%#v", nav)
+	}
+	plan := app.pendingManageSavePlan
+	if plan == nil || plan.plan == nil || plan.plan.hasBlocked() {
+		t.Fatalf("Manage S plan=%#v err=%v", plan, app.manageSavePlanErr)
+	}
+	if plan == oldPlan {
+		t.Fatal("Manage S reused the stale prebuilt plan pointer")
+	}
+	action := planActionByID(t, plan.plan, "config:yazi:main")
+	wantTarget := planTargetPath(home, paths.Main)
+	if action.Target != wantTarget || !slices.Equal(action.BackupTargets, []string{wantTarget}) || !slices.Equal(plan.plan.configTools, []string{"yazi"}) {
+		t.Fatalf("frozen reviewed Yazi action=%+v tools=%v", action, plan.plan.configTools)
+	}
+	wantHidden := app.manageConfig.YaziShowHidden
+	hash := plan.plan.hash()
+	app.manageConfig.YaziShowHidden = !app.manageConfig.YaziShowHidden
+	if plan.snapshot.YaziShowHidden != wantHidden || plan.plan.hash() != hash {
+		t.Fatal("reviewed Manage Yazi snapshot aliases later editor changes")
+	}
+	assertManageYaziDiskUnchanged(t, home, paths, before)
+}
+
+func TestManageYaziCompactApplicableConfirmRoutesPreserveDisk(t *testing.T) {
+	const width, height = 60, 18
+	for _, key := range []string{"esc", "q"} {
+		t.Run(key, func(t *testing.T) {
+			app, home, paths, screen := newManageYaziConfirmFixture(t, true, false)
+			before := snapshotManageYaziDisk(t, home, paths)
+			pending := app.manageConfig.YaziShowHidden
+			view := screen.View(width, height)
+			assertYaziRenderBounds(t, view, width, height)
+			helpY := labelLineY(t, strings.ToLower(stripANSITest(view)), "enter confirm")
+			if helpY < 0 || helpY >= height {
+				t.Fatalf("applicable state-aware footer is not pinned inside 60x18 (y=%d)", helpY)
+			}
+			footer := strings.ToLower(strings.Join(strings.Fields(strings.Split(stripANSITest(view), "\n")[helpY]), " "))
+			for _, want := range []string{"enter confirm", "esc edit", "q cancel"} {
+				if !strings.Contains(footer, want) {
+					t.Errorf("applicable footer missing %q", want)
+				}
+			}
+			_, cmd := screen.Update(keyMsg(key))
+			if key == "esc" {
+				if cmd == nil {
+					t.Fatal("Esc returned no Manage navigation")
+				}
+				if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenManage {
+					t.Fatalf("Esc navigation=%#v", nav)
+				}
+			} else {
+				if cmd == nil {
+					t.Fatal("q returned no quit command")
+				}
+				if _, ok := cmd().(tea.QuitMsg); !ok {
+					t.Fatalf("q command returned %T", cmd())
+				}
+			}
+			if app.manageConfig.YaziShowHidden != pending {
+				t.Fatal("confirmation route discarded pending Yazi edit")
+			}
+			assertManageYaziDiskUnchanged(t, home, paths, before)
+		})
+	}
+}
+
+func TestManageYaziCompactNoChangeEnterReturnsWithoutWrite(t *testing.T) {
+	const width, height = 60, 18
+	app, home, paths, screen := newManageYaziConfirmFixture(t, false, false)
+	before := snapshotManageYaziDisk(t, home, paths)
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	_ = manageYaziConfirmHelpLine(t, view, "no changes", "enter/q close", "esc edit")
+	_, cmd := screen.Update(keyMsg("enter"))
+	if cmd == nil {
+		t.Fatal("no-change Enter returned no Manage navigation")
+	}
+	if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenManage {
+		t.Fatalf("no-change Enter navigation=%#v", nav)
+	}
+	if app.manageSaveRunning || app.manageStatus != "No changes" {
+		t.Fatalf("no-change Enter running=%t status=%q", app.manageSaveRunning, app.manageStatus)
+	}
+	assertManageYaziDiskUnchanged(t, home, paths, before)
+}
+
+func TestManageYaziCompactBlockedNativeConfirmIsInert(t *testing.T) {
+	const width, height = 60, 18
+	const reason = "arbitrary native Yazi TOML is read-only in this release"
+	const actionReason = "yazi.toml has native ownership: " + reason
+	app, home, paths, screen := newManageYaziConfirmFixture(t, true, true)
+	action := planActionByID(t, app.pendingManageSavePlan.plan, "config:yazi:main")
+	if action.Disposition != operation.DispositionBlocked || action.Reason != actionReason {
+		t.Fatalf("blocked Manage Yazi action disposition/reason=%s/%q, want blocked/%q", action.Disposition, action.Reason, actionReason)
+	}
+	before := snapshotManageYaziDisk(t, home, paths)
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	visible := strings.ToLower(normalizedYaziVisibleText(view))
+	for _, want := range []string{"blocked", strings.ToLower(actionReason)} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("blocked Manage confirmation missing %q", want)
+		}
+	}
+	_ = manageYaziConfirmHelpLine(t, view, "blocked", "esc edit", "q cancel")
+	for _, forbidden := range []string{"enter confirm", "enter/q close"} {
+		if strings.Contains(visible, forbidden) {
+			t.Errorf("blocked Manage confirmation advertises %q", forbidden)
+		}
+	}
+	_, cmd := screen.Update(keyMsg("enter"))
+	if cmd != nil || app.manageSaveRunning {
+		t.Fatal("blocked Manage Enter was not inert")
+	}
+	assertManageYaziDiskUnchanged(t, home, paths, before)
+}
+
+func TestManageYaziCompactRunningConfirmInputsAreInert(t *testing.T) {
+	const width, height = 60, 18
+	app, home, paths, screen := newManageYaziConfirmFixture(t, true, false)
+	app.manageSaveRunning = true
+	app.manageStatus = "Saving reviewed changes..."
+	app.manageSaveScroll = 1
+	before := snapshotManageYaziDisk(t, home, paths)
+	scrollBefore := app.manageSaveScroll
+	planHash := app.pendingManageSavePlan.plan.hash()
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	visible := strings.ToLower(normalizedYaziVisibleText(view))
+	for _, want := range []string{"saving reviewed changes", "input is paused"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("running Manage confirmation missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"enter confirm", "esc edit", "q cancel"} {
+		if strings.Contains(visible, forbidden) {
+			t.Errorf("running Manage confirmation advertises %q", forbidden)
+		}
+	}
+	inputs := []tea.Msg{keyMsg("esc"), keyMsg("q"), keyMsg("enter"), clickAt(30, 10), tea.MouseMsg{X: 30, Y: 10, Button: tea.MouseButtonWheelDown}}
+	for _, input := range inputs {
+		_, cmd := screen.Update(input)
+		if cmd != nil || !app.manageSaveRunning || app.manageStatus != "Saving reviewed changes..." || app.manageSaveScroll != scrollBefore || app.pendingManageSavePlan.plan.hash() != planHash {
+			t.Errorf("running Manage confirmation accepted %T: cmd=%v running=%t status=%q scroll=%d/%d hashChanged=%t", input, cmd != nil, app.manageSaveRunning, app.manageStatus, app.manageSaveScroll, scrollBefore, app.pendingManageSavePlan.plan.hash() != planHash)
+		}
+		assertManageYaziDiskUnchanged(t, home, paths, before)
+	}
+}
+
+func manageYaziConfirmHelpLine(t *testing.T, view string, wants ...string) string {
+	t.Helper()
+	for _, raw := range strings.Split(stripANSITest(view), "\n") {
+		line := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		matched := true
+		for _, want := range wants {
+			matched = matched && strings.Contains(line, strings.ToLower(want))
+		}
+		if matched {
+			return line
+		}
+	}
+	t.Errorf("confirmation has no single pinned help line containing %q", wants)
+	return ""
+}
+
+type manageYaziDiskSnapshot struct {
+	tree             []string
+	main, key, theme string
+	mainMode         os.FileMode
+	keyMode          os.FileMode
+	themeMode        os.FileMode
+}
+
+func newManageYaziConfirmFixture(t *testing.T, dirty, nativeMain bool) (*App, string, tools.YaziConfigPaths, *manageSaveConfirmScreen) {
+	t.Helper()
+	app, home, _ := newPlanTestApp(t)
+	dir := filepath.Join(home, ".config", "yazi-confirm")
+	t.Setenv("YAZI_CONFIG_HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := yaziConfigFrom(manageConfigToDeepDive(app.manageConfig))
+	main := tools.GenerateYaziConfig(cfg, app.theme)
+	if nativeMain {
+		main = "[mgr]\nsort_by = \"extension\"\n"
+	}
+	for _, file := range []struct {
+		name    string
+		content string
+		mode    os.FileMode
+	}{
+		{tools.YaziFileMain, main, 0o640},
+		{tools.YaziFileKeymap, tools.GenerateYaziKeymap(cfg, app.theme), 0o600},
+		{tools.YaziFileTheme, tools.GenerateYaziTheme(app.theme), 0o644},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, file.name), []byte(file.content), file.mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	imported, err := tools.ImportYaziConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.nativeConfigState.Yazi = imported
+	if nativeMain && imported.Main.Ownership != tools.YaziOwnershipNative {
+		t.Fatalf("blocked fixture main ownership=%s, want native", imported.Main.Ownership)
+	}
+	if dirty {
+		app.manageConfig.YaziShowHidden = !app.manageConfig.YaziShowHidden
+	}
+	plan, err := buildManageSavePlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan == nil || plan.plan == nil {
+		t.Fatal("Manage Yazi confirmation fixture produced no reviewed plan")
+	}
+	if nativeMain != plan.plan.hasBlocked() {
+		t.Fatalf("Manage Yazi fixture blocked=%t want=%t", plan.plan.hasBlocked(), nativeMain)
+	}
+	app.pendingManageSavePlan = plan
+	ctx := NewTestScreenContext()
+	ctx.app = app
+	return app, home, imported.Paths, NewManageSaveConfirmScreen(ctx)
+}
+
+func snapshotManageYaziDisk(t *testing.T, home string, paths tools.YaziConfigPaths) manageYaziDiskSnapshot {
+	t.Helper()
+	read := func(path string) (string, os.FileMode) {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content), info.Mode()
+	}
+	main, mainMode := read(paths.Main)
+	key, keyMode := read(paths.Keymap)
+	theme, themeMode := read(paths.Theme)
+	return manageYaziDiskSnapshot{tree: testTreeState(t, home), main: main, key: key, theme: theme, mainMode: mainMode, keyMode: keyMode, themeMode: themeMode}
+}
+
+func assertManageYaziDiskUnchanged(t *testing.T, home string, paths tools.YaziConfigPaths, want manageYaziDiskSnapshot) {
+	t.Helper()
+	got := snapshotManageYaziDisk(t, home, paths)
+	if !slices.Equal(got.tree, want.tree) || got.main != want.main || got.key != want.key || got.theme != want.theme || got.mainMode != want.mainMode || got.keyMode != want.keyMode || got.themeMode != want.themeMode {
+		t.Errorf("Manage Yazi confirmation changed HOME tree, bytes, or modes: got=%+v want=%+v", got, want)
+	}
+}
+
+func manageYaziFocusedRowText(t *testing.T, view, label string) string {
+	t.Helper()
+	for _, line := range strings.Split(stripANSITest(view), "\n") {
+		if strings.Contains(line, label) {
+			return strings.Join(strings.Fields(line), " ")
+		}
+	}
+	t.Errorf("focused Manage row %q is not visible", label)
+	return ""
+}
+
+func manageYaziHelpLineText(t *testing.T, view string) string {
+	t.Helper()
+	for _, line := range strings.Split(stripANSITest(view), "\n") {
+		if strings.Contains(line, "S save") {
+			return strings.Join(strings.Fields(line), " ")
+		}
+	}
+	t.Error("Manage help line containing S save is not visible")
+	return ""
+}
+
+func TestStandaloneYaziCompactWritableViewportContract(t *testing.T) {
+	dimensions := []struct{ width, height int }{{80, 24}, {60, 18}}
+	fields := []struct {
+		index int
+		label string
+		value string
+	}{
+		{0, "Keymap Style", "Vim/Yazi defaults"},
+		{1, "Show Hidden Files", "OFF"},
+		{2, "File Preview", "Default image-preview delay (30ms)"},
+		{3, "Sort By", "Alphabetical"},
+		{4, "Reverse Sort", "OFF"},
+		{5, "Line Metadata", "None"},
+		{6, "Scroll Offset", "5 lines"},
+	}
+	for _, size := range dimensions {
+		for _, field := range fields {
+			t.Run(fmt.Sprintf("%dx%d/field-%d", size.width, size.height, field.index), func(t *testing.T) {
+				ctx, screen := newStandaloneYaziPolicyScreen(t, tools.YaziFileObservation{}, tools.YaziFileObservation{})
+				setStandaloneYaziTestSize(ctx, size.width, size.height)
+				ctx.app.configFieldIndex = field.index
+				view := screen.View(size.width, size.height)
+				assertYaziRenderBounds(t, view, size.width, size.height)
+				if assertStandaloneYaziFocusedExtentOnScreen(t, ctx.app, field.index, size.height) {
+					fieldText := standaloneYaziFieldTextFromView(t, view, ctx.app, field.index)
+					for _, want := range []string{field.label, field.value} {
+						if !strings.Contains(fieldText, want) {
+							t.Errorf("focused writable field rows missing %q", want)
+						}
+					}
+				}
+				if size.width == 60 && len(ctx.app.configFieldLayout.extents) >= 7 {
+					t.Errorf("60x18 rendered %d field extents, want a real viewport", len(ctx.app.configFieldLayout.extents))
+				}
+				footer := standaloneYaziFooterText(t, view)
+				for _, want := range []string{"↑↓", "change", "enter preview", "esc/q cancel"} {
+					if !strings.Contains(footer, want) {
+						t.Errorf("writable footer missing %q", want)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestStandaloneYaziCompactReadOnlyRawViewportContract(t *testing.T) {
+	dimensions := []struct{ width, height int }{{80, 24}, {60, 18}}
+	const reason = "arbitrary native Yazi TOML is read-only in this release"
+	fields := []struct {
+		index int
+		label string
+		value string
+	}{
+		{0, "Keymap Style", "custom"},
+		{3, "Sort By", "extension"},
+		{6, "Scroll Offset", "99 lines"},
+	}
+	for _, size := range dimensions {
+		for _, field := range fields {
+			t.Run(fmt.Sprintf("%dx%d/field-%d", size.width, size.height, field.index), func(t *testing.T) {
+				ctx, screen, _ := newStandaloneYaziImportedRawScreen(t,
+					"[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n",
+					"[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n",
+				)
+				setStandaloneYaziTestSize(ctx, size.width, size.height)
+				ctx.app.configFieldIndex = field.index
+				before := yaziConfigFrom(*ctx.app.deepDiveConfig)
+				view := screen.View(size.width, size.height)
+				assertYaziRenderBounds(t, view, size.width, size.height)
+				if assertStandaloneYaziFocusedExtentOnScreen(t, ctx.app, field.index, size.height) {
+					fieldText := standaloneYaziFieldTextFromView(t, view, ctx.app, field.index)
+					for _, want := range []string{field.label, field.value, "(read-only)"} {
+						if !strings.Contains(fieldText, want) {
+							t.Errorf("focused read-only field rows missing %q", want)
+						}
+					}
+				}
+				if !strings.Contains(normalizedYaziVisibleText(view), reason) {
+					t.Error("compact read-only view omitted canonical winning cause")
+				}
+				footer := standaloneYaziFooterText(t, view)
+				for _, want := range []string{"↑↓", "enter preview", "esc/q cancel", "focused read-only"} {
+					if !strings.Contains(footer, want) {
+						t.Errorf("compact read-only footer missing %q", want)
+					}
+				}
+				if strings.Contains(footer, "change") {
+					t.Error("compact read-only footer advertises focused change")
+				}
+				if got := yaziConfigFrom(*ctx.app.deepDiveConfig); got != before {
+					t.Errorf("compact read-only render mutated config from %+v to %+v", before, got)
+				}
+				if size.width == 60 && len(ctx.app.configFieldLayout.extents) >= 7 {
+					t.Errorf("60x18 rendered %d field extents, want a real viewport", len(ctx.app.configFieldLayout.extents))
+				}
+			})
+		}
+	}
+}
+
+func TestStandaloneYaziCompactKeyboardAndWheelKeepFocusVisible(t *testing.T) {
+	const width, height = 60, 18
+	labels := []string{"Keymap Style", "Show Hidden Files", "File Preview", "Sort By", "Reverse Sort", "Line Metadata", "Scroll Offset"}
+
+	t.Run("sequential keyboard navigation", func(t *testing.T) {
+		ctx, screen, _ := newStandaloneYaziImportedRawScreen(t,
+			"[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n",
+			"[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n",
+		)
+		setStandaloneYaziTestSize(ctx, width, height)
+		before := yaziConfigFrom(*ctx.app.deepDiveConfig)
+		ctx.app.configFieldIndex = 0
+		for index := 0; index <= 6; index++ {
+			if ctx.app.configFieldIndex != index {
+				t.Errorf("down sequence focus=%d, want %d", ctx.app.configFieldIndex, index)
+			}
+			view := screen.View(width, height)
+			assertStandaloneYaziFocusedGeometry(t, view, ctx.app, index, labels[index], height)
+			if index < 6 {
+				screen.Update(keyMsg("down"))
+			}
+		}
+		for index := 6; index >= 0; index-- {
+			if ctx.app.configFieldIndex != index {
+				t.Errorf("up sequence focus=%d, want %d", ctx.app.configFieldIndex, index)
+			}
+			view := screen.View(width, height)
+			assertStandaloneYaziFocusedGeometry(t, view, ctx.app, index, labels[index], height)
+			if index > 0 {
+				screen.Update(keyMsg("up"))
+			}
+		}
+		if got := yaziConfigFrom(*ctx.app.deepDiveConfig); got != before {
+			t.Errorf("keyboard navigation mutated config from %+v to %+v", before, got)
+		}
+	})
+
+	t.Run("wheel navigation", func(t *testing.T) {
+		ctx, screen, _ := newStandaloneYaziImportedRawScreen(t,
+			"[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n",
+			"[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n",
+		)
+		setStandaloneYaziTestSize(ctx, width, height)
+		ctx.app.configFieldIndex = 3
+		before := yaziConfigFrom(*ctx.app.deepDiveConfig)
+		screen.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+		view := screen.View(width, height)
+		assertStandaloneYaziFocusedGeometry(t, view, ctx.app, 4, labels[4], height)
+		screen.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+		view = screen.View(width, height)
+		assertStandaloneYaziFocusedGeometry(t, view, ctx.app, 3, labels[3], height)
+		if got := yaziConfigFrom(*ctx.app.deepDiveConfig); got != before {
+			t.Errorf("wheel navigation mutated config from %+v to %+v", before, got)
+		}
+	})
+}
+
+func TestStandaloneYaziCompactVisibleExtentClicksMapExactly(t *testing.T) {
+	const width, height = 60, 18
+	ctx, screen, _ := newStandaloneYaziImportedRawScreen(t,
+		"[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n",
+		"[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n",
+	)
+	setStandaloneYaziTestSize(ctx, width, height)
+	ctx.app.configFieldIndex = 3
+	_ = screen.View(width, height)
+	var visible []fieldExtent
+	for _, extent := range ctx.app.configFieldLayout.extents {
+		if extent.startY >= 0 && extent.startY+extent.height <= height {
+			visible = append(visible, extent)
+		}
+	}
+	if len(visible) == 0 {
+		t.Fatal("60x18 viewport exposes no clickable Yazi field extents")
+	}
+	if len(visible) >= 7 {
+		t.Errorf("60x18 viewport exposes all %d fields; want at least one offscreen", len(visible))
+	}
+	for _, expected := range visible {
+		t.Run(fmt.Sprintf("field-%d", expected.index), func(t *testing.T) {
+			ctx, screen, _ := newStandaloneYaziImportedRawScreen(t,
+				"[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n",
+				"[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n",
+			)
+			setStandaloneYaziTestSize(ctx, width, height)
+			ctx.app.configFieldIndex = 3
+			before := yaziConfigFrom(*ctx.app.deepDiveConfig)
+			_ = screen.View(width, height)
+			extent := standaloneYaziFieldExtent(t, ctx.app, expected.index)
+			x := (ctx.app.configFieldLayout.boxLeft + ctx.app.configFieldLayout.boxRight) / 2
+			screen.Update(clickAt(x, extent.startY))
+			if ctx.app.configFieldIndex != expected.index {
+				t.Errorf("click focused index=%d, want %d", ctx.app.configFieldIndex, expected.index)
+			}
+			if got := yaziConfigFrom(*ctx.app.deepDiveConfig); got != before {
+				t.Errorf("field click mutated config from %+v to %+v", before, got)
+			}
+		})
+	}
+}
+
+func TestStandaloneYaziCompactNoticeAndFooterClicksAreInert(t *testing.T) {
+	const width, height = 60, 18
+	ctx, screen, _ := newStandaloneYaziImportedRawScreen(t,
+		"[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n",
+		"[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n",
+	)
+	setStandaloneYaziTestSize(ctx, width, height)
+	ctx.app.configFieldIndex = 3
+	before := yaziConfigFrom(*ctx.app.deepDiveConfig)
+	view := screen.View(width, height)
+	x := (ctx.app.configFieldLayout.boxLeft + ctx.app.configFieldLayout.boxRight) / 2
+	for _, row := range []struct {
+		name string
+		text string
+	}{{"notice", "Read-only:"}, {"footer", "enter preview"}} {
+		t.Run(row.name, func(t *testing.T) {
+			y := labelLineY(t, view, row.text)
+			if y < 0 || y >= height {
+				t.Errorf("%s row %q not visible inside 60x18 (y=%d)", row.name, row.text, y)
+				return
+			}
+			if field, found := ctx.app.configFieldLayout.fieldAt(y); found {
+				t.Errorf("%s row belongs to field %d", row.name, field)
+			}
+			screen.Update(clickAt(x, y))
+			if ctx.app.configFieldIndex != 3 {
+				t.Errorf("%s click moved focus to %d, want 3", row.name, ctx.app.configFieldIndex)
+			}
+			if got := yaziConfigFrom(*ctx.app.deepDiveConfig); got != before {
+				t.Errorf("%s click mutated config from %+v to %+v", row.name, before, got)
+			}
+		})
+	}
+}
+
+func TestStandaloneYaziCompactMaximumPressureNative(t *testing.T) {
+	const width, height = 60, 18
+	const nativeReason = "arbitrary native Yazi TOML is read-only in this release"
+	ctx, screen, imported := newStandaloneYaziImportedRawScreen(t,
+		"[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n",
+		"[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n",
+	)
+	imported.Theme = tools.InspectYaziConfigContent(tools.YaziFileKindTheme, imported.Paths.Theme, []byte("[flavor\ndark = \"nord\"\n"), true)
+	ctx.app.nativeConfigState.Yazi = imported
+	setStandaloneYaziTestSize(ctx, width, height)
+	ctx.app.configFieldIndex = 3
+	before := yaziConfigFrom(*ctx.app.deepDiveConfig)
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	if assertStandaloneYaziFocusedExtentOnScreen(t, ctx.app, 3, height) {
+		fieldText := standaloneYaziFieldTextFromView(t, view, ctx.app, 3)
+		for _, want := range []string{"Sort By", "extension", "(read-only)"} {
+			if !strings.Contains(fieldText, want) {
+				t.Errorf("maximum-pressure focused field missing %q", want)
+			}
+		}
+	}
+	visible := normalizedYaziVisibleText(view)
+	for _, want := range []string{nativeReason, "Observed at", "mgr.sort_by", "native", "Theme file", "display-only", "malformed"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("maximum-pressure native view missing %q", want)
+		}
+	}
+	assertStandaloneYaziExternalRow(t, view, ctx.app, "Observed at", height)
+	assertStandaloneYaziExternalRow(t, view, ctx.app, "Theme file", height)
+	assertStandaloneYaziNearbyCopy(t, view, "mgr.sort_by", []string{"Observed at", "native"})
+	assertStandaloneYaziPressureIndicators(t, view, ctx, screen, before, height)
+	footer := standaloneYaziFooterText(t, view)
+	for _, want := range []string{"↑↓", "focused read-only", "enter preview", "esc/q cancel"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("maximum-pressure native footer missing %q", want)
+		}
+	}
+	if len(ctx.app.configFieldLayout.extents) >= 7 {
+		t.Errorf("60x18 maximum-pressure view exposes %d extents, want fewer than 7", len(ctx.app.configFieldLayout.extents))
+	}
+	for _, extent := range ctx.app.configFieldLayout.extents {
+		if extent.index == 7 {
+			t.Fatal("maximum-pressure theme/provenance notice created field index 7")
+		}
+	}
+}
+
+func TestStandaloneYaziCompactMaximumPressurePreferenceError(t *testing.T) {
+	const width, height = 60, 18
+	const preferenceReason = "saved management preferences could not be read safely: invalid manage.json"
+	const nativeReason = "arbitrary native Yazi TOML is read-only in this release"
+	ctx, screen, imported := newStandaloneYaziImportedRawScreen(t,
+		"[mgr]\nsort_by = \"extension\"\nlinemode = \"owner\"\nscrolloff = 99\n\n[plugin]\npreviewers = []\n",
+		"[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n",
+	)
+	imported.Theme = tools.InspectYaziConfigContent(tools.YaziFileKindTheme, imported.Paths.Theme, []byte("[flavor\ndark = \"nord\"\n"), true)
+	ctx.app.nativeConfigState.Yazi = imported
+	ctx.app.nativeConfigState.PreferenceError = "invalid manage.json"
+	preferred := manageConfigToDeepDive(NewManageConfig())
+	ctx.app.deepDiveConfig.YaziKeymap = preferred.YaziKeymap
+	ctx.app.deepDiveConfig.YaziShowHidden = preferred.YaziShowHidden
+	ctx.app.deepDiveConfig.YaziPreviewMode = preferred.YaziPreviewMode
+	ctx.app.deepDiveConfig.YaziSortBy = preferred.YaziSortBy
+	ctx.app.deepDiveConfig.YaziSortReverse = preferred.YaziSortReverse
+	ctx.app.deepDiveConfig.YaziLineMode = preferred.YaziLineMode
+	ctx.app.deepDiveConfig.YaziScrollOff = preferred.YaziScrollOff
+	if ctx.app.deepDiveConfig.YaziSortBy == imported.Config.SortBy {
+		t.Fatal("preference pressure fixture did not separate displayed and imported sort values")
+	}
+	setStandaloneYaziTestSize(ctx, width, height)
+	ctx.app.configFieldIndex = 3
+	before := yaziConfigFrom(*ctx.app.deepDiveConfig)
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	if assertStandaloneYaziFocusedExtentOnScreen(t, ctx.app, 3, height) {
+		fieldText := standaloneYaziFieldTextFromView(t, view, ctx.app, 3)
+		for _, want := range []string{"Sort By", "alphabetical", "(read-only)"} {
+			if !strings.Contains(fieldText, want) {
+				t.Errorf("preference pressure focused field missing %q", want)
+			}
+		}
+	}
+	visible := normalizedYaziVisibleText(view)
+	for _, want := range []string{preferenceReason, "Observed only (not applied)", "mgr.sort_by", "native", "Theme file", "display-only", "malformed"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("maximum-pressure preference view missing %q", want)
+		}
+	}
+	if strings.Contains(visible, nativeReason) {
+		t.Error("maximum-pressure preference view exposed lower-precedence native cause")
+	}
+	assertStandaloneYaziExternalRow(t, view, ctx.app, "Observed only", height)
+	assertStandaloneYaziExternalRow(t, view, ctx.app, "Theme file", height)
+	assertStandaloneYaziNearbyCopy(t, view, "mgr.sort_by", []string{"Observed only", "native"})
+	assertStandaloneYaziPressureIndicators(t, view, ctx, screen, before, height)
+	footer := standaloneYaziFooterText(t, view)
+	for _, want := range []string{"↑↓", "focused read-only", "enter preview", "esc/q cancel"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("maximum-pressure preference footer missing %q", want)
+		}
+	}
+}
+
+func TestStandaloneYaziCompactViewportIndicatorsAreDiscoverableAndInert(t *testing.T) {
+	const width, height = 60, 18
+	tests := []struct {
+		name      string
+		focus     int
+		wantAbove bool
+		wantBelow bool
+	}{
+		{name: "top", focus: 0, wantBelow: true},
+		{name: "middle", focus: 3, wantAbove: true, wantBelow: true},
+		{name: "bottom", focus: 6, wantAbove: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, screen := newStandaloneYaziPolicyScreen(t, tools.YaziFileObservation{}, tools.YaziFileObservation{})
+			setStandaloneYaziTestSize(ctx, width, height)
+			ctx.app.configFieldIndex = test.focus
+			before := yaziConfigFrom(*ctx.app.deepDiveConfig)
+			view := screen.View(width, height)
+			assertYaziRenderBounds(t, view, width, height)
+			for _, indicator := range []struct {
+				text string
+				want bool
+			}{{"more above", test.wantAbove}, {"more below", test.wantBelow}} {
+				y := labelLineY(t, view, indicator.text)
+				if indicator.want {
+					if y < 0 || y >= height {
+						t.Errorf("wanted indicator %q is not visible (y=%d)", indicator.text, y)
+						continue
+					}
+					if field, found := ctx.app.configFieldLayout.fieldAt(y); found {
+						t.Errorf("indicator %q row belongs to field %d", indicator.text, field)
+					}
+					x := (ctx.app.configFieldLayout.boxLeft + ctx.app.configFieldLayout.boxRight) / 2
+					screen.Update(clickAt(x, y))
+					if ctx.app.configFieldIndex != test.focus {
+						t.Errorf("indicator %q click moved focus to %d, want %d", indicator.text, ctx.app.configFieldIndex, test.focus)
+					}
+				} else if y >= 0 {
+					t.Errorf("unexpected indicator %q visible at y=%d", indicator.text, y)
+				}
+			}
+			if got := yaziConfigFrom(*ctx.app.deepDiveConfig); got != before {
+				t.Errorf("indicator clicks mutated config from %+v to %+v", before, got)
+			}
+		})
+	}
+}
+
+func TestStandaloneYaziCompactEditorSaveAndCancelRoutesDoNotWrite(t *testing.T) {
+	const width, height = 60, 18
+	for _, key := range []string{"esc", "q"} {
+		t.Run(key+" cancels", func(t *testing.T) {
+			app, home, _ := newPlanTestApp(t)
+			prepareStandaloneYaziDirtyApp(app, false, true)
+			app.configStandalone = true
+			ctx := NewTestScreenContext()
+			ctx.app, ctx.Width, ctx.Height = app, width, height
+			app.width, app.height = width, height
+			screen := NewConfigYaziScreen(ctx)
+			before := testTreeState(t, home)
+			view := screen.View(width, height)
+			assertYaziRenderBounds(t, view, width, height)
+			footer := standaloneYaziFooterText(t, view)
+			for _, want := range []string{"↑↓", "change", "enter preview", "esc/q cancel"} {
+				if !strings.Contains(footer, want) {
+					t.Errorf("compact editor footer missing %q", want)
+				}
+			}
+			_, cmd := screen.Update(keyMsg(key))
+			if cmd == nil {
+				t.Fatalf("%s returned no quit command", key)
+			}
+			if _, ok := cmd().(tea.QuitMsg); !ok {
+				t.Fatalf("%s returned %T, want tea.QuitMsg", key, cmd())
+			}
+			if app.standaloneConfigPlan != nil || !slices.Equal(before, testTreeState(t, home)) {
+				t.Fatalf("%s planned or mutated HOME", key)
+			}
+		})
+	}
+
+	t.Run("enter freezes keymap-only preview", func(t *testing.T) {
+		app, home, _ := newPlanTestApp(t)
+		prepareStandaloneYaziDirtyApp(app, false, true)
+		app.configStandalone = true
+		ctx := NewTestScreenContext()
+		ctx.app, ctx.Width, ctx.Height = app, width, height
+		app.width, app.height = width, height
+		screen := NewConfigYaziScreen(ctx)
+		before := testTreeState(t, home)
+		view := screen.View(width, height)
+		assertYaziRenderBounds(t, view, width, height)
+		footer := standaloneYaziFooterText(t, view)
+		for _, want := range []string{"↑↓", "change", "enter preview", "esc/q cancel"} {
+			if !strings.Contains(footer, want) {
+				t.Errorf("compact editor footer missing %q", want)
+			}
+		}
+		_, cmd := screen.Update(keyMsg("enter"))
+		if cmd == nil {
+			t.Fatal("Enter returned no confirmation navigation")
+		}
+		if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenConfigSaveConfirm {
+			t.Fatalf("Enter message=%#v, want config save confirmation", nav)
+		}
+		plan := app.standaloneConfigPlan
+		if plan == nil {
+			t.Fatal("Enter did not freeze a plan")
+		}
+		if plan.hasBlocked() || !slices.Equal(plan.configTools, []string{"yazi"}) {
+			t.Fatalf("keymap-only preview plan=%#v tools=%v", plan, plan.configTools)
+		}
+		var applied []string
+		for _, action := range plan.actions() {
+			if action.Kind == operation.KindWriteConfig && action.Disposition == operation.DispositionApply {
+				applied = append(applied, action.ID)
+			}
+		}
+		if !slices.Equal(applied, []string{"config:yazi:keymap"}) {
+			t.Errorf("keymap-only applied actions=%v", applied)
+		}
+		if !slices.Equal(before, testTreeState(t, home)) {
+			t.Fatal("Enter preview mutated HOME")
+		}
+	})
+}
+
+func TestStandaloneYaziCompactConfirmApplicableRoutesDoNotWrite(t *testing.T) {
+	const width, height = 60, 18
+	for _, key := range []string{"esc", "q"} {
+		t.Run(key, func(t *testing.T) {
+			app, home, screen := newStandaloneYaziConfirmTest(t, true)
+			before := testTreeState(t, home)
+			view := screen.View(width, height)
+			assertYaziRenderBounds(t, view, width, height)
+			visible := normalizedYaziVisibleText(view)
+			for _, want := range []string{"enter confirm", "esc edit", "q cancel"} {
+				if !strings.Contains(visible, want) {
+					t.Errorf("applicable confirm footer missing %q", want)
+				}
+			}
+			_, cmd := screen.Update(keyMsg(key))
+			if cmd == nil {
+				t.Fatalf("%s returned no command", key)
+			}
+			if key == "esc" {
+				if nav, ok := cmd().(NavigateMsg); !ok || nav.To != ScreenConfigYazi {
+					t.Fatalf("Esc message=%#v, want Yazi editor", nav)
+				}
+			} else if _, ok := cmd().(tea.QuitMsg); !ok {
+				t.Fatalf("q returned %T, want tea.QuitMsg", cmd())
+			}
+			if app.standaloneConfigRunning || !slices.Equal(before, testTreeState(t, home)) {
+				t.Fatalf("%s executed or mutated HOME", key)
+			}
+		})
+	}
+}
+
+func TestStandaloneYaziCompactConfirmNoChangeClosesWithoutWrite(t *testing.T) {
+	const width, height = 60, 18
+	app, home, screen := newStandaloneYaziConfirmTest(t, false)
+	before := testTreeState(t, home)
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	visible := normalizedYaziVisibleText(view)
+	for _, want := range []string{"no changes", "enter/q close", "esc edit"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("no-change confirm footer missing %q", want)
+		}
+	}
+	_, cmd := screen.Update(keyMsg("enter"))
+	if cmd == nil {
+		t.Fatal("no-change Enter returned no command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("no-change Enter returned %T, want tea.QuitMsg", cmd())
+	}
+	if app.standaloneConfigRunning || !slices.Equal(before, testTreeState(t, home)) {
+		t.Fatal("no-change Enter executed or mutated HOME")
+	}
+}
+
+func TestStandaloneYaziCompactConfirmBlockedEnterIsInert(t *testing.T) {
+	const width, height = 60, 18
+	app, home, _ := newPlanTestApp(t)
+	prepareStandaloneYaziDirtyApp(app, false, true)
+	paths, err := tools.ResolveYaziConfigPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(paths.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeKeymap := []byte("[mgr]\nkeymap = [{ on = \"x\", run = \"noop\" }]\n")
+	if err := os.WriteFile(paths.Keymap, nativeKeymap, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := tools.ImportYaziConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.nativeConfigState.Yazi = imported
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil || plan == nil || !plan.hasBlocked() {
+		t.Fatalf("blocked keymap plan=%#v err=%v", plan, err)
+	}
+	app.standaloneConfigPlan = plan
+	ctx := NewTestScreenContext()
+	ctx.app = app
+	screen := NewConfigSaveConfirmScreen(ctx)
+	before := testTreeState(t, home)
+	keymapBefore, err := os.ReadFile(paths.Keymap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keymapInfoBefore, err := os.Stat(paths.Keymap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := screen.View(width, height)
+	assertYaziRenderBounds(t, view, width, height)
+	visible := strings.ToLower(normalizedYaziVisibleText(view))
+	for _, want := range []string{"blocked", "esc edit", "q cancel"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("blocked confirmation View omitted %q", want)
+		}
+	}
+	if strings.Contains(visible, "enter confirm") {
+		t.Error("blocked confirmation advertises enter confirm")
+	}
+	_, cmd := screen.Update(keyMsg("enter"))
+	if cmd != nil || app.standaloneConfigRunning || !slices.Equal(before, testTreeState(t, home)) {
+		t.Fatal("blocked Enter executed, ran, or mutated HOME")
+	}
+	keymapAfter, err := os.ReadFile(paths.Keymap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keymapInfoAfter, err := os.Stat(paths.Keymap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(keymapAfter) != string(keymapBefore) || keymapInfoAfter.Mode() != keymapInfoBefore.Mode() {
+		t.Fatal("blocked Enter changed native keymap bytes or mode")
+	}
+}
+
+func TestStandaloneYaziCompactConfirmRunningInputsAreInert(t *testing.T) {
+	const width, height = 60, 18
+	for _, key := range []string{"esc", "q", "enter"} {
+		t.Run(key, func(t *testing.T) {
+			app, home, screen := newStandaloneYaziConfirmTest(t, true)
+			app.standaloneConfigRunning = true
+			app.standaloneConfigStatus = "Saving reviewed configuration..."
+			before := testTreeState(t, home)
+			view := screen.View(width, height)
+			assertYaziRenderBounds(t, view, width, height)
+			visible := strings.ToLower(normalizedYaziVisibleText(view))
+			for _, want := range []string{"saving reviewed configuration", "input paused"} {
+				if !strings.Contains(visible, want) {
+					t.Errorf("running confirmation View omitted %q", want)
+				}
+			}
+			for _, forbidden := range []string{"enter confirm", "esc edit", "q cancel"} {
+				if strings.Contains(visible, forbidden) {
+					t.Errorf("running confirmation advertises %q", forbidden)
+				}
+			}
+			_, cmd := screen.Update(keyMsg(key))
+			if cmd != nil || !app.standaloneConfigRunning || !slices.Equal(before, testTreeState(t, home)) {
+				t.Fatalf("running %s was not inert", key)
+			}
+		})
+	}
+}
+
+func newStandaloneYaziConfirmTest(t *testing.T, dirty bool) (*App, string, *configSaveConfirmScreen) {
+	t.Helper()
+	app, home, _ := newPlanTestApp(t)
+	prepareStandaloneYaziDirtyApp(app, false, dirty)
+	plan, err := buildStandaloneConfigPlan(app, time.Now())
+	if err != nil || plan == nil || plan.hasBlocked() {
+		t.Fatalf("confirm fixture plan=%#v err=%v", plan, err)
+	}
+	app.standaloneConfigPlan = plan
+	ctx := NewTestScreenContext()
+	ctx.app = app
+	return app, home, NewConfigSaveConfirmScreen(ctx)
+}
+
+func assertStandaloneYaziFocusedGeometry(t *testing.T, view string, app *App, index int, label string, height int) {
+	t.Helper()
+	if !assertStandaloneYaziFocusedExtentOnScreen(t, app, index, height) {
+		return
+	}
+	if fieldText := standaloneYaziFieldTextFromView(t, view, app, index); !strings.Contains(fieldText, label) {
+		t.Errorf("focused field %d rows missing label %q", index, label)
+	}
+}
+
+func assertStandaloneYaziExternalRow(t *testing.T, view string, app *App, text string, height int) {
+	t.Helper()
+	y := labelLineY(t, view, text)
+	if y < 0 || y >= height {
+		t.Errorf("external row %q not visible inside height=%d (y=%d)", text, height, y)
+		return
+	}
+	if field, found := app.configFieldLayout.fieldAt(y); found {
+		t.Errorf("external row %q belongs to field %d", text, field)
+	}
+}
+
+func assertStandaloneYaziNearbyCopy(t *testing.T, view, anchor string, wants []string) {
+	t.Helper()
+	lines := strings.Split(stripANSITest(view), "\n")
+	y := labelLineY(t, view, anchor)
+	if y < 0 {
+		t.Errorf("nearby-copy anchor %q is absent", anchor)
+		return
+	}
+	start, end := y-1, y+2
+	if start < 0 {
+		start = 0
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	nearby := normalizedYaziVisibleText(strings.Join(lines[start:end], "\n"))
+	for _, want := range wants {
+		if !strings.Contains(nearby, want) {
+			t.Errorf("copy near %q omitted %q", anchor, want)
+		}
+	}
+}
+
+func assertStandaloneYaziPressureIndicators(t *testing.T, view string, ctx *ScreenContext, screen *configYaziScreen, before tools.YaziConfig, height int) {
+	t.Helper()
+	x := (ctx.app.configFieldLayout.boxLeft + ctx.app.configFieldLayout.boxRight) / 2
+	for _, text := range []string{"more above", "more below"} {
+		y := labelLineY(t, view, text)
+		if y < 0 || y >= height {
+			t.Errorf("pressure indicator %q not visible inside height=%d (y=%d)", text, height, y)
+			continue
+		}
+		if field, found := ctx.app.configFieldLayout.fieldAt(y); found {
+			t.Errorf("pressure indicator %q belongs to field %d", text, field)
+		}
+		screen.Update(clickAt(x, y))
+		if ctx.app.configFieldIndex != 3 {
+			t.Errorf("pressure indicator %q click moved focus to %d", text, ctx.app.configFieldIndex)
+		}
+		if got := yaziConfigFrom(*ctx.app.deepDiveConfig); got != before {
+			t.Errorf("pressure indicator %q click mutated config from %+v to %+v", text, before, got)
+		}
+	}
+}
+
+func setStandaloneYaziTestSize(ctx *ScreenContext, width, height int) {
+	ctx.Width, ctx.Height = width, height
+	ctx.app.width, ctx.app.height = width, height
+}
+
+func assertYaziRenderBounds(t *testing.T, view string, width, height int) {
+	t.Helper()
+	if got := lipgloss.Height(view); got > height {
+		t.Errorf("rendered height=%d exceeds terminal height=%d", got, height)
+	}
+	for index, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("rendered line %d width=%d exceeds terminal width=%d", index, got, width)
+		}
+	}
+}
+
+func assertStandaloneYaziFocusedExtentOnScreen(t *testing.T, app *App, index, height int) bool {
+	t.Helper()
+	extent := standaloneYaziFieldExtent(t, app, index)
+	if extent.startY < 0 || extent.startY+extent.height > height {
+		t.Errorf("focused field extent %+v outside terminal height=%d", extent, height)
+		return false
+	}
+	return true
+}
+
+func standaloneYaziFieldTextFromView(t *testing.T, view string, app *App, index int) string {
+	t.Helper()
+	extent := standaloneYaziFieldExtent(t, app, index)
+	lines := strings.Split(view, "\n")
+	if extent.startY < 0 || extent.startY+extent.height > len(lines) {
+		t.Fatalf("focused field extent %+v outside %d rendered rows", extent, len(lines))
+	}
+	return normalizedYaziVisibleText(strings.Join(lines[extent.startY:extent.startY+extent.height], "\n"))
+}
+
+func standaloneYaziFooterText(t *testing.T, view string) string {
+	t.Helper()
+	lines := strings.Split(stripANSITest(view), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "enter preview") {
+			return strings.ToLower(strings.Join(strings.Fields(line), " "))
+		}
+	}
+	t.Error("standalone Yazi footer with enter preview is not visible")
+	return ""
 }
 
 func newStandaloneYaziPolicyScreen(t *testing.T, main, keymap tools.YaziFileObservation) (*ScreenContext, *configYaziScreen) {

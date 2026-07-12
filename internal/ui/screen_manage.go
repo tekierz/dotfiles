@@ -559,7 +559,11 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// through navigateTab (NavigateTo + on-enter load). Blocked while installing
 	// so the streaming install message can't be dropped by a screen switch.
 	if !a.manageInstalling && m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+		target := a.detectTabClick(m.X)
+		if a.compactManageSinglePaneActive() {
+			target = detectCompactManageTabClick(m.X)
+		}
+		if screen := target; screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -588,10 +592,28 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 
 		if m.X < layout.rightX { // left side (tools)
-			a.manageToolsScroll = clampInt(a.manageToolsScroll+delta, 0, layout.maxToolsScroll(len(items)))
+			oldScroll := a.manageToolsScroll
+			newScroll := clampInt(oldScroll+delta, 0, layout.maxToolsScroll(len(items)))
+			a.manageToolsScroll = newScroll
+			if a.manageIndex == oldScroll {
+				a.manageIndex = newScroll
+			} else if a.manageIndex < newScroll {
+				a.manageIndex = newScroll
+			} else if a.manageIndex >= newScroll+layout.leftListH {
+				a.manageIndex = newScroll + layout.leftListH - 1
+			}
 		} else { // right side (fields)
 			fields := a.manageFieldsFor(items[a.manageIndex].id)
-			a.manageFieldsScroll = clampInt(a.manageFieldsScroll+delta, 0, layout.maxFieldsScroll(len(fields)))
+			oldScroll := a.manageFieldsScroll
+			newScroll := clampInt(oldScroll+delta, 0, layout.maxFieldsScroll(len(fields)))
+			a.manageFieldsScroll = newScroll
+			if a.configFieldIndex == oldScroll {
+				a.configFieldIndex = newScroll
+			} else if a.configFieldIndex < newScroll {
+				a.configFieldIndex = newScroll
+			} else if a.configFieldIndex >= newScroll+layout.rightListH {
+				a.configFieldIndex = newScroll + layout.rightListH - 1
+			}
 		}
 		return nil
 	}
@@ -754,6 +776,14 @@ func (s *manageScreen) View(width, height int) string {
 		fields = a.manageFieldsFor(items[a.manageIndex].id)
 	}
 	a.manageEnsureFieldsVisible(layout, len(fields))
+	if a.compactManageSinglePaneActive() {
+		if a.managePane == managePaneTools {
+			return a.renderCompactManageTools(layout, items)
+		}
+		if len(items) > 0 && items[a.manageIndex].id == "yazi" {
+			return a.renderCompactManageYazi(layout, fields)
+		}
+	}
 
 	header := a.renderManageHeader(layout.w)
 	footer := a.renderManageFooter(layout.w, items, fields)

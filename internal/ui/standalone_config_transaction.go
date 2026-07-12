@@ -495,6 +495,10 @@ func standaloneConfigPlanSpecsAtResolved(home, theme string, cfg DeepDiveConfig,
 				specs = append(specs, configPlanSpec{actionID: "config:yazi:main", toolID: "yazi", yaziKind: kind, targets: []string{planTargetPath(home, yaziConfigPaths.Main)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi main configuration", fullFilePolicy: true})
 			case tools.YaziFileKindKeymap:
 				specs = append(specs, configPlanSpec{actionID: "config:yazi:keymap", toolID: "yazi", yaziKind: kind, targets: []string{planTargetPath(home, yaziConfigPaths.Keymap)}, ownership: operation.OwnershipManagedFile, description: "write managed Yazi keymap configuration", fullFilePolicy: true})
+			case tools.YaziFileKindTheme:
+				// Theme is intentionally observation-only in the Yazi editor. Never
+				// silently expand a frozen main/keymap plan into theme authority.
+				return nil, "", fmt.Errorf("standalone Yazi theme writes are unsupported; theme.toml is display-only")
 			}
 		}
 		return specs, "", nil

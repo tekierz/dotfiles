@@ -99,6 +99,9 @@ func (s *manageSaveConfirmScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 func (s *manageSaveConfirmScreen) View(width, height int) string {
 	a := s.App()
+	if width <= 80 || height <= 24 {
+		return renderCompactManageSaveConfirm(a, width, height)
+	}
 	lines := []string{lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("Review Manage Save"), ""}
 	if a.pendingManageSavePlan == nil || a.pendingManageSavePlan.plan == nil {
 		lines = append(lines, configSaveErrorStyle.Render("Blocked: "+errorText(a.manageSavePlanErr)))
@@ -165,20 +168,79 @@ func (s *manageSaveConfirmScreen) View(width, height int) string {
 		a.manageSaveScroll = maxScroll
 	}
 	visible := lines[a.manageSaveScroll:min(len(lines), a.manageSaveScroll+viewportHeight)]
-	help := "↑↓ scroll • enter confirm • esc edit • q cancel"
-	if a.manageSaveRunning {
-		help = "saving reviewed changes… input is paused"
-	} else if a.manageSaveDone {
-		help = "↑↓ scroll • enter/esc return • q close"
-	}
-	if a.pendingManageSavePlan != nil && a.pendingManageSavePlan.plan != nil && a.pendingManageSavePlan.plan.hasBlocked() {
-		help = "↑↓ scroll • blocked • esc edit • q cancel"
-	} else if a.pendingManageSavePlan != nil && a.pendingManageSavePlan.plan != nil && !managePlanHasApplicableChanges(a.pendingManageSavePlan.plan) {
-		help = "no changes • enter/q close • esc edit"
-	}
+	help := manageSaveHelp(a)
 	content := strings.Join(append(visible, "", HelpStyle.Render(help)), "\n")
 	boxWidth := min(82, max(34, width-4))
 	return PlaceWithBackground(width, height, ContainerStyle.Width(boxWidth).Render(content))
+}
+
+func manageSaveHelp(a *App) string {
+	planAvailable := a.pendingManageSavePlan != nil && a.pendingManageSavePlan.plan != nil
+	switch {
+	case a.manageSaveRunning:
+		return "saving reviewed changes • input is paused"
+	case a.manageSaveDone:
+		return "↑↓ scroll • enter/esc return • q close"
+	case planAvailable && a.pendingManageSavePlan.plan.hasBlocked():
+		return "↑↓ scroll • blocked • esc edit • q cancel"
+	case planAvailable && !managePlanHasApplicableChanges(a.pendingManageSavePlan.plan):
+		return "no changes • enter/q close • esc edit"
+	default:
+		return "↑↓ scroll • enter confirm • esc edit • q cancel"
+	}
+}
+
+func renderCompactManageSaveConfirm(a *App, width, height int) string {
+	lines := []string{"Review Manage Save"}
+	if a.manageStatus != "" {
+		lines = append(lines, a.manageStatus)
+	}
+	if a.pendingManageSavePlan == nil || a.pendingManageSavePlan.plan == nil {
+		lines = append(lines, "Blocked: "+errorText(a.manageSavePlanErr))
+	} else {
+		plan := a.pendingManageSavePlan.plan
+		hash := plan.hash()
+		if len(hash) > 16 {
+			hash = hash[:16]
+		}
+		lines = append(lines, "Plan: "+hash)
+		for _, action := range plan.actions() {
+			if action.ID == "state:parents" {
+				continue
+			}
+			label := action.ID
+			if action.Disposition != operation.DispositionApply {
+				label += " [" + string(action.Disposition) + "]"
+			}
+			lines = append(lines, label)
+			if action.Reason != "" {
+				lines = append(lines, action.Reason)
+			}
+			if action.Target != "" {
+				lines = append(lines, "Target: "+action.Target)
+			}
+		}
+		if plan.hasBlocked() {
+			lines = append(lines, "Confirmation disabled until blocked actions are resolved.")
+		} else if !managePlanHasApplicableChanges(plan) {
+			lines = append(lines, "No changes to save.")
+		}
+	}
+	if a.manageSaveManual {
+		lines = append(lines, "Manual recovery required")
+	}
+	if a.manageSaveWarning != "" {
+		lines = append(lines, "Warning: "+a.manageSaveWarning)
+	}
+	wrapped := wrapCompactConfirmationSource(width, lines)
+	viewportHeight := max(0, height-1)
+	maxScroll := max(0, len(wrapped)-viewportHeight)
+	start := clampInt(a.manageSaveScroll, 0, maxScroll)
+	if !a.manageSaveRunning {
+		a.manageSaveScroll = start
+	}
+	end := min(len(wrapped), start+viewportHeight)
+	return renderCompactConfirmationRows(width, height, wrapped[start:end], manageSaveHelp(a))
 }
 
 func managePlanHasApplicableChanges(plan *installPlan) bool {
