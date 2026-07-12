@@ -35,6 +35,26 @@ type NativeManageConfigState struct {
 	PreferenceError      string
 }
 
+func yaziUIFieldBlockReason(a *App, fieldKey string) string {
+	if a == nil {
+		return ""
+	}
+	if a.nativeConfigState.PreferenceError != "" {
+		return "saved management preferences could not be read safely: " + a.nativeConfigState.PreferenceError
+	}
+	if a.nativeConfigState.YaziError != "" {
+		return "native Yazi configuration could not be imported safely: " + a.nativeConfigState.YaziError
+	}
+	switch fieldKey {
+	case "keymap":
+		return a.nativeConfigState.Yazi.Keymap.ReadOnlyReason
+	case "hidden", "preview_mode", "sort_by", "sort_rev", "linemode", "scrolloff":
+		return a.nativeConfigState.Yazi.Main.ReadOnlyReason
+	default:
+		return ""
+	}
+}
+
 // lazyGitUIBlockReason is the single presentation and interaction policy for
 // LazyGit whole-source read-only state.
 func lazyGitUIBlockReason(a *App) string {

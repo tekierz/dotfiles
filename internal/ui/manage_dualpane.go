@@ -516,13 +516,13 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 
 	case "yazi":
 		return []manageField{
-			{key: "keymap", label: "Keymap", description: "Keyboard navigation style", kind: manageFieldOption, str: &cfg.YaziKeymap, options: []string{"vim", "emacs"}},
-			{key: "hidden", label: "Show Hidden", description: "Show dotfiles by default", kind: manageFieldToggle, b: &cfg.YaziShowHidden},
-			{key: "preview_mode", label: "Preview Mode", description: "File preview behavior", kind: manageFieldOption, str: &cfg.YaziPreviewMode, options: []string{"auto", "always", "never"}},
-			{key: "sort_by", label: "Sort By", description: "Sort order", kind: manageFieldOption, str: &cfg.YaziSortBy, options: []string{"alphabetical", "modified", "size", "natural"}},
-			{key: "sort_rev", label: "Sort Reverse", description: "Reverse sort direction", kind: manageFieldToggle, b: &cfg.YaziSortReverse},
-			{key: "linemode", label: "Line Mode", description: "Line metadata style", kind: manageFieldOption, str: &cfg.YaziLineMode, options: []string{"size", "permissions", "mtime", "none"}},
-			{key: "scrolloff", label: "Scroll Offset", description: "Keep N items visible above/below cursor", kind: manageFieldNumber, n: &cfg.YaziScrollOff, min: 0, max: 20, step: 1, unit: " lines"},
+			{key: "keymap", label: "Keymap", description: "Keyboard navigation style", kind: manageFieldOption, str: &cfg.YaziKeymap, options: []string{"vim", "emacs"}, readOnlyReason: yaziUIFieldBlockReason(a, "keymap")},
+			{key: "hidden", label: "Show Hidden", description: "Show dotfiles by default", kind: manageFieldToggle, b: &cfg.YaziShowHidden, readOnlyReason: yaziUIFieldBlockReason(a, "hidden")},
+			{key: "preview_mode", label: "Preview Mode", description: "File preview behavior", kind: manageFieldOption, str: &cfg.YaziPreviewMode, options: []string{"auto", "always", "never"}, readOnlyReason: yaziUIFieldBlockReason(a, "preview_mode")},
+			{key: "sort_by", label: "Sort By", description: "Sort order", kind: manageFieldOption, str: &cfg.YaziSortBy, options: []string{"alphabetical", "modified", "size", "natural"}, readOnlyReason: yaziUIFieldBlockReason(a, "sort_by")},
+			{key: "sort_rev", label: "Sort Reverse", description: "Reverse sort direction", kind: manageFieldToggle, b: &cfg.YaziSortReverse, readOnlyReason: yaziUIFieldBlockReason(a, "sort_rev")},
+			{key: "linemode", label: "Line Mode", description: "Line metadata style", kind: manageFieldOption, str: &cfg.YaziLineMode, options: []string{"size", "permissions", "mtime", "none"}, readOnlyReason: yaziUIFieldBlockReason(a, "linemode")},
+			{key: "scrolloff", label: "Scroll Offset", description: "Keep N items visible above/below cursor", kind: manageFieldNumber, n: &cfg.YaziScrollOff, min: 0, max: 20, step: 1, unit: " lines", readOnlyReason: yaziUIFieldBlockReason(a, "scrolloff")},
 		}
 
 	case "fzf":
@@ -1102,7 +1102,18 @@ func (a *App) renderManageInlineEditor(width int) string {
 		Render(plain)
 }
 
+func (a *App) manageFieldMutationBlocked(field manageField) bool {
+	if field.readOnlyReason == "" {
+		return false
+	}
+	a.manageStatus = field.label + " is read-only: " + field.readOnlyReason
+	return true
+}
+
 func (a *App) manageStartEditing(field manageField) {
+	if a.manageFieldMutationBlocked(field) {
+		return
+	}
 	if field.kind != manageFieldText && field.kind != manageFieldNumber {
 		return
 	}

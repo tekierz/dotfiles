@@ -251,6 +251,9 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if !ok {
 			return
 		}
+		if a.manageFieldMutationBlocked(f) {
+			return
+		}
 		switch f.kind {
 		case manageFieldOption:
 			if f.str != nil && len(f.options) > 0 {
@@ -279,6 +282,9 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	toggleField := func() {
 		f, ok := currentField()
 		if !ok {
+			return
+		}
+		if a.manageFieldMutationBlocked(f) {
 			return
 		}
 		if f.kind == manageFieldToggle && f.b != nil {
@@ -652,6 +658,9 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 
 		f := fields[fieldIdx]
+		if a.manageFieldMutationBlocked(f) {
+			return nil
+		}
 		switch f.kind {
 		case manageFieldToggle:
 			if f.b != nil {
