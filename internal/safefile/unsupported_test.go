@@ -29,6 +29,9 @@ func TestDescriptorAnchoredOperationsAreTypedUnsupported(t *testing.T) {
 	if _, err := OpenDirectoryWithinAuthorized(".", "directory", &ParentChain{}, &DirectorySnapshot{}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("OpenDirectoryWithinAuthorized error = %v, want ErrUnsupported", err)
 	}
+	if _, _, err := CaptureChildDirectoryWithinAuthorized(".", "directory", "child", &ParentChain{}, &DirectorySnapshot{}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("CaptureChildDirectoryWithinAuthorized error = %v, want ErrUnsupported", err)
+	}
 	if _, err := ExtendParentChainWithinDirectory(".", "directory/file", "directory", &ParentChain{}, &DirectorySnapshot{}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("ExtendParentChainWithinDirectory error = %v, want ErrUnsupported", err)
 	}

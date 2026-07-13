@@ -355,6 +355,12 @@ func (r Revision) Exists() bool { return r.tracked && r.exists }
 // Missing and untracked revisions return zero.
 func (r Revision) Permissions() fs.FileMode { return fs.FileMode(r.mode).Perm() }
 
+// Mode returns the complete stable os.FileInfo mode captured from the held
+// descriptor. Callers that require an exact private-file mode can therefore
+// reject setuid, setgid, sticky, and other non-permission bits as well as
+// ordinary permission mismatches.
+func (r Revision) Mode() fs.FileMode { return fs.FileMode(r.mode) }
+
 // LinkCount reports the number of directory entries observed for the opened
 // inode. Missing and untracked revisions return zero. Mutation workflows can
 // require exactly one link before removing a user-local file, avoiding changes

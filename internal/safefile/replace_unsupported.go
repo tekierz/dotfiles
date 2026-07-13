@@ -169,6 +169,10 @@ func OpenDirectoryWithinAuthorized(_ string, _ string, _ *ParentChain, _ *Direct
 	return nil, ErrUnsupported
 }
 
+func CaptureChildDirectoryWithinAuthorized(_ string, _, _ string, _ *ParentChain, _ *DirectorySnapshot) (*DirectorySnapshot, *ParentChain, error) {
+	return nil, nil, ErrUnsupported
+}
+
 // RemoveWithin is unavailable on platforms without descriptor-relative open,
 // no-follow, unlink, and directory durability operations.
 func RemoveWithin(_ string, _ string) error {

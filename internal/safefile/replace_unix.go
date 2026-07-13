@@ -34,20 +34,22 @@ type stagedFile struct {
 // replaceHooks is intentionally package-private. Tests can place actions at
 // security-sensitive boundaries without expanding the production API.
 type replaceHooks struct {
-	randomSuffix              func() (string, error)
-	afterMkdir                func(parentFD int, name string) error
-	afterAuthorizedParentOpen func(rootFD, parentFD int, name string) error
-	afterReadOpen             func(parentFD, fileFD int, name string) error
-	afterLock                 func(parentFD, lockFD int, name string) error
-	beforeRemove              func(parentFD, targetFD int, name string) error
-	afterRemove               func(parentFD, targetFD int, name string) error
-	closeRemoved              func(fd int) error
-	beforeCommit              func(parentFD, stagedFD int, temporary, target string) error
-	afterCommit               func(parentFD, stagedFD int, target string) error
-	fsyncStaged               func(fd int) error
-	closeStaged               func(fd int) error
-	fsyncDir                  func(fd int, operation string) error
-	unlinkTemp                func(parentFD int, name string) error
+	randomSuffix                 func() (string, error)
+	afterMkdir                   func(parentFD int, name string) error
+	afterAuthorizedParentOpen    func(rootFD, parentFD int, name string) error
+	afterAuthorizedDirectoryOpen func(directoryFD int, child string) error
+	afterAuthorizedChildObserve  func(directoryFD, childFD int, child string, exists bool) error
+	afterReadOpen                func(parentFD, fileFD int, name string) error
+	afterLock                    func(parentFD, lockFD int, name string) error
+	beforeRemove                 func(parentFD, targetFD int, name string) error
+	afterRemove                  func(parentFD, targetFD int, name string) error
+	closeRemoved                 func(fd int) error
+	beforeCommit                 func(parentFD, stagedFD int, temporary, target string) error
+	afterCommit                  func(parentFD, stagedFD int, target string) error
+	fsyncStaged                  func(fd int) error
+	closeStaged                  func(fd int) error
+	fsyncDir                     func(fd int, operation string) error
+	unlinkTemp                   func(parentFD int, name string) error
 }
 
 var replaceTestHooks replaceHooks

@@ -154,6 +154,108 @@ func OpenDirectoryWithinAuthorized(root, rel string, parents *ParentChain, expec
 	return os.NewFile(uintptr(fd), target), nil
 }
 
+// CaptureChildDirectoryWithinAuthorized observes one direct child through a
+// held descriptor for an already-authorized directory. The returned parent
+// chain is derived from that same descriptor, and the accepted directory path
+// plus child namespace entry are revalidated before return. A missing child is
+// reported with os.ErrNotExist only after the accepted path is revalidated.
+func CaptureChildDirectoryWithinAuthorized(root, directoryRel, child string, parents *ParentChain, expected *DirectorySnapshot) (*DirectorySnapshot, *ParentChain, error) {
+	if child == "" || child == "." || child == ".." || filepath.Base(child) != child || strings.ContainsAny(child, "/\\\x00\r\n\t ") {
+		return nil, nil, fmt.Errorf("%w: child directory name must be one component", ErrInvalidPath)
+	}
+	directory, err := OpenDirectoryWithinAuthorized(root, directoryRel, parents, expected)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = directory.Close() }()
+	directoryFD := int(directory.Fd())
+	directoryEntry, err := parentChainEntryForFD(directoryFD, directoryRel)
+	if err != nil {
+		return nil, nil, fmt.Errorf("identify authorized directory: %w", err)
+	}
+	if directoryEntry.mode != uint32(expected.Permissions()) {
+		return nil, nil, fmt.Errorf("%w: authorized directory mode changed", ErrDirectoryChanged)
+	}
+	childParents := &ParentChain{tracked: true, entries: append([]parentChainEntry(nil), parents.entries...)}
+	childParents.entries = append(childParents.entries, directoryEntry)
+	if hook := replaceTestHooks.afterAuthorizedDirectoryOpen; hook != nil {
+		if err := hook(directoryFD, child); err != nil {
+			return nil, nil, fmt.Errorf("after opening authorized directory: %w", err)
+		}
+	}
+
+	childFD, openErr := openDirectoryAt(directoryFD, child)
+	if openErr != nil && !errors.Is(openErr, unix.ENOENT) {
+		entry, statErr := statDirectoryEntryAt(directoryFD, child)
+		if statErr == nil {
+			switch entry.fileType {
+			case unix.S_IFLNK:
+				return nil, nil, fmt.Errorf("%w: child directory %q", ErrSymlink, child)
+			case unix.S_IFDIR:
+			default:
+				return nil, nil, fmt.Errorf("%w: child directory %q", ErrNonRegular, child)
+			}
+		}
+		return nil, nil, openErr
+	}
+	exists := openErr == nil
+	if hook := replaceTestHooks.afterAuthorizedChildObserve; hook != nil {
+		hookFD := childFD
+		if !exists {
+			hookFD = -1
+		}
+		if err := hook(directoryFD, hookFD, child, exists); err != nil {
+			if exists {
+				_ = unix.Close(childFD)
+			}
+			return nil, nil, fmt.Errorf("after observing authorized child: %w", err)
+		}
+	}
+
+	var snapshot *DirectorySnapshot
+	var wanted fileIdentity
+	var childStat unix.Stat_t
+	if exists {
+		defer func() { _ = unix.Close(childFD) }()
+		if err := unix.Fstat(childFD, &childStat); err != nil {
+			return nil, nil, fmt.Errorf("identify authorized child: %w", err)
+		}
+		if uint32(childStat.Mode)&unix.S_IFMT != unix.S_IFDIR {
+			return nil, nil, fmt.Errorf("%w: child directory %q", ErrNonRegular, child)
+		}
+		if !restorableOwner(childStat.Uid, childStat.Gid, os.Geteuid(), os.Getegid()) {
+			return nil, nil, fmt.Errorf("%w: child directory owner is not the process owner", ErrDirectoryChanged)
+		}
+		wanted = identityFromStat(&childStat)
+		snapshot = &DirectorySnapshot{
+			tracked: true, rootOnly: true,
+			device: uint64(childStat.Dev), inode: childStat.Ino, uid: childStat.Uid, gid: childStat.Gid,
+			root: directorySnapshotNode{mode: fs.FileMode(uint32(childStat.Mode) & 0o777)},
+		}
+	}
+
+	reopened, err := OpenDirectoryWithinAuthorized(root, directoryRel, parents, expected)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: authorized directory changed after child observation", errors.Join(ErrParentChanged, err))
+	}
+	reopenedEntry, identifyErr := parentChainEntryForFD(int(reopened.Fd()), directoryRel)
+	closeErr := reopened.Close()
+	if identifyErr != nil || closeErr != nil || reopenedEntry != directoryEntry {
+		return nil, nil, fmt.Errorf("%w: authorized directory changed after child observation", ErrParentChanged)
+	}
+	entry, statErr := statDirectoryEntryAt(directoryFD, child)
+	if !exists {
+		if errors.Is(statErr, unix.ENOENT) {
+			return nil, childParents, os.ErrNotExist
+		}
+		return nil, nil, fmt.Errorf("%w: missing child directory appeared during observation", ErrDirectoryChanged)
+	}
+	if statErr != nil || entry.fileType != unix.S_IFDIR || entry.identity != wanted || entry.uid != childStat.Uid || entry.gid != childStat.Gid || entry.mode.Perm() != snapshot.Permissions() {
+		return nil, nil, fmt.Errorf("%w: child directory changed during observation", ErrDirectoryChanged)
+	}
+	return snapshot, childParents, nil
+}
+
 // CaptureParentChainWithin captures root plus every target-parent component.
 // Once a component is absent, every deeper component is recorded absent
 // without being created.
