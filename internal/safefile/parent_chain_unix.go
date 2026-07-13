@@ -229,7 +229,7 @@ func CaptureChildDirectoryWithinAuthorized(root, directoryRel, child string, par
 		wanted = identityFromStat(&childStat)
 		snapshot = &DirectorySnapshot{
 			tracked: true, rootOnly: true,
-			device: uint64(childStat.Dev), inode: childStat.Ino, uid: childStat.Uid, gid: childStat.Gid,
+			device: wanted.device, inode: wanted.inode, uid: childStat.Uid, gid: childStat.Gid,
 			root: directorySnapshotNode{mode: fs.FileMode(uint32(childStat.Mode) & 0o777)},
 		}
 	}

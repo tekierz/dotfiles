@@ -92,6 +92,30 @@ func TestBuildSeparatesFatalSnapshotShapeFromRepresentableStaleness(t *testing.T
 	}
 }
 
+func TestAcceptedPlanHashRejectsCorruptedSnapshotSchemaBeforeHashing(t *testing.T) {
+	recipe := reviewedPackageRecipe("git")
+	snapshot := mustSnapshot(t, 12, mustObservation(t, "git", health.PackageMissing, recipe))
+	result, err := Build(Request{
+		Intent: mustIntent(t, "git"), Snapshot: snapshot,
+		Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 12},
+	}, countingDependencies(&dependencyCounts{}, recipe))
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, ok := result.Accepted()
+	if !ok {
+		t.Fatal("ready result omitted accepted authority")
+	}
+
+	for _, schema := range []int{-1, health.CurrentInstallationSchemaVersion + 1} {
+		corrupted := cloneAccepted(accepted)
+		corrupted.snapshot.SchemaVersion = schema
+		if hash, hashErr := acceptedPlanHash(corrupted); hash != "" || !errors.Is(hashErr, ErrInvalidRequest) {
+			t.Fatalf("schema %d hash=%q error=%v, want fail-closed invalid request", schema, hash, hashErr)
+		}
+	}
+}
+
 func TestBuildReturnsBlockedDomainOutcomesWithoutPrivateAuthority(t *testing.T) {
 	recipe := reviewedPackageRecipe("git")
 	digest := mustRecipeDigest(t, recipe)

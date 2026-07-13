@@ -56,8 +56,10 @@ func adoptHeadlessInstallPlan(app *App, accepted headless.AcceptedPlan) (*instal
 			if authority.Intent != wantIntent || !validAdapterDigest(authority.RecipeDigest) {
 				return nil, fmt.Errorf("headless mutation authority for %s is invalid", id)
 			}
-		default:
+		case health.PresenceUnknown:
 			return nil, fmt.Errorf("headless tool %s has unresolved presence", id)
+		default:
+			return nil, fmt.Errorf("headless tool %s has invalid presence", id)
 		}
 		installAuthorities[id] = installToolAuthority{presence: authority.Presence, intent: authority.Intent, recipeDigest: authority.RecipeDigest}
 	}

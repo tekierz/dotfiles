@@ -219,6 +219,7 @@ func packageManagerNil(manager pkg.PackageManager) bool {
 		return true
 	}
 	value := reflect.ValueOf(manager)
+	//nolint:exhaustive // Only nil-capable reflect kinds may be passed to IsNil.
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
 		return value.IsNil()

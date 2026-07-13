@@ -266,6 +266,8 @@ func recipePackageReceipts(recipe operation.InstallRecipe) []string {
 		switch step.Kind {
 		case operation.InstallStepPackageManager:
 			values = step.Packages
+		case operation.InstallStepNPMGlobal:
+			// NPM globals are detected by their binary, not a package receipt.
 		case operation.InstallStepHomebrewCask:
 			values = step.Casks
 		}
@@ -290,6 +292,8 @@ func completePackageFacet(state health.PackageState, receipts []string) health.P
 		facet.ObservedReceipts = append([]string(nil), receipts...)
 	case health.PackageMissing:
 		facet.MissingReceipts = append([]string(nil), receipts...)
+	case health.PackagePartial, health.PackageUnknown, health.PackageNotApplicable:
+		// These states are not used by this complete-fixture helper.
 	}
 	return facet
 }
@@ -308,6 +312,8 @@ func directDetectorFacet(detector operation.InstallDetector, state health.Compon
 		kind = health.DirectSourceBinary
 	case operation.InstallDetectorAppBundle:
 		kind = health.DirectSourceAppBundle
+	case operation.InstallDetectorPackageReceipt:
+		return health.DirectFacet{State: health.ComponentNotApplicable}
 	default:
 		return health.DirectFacet{State: health.ComponentNotApplicable}
 	}

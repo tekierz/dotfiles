@@ -219,6 +219,9 @@ func Apply(ctx context.Context, request Request, dependencies Dependencies) (Res
 			succeeded++
 		case operation.ActionFailed:
 			failed++
+		case operation.ActionPending, operation.ActionSkipped:
+			// Pending and skipped actions are intentionally excluded from the
+			// terminal success/failure totals.
 		}
 	}
 	result := Result{OperationID: record.OperationID, PlanHash: accepted.Hash(), Status: status, Succeeded: succeeded, Failed: failed}
@@ -306,6 +309,8 @@ func validatePackageOnlyAuthority(accepted installplan.AcceptedPlan, manager pkg
 			if !ok || authority.Intent != "repair" || !hasAction || !hasRecipe {
 				return nil, nil, nil, fmt.Errorf("accepted repair authority for %s is inconsistent", toolID)
 			}
+		case health.PresenceUnknown:
+			return nil, nil, nil, fmt.Errorf("accepted tool authority for %s is inconsistent", toolID)
 		default:
 			return nil, nil, nil, fmt.Errorf("accepted tool authority for %s is inconsistent", toolID)
 		}

@@ -320,6 +320,8 @@ func observedInstallDetector(observation health.InstallationObservation, detecto
 				case health.ComponentPresent:
 				case health.ComponentMissing:
 					return false, true
+				case health.ComponentUnknown, health.ComponentNotApplicable:
+					unknown = true
 				default:
 					unknown = true
 				}
@@ -388,6 +390,7 @@ func toolIsNil(tool tools.Tool) bool {
 		return true
 	}
 	value := reflect.ValueOf(tool)
+	//nolint:exhaustive // Only nil-capable reflect kinds may be passed to IsNil.
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return value.IsNil()
@@ -536,6 +539,9 @@ func cloneRecipes(recipes map[string]operation.InstallRecipe) map[string]operati
 }
 
 func acceptedPlanHash(plan AcceptedPlan) (string, error) {
+	if plan.snapshot.SchemaVersion != health.CurrentInstallationSchemaVersion {
+		return "", ErrInvalidRequest
+	}
 	stateDigest, err := operation.StatePlanAuthorityDigest(plan.statePlan)
 	if err != nil {
 		return "", err
@@ -564,7 +570,7 @@ func acceptedPlanHash(plan AcceptedPlan) (string, error) {
 	digest := sha256.New()
 	_, _ = digest.Write([]byte("dotfiles/installplan-accepted-authority/v1\x00"))
 	hashAcceptedAuthorityBytes(digest, documentDigest)
-	hashAcceptedAuthorityUint64(digest, uint64(plan.snapshot.SchemaVersion))
+	hashAcceptedAuthorityUint64(digest, uint64(health.CurrentInstallationSchemaVersion))
 	hashAcceptedAuthorityUint64(digest, plan.snapshot.Generation)
 	hashAcceptedAuthorityBytes(digest, []byte(plan.snapshot.Platform))
 	hashAcceptedAuthorityBytes(digest, []byte(plan.snapshot.Manager))

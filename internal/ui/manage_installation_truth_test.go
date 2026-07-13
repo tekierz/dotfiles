@@ -70,6 +70,8 @@ func manageTruthObservationWithInstallability(t *testing.T, id string, presence 
 		switch step.Kind {
 		case operation.InstallStepPackageManager:
 			receipts = step.Packages
+		case operation.InstallStepNPMGlobal:
+			// NPM globals are detected by their binary, not a package receipt.
 		case operation.InstallStepHomebrewCask:
 			receipts = step.Casks
 		}
@@ -88,6 +90,8 @@ func manageTruthObservationWithInstallability(t *testing.T, id string, presence 
 		directKind = health.DirectSourceBinary
 	case operation.InstallDetectorAppBundle:
 		directKind = health.DirectSourceAppBundle
+	case operation.InstallDetectorPackageReceipt:
+		// Package-receipt detectors do not contribute direct evidence.
 	}
 	setDirect := func(state health.ComponentState) {
 		if directKind == "" {
