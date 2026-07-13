@@ -21,7 +21,7 @@ const exactNPMEnvNodeShebang = "#!/usr/bin/env node\n"
 
 func TestNPMExecutionIdentityObservesExactEnvNodeChainDeterministically(t *testing.T) {
 	npmPath := writeNPMExecutable(t, "console.log('npm');\n")
-	nodePath := writeNodeExecutable(t, "exit 0\n")
+	nodePath := writeNodeExecutable(t)
 
 	first, err := pkg.ObserveNPMExecutionIdentity(npmPath, nodePath)
 	if err != nil {
@@ -31,8 +31,8 @@ func TestNPMExecutionIdentityObservesExactEnvNodeChainDeterministically(t *testi
 	if err != nil {
 		t.Fatalf("repeat npm execution identity observation: %v", err)
 	}
-	if first.SchemaVersion() <= 0 || first.SchemaVersion() != second.SchemaVersion() {
-		t.Fatalf("schema versions = %d and %d, want one stable positive version", first.SchemaVersion(), second.SchemaVersion())
+	if first.SchemaVersion() != 2 || first.SchemaVersion() != second.SchemaVersion() {
+		t.Fatalf("schema versions = %d and %d, want revised schema 2", first.SchemaVersion(), second.SchemaVersion())
 	}
 	if first.Digest() == "" || first.Digest() != second.Digest() {
 		t.Fatalf("digests = %q and %q, want one deterministic digest", first.Digest(), second.Digest())
@@ -119,7 +119,7 @@ func TestNPMExecutionIdentityRejectsEveryComponentDrift(t *testing.T) {
 
 func TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths(t *testing.T) {
 	validNPM := writeNPMExecutable(t, "exit 0\n")
-	validNode := writeNodeExecutable(t, "exit 0\n")
+	validNode := writeNodeExecutable(t)
 	directory := t.TempDir()
 	missing := filepath.Join(t.TempDir(), "private-missing-executable-marker")
 	nonExecutable := writeFile(t, "private-nonexec-marker", exactNPMEnvNodeShebang+"exit 0\n", 0o600)
@@ -166,7 +166,7 @@ func TestObserveNPMExecutionIdentityRejectsFIFOComponentsWithoutHanging(t *testi
 		t.Skip("FIFO execution identity is supported on Darwin and Linux")
 	}
 	validNPM := writeNPMExecutable(t, "exit 0\n")
-	validNode := writeNodeExecutable(t, "exit 0\n")
+	validNode := writeNodeExecutable(t)
 	for _, component := range []string{"npm", "node"} {
 		t.Run(component, func(t *testing.T) {
 			fifo := filepath.Join(t.TempDir(), "private-fifo-marker")
@@ -198,7 +198,7 @@ func TestObserveNPMExecutionIdentityRejectsFIFOComponentsWithoutHanging(t *testi
 }
 
 func TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang(t *testing.T) {
-	nodePath := writeNodeExecutable(t, "exit 0\n")
+	nodePath := writeNodeExecutable(t)
 	tests := map[string]string{
 		"missing":           "console.log('npm');\n",
 		"empty-interpreter": "#!\nconsole.log('npm');\n",
@@ -222,9 +222,50 @@ func TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang(t *testing.T) {
 	}
 }
 
+func TestNPMExecutionIdentityRequiresNativeNodeFormat(t *testing.T) {
+	npmPath := writeNPMExecutable(t, "exit 0\n")
+	if _, err := pkg.ObserveNPMExecutionIdentity(npmPath, writeNodeExecutable(t)); err != nil {
+		t.Fatalf("copied native executable was rejected: %v", err)
+	}
+	supported := map[string][]byte{
+		"elf":              {0x7f, 'E', 'L', 'F'},
+		"macho-32":         {0xfe, 0xed, 0xfa, 0xce},
+		"macho-32-swapped": {0xce, 0xfa, 0xed, 0xfe},
+		"macho-64":         {0xfe, 0xed, 0xfa, 0xcf},
+		"macho-64-swapped": {0xcf, 0xfa, 0xed, 0xfe},
+		"fat":              {0xca, 0xfe, 0xba, 0xbe},
+		"fat-swapped":      {0xbe, 0xba, 0xfe, 0xca},
+		"fat-64":           {0xca, 0xfe, 0xba, 0xbf},
+		"fat-64-swapped":   {0xbf, 0xba, 0xfe, 0xca},
+	}
+	for name, magic := range supported {
+		t.Run("accept-"+name, func(t *testing.T) {
+			if _, err := pkg.ObserveNPMExecutionIdentity(npmPath, writeNodeMagic(t, magic)); err != nil {
+				t.Fatalf("supported native magic was rejected: %v", err)
+			}
+		})
+	}
+	invalid := map[string][]byte{
+		"shebang":    []byte("#!/bin/sh\nexit 0\n"),
+		"plain-text": []byte("not a native executable\n"),
+		"truncated":  {0x7f, 'E', 'L'},
+		"bad-magic":  {0x00, 0x01, 0x02, 0x03, 0x04},
+	}
+	for name, content := range invalid {
+		t.Run("reject-"+name, func(t *testing.T) {
+			nodePath := writeFile(t, "private-node-format-marker", string(content), 0o700)
+			_, err := pkg.ObserveNPMExecutionIdentity(npmPath, nodePath)
+			if err == nil {
+				t.Fatal("invalid native format was accepted")
+			}
+			assertPathFreeError(t, err, npmPath, nodePath)
+		})
+	}
+}
+
 func TestNPMExecutionIdentityPublicSurfaceIsOpaqueAndPathFree(t *testing.T) {
 	npmPath := writeNPMExecutable(t, "console.log('private-npm-body-marker');\n")
-	nodePath := writeNodeExecutable(t, "echo private-node-body-marker\n")
+	nodePath := writeNodeExecutable(t)
 	identity, err := pkg.ObserveNPMExecutionIdentity(npmPath, nodePath)
 	if err != nil {
 		t.Fatalf("observe npm execution identity: %v", err)
@@ -247,6 +288,9 @@ func TestNPMExecutionIdentityPublicSurfaceIsOpaqueAndPathFree(t *testing.T) {
 
 	for _, formatted := range []string{identity.String(), identity.GoString(), fmt.Sprint(identity), fmt.Sprintf("%#v", identity)} {
 		assertPathFreeText(t, formatted, npmPath, nodePath, "private-npm-body-marker", "private-node-body-marker")
+		if !strings.Contains(formatted, "npm_execution_identity<v2:") {
+			t.Fatalf("diagnostic %q omits revised schema", formatted)
+		}
 		if !strings.Contains(formatted, identity.Digest()) {
 			t.Fatalf("diagnostic %q omits aggregate digest", formatted)
 		}
@@ -267,7 +311,7 @@ func TestNPMExecutionIdentityPublicSurfaceIsOpaqueAndPathFree(t *testing.T) {
 func npmChainForDrift(t *testing.T, component string, symlinked bool) (string, string) {
 	t.Helper()
 	npmPath := writeNPMExecutable(t, "console.log('npm');\n")
-	nodePath := writeNodeExecutable(t, "exit 0\n")
+	nodePath := writeNodeExecutable(t)
 	if !symlinked {
 		return npmPath, nodePath
 	}
@@ -326,9 +370,23 @@ func writeNPMExecutable(t *testing.T, body string) string {
 	return writeFile(t, "npm", exactNPMEnvNodeShebang+body, 0o700)
 }
 
-func writeNodeExecutable(t *testing.T, body string) string {
+func writeNodeExecutable(t *testing.T) string {
 	t.Helper()
-	return writeFile(t, "node", "#!/bin/sh\n"+body, 0o700)
+	content, err := os.ReadFile("/bin/sh")
+	if err != nil {
+		t.Fatalf("read native fixture: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "node")
+	if err := os.WriteFile(path, content, 0o700); err != nil {
+		t.Fatalf("write native fixture: %v", err)
+	}
+	return path
+}
+
+func writeNodeMagic(t *testing.T, magic []byte) string {
+	t.Helper()
+	content := append(append([]byte(nil), magic...), make([]byte, 64)...)
+	return writeFile(t, "private-node-format-marker", string(content), 0o700)
 }
 
 func writeFile(t *testing.T, name, content string, mode os.FileMode) string {
