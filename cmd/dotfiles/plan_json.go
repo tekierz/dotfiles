@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"reflect"
-	"slices"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -157,104 +153,17 @@ func planSyntaxError() error {
 }
 
 func writePlanJSON(ctx context.Context, writer io.Writer, rawTools []string, runtime planJSONRuntime) (planpublic.Status, error) {
-	if explicitToolsEmpty(rawTools) {
-		result, err := installplan.Build(installplan.Request{Intent: planpublic.Intent{Source: "explicit_tools", Tools: []string{}}}, installplan.Dependencies{})
-		if err != nil {
-			return "", errPlanCollection
-		}
-		return writePublicPlan(writer, result.Public())
-	}
-	if runtime.registry == nil || runtime.detectPlatform == nil || runtime.detectManager == nil || runtime.collect == nil ||
-		runtime.describe == nil || runtime.capture == nil || runtime.now == nil {
-		return "", errPlanCollection
-	}
-
-	registryTools := slices.Clone(runtime.registry())
-	if len(registryTools) == 0 {
-		return "", errPlanCollection
-	}
-	registryByID := make(map[string]tools.Tool, len(registryTools))
-	registeredIDs := make([]string, 0, len(registryTools))
-	for _, tool := range registryTools {
-		if toolInterfaceNil(tool) {
-			return "", errPlanCollection
-		}
-		id := tool.ID()
-		if _, duplicate := registryByID[id]; duplicate {
-			return "", errPlanCollection
-		}
-		registryByID[id] = tool
-		registeredIDs = append(registeredIDs, id)
-	}
-	if _, err := planpublic.NormalizeExplicitTools(registeredIDs, registeredIDs); err != nil {
-		return "", errPlanCollection
-	}
-
-	universeSet := make(map[string]struct{}, len(registeredIDs)+len(rawTools))
-	for _, id := range registeredIDs {
-		universeSet[id] = struct{}{}
-	}
-	for _, raw := range rawTools {
-		if id := strings.TrimSpace(raw); id != "" {
-			universeSet[id] = struct{}{}
-		}
-	}
-	universe := make([]string, 0, len(universeSet))
-	for id := range universeSet {
-		universe = append(universe, id)
-	}
-	sort.Strings(universe)
-	intent, err := planpublic.NormalizeExplicitTools(rawTools, universe)
-	if err != nil {
-		return "", planSyntaxError()
-	}
-
-	platform := runtime.detectPlatform()
-	manager := runtime.detectManager()
-	if manager == nil || platform == pkg.PlatformUnknown || manager.Name() == "" {
-		return "", errPlanCollection
-	}
-	const generation uint64 = 1
-	snapshot, err := runtime.collect(ctx, registryTools, manager, platform, generation)
-	if err != nil || snapshot.SchemaVersion() != health.CurrentInstallationSchemaVersion || snapshot.Generation() != generation ||
-		snapshot.Platform() != string(platform) || snapshot.Manager() != manager.Name() || snapshot.Digest() == "" {
-		return "", errPlanCollection
-	}
-	if !planSnapshotMatchesRegistry(snapshot, registryByID) {
-		return "", errPlanCollection
-	}
-	result, err := installplan.Build(installplan.Request{
-		Intent: intent, Snapshot: snapshot,
-		Environment: installplan.Environment{Platform: platform, Manager: manager.Name(), ExpectedGeneration: generation},
-	}, installplan.Dependencies{
-		LookupTool: func(id string) (tools.Tool, bool) {
-			tool, ok := registryByID[id]
-			return tool, ok
-		},
-		DescribeInstall: runtime.describe, CaptureStatePlan: runtime.capture, Now: runtime.now,
+	session, err := installplan.PlanFresh(ctx, rawTools, installplan.FreshDependencies{
+		Registry: runtime.registry, DetectPlatform: runtime.detectPlatform, DetectManager: runtime.detectManager,
+		Collect: runtime.collect, DescribeInstall: runtime.describe, CaptureStatePlan: runtime.capture, Now: runtime.now,
 	})
 	if err != nil {
+		if errors.Is(err, planpublic.ErrInvalidIntent) {
+			return "", planSyntaxError()
+		}
 		return "", errPlanCollection
 	}
-	return writePublicPlan(writer, result.Public())
-}
-
-func planSnapshotMatchesRegistry(snapshot health.InstallationSnapshot, registry map[string]tools.Tool) bool {
-	for _, observation := range snapshot.Tools() {
-		if _, ok := registry[observation.ToolID()]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func explicitToolsEmpty(rawTools []string) bool {
-	for _, raw := range rawTools {
-		if strings.TrimSpace(raw) != "" {
-			return false
-		}
-	}
-	return true
+	return writePublicPlan(writer, session.Result().Public())
 }
 
 func writePublicPlan(writer io.Writer, document planpublic.Document) (planpublic.Status, error) {
@@ -270,17 +179,4 @@ func writePublicPlan(writer io.Writer, document planpublic.Document) (planpublic
 		return "", errPlanCollection
 	}
 	return document.Status(), nil
-}
-
-func toolInterfaceNil(tool tools.Tool) bool {
-	if tool == nil {
-		return true
-	}
-	value := reflect.ValueOf(tool)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
 }
