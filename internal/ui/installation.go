@@ -80,6 +80,9 @@ func emitInstallEvent(ctx context.Context, events chan<- installEventMsg, line s
 // manager caches.
 type toolInstallRuntime struct {
 	lookupTool             func(string) (tools.Tool, bool)
+	registeredToolIDs      func() []string
+	describeInstall        func(tools.Tool, tools.InstallEnvironment) (operation.InstallRecipe, error)
+	captureStatePlan       func() (*operation.StatePlan, error)
 	detectManager          func() pkg.PackageManager
 	detectPlatform         func() pkg.Platform
 	isToolInstalled        func(tools.Tool) bool
@@ -92,9 +95,19 @@ type toolInstallRuntime struct {
 func defaultToolInstallRuntime() toolInstallRuntime {
 	reg := tools.GetRegistry()
 	return toolInstallRuntime{
-		lookupTool:     reg.Get,
-		detectManager:  pkg.DetectManager,
-		detectPlatform: pkg.DetectPlatform,
+		lookupTool: reg.Get,
+		registeredToolIDs: func() []string {
+			registered := reg.All()
+			ids := make([]string, 0, len(registered))
+			for _, tool := range registered {
+				ids = append(ids, tool.ID())
+			}
+			return ids
+		},
+		describeInstall:  tools.DescribeInstall,
+		captureStatePlan: operation.CaptureStatePlan,
+		detectManager:    pkg.DetectManager,
+		detectPlatform:   pkg.DetectPlatform,
 		isToolInstalled: func(t tools.Tool) bool {
 			return t.IsInstalled()
 		},

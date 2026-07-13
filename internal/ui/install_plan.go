@@ -18,8 +18,10 @@ import (
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/health"
+	headless "github.com/tekierz/dotfiles/internal/installplan"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/planpublic"
 	"github.com/tekierz/dotfiles/internal/safefile"
 	"github.com/tekierz/dotfiles/internal/scripts"
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -369,17 +371,20 @@ func buildInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time) 
 }
 
 func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now time.Time, onlyTools []string) (*installPlan, error) {
+	if onlyTools != nil && len(onlyTools) == 0 {
+		return nil, errors.New("explicit tool intent required")
+	}
 	if a == nil || !a.installationSnapshotPlanningReady() || !a.installationSnapshotTerminal ||
 		a.installationSnapshot.Digest() == "" || a.installationSnapshot.Generation() == 0 ||
 		a.installationSnapshot.Generation() != a.installationSnapshotGeneration {
 		return nil, errors.New(installationSnapshotUnavailable)
 	}
-	if a == nil || a.deepDiveConfig == nil {
-		return nil, fmt.Errorf("cannot build install plan without installer state")
-	}
 	snapshot := a.installationSnapshot
-	if len(onlyTools) != 0 {
+	if onlyTools != nil {
 		return buildPackageOnlyInstallPlan(a, installRuntime, now, snapshot, onlyTools)
+	}
+	if a.deepDiveConfig == nil {
+		return nil, fmt.Errorf("cannot build install plan without installer state")
 	}
 	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
 	statePlan, err := operation.CaptureStatePlan()
@@ -715,81 +720,62 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 }
 
 func buildPackageOnlyInstallPlan(a *App, installRuntime toolInstallRuntime, now time.Time, snapshot health.InstallationSnapshot, onlyTools []string) (*installPlan, error) {
-	statePlan, err := operation.CaptureStatePlan()
+	if installRuntime.registeredToolIDs == nil || installRuntime.lookupTool == nil || installRuntime.describeInstall == nil || installRuntime.captureStatePlan == nil {
+		return nil, errors.New(installationSnapshotUnavailable)
+	}
+	intent, err := planpublic.NormalizeExplicitTools(onlyTools, installRuntime.registeredToolIDs())
+	if errors.Is(err, planpublic.ErrIntentRequired) {
+		return nil, errors.New("explicit tool intent required")
+	}
 	if err != nil {
-		return nil, fmt.Errorf("capture private operation state before planning: %w", err)
+		return nil, errors.New(installationSnapshotUnavailable)
 	}
-	platform := pkg.Platform(snapshot.Platform())
-	managerName := snapshot.Manager()
-	installAuthorities := make(map[string]installToolAuthority)
-	pinnedRecipes := make(map[string]operation.InstallRecipe)
-	var actions []operation.Action
-	for _, toolID := range installPlanCandidateTools(a, platform, onlyTools) {
-		observation, observed := snapshot.Tool(toolID)
-		if !observed {
-			return nil, errors.New(installationSnapshotUnavailable)
-		}
-		presence := observation.Presence()
-		if presence == health.PresencePresent {
-			installAuthorities[toolID] = installToolAuthority{presence: presence, intent: "none"}
-			continue
-		}
-		if (presence != health.PresenceMissing && presence != health.PresencePartial) || observation.Installability() != health.InstallabilitySupported {
-			return nil, errors.New(installationSnapshotUnavailable)
-		}
-		tool, ok := installRuntime.lookupTool(toolID)
-		if !ok {
-			return nil, fmt.Errorf("selected tool %s disappeared while planning", toolID)
-		}
-		recipe, describeErr := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: platform, Manager: managerName})
-		if describeErr != nil {
-			return nil, fmt.Errorf("describe selected tool %s install: %w", toolID, describeErr)
-		}
-		recipeDigest := installRecipeDigest(recipe)
-		if recipeDigest == "" || recipeDigest != observation.InstallRecipeDigest() {
-			return nil, errors.New(installationSnapshotUnavailable)
-		}
-		intent, description := "install", "install "+toolID
-		if presence == health.PresencePartial {
-			intent, description = "repair", "repair "+toolID
-		}
-		installAuthorities[toolID] = installToolAuthority{presence: presence, intent: intent, recipeDigest: recipeDigest}
-		pinnedRecipes[toolID] = operation.CloneInstallRecipe(recipe)
-		detected := false
-		actions = append(actions, operation.Action{
-			ID: "install:" + toolID, Kind: operation.KindInstallTool, ToolID: toolID, Target: toolID,
-			Description: description, Disposition: operation.DispositionApply, DesiredDigest: recipeDigest,
-			Ownership: operation.OwnershipPackageManager, Reversibility: operation.ReversibilityManual,
-			InstallRecipe: &recipe, InstallDetected: &detected,
-		})
-	}
-	document, err := operation.NewPlan(now, actions)
+	result, err := headless.Build(headless.Request{
+		Intent:   intent,
+		Snapshot: snapshot,
+		Environment: headless.Environment{
+			Platform:           pkg.Platform(snapshot.Platform()),
+			Manager:            snapshot.Manager(),
+			ExpectedGeneration: snapshot.Generation(),
+		},
+	}, headless.Dependencies{
+		LookupTool:       installRuntime.lookupTool,
+		DescribeInstall:  installRuntime.describeInstall,
+		CaptureStatePlan: installRuntime.captureStatePlan,
+		Now:              func() time.Time { return now },
+	})
 	if err != nil {
-		return nil, err
+		return nil, errors.New(installationSnapshotUnavailable)
 	}
-	snapshotAuthority := installationSnapshotAuthority{
-		schema: snapshot.SchemaVersion(), generation: snapshot.Generation(), platform: snapshot.Platform(),
-		manager: snapshot.Manager(), digest: snapshot.Digest(),
+	accepted, hasAccepted := result.Accepted()
+	switch result.Public().Status() {
+	case planpublic.StatusReady:
+		if !hasAccepted {
+			return nil, errors.New(installationSnapshotUnavailable)
+		}
+		plan, adoptErr := adoptHeadlessInstallPlan(a, accepted)
+		if adoptErr != nil {
+			return nil, errors.New(installationSnapshotUnavailable)
+		}
+		return plan, nil
+	case planpublic.StatusNoChanges:
+		if hasAccepted {
+			return nil, errors.New(installationSnapshotUnavailable)
+		}
+		return nil, errors.New("no installation changes required")
+	case planpublic.StatusIntentRequired:
+		if hasAccepted {
+			return nil, errors.New(installationSnapshotUnavailable)
+		}
+		return nil, errors.New("explicit tool intent required")
+	case planpublic.StatusBlocked:
+		if hasAccepted {
+			return nil, errors.New(installationSnapshotUnavailable)
+		}
+		return nil, errors.New(installationSnapshotUnavailable)
+	default:
+		return nil, errors.New(installationSnapshotUnavailable)
 	}
-	installHash := digestPlanValue(struct {
-		Document   string
-		Schema     int
-		Generation uint64
-		Platform   string
-		Manager    string
-		Snapshot   string
-		Recipes    []string
-	}{document.Hash(), snapshotAuthority.schema, snapshotAuthority.generation, snapshotAuthority.platform,
-		snapshotAuthority.manager, snapshotAuthority.digest, sortedInstallRecipeAuthorities(installAuthorities)})
-	return &installPlan{
-		document: document, installHash: installHash, installSnapshot: snapshotAuthority,
-		installTools: maps.Clone(installAuthorities), installRecipes: cloneInstallRecipes(pinnedRecipes),
-		// A selected-tool Manage plan must not inherit unrelated helper or
-		// configuration intent. The worker uses this snapshot to select those
-		// phases, so an explicit empty value is part of the install-only boundary.
-		config: DeepDiveConfig{}, theme: a.theme, navStyle: a.navStyle, animations: a.animationsEnabled,
-		authority: make(map[string]map[string]acceptedTarget), statePlan: statePlan,
-	}, nil
 }
 
 func installPlanCandidateTools(a *App, platform pkg.Platform, onlyTools []string) []string {

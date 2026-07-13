@@ -169,9 +169,19 @@ func registryRuntime(platform pkg.Platform, installed map[string]bool) toolInsta
 		manager.ManagerName = "unknown"
 	}
 	return toolInstallRuntime{
-		lookupTool:     reg.Get,
-		detectManager:  func() pkg.PackageManager { return manager },
-		detectPlatform: func() pkg.Platform { return platform },
+		lookupTool: reg.Get,
+		registeredToolIDs: func() []string {
+			registered := reg.All()
+			ids := make([]string, 0, len(registered))
+			for _, tool := range registered {
+				ids = append(ids, tool.ID())
+			}
+			return ids
+		},
+		describeInstall:  tools.DescribeInstall,
+		captureStatePlan: operation.CaptureStatePlan,
+		detectManager:    func() pkg.PackageManager { return manager },
+		detectPlatform:   func() pkg.Platform { return platform },
 		isToolInstalled: func(t tools.Tool) bool {
 			return installed[t.ID()]
 		},
