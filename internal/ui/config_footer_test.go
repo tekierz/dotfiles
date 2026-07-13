@@ -193,12 +193,6 @@ func TestListNavScreensUseSharedFooter(t *testing.T) {
 			ctx.Width, ctx.Height = w, h
 			return NewConfigMacAppsScreen(ctx)
 		}()},
-		{"clitools", func() ScreenHandler {
-			ctx := newDeepDiveContext(t)
-			ctx.app.width, ctx.app.height = w, h
-			ctx.Width, ctx.Height = w, h
-			return NewConfigCLIToolsScreen(ctx)
-		}()},
 		{"cliutilities", func() ScreenHandler {
 			ctx := newDeepDiveContext(t)
 			ctx.app.width, ctx.app.height = w, h
@@ -232,6 +226,23 @@ func TestListNavScreensUseSharedFooter(t *testing.T) {
 			}
 		})
 	}
+
+	// CLI Tools uses explicit textual state labels, so its footer describes
+	// that accessible contract instead of relying on the shared yellow hint.
+	t.Run("clitools textual status", func(t *testing.T) {
+		ctx := newDeepDiveContext(t)
+		ctx.app.width, ctx.app.height = w, h
+		ctx.Width, ctx.Height = w, h
+		visible := stripANSITest(NewConfigCLIToolsScreen(ctx).View(w, h))
+		for _, want := range []string{"↑↓ navigate", "space toggle", "enter/esc back", "text status"} {
+			if !strings.Contains(visible, want) {
+				t.Errorf("clitools footer missing %q:\n%s", want, visible)
+			}
+		}
+		if strings.Contains(visible, "yellow = installed") {
+			t.Errorf("clitools footer regressed to color-only status meaning:\n%s", visible)
+		}
+	})
 
 	// claudecode uses a plain list footer (no "yellow = installed").
 	t.Run("claudecode", func(t *testing.T) {

@@ -342,7 +342,9 @@ func TestAIInstallRowsExposeOnlyReviewedPlatformRoutes(t *testing.T) {
 		{"opencode", pkg.PlatformArch, true},
 		{"opencode", pkg.PlatformDebian, false},
 	} {
-		if got := cliToolAvailableForPlatform(test.id, test.platform); got != test.want {
+		tool, registered := tools.GetRegistry().Get(test.id)
+		got := registered && installerAvailable(tool, test.platform)
+		if got != test.want {
 			t.Errorf("%s availability on %s = %v, want %v", test.id, test.platform, got, test.want)
 		}
 	}

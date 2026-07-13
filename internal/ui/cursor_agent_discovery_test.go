@@ -43,6 +43,7 @@ func cursorAgentBareContext(t *testing.T) *ScreenContext {
 	t.Helper()
 	withTempHome(t)
 	app := NewApp(true)
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 	return &ScreenContext{app: app, Theme: "neon-seapunk", NavStyle: "emacs", AnimationsEnabled: false, Width: 80, Height: 24}
 }
 
@@ -224,6 +225,7 @@ func TestCursorAgentDeepDiveRowIsUniqueInspectableDisabledAndPreservesIntegratio
 	ctx.app.deepDiveConfig.CLITools = make(map[string]bool)
 	ctx.app.manageInstalled["cursor-agent"] = false
 	ctx.app.deepDiveConfig.CLITools["cursor-agent"] = false
+	setManageTruthSnapshot(t, ctx.app, 111, pkg.PlatformMacOS, "brew", planningCacheObservation(t, tools.NewCursorAgentTool(), false))
 	ctx.app.cliToolIndex = agentIndex
 	screen := NewConfigCLIToolsScreen(ctx)
 	_, _ = screen.Update(keyMsg(" "))
@@ -253,6 +255,7 @@ func TestCursorAgentDeepDiveMouseGeometryRemainsExactWithFocusedReason(t *testin
 			ctx.app.installCacheLoading = false
 			ctx.app.manageInstalled = make(map[string]bool)
 			ctx.app.deepDiveConfig.CLITools = make(map[string]bool)
+			setManageTruthSnapshot(t, ctx.app, 111, pkg.PlatformMacOS, "brew", planningCacheObservation(t, tools.NewCursorAgentTool(), false))
 			agentIndex, adjacentIndex := -1, -1
 			for index, item := range cliToolItems {
 				if item.id == "cursor-agent" {

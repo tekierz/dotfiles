@@ -298,13 +298,29 @@ func TestDeepDiveSupportedIntegrationRowsRenderAtSupportedSizes(t *testing.T) {
 		ctx.Width, ctx.Height = size.width, size.height
 		ctx.app.width, ctx.app.height = size.width, size.height
 		ctx.app.installCacheLoading = false
+		cliScreen := NewConfigCLIToolsScreen(ctx)
+		for _, target := range []struct {
+			id   string
+			name string
+		}{
+			{id: "codex", name: "Codex"},
+			{id: "cursor-agent", name: "Cursor Agent"},
+			{id: "hermes", name: "Hermes Agent"},
+			{id: "opencode", name: "OpenCode"},
+			{id: "pi", name: "Pi"},
+		} {
+			ctx.app.cliToolIndex = cliToolIndexForTest(t, target.id)
+			view := stripANSITest(cliScreen.View(size.width, size.height))
+			if !strings.Contains(view, target.name) {
+				t.Errorf("%dx%d focused CLI viewport omits %q", size.width, size.height, target.name)
+			}
+		}
 		views := []string{
-			stripANSITest(NewConfigCLIToolsScreen(ctx).View(size.width, size.height)),
 			stripANSITest(NewConfigGUIAppsScreen(ctx).View(size.width, size.height)),
 			stripANSITest(NewConfigMacAppsScreen(ctx).View(size.width, size.height)),
 		}
 		joined := strings.Join(views, "\n")
-		for _, want := range []string{"Codex", "Cursor Agent", "Hermes Agent", "OpenCode", "Pi", "Cursor", "LM Studio", "OBS Studio", "T3 Code"} {
+		for _, want := range []string{"Cursor", "LM Studio", "OBS Studio", "T3 Code"} {
 			if !strings.Contains(joined, want) {
 				t.Errorf("%dx%d deep-dive rows omit %q", size.width, size.height, want)
 			}

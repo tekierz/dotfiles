@@ -49,6 +49,11 @@ observability land before new integrations or broad UI work.
   - [x] Adopt one atomic installation snapshot in Manage and install planning: reject stale
         async completions, render Present/Partial/Missing/Unknown truthfully, and fail closed
         when planning from unknown, unsupported, stale, or environment-mismatched evidence.
+  - [x] Adopt the same fresh, generation-bound installation snapshot in the CLI-tools
+        deep-dive selector: render Present/Partial/Missing/Unknown and installability states
+        textually, fail closed on loading/stale/error or generation mismatch, keep Cursor
+        Agent/Hermes discovery-only and Claude Code context-only, and bound keyboard/mouse
+        views at 60x18, 80x24, and 120x40.
 - [ ] Add current-source/provenance, Essentials/Advanced/raw layers, diff, and capability badges.
 - [ ] Make 60x18/80x24/120x40 layouts responsive with viewports, compact tabs, glyph/color
       fallbacks, reduced motion, and explicit Save/Cancel semantics.

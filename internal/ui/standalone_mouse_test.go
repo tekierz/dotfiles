@@ -390,7 +390,7 @@ func TestConfigListClick(t *testing.T) {
 		ctx.Width, ctx.Height = w, h
 		screen := NewConfigCLIToolsScreen(ctx)
 		out := screen.View(w, h)
-		y := labelLineY(t, out, "AI-powered coding")
+		y := labelLineY(t, out, "Claude Code")
 		if y < 0 {
 			t.Fatal("claude-code row not found")
 		}

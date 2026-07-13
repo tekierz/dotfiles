@@ -116,6 +116,7 @@ func TestHermesCLIRegistryParityAndMouseGeometry(t *testing.T) {
 			ctx.app.installCacheLoading = false
 			ctx.app.manageInstalled = make(map[string]bool)
 			ctx.app.deepDiveConfig.CLITools = make(map[string]bool)
+			setManageTruthSnapshot(t, ctx.app, 131, pkg.PlatformMacOS, "brew", planningCacheObservation(t, tools.NewHermesAgentTool(), false))
 			hermesIndex := -1
 			for index, item := range cliToolItems {
 				if item.id == "hermes" {
@@ -248,6 +249,7 @@ func TestHermesCLIInspectionRowIsOrderedDisabledAndResponsive(t *testing.T) {
 	keyboardCtx.app.installCacheLoading = false
 	keyboardCtx.app.manageInstalled = make(map[string]bool)
 	keyboardCtx.app.deepDiveConfig.CLITools = make(map[string]bool)
+	setManageTruthSnapshot(t, keyboardCtx.app, 131, pkg.PlatformMacOS, "brew", planningCacheObservation(t, tools.NewHermesAgentTool(), false))
 	keyboardCtx.app.cliToolIndex = cursorIndex
 	keyboardScreen := NewConfigCLIToolsScreen(keyboardCtx)
 	keyboardScreen.Update(keyMsg("down"))
@@ -270,6 +272,7 @@ func TestHermesCLIInspectionRowIsOrderedDisabledAndResponsive(t *testing.T) {
 			ctx.app.installCacheLoading = false
 			ctx.app.manageInstalled = make(map[string]bool)
 			ctx.app.deepDiveConfig.CLITools = make(map[string]bool)
+			setManageTruthSnapshot(t, ctx.app, 131, pkg.PlatformMacOS, "brew", planningCacheObservation(t, tools.NewHermesAgentTool(), false))
 			ctx.app.cliToolIndex = hermesIndex
 			screen := NewConfigCLIToolsScreen(ctx)
 			view := screen.View(size.width, size.height)
