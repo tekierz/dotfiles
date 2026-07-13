@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode"
@@ -18,6 +19,25 @@ import (
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
+
+type statusTestWriter struct {
+	bytes.Buffer
+	writes int
+	short  bool
+	err    error
+}
+
+func (writer *statusTestWriter) Write(value []byte) (int, error) {
+	writer.writes++
+	if writer.err != nil {
+		return 0, writer.err
+	}
+	if writer.short && len(value) > 0 {
+		_, _ = writer.Buffer.Write(value[:len(value)-1])
+		return len(value) - 1, nil
+	}
+	return writer.Buffer.Write(value)
+}
 
 func TestStatusCommandRoutesHumanAndJSONWithoutChangingHumanBytes(t *testing.T) {
 	const humanBytes = "Dotfiles Status\n===============\nlegacy human bytes stay unchanged\n"
@@ -347,6 +367,249 @@ func TestWriteStatusJSONDeterministicExactSchemaAndEvidence(t *testing.T) {
 			}
 			assertDiagnostic(t, objectValue(t, alternative, "diagnostic"))
 		}
+	}
+}
+
+func TestCollectAndMarshalStatusDocumentPreserveGoldenBytes(t *testing.T) {
+	snapshot := statusJSONSnapshot(t)
+	manager := pkg.NewMockPackageManager()
+	manager.ManagerName = "brew"
+	runtime := statusJSONRuntime{
+		tools:          func() []tools.Tool { return []tools.Tool{tools.NewZshTool(), tools.NewGhosttyTool()} },
+		detectPlatform: func() pkg.Platform { return pkg.PlatformMacOS },
+		detectManager:  func() pkg.PackageManager { return manager },
+		collect: func(context.Context, []tools.Tool, pkg.PackageManager, pkg.Platform, uint64) (health.InstallationSnapshot, error) {
+			return snapshot, nil
+		},
+	}
+	document, err := collectStatusDocument(context.Background(), runtime)
+	if err != nil {
+		t.Fatalf("collect status document: %v", err)
+	}
+	encoded, err := marshalStatusDocument(document)
+	if err != nil {
+		t.Fatalf("marshal status document: %v", err)
+	}
+	standalone := append(bytes.Clone(encoded), '\n')
+	publicDigest := independentStatusPublicDigest(t, standalone)
+	if got, want := string(standalone), statusJSONGolden(publicDigest); got != want {
+		t.Fatalf("extracted status bytes changed:\ngot:  %s\nwant: %s", got, want)
+	}
+	var output bytes.Buffer
+	if err := writeStatusJSON(context.Background(), &output, runtime); err != nil {
+		t.Fatalf("write status JSON: %v", err)
+	}
+	if !bytes.Equal(standalone, output.Bytes()) {
+		t.Fatalf("collect/marshal bytes differ from command writer:\ncollect=%s\nwrite=%s", standalone, output.Bytes())
+	}
+}
+
+func TestValidatedStatusDocumentEmbedsExactlyWithoutRecollectionOrAliases(t *testing.T) {
+	expected := []string{"package-a"}
+	missing := []string{"package-a"}
+	identifiers := []string{"status-binary"}
+	observation, err := health.NewInstallationObservation(health.InstallationObservationSpec{
+		ToolID: "status-tool", Installability: health.InstallabilityUnknown,
+		Package: health.PackageFacet{
+			State: health.PackageMissing, Provider: "brew", ExpectedReceipts: expected, MissingReceipts: missing, Authoritative: true, Complete: true,
+		},
+		Direct: health.DirectFacet{State: health.ComponentMissing, Authoritative: true, Alternatives: []health.DirectAlternative{{
+			Kind: health.DirectSourceBinary, Identifiers: identifiers, State: health.ComponentMissing,
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := health.NewInstallationSnapshot(health.InstallationSnapshotSpec{Generation: 1, Platform: "macos", Manager: "brew", Tools: []health.InstallationObservation{observation}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := pkg.NewMockPackageManager()
+	manager.ManagerName = "brew"
+	collectCalls := 0
+	runtime := statusJSONRuntime{
+		tools:          func() []tools.Tool { return []tools.Tool{tools.NewZshTool()} },
+		detectPlatform: func() pkg.Platform { return pkg.PlatformMacOS },
+		detectManager:  func() pkg.PackageManager { return manager },
+		collect: func(context.Context, []tools.Tool, pkg.PackageManager, pkg.Platform, uint64) (health.InstallationSnapshot, error) {
+			collectCalls++
+			return snapshot, nil
+		},
+	}
+	document, err := collectStatusDocument(context.Background(), runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	standalone, err := marshalStatusDocument(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Poison every caller-owned source slice after collection. The validated
+	// document must retain its own redacted projection.
+	expected[0], missing[0], identifiers[0] = "poison-expected", "poison-missing", "poison-binary"
+	packageCopy := snapshot.Tools()[0].Package()
+	packageCopy.ExpectedReceipts[0] = "poison-snapshot-copy"
+	directCopy := snapshot.Tools()[0].Direct()
+	directCopy.Alternatives[0].Identifiers[0] = "poison-direct-copy"
+
+	envelope, err := json.Marshal(struct {
+		Status validatedStatusDocument `json:"status"`
+	}{Status: document})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Status json.RawMessage `json:"status"`
+	}
+	if err := json.Unmarshal(envelope, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.Status, standalone) {
+		t.Fatalf("embedded status differs from standalone:\nembedded=%s\nstandalone=%s", decoded.Status, standalone)
+	}
+	if collectCalls != 1 {
+		t.Fatalf("embedding recollected status %d times", collectCalls)
+	}
+
+	expectedObject := bytes.Clone(standalone)
+	standalone[0] = '['
+	again, err := document.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(again, expectedObject) || bytes.Equal(again, standalone) {
+		t.Fatalf("returned JSON bytes alias document state: again=%s mutated=%s", again, standalone)
+	}
+	if bytes.Contains(again, []byte("poison")) {
+		t.Fatalf("source slice mutation reached validated document: %s", again)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(again, &object); err != nil {
+		t.Fatal(err)
+	}
+	if object["schema_version"] != float64(statusSchemaVersion) || objectValue(t, object, "snapshot")["digest"] == "" {
+		t.Fatalf("embedded schema/digest invalid: %#v", object)
+	}
+}
+
+func TestCollectStatusDocumentCallsRuntimeOnceInExistingOrderAndMarshalDoesNotRecollect(t *testing.T) {
+	snapshot := statusJSONSnapshot(t)
+	manager := pkg.NewMockPackageManager()
+	manager.ManagerName = "brew"
+	registry := []tools.Tool{tools.NewGhosttyTool(), tools.NewZshTool()}
+	var sequence []string
+	runtime := statusJSONRuntime{
+		tools: func() []tools.Tool {
+			sequence = append(sequence, "tools")
+			return registry
+		},
+		detectPlatform: func() pkg.Platform {
+			sequence = append(sequence, "platform")
+			return pkg.PlatformMacOS
+		},
+		detectManager: func() pkg.PackageManager {
+			sequence = append(sequence, "manager")
+			return manager
+		},
+		collect: func(_ context.Context, gotTools []tools.Tool, gotManager pkg.PackageManager, gotPlatform pkg.Platform, generation uint64) (health.InstallationSnapshot, error) {
+			sequence = append(sequence, "collect")
+			if len(gotTools) != len(registry) || gotTools[0] != registry[0] || gotTools[1] != registry[1] || gotManager != manager || gotPlatform != pkg.PlatformMacOS || generation != 1 {
+				t.Fatalf("collector boundary tools=%#v manager=%v platform=%q generation=%d", gotTools, gotManager == manager, gotPlatform, generation)
+			}
+			return snapshot, nil
+		},
+	}
+	document, err := collectStatusDocument(context.Background(), runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSequence := []string{"tools", "platform", "manager", "collect"}
+	if !reflect.DeepEqual(sequence, wantSequence) {
+		t.Fatalf("runtime sequence=%v want=%v", sequence, wantSequence)
+	}
+	if _, err := marshalStatusDocument(document); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(sequence, wantSequence) {
+		t.Fatalf("marshal recollected runtime: %v", sequence)
+	}
+}
+
+func TestStatusDocumentExtractionFailsClosedAndWriterIsSingleCall(t *testing.T) {
+	if document, err := collectStatusDocument(context.Background(), statusJSONRuntime{}); !errors.Is(err, errStatusCollection) || !reflect.DeepEqual(document, validatedStatusDocument{}) {
+		t.Fatalf("nil runtime document=%#v error=%v", document, err)
+	}
+	if encoded, err := marshalStatusDocument(validatedStatusDocument{}); !errors.Is(err, errStatusCollection) || encoded != nil {
+		t.Fatalf("zero document encoded=%q error=%v", encoded, err)
+	}
+
+	snapshot := statusJSONSnapshot(t)
+	manager := pkg.NewMockPackageManager()
+	manager.ManagerName = "brew"
+	collectCalls := 0
+	runtime := statusJSONRuntime{
+		tools:          func() []tools.Tool { return []tools.Tool{tools.NewGhosttyTool(), tools.NewZshTool()} },
+		detectPlatform: func() pkg.Platform { return pkg.PlatformMacOS },
+		detectManager:  func() pkg.PackageManager { return manager },
+		collect: func(context.Context, []tools.Tool, pkg.PackageManager, pkg.Platform, uint64) (health.InstallationSnapshot, error) {
+			collectCalls++
+			return snapshot, nil
+		},
+	}
+	for _, writer := range []*statusTestWriter{{}, {short: true}, {err: errors.New("/Users/private token=SECRET")}} {
+		collectCalls = 0
+		err := writeStatusJSON(context.Background(), writer, runtime)
+		if writer.short || writer.err != nil {
+			if !errors.Is(err, errStatusCollection) || err.Error() != "status collection failed" {
+				t.Fatalf("writer failure=%v want generic", err)
+			}
+		} else if err != nil {
+			t.Fatalf("successful writer error=%v", err)
+		}
+		if collectCalls != 1 || writer.writes != 1 {
+			t.Fatalf("calls collect/write=%d/%d", collectCalls, writer.writes)
+		}
+		if err != nil && (strings.Contains(err.Error(), "Users") || strings.Contains(err.Error(), "SECRET")) {
+			t.Fatalf("writer detail leaked: %v", err)
+		}
+	}
+}
+
+func TestCollectStatusDocumentRawAndProvenanceFailuresReturnZeroGenericDocument(t *testing.T) {
+	manager := pkg.NewMockPackageManager()
+	manager.ManagerName = "brew"
+	base := statusJSONSnapshot(t)
+	mismatch, err := health.NewInstallationSnapshot(health.InstallationSnapshotSpec{Generation: 2, Platform: "macos", Manager: "brew", Tools: base.Tools()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		snapshot health.InstallationSnapshot
+		err      error
+	}{
+		{name: "raw collector", err: errors.New("/Users/private token=SECRET")},
+		{name: "zero snapshot"},
+		{name: "provenance mismatch", snapshot: mismatch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := statusJSONRuntime{
+				tools:          func() []tools.Tool { return []tools.Tool{tools.NewZshTool()} },
+				detectPlatform: func() pkg.Platform { return pkg.PlatformMacOS },
+				detectManager:  func() pkg.PackageManager { return manager },
+				collect: func(context.Context, []tools.Tool, pkg.PackageManager, pkg.Platform, uint64) (health.InstallationSnapshot, error) {
+					return tc.snapshot, tc.err
+				},
+			}
+			document, err := collectStatusDocument(context.Background(), runtime)
+			if !errors.Is(err, errStatusCollection) || err.Error() != "status collection failed" || !reflect.DeepEqual(document, validatedStatusDocument{}) {
+				t.Fatalf("document=%#v error=%v", document, err)
+			}
+			if strings.Contains(err.Error(), "Users") || strings.Contains(err.Error(), "SECRET") {
+				t.Fatalf("raw detail leaked: %v", err)
+			}
+		})
 	}
 }
 

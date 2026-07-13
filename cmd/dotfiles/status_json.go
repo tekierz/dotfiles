@@ -53,6 +53,13 @@ type statusDocument struct {
 	Tools         []statusTool           `json:"tools"`
 }
 
+// validatedStatusDocument is a fully collected, redacted status projection.
+// Keeping its value private prevents callers from treating a partially built
+// statusDocument as safe to marshal or embed.
+type validatedStatusDocument struct {
+	value statusDocument
+}
+
 type statusSnapshotIdentity struct {
 	SchemaVersion int    `json:"schema_version"`
 	Generation    uint64 `json:"generation"`
@@ -163,15 +170,32 @@ func newStatusCommand(runtime statusCommandRuntime) *cobra.Command {
 }
 
 func writeStatusJSON(ctx context.Context, writer io.Writer, runtime statusJSONRuntime) error {
-	if runtime.tools == nil || runtime.detectPlatform == nil || runtime.detectManager == nil || runtime.collect == nil {
+	document, err := collectStatusDocument(ctx, runtime)
+	if err != nil {
 		return errStatusCollection
+	}
+	encoded, err := marshalStatusDocument(document)
+	if err != nil {
+		return errStatusCollection
+	}
+	encoded = append(encoded, '\n')
+	written, err := writer.Write(encoded)
+	if err != nil || written != len(encoded) {
+		return errStatusCollection
+	}
+	return nil
+}
+
+func collectStatusDocument(ctx context.Context, runtime statusJSONRuntime) (validatedStatusDocument, error) {
+	if runtime.tools == nil || runtime.detectPlatform == nil || runtime.detectManager == nil || runtime.collect == nil {
+		return validatedStatusDocument{}, errStatusCollection
 	}
 	registryTools := runtime.tools()
 	platform := runtime.detectPlatform()
 	manager := runtime.detectManager()
 	snapshot, err := runtime.collect(ctx, registryTools, manager, platform, 1)
 	if err != nil {
-		return errStatusCollection
+		return validatedStatusDocument{}, errStatusCollection
 	}
 	expectedManager := ""
 	if manager != nil {
@@ -182,7 +206,7 @@ func writeStatusJSON(ctx context.Context, writer io.Writer, runtime statusJSONRu
 		snapshot.Platform() != string(platform) ||
 		snapshot.Manager() != expectedManager ||
 		snapshot.Digest() == "" {
-		return errStatusCollection
+		return validatedStatusDocument{}, errStatusCollection
 	}
 
 	document := statusDocument{
@@ -207,19 +231,37 @@ func writeStatusJSON(ctx context.Context, writer io.Writer, runtime statusJSONRu
 	}
 	digest, err := statusPublicDigest(document)
 	if err != nil {
-		return errStatusCollection
+		return validatedStatusDocument{}, errStatusCollection
 	}
 	document.Snapshot.Digest = digest
-	encoded, err := json.Marshal(document)
+	return validatedStatusDocument{value: document}, nil
+}
+
+func marshalStatusDocument(document validatedStatusDocument) ([]byte, error) {
+	value := document.value
+	if value.SchemaVersion != statusSchemaVersion || value.Kind != statusKind ||
+		value.Snapshot.SchemaVersion != health.CurrentInstallationSchemaVersion || value.Snapshot.Generation != 1 ||
+		value.Snapshot.Digest == "" || value.Tools == nil || value.Capabilities != (statusCapabilities{
+		Installation: "collected", Config: "not_collected", Service: "not_collected", Auth: "not_collected",
+	}) {
+		return nil, errStatusCollection
+	}
+	digest, err := statusPublicDigest(value)
+	if err != nil || digest != value.Snapshot.Digest {
+		return nil, errStatusCollection
+	}
+	encoded, err := json.Marshal(value)
 	if err != nil {
-		return errStatusCollection
+		return nil, errStatusCollection
 	}
-	encoded = append(encoded, '\n')
-	written, err := writer.Write(encoded)
-	if err != nil || written != len(encoded) {
-		return errStatusCollection
-	}
-	return nil
+	return encoded, nil
+}
+
+// MarshalJSON embeds the exact validated public status object without a
+// command-line newline. json.Marshal returns caller-owned bytes, so embedding
+// or mutating one result cannot alter later encodings of the document.
+func (document validatedStatusDocument) MarshalJSON() ([]byte, error) {
+	return marshalStatusDocument(document)
 }
 
 func publicStatusTool(observation health.InstallationObservation) statusTool {
