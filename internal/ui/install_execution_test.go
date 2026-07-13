@@ -60,6 +60,9 @@ func TestInstallRecipeDetectedAppBundleRequiresDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	recipe := operation.InstallRecipe{
+		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
+		ToolID:        "detector-fixture", Platform: "macos", Manager: "brew", Risk: "reviewed test install",
+		Steps: []operation.InstallStep{{Kind: operation.InstallStepHomebrewCask, Provider: "brew", Casks: []string{"detector-fixture"}}},
 		Detector: operation.InstallDetector{
 			Kind:   operation.InstallDetectorAppBundle,
 			Values: []string{filepath.Base(bundle)},

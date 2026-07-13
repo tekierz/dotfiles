@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/health"
+	"github.com/tekierz/dotfiles/internal/installapply"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
@@ -1587,123 +1587,11 @@ func runSelectedToolInstalls(
 }
 
 func installRecipeDetected(recipe operation.InstallRecipe, mgr pkg.PackageManager) (bool, error) {
-	switch recipe.Detector.Kind {
-	case operation.InstallDetectorPackageReceipt:
-		if mgr == nil || mgr.Name() != recipe.Manager {
-			return false, fmt.Errorf("reviewed package manager %q is unavailable", recipe.Manager)
-		}
-		for _, name := range recipe.Detector.Values {
-			if !mgr.IsInstalled(name) {
-				return false, nil
-			}
-		}
-		return true, nil
-	case operation.InstallDetectorBinary:
-		for _, name := range recipe.Detector.Values {
-			if filepath.Base(name) != name {
-				return false, fmt.Errorf("binary detector must be a command name")
-			}
-			_, lookupErr := exec.LookPath(name)
-			if errors.Is(lookupErr, exec.ErrNotFound) {
-				return false, nil
-			}
-			if lookupErr != nil {
-				return false, lookupErr
-			}
-		}
-		return true, nil
-	case operation.InstallDetectorAppBundle:
-		home, homeErr := os.UserHomeDir()
-		if homeErr != nil {
-			return false, homeErr
-		}
-		for _, name := range recipe.Detector.Values {
-			if filepath.Base(name) != name || strings.TrimSuffix(name, ".app") == "" {
-				return false, fmt.Errorf("app detector must be an application name")
-			}
-			bundle := name
-			if !strings.HasSuffix(bundle, ".app") {
-				bundle += ".app"
-			}
-			found := false
-			for _, root := range []string{"/Applications", filepath.Join(home, "Applications")} {
-				info, err := os.Stat(filepath.Join(root, bundle))
-				if err == nil {
-					if info.IsDir() {
-						found = true
-						break
-					}
-					continue
-				}
-				if !errors.Is(err, os.ErrNotExist) {
-					return false, err
-				}
-			}
-			if !found {
-				return false, nil
-			}
-		}
-		return true, nil
-	default:
-		return false, fmt.Errorf("unsupported reviewed detector %q", recipe.Detector.Kind)
-	}
+	return installapply.DetectRecipe(recipe, mgr)
 }
 
 func executeInstallRecipe(ctx context.Context, recipe operation.InstallRecipe, mgr pkg.PackageManager, emitLine func(string)) error {
-	for _, step := range recipe.Steps {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		switch step.Kind {
-		case operation.InstallStepPackageManager:
-			if mgr == nil || mgr.Name() != step.Provider {
-				return fmt.Errorf("reviewed package manager %q is unavailable", step.Provider)
-			}
-			adapted := &streamingInstallManager{PackageManager: mgr, ctx: ctx, emitLine: emitLine}
-			if err := adapted.Install(step.Packages...); err != nil {
-				return err
-			}
-		case operation.InstallStepNPMGlobal:
-			npmPath, err := exec.LookPath(step.Provider)
-			if err != nil {
-				return fmt.Errorf("reviewed npm executable is unavailable: %w", err)
-			}
-			cmd, err := runner.RunStreaming(ctx, npmPath, step.Args...)
-			if err != nil {
-				return err
-			}
-			for line := range cmd.Output {
-				if emitLine != nil {
-					emitLine(line)
-				}
-			}
-			if err := cmd.Wait(); err != nil {
-				return err
-			}
-		case operation.InstallStepHomebrewCask:
-			caskManager, ok := mgr.(pkg.HomebrewCaskManager)
-			if !ok || mgr.Name() != "brew" {
-				return fmt.Errorf("reviewed Homebrew cask installer is unavailable")
-			}
-			cmd, err := caskManager.InstallCasksStreaming(ctx, step.Casks...)
-			if err != nil {
-				return err
-			}
-			if cmd != nil {
-				for line := range cmd.Output {
-					if emitLine != nil {
-						emitLine(line)
-					}
-				}
-				if err := cmd.Wait(); err != nil {
-					return err
-				}
-			}
-		default:
-			return fmt.Errorf("unsupported reviewed install step %q", step.Kind)
-		}
-	}
-	return nil
+	return installapply.ExecuteRecipe(ctx, recipe, mgr, emitLine)
 }
 
 // aggregateFailures builds the final installation error from a slice of per-step
