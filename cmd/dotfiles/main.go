@@ -138,6 +138,9 @@ var hotkeysCmd = &cobra.Command{
 // statusCmd shows current status.
 var statusCmd = newRegisteredStatusCommand()
 
+// planCmd prints the deterministic, install-only public plan contract.
+var planCmd = newRegisteredPlanCommand()
+
 // backupsCmd lists available backups
 var backupsCmd = &cobra.Command{
 	Use:   "backups",
@@ -303,6 +306,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(hotkeysCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(backupsCmd)
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(versionCmd)
@@ -355,6 +359,15 @@ func executeRoot(args []string, stdout, stderr io.Writer) int {
 	rootCmd.SetOut(stdout)
 	rootCmd.SetErr(stderr)
 	if err := rootCmd.Execute(); err != nil {
+		var exit *commandExitError
+		if errors.As(err, &exit) {
+			if !exit.silent {
+				if _, writeErr := fmt.Fprintln(stderr, exit.Error()); writeErr != nil {
+					return 1
+				}
+			}
+			return exit.code
+		}
 		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
 			return 1
 		}
