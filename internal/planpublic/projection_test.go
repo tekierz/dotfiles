@@ -19,7 +19,7 @@ func readyProjectionSpec() DocumentSpec {
 		Manager:      "brew",
 		Intent:       intent,
 		Snapshot:     &Snapshot{SchemaVersion: 1, Generation: 1, PublicDigest: strings.Repeat("2", 64)},
-		Capabilities: Capabilities{Installation: "planned", Config: "not_planned", Service: "not_collected", Auth: "not_collected", Apply: "not_available"},
+		Capabilities: Capabilities{Installation: "planned", Config: "not_planned", Service: "not_collected", Auth: "not_collected", Apply: "hash_required"},
 		Summary:      Summary{Apply: 2},
 		Actions: []ActionSpec{
 			{ActionID: "install:codex", Kind: "install_tool", ToolID: "codex", Description: "install codex", Disposition: "apply", Ownership: "package_manager", Reversibility: "external", Install: validInstallSpec(strings.Repeat("a", 64))},

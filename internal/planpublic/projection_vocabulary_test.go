@@ -219,7 +219,7 @@ func vocabularyDocument(toolID string, install *InstallSpec) DocumentSpec {
 	return DocumentSpec{
 		Status: StatusReady, PlanHash: strings.Repeat("1", 64), Platform: "macos", Manager: "brew", Intent: intent,
 		Snapshot:     &Snapshot{SchemaVersion: 1, Generation: 1, PublicDigest: strings.Repeat("a", 64)},
-		Capabilities: Capabilities{Installation: "planned", Config: "not_planned", Service: "not_collected", Auth: "not_collected", Apply: "not_available"},
+		Capabilities: Capabilities{Installation: "planned", Config: "not_planned", Service: "not_collected", Auth: "not_collected", Apply: "hash_required"},
 		Summary:      Summary{Apply: 1},
 		Actions:      []ActionSpec{{ActionID: "install:" + toolID, Kind: "install_tool", ToolID: toolID, Description: "install " + toolID, Disposition: "apply", Ownership: "package_manager", Reversibility: "external", Install: install}},
 	}

@@ -109,13 +109,14 @@ func TestPlanJSONReadyNoChangesAndUnknownOutcomes(t *testing.T) {
 		presence     health.Presence
 		selection    string
 		wantStatus   string
+		wantApply    string
 		wantExit     int
 		wantDescribe int
 		wantCapture  int
 	}{
-		{name: "ready", presence: health.PresenceMissing, selection: "zsh", wantStatus: "ready", wantDescribe: 1, wantCapture: 1},
-		{name: "no changes", presence: health.PresencePresent, selection: "zsh", wantStatus: "no_changes"},
-		{name: "unknown", presence: health.PresencePresent, selection: "unknown-tool", wantStatus: "blocked", wantExit: 2},
+		{name: "ready", presence: health.PresenceMissing, selection: "zsh", wantStatus: "ready", wantApply: "hash_required", wantDescribe: 1, wantCapture: 1},
+		{name: "no changes", presence: health.PresencePresent, selection: "zsh", wantStatus: "no_changes", wantApply: "not_available"},
+		{name: "unknown", presence: health.PresencePresent, selection: "unknown-tool", wantStatus: "blocked", wantApply: "not_available", wantExit: 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runtime, calls := planRuntimeFixture(t, test.presence)
@@ -137,6 +138,9 @@ func TestPlanJSONReadyNoChangesAndUnknownOutcomes(t *testing.T) {
 			}
 			if writer.writes != 1 || !strings.Contains(writer.String(), `"status":"`+test.wantStatus+`"`) {
 				t.Fatalf("writes=%d output=%s", writer.writes, writer.String())
+			}
+			if !strings.Contains(writer.String(), `"apply":"`+test.wantApply+`"`) {
+				t.Fatalf("status %q apply capability mismatch: %s", test.wantStatus, writer.String())
 			}
 			if test.wantStatus == "ready" && !strings.Contains(writer.String(), `"plan_hash":"`) {
 				t.Fatalf("ready output omitted complete plan hash: %s", writer.String())

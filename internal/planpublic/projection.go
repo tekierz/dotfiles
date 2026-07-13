@@ -16,6 +16,8 @@ const (
 	planKind          = "dotfiles.plan"
 	maxPublicActions  = 256
 	maxRecipeItems    = 128
+	applyHashRequired = "hash_required"
+	applyNotAvailable = "not_available"
 )
 
 var ErrInvalidDocument = errors.New("invalid public plan document")
@@ -296,9 +298,14 @@ func validCapabilities(status Status, capabilities Capabilities) bool {
 	if status == StatusIntentRequired {
 		return capabilities == (Capabilities{})
 	}
-	return capabilities.Installation == "planned" && capabilities.Config == "not_planned" &&
-		capabilities.Service == "not_collected" && capabilities.Auth == "not_collected" &&
-		capabilities.Apply == "not_available"
+	if capabilities.Installation != "planned" || capabilities.Config != "not_planned" ||
+		capabilities.Service != "not_collected" || capabilities.Auth != "not_collected" {
+		return false
+	}
+	if status == StatusReady {
+		return capabilities.Apply == applyHashRequired
+	}
+	return capabilities.Apply == applyNotAvailable
 }
 
 func validSummary(summary Summary, actions []ActionSpec) bool {

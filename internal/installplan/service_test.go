@@ -139,7 +139,7 @@ func TestBuildOneMissingReviewedToolReturnsReadyPrivateAndPublicPlan(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"status":"ready"`, `"installation":"planned"`, `"config":"not_planned"`, `"service":"not_collected"`, `"auth":"not_collected"`, `"apply":"not_available"`} {
+	for _, want := range []string{`"status":"ready"`, `"installation":"planned"`, `"config":"not_planned"`, `"service":"not_collected"`, `"auth":"not_collected"`, `"apply":"hash_required"`} {
 		if !strings.Contains(string(encoded), want) {
 			t.Fatalf("public ready document omitted %s: %s", want, encoded)
 		}

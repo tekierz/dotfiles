@@ -171,7 +171,7 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	if !mutationRequired {
 		document, err := planpublic.NewDocument(planpublic.DocumentSpec{
 			Status: planpublic.StatusNoChanges, Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Intent: intent,
-			Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(),
+			Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(planpublic.StatusNoChanges),
 			Summary: planpublic.Summary{Skip: len(publicActions)}, Actions: publicActions,
 		})
 		if err != nil {
@@ -270,7 +270,7 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	}
 	publicDocument, err := planpublic.NewDocument(planpublic.DocumentSpec{
 		Status: planpublic.StatusReady, PlanHash: accepted.hash, Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Intent: intent,
-		Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(),
+		Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(planpublic.StatusReady),
 		Summary: planpublic.Summary{Apply: len(privateActions), Skip: len(intent.Tools) - len(privateActions)}, Actions: publicActions,
 	})
 	if err != nil {
@@ -349,7 +349,7 @@ func blockedResult(intent planpublic.Intent, snapshot health.InstallationSnapsho
 	}
 	document, err := planpublic.NewDocument(planpublic.DocumentSpec{
 		Status: planpublic.StatusBlocked, Platform: snapshot.Platform(), Manager: snapshot.Manager(), Intent: cloneIntent(intent),
-		Snapshot: publicSnapshot(snapshot, intent.Tools), Capabilities: plannedCapabilities(),
+		Snapshot: publicSnapshot(snapshot, intent.Tools), Capabilities: plannedCapabilities(planpublic.StatusBlocked),
 		Summary: planpublic.Summary{Blocked: len(actions)}, Actions: actions,
 	})
 	if err != nil {
@@ -396,8 +396,12 @@ func toolIsNil(tool tools.Tool) bool {
 	}
 }
 
-func plannedCapabilities() planpublic.Capabilities {
-	return planpublic.Capabilities{Installation: "planned", Config: "not_planned", Service: "not_collected", Auth: "not_collected", Apply: "not_available"}
+func plannedCapabilities(status planpublic.Status) planpublic.Capabilities {
+	apply := "not_available"
+	if status == planpublic.StatusReady {
+		apply = "hash_required"
+	}
+	return planpublic.Capabilities{Installation: "planned", Config: "not_planned", Service: "not_collected", Auth: "not_collected", Apply: apply}
 }
 
 func publicSnapshot(snapshot health.InstallationSnapshot, selected []string) *planpublic.Snapshot {

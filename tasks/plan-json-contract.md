@@ -82,7 +82,7 @@ Every nonfatal JSON outcome is one versioned object:
     "config": "not_planned",
     "service": "not_collected",
     "auth": "not_collected",
-    "apply": "not_available"
+    "apply": "hash_required"
   },
   "summary": {
     "apply": 2,
@@ -100,9 +100,12 @@ Allowed statuses are `ready`, `no_changes`, `blocked`, and `intent_required`.
   authority digests because collection and planning did not run.
 - `blocked` contains only bounded public decision codes/reasons and redacted public evidence.
   It omits `plan_hash` and every private digest.
-- `ready` and `no_changes` may include `plan_hash` only after the complete private authority
-  fingerprint described below is implemented. If that fingerprint is deferred, v1 omits
-  `plan_hash` and advertises apply as `not_available`.
+- `ready` includes the complete private-authority `plan_hash` and advertises apply as
+  `hash_required`. This declares that only an exact fresh-plan hash match can authorize apply;
+  it does not by itself register or promise availability of the apply command.
+- `no_changes` and `blocked` omit `plan_hash` and advertise apply as `not_available`.
+- `intent_required` retains its zero capability object because collection and planning did not
+  run.
 - The private installation snapshot digest is never published. `snapshot.public_digest`
   binds only the redacted public snapshot projection.
 - `authority.public_digest` is SHA-256 over the canonical public document with that field
@@ -140,8 +143,8 @@ public digest is computed.
 
 ## Complete private authority fingerprint
 
-Noninteractive apply must not accept the current operation-document hash alone. Before a
-public `plan_hash` exists, a private canonical fingerprint must bind:
+Noninteractive apply must not accept an operation-document hash alone. The public `plan_hash`
+is derived from a private canonical fingerprint that binds:
 
 - operation document hash and normalized explicit intent digest;
 - installation snapshot schema/generation/platform/manager/private digest;
