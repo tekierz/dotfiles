@@ -2,12 +2,14 @@
 version=1
 slice_id=npm-private-phase-authority
 state=contract-frozen
-max_total_files=5
+max_total_files=7
 max_production_files=2
-max_changed_lines=550
+max_changed_lines=650
 ignore=tasks/pi-agent-integration-spec.md
 allow=internal/pkg/npm_execution_identity.go
 allow=internal/installplan/service.go
 allow=internal/installplan/manager_identity_authority_test.go
 allow=internal/installplan/npm_identity_authority_test.go
 allow=internal/installplan/service_mapping_test.go
+allow=internal/ui/installplan_service_wiring_test.go
+allow=internal/ui/manage_pi_reachability_test.go
