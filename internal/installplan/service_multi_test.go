@@ -121,7 +121,7 @@ func TestBuildEquivalentIntentOrderIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestSelectedToolPublicSnapshotDigestIsScopedAndPrivateDigestRemainsPrivate(t *testing.T) {
+func TestSelectedToolPublicSnapshotDigestIsScopedAndPrivateDriftChangesOnlyPublishedAuthority(t *testing.T) {
 	gitRecipe := reviewedPackageRecipe("git")
 	otherRecipe := reviewedPackageRecipe("pi")
 	intent := mustIntent(t, "git")
@@ -160,8 +160,22 @@ func TestSelectedToolPublicSnapshotDigestIsScopedAndPrivateDigestRemainsPrivate(
 	}
 	firstJSON := mustPublicJSON(t, first.Public())
 	privateDriftJSON := mustPublicJSON(t, privateDrift.Public())
-	if !reflect.DeepEqual(firstJSON, privateDriftJSON) {
-		t.Fatalf("private-evidence-only drift changed public bytes:\n%s\n%s", firstJSON, privateDriftJSON)
+	firstAccepted, firstOK := first.Accepted()
+	privateAccepted, privateOK := privateDrift.Accepted()
+	if !firstOK || !privateOK || firstAccepted.Hash() == privateAccepted.Hash() {
+		t.Fatalf("private-evidence drift hashes=%q/%q accepted=%v/%v", firstAccepted.Hash(), privateAccepted.Hash(), firstOK, privateOK)
+	}
+	var firstRedacted, privateRedacted map[string]any
+	if err := json.Unmarshal(firstJSON, &firstRedacted); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(privateDriftJSON, &privateRedacted); err != nil {
+		t.Fatal(err)
+	}
+	delete(firstRedacted, "authority")
+	delete(privateRedacted, "authority")
+	if !reflect.DeepEqual(firstRedacted, privateRedacted) {
+		t.Fatalf("private-evidence-only drift changed redacted public payload:\n%s\n%s", firstJSON, privateDriftJSON)
 	}
 	if firstDigest == publicDriftDigest {
 		t.Fatal("selected observation drift did not change public snapshot digest")

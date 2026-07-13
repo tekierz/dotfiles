@@ -9,6 +9,7 @@ func TestDocumentStatusIsTypedReadOnlyOutcome(t *testing.T) {
 	ready := readyProjectionSpec()
 	noChanges := readyProjectionSpec()
 	noChanges.Status = StatusNoChanges
+	noChanges.PlanHash = ""
 	noChanges.Actions = []ActionSpec{{
 		ActionID: "install:codex", Kind: "install_tool", ToolID: "codex", Description: "install codex",
 		Disposition: "skip", ReasonCode: "present", Reason: "already present", Ownership: "package_manager", Reversibility: "external",
@@ -16,6 +17,7 @@ func TestDocumentStatusIsTypedReadOnlyOutcome(t *testing.T) {
 	noChanges.Summary = Summary{Skip: 1}
 	blocked := readyProjectionSpec()
 	blocked.Status = StatusBlocked
+	blocked.PlanHash = ""
 	blocked.Actions = []ActionSpec{{
 		ActionID: "install:codex", Kind: "install_tool", ToolID: "codex", Description: "install codex",
 		Disposition: "blocked", ReasonCode: "unknown", Reason: "installation status unknown", Ownership: "package_manager", Reversibility: "external",

@@ -256,7 +256,7 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		return Result{}, ErrInvalidRequest
 	}
 	publicDocument, err := planpublic.NewDocument(planpublic.DocumentSpec{
-		Status: planpublic.StatusReady, Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Intent: intent,
+		Status: planpublic.StatusReady, PlanHash: accepted.hash, Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Intent: intent,
 		Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(),
 		Summary: planpublic.Summary{Apply: len(privateActions), Skip: len(intent.Tools) - len(privateActions)}, Actions: publicActions,
 	})

@@ -48,7 +48,7 @@ func TestPublicProjectionPreservesSafeShapeOrderAndNonNullArrays(t *testing.T) {
 	}
 	assertRawKeys(t, root["intent"], []string{"source", "tools", "digest"})
 	assertRawKeys(t, root["snapshot"], []string{"schema_version", "generation", "public_digest"})
-	assertRawKeys(t, root["authority"], []string{"public_digest"})
+	assertRawKeys(t, root["authority"], []string{"plan_hash", "public_digest"})
 	assertRawKeys(t, root["capabilities"], []string{"installation", "config", "service", "auth", "apply"})
 	assertRawKeys(t, root["summary"], []string{"apply", "skip", "blocked", "backup_targets"})
 	var actions []map[string]json.RawMessage

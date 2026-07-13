@@ -14,6 +14,7 @@ func readyProjectionSpec() DocumentSpec {
 	intent := testExplicitIntent([]string{"codex", "pi"})
 	return DocumentSpec{
 		Status:       StatusReady,
+		PlanHash:     strings.Repeat("1", 64),
 		Platform:     "macos",
 		Manager:      "brew",
 		Intent:       intent,

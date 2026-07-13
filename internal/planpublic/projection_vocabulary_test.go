@@ -217,7 +217,7 @@ func TestReviewedIntegrationRecipeVocabularyAndStepOrder(t *testing.T) {
 func vocabularyDocument(toolID string, install *InstallSpec) DocumentSpec {
 	intent := testExplicitIntent([]string{toolID})
 	return DocumentSpec{
-		Status: StatusReady, Platform: "macos", Manager: "brew", Intent: intent,
+		Status: StatusReady, PlanHash: strings.Repeat("1", 64), Platform: "macos", Manager: "brew", Intent: intent,
 		Snapshot:     &Snapshot{SchemaVersion: 1, Generation: 1, PublicDigest: strings.Repeat("a", 64)},
 		Capabilities: Capabilities{Installation: "planned", Config: "not_planned", Service: "not_collected", Auth: "not_collected", Apply: "not_available"},
 		Summary:      Summary{Apply: 1},

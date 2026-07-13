@@ -2,9 +2,11 @@ package installplan
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -31,7 +33,7 @@ func TestMain(main *testing.M) {
 	os.Exit(code)
 }
 
-func TestAcceptedHashBindsPrivateStateAuthorityWithoutChangingPublicDocument(t *testing.T) {
+func TestAcceptedHashBindsPrivateStateAuthorityAndPublishesOnlyItsFingerprint(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", "")
@@ -78,8 +80,20 @@ func TestAcceptedHashBindsPrivateStateAuthorityWithoutChangingPublicDocument(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(firstPublic, secondPublic) {
-		t.Fatalf("private state authority changed public projection:\n%s\n%s", firstPublic, secondPublic)
+	if bytes.Equal(firstPublic, secondPublic) {
+		t.Fatal("private state authority did not change published plan authority")
+	}
+	var firstRedacted, secondRedacted map[string]any
+	if err := json.Unmarshal(firstPublic, &firstRedacted); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(secondPublic, &secondRedacted); err != nil {
+		t.Fatal(err)
+	}
+	delete(firstRedacted, "authority")
+	delete(secondRedacted, "authority")
+	if !reflect.DeepEqual(firstRedacted, secondRedacted) {
+		t.Fatalf("private state authority changed redacted public projection:\n%s\n%s", firstPublic, secondPublic)
 	}
 	forged := firstAccepted
 	forged.intent.Digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

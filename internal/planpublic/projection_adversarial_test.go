@@ -91,6 +91,7 @@ func TestIntentRequiredRejectsAnyCollectedOrPlannedState(t *testing.T) {
 func TestBlockedStatusAndSummaryMustMatchProjectedActions(t *testing.T) {
 	blocked := readyProjectionSpec()
 	blocked.Status = StatusBlocked
+	blocked.PlanHash = ""
 	blocked.Actions = []ActionSpec{{ActionID: "install:codex", Kind: "install_tool", ToolID: "codex", Description: "install codex", Disposition: "blocked", ReasonCode: "unsupported", Reason: "installation unsupported", Ownership: "package_manager", Reversibility: "external"}}
 	blocked.Summary = Summary{Blocked: 1}
 	if _, err := NewDocument(blocked); err != nil {

@@ -95,6 +95,7 @@ type ActionSpec struct {
 
 type DocumentSpec struct {
 	Status       Status
+	PlanHash     string
 	Platform     string
 	Manager      string
 	Intent       Intent
@@ -108,6 +109,7 @@ type DocumentSpec struct {
 // executable planning authority.
 type Document struct {
 	status       Status
+	planHash     string
 	platform     string
 	manager      string
 	intent       Intent
@@ -119,6 +121,7 @@ type Document struct {
 }
 
 type publicAuthority struct {
+	PlanHash     string `json:"plan_hash,omitempty"`
 	PublicDigest string `json:"public_digest"`
 }
 
@@ -155,12 +158,13 @@ func NewDocument(spec DocumentSpec) (Document, error) {
 	if !validStatus(spec.Status) || !validDocumentIntent(spec.Status, spec.Intent) {
 		return Document{}, ErrInvalidDocument
 	}
-	if !validStatusShape(spec) || !validSnapshot(spec.Snapshot) || !validCapabilities(spec.Status, spec.Capabilities) || !validSummary(spec.Summary, spec.Actions) || !validActions(spec) {
+	if !validPlanHash(spec.Status, spec.PlanHash) || !validStatusShape(spec) || !validSnapshot(spec.Snapshot) || !validCapabilities(spec.Status, spec.Capabilities) || !validSummary(spec.Summary, spec.Actions) || !validActions(spec) {
 		return Document{}, ErrInvalidDocument
 	}
 
 	doc := Document{
 		status:       spec.Status,
+		planHash:     spec.PlanHash,
 		platform:     spec.Platform,
 		manager:      spec.Manager,
 		intent:       cloneIntent(spec.Intent),
@@ -214,7 +218,7 @@ func (d Document) publicDocument(digest string) publicDocument {
 	return publicDocument{
 		SchemaVersion: planSchemaVersion, Kind: planKind, Status: d.status,
 		Platform: d.platform, Manager: d.manager, Intent: cloneIntent(d.intent),
-		Snapshot: cloneSnapshot(d.snapshot), Authority: publicAuthority{PublicDigest: digest},
+		Snapshot: cloneSnapshot(d.snapshot), Authority: publicAuthority{PlanHash: d.planHash, PublicDigest: digest},
 		Capabilities: d.capabilities, Summary: d.summary, Actions: actions,
 	}
 }
@@ -250,6 +254,13 @@ func validStatus(status Status) bool {
 	default:
 		return false
 	}
+}
+
+func validPlanHash(status Status, planHash string) bool {
+	if status == StatusReady {
+		return validSHA256(planHash)
+	}
+	return planHash == ""
 }
 
 func validDocumentIntent(status Status, intent Intent) bool {
