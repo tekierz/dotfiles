@@ -1,10 +1,12 @@
-# Frozen contract for the npm execution-chain observation foundation.
+# Frozen contract for the accepted npm process-start boundary.
 version=1
-slice_id=npm-execution-chain-observation
+slice_id=npm-accepted-chain-start
 state=contract-frozen
-max_total_files=2
-max_production_files=1
-max_changed_lines=600
+max_total_files=4
+max_production_files=2
+max_changed_lines=700
 ignore=tasks/pi-agent-integration-spec.md
+allow=internal/runner/exact_streaming.go
+allow=internal/runner/exact_streaming_test.go
 allow=internal/pkg/npm_execution_identity.go
-allow=internal/pkg/npm_execution_identity_test.go
+allow=internal/pkg/npm_execution_identity_start_test.go
