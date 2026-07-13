@@ -144,6 +144,9 @@ var planCmd = newRegisteredPlanCommand()
 // applyCmd executes only an exact freshly reviewed installation plan.
 var applyCmd = newRegisteredApplyCommand()
 
+// supportCmd prints one deterministic, redacted support document.
+var supportCmd = newRegisteredSupportCommand()
+
 // backupsCmd lists available backups
 var backupsCmd = &cobra.Command{
 	Use:   "backups",
@@ -311,6 +314,7 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(applyCmd)
+	rootCmd.AddCommand(supportCmd)
 	rootCmd.AddCommand(backupsCmd)
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(versionCmd)

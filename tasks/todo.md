@@ -58,7 +58,8 @@ observability land before new integrations or broad UI work.
       redacted support bundle.
   - [x] Add deterministic, versioned `status --json` v1 directly from the installation-health
         collector, with redacted public evidence, explicit uncollected capabilities, and stable
-        success/failure exit behavior. Apply and the support bundle remain open.
+        success/failure exit behavior. Plan and apply are now complete; the support bundle
+        remains open until its documentation and final verification gates pass.
   - [x] Implement the reviewed `plan --json` contract in
         `tasks/plan-json-contract.md`: public projection tests first, then a neutral headless
         install-only planner accepting explicit repeated `--tool` intent with no defaults or
@@ -68,6 +69,10 @@ observability land before new integrations or broad UI work.
         require explicit tools/confirmation/hash, fresh replan, detector revalidation, lock,
         running/terminal journal, cancellation, and bounded deterministic exits. Package-only
         actions truthfully record that no filesystem rollback point exists.
+  - [x] Register the reviewed `dotfiles support --json` v1 command on the validated public
+        projection and read-only journal summary boundary, with fixed collection order,
+        cancellation precedence, closed partial reason codes, one-write output, and deterministic
+        complete/partial/fatal exits. Sharing guidance and the final adversarial/owner gate remain.
 - [ ] Generate settings/help/hotkeys/docs/tests from tool manifests where practical.
 
 ### Batch 4 — integrations, distribution, and deployment gates

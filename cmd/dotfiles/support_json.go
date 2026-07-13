@@ -226,22 +226,29 @@ func unavailableSupportOperations(reason string) supportOperationsInput {
 }
 
 func newValidatedSupportDocument(spec supportProjectionSpec) (validatedSupportDocument, error) {
-	installation, err := buildSupportInstallation(spec.Installation)
+	return newValidatedSupportDocumentFromBuild(normalizeSupportBuild(spec.Build), spec.Installation, spec.Provenance, spec.Operations)
+}
+
+func newValidatedSupportDocumentFromBuild(build supportBuild, installationInput supportInstallationInput, provenanceInput supportProvenanceInput, operationsInput supportOperationsInput) (validatedSupportDocument, error) {
+	if validateSupportBuild(build) != nil {
+		return validatedSupportDocument{}, errSupportProjection
+	}
+	installation, err := buildSupportInstallation(installationInput)
 	if err != nil {
 		return validatedSupportDocument{}, errSupportProjection
 	}
-	provenance, err := buildSupportProvenance(spec.Provenance)
+	provenance, err := buildSupportProvenance(provenanceInput)
 	if err != nil {
 		return validatedSupportDocument{}, errSupportProjection
 	}
-	operations, err := buildSupportOperations(spec.Operations)
+	operations, err := buildSupportOperations(operationsInput)
 	if err != nil {
 		return validatedSupportDocument{}, errSupportProjection
 	}
 	document := supportDocument{
 		SchemaVersion: supportSchemaVersion,
 		Kind:          supportKind,
-		Build:         normalizeSupportBuild(spec.Build),
+		Build:         build,
 		Installation:  installation,
 		Provenance:    provenance,
 		Operations:    operations,
