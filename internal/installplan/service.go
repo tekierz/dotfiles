@@ -1,0 +1,504 @@
+// Package installplan builds explicit, install-only plans without depending on
+// terminal UI state or rediscovering the caller's environment.
+package installplan
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
+	"reflect"
+	"slices"
+	"sort"
+	"time"
+
+	"github.com/tekierz/dotfiles/internal/health"
+	"github.com/tekierz/dotfiles/internal/operation"
+	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/planpublic"
+	"github.com/tekierz/dotfiles/internal/tools"
+)
+
+var ErrInvalidRequest = errors.New("invalid install plan request")
+
+type Environment struct {
+	Platform           pkg.Platform
+	Manager            string
+	ExpectedGeneration uint64
+}
+
+type Request struct {
+	Intent      planpublic.Intent
+	Snapshot    health.InstallationSnapshot
+	Environment Environment
+}
+
+type Dependencies struct {
+	LookupTool       func(string) (tools.Tool, bool)
+	DescribeInstall  func(tools.Tool, tools.InstallEnvironment) (operation.InstallRecipe, error)
+	CaptureStatePlan func() (*operation.StatePlan, error)
+	Now              func() time.Time
+}
+
+type SnapshotAuthority struct {
+	SchemaVersion int
+	Generation    uint64
+	Platform      string
+	Manager       string
+	Digest        string
+}
+
+type ToolAuthority struct {
+	Presence     health.Presence
+	Intent       string
+	RecipeDigest string
+}
+
+type AcceptedPlan struct {
+	document  operation.Plan
+	statePlan *operation.StatePlan
+	snapshot  SnapshotAuthority
+	tools     map[string]ToolAuthority
+	recipes   map[string]operation.InstallRecipe
+	intent    planpublic.Intent
+	hash      string
+}
+
+func (plan AcceptedPlan) Operation() operation.Plan            { return plan.document }
+func (plan AcceptedPlan) StatePlan() *operation.StatePlan      { return plan.statePlan }
+func (plan AcceptedPlan) SnapshotAuthority() SnapshotAuthority { return plan.snapshot }
+func (plan AcceptedPlan) Hash() string                         { return plan.hash }
+
+func (plan AcceptedPlan) Intent() planpublic.Intent {
+	return cloneIntent(plan.intent)
+}
+
+func (plan AcceptedPlan) ToolAuthority(id string) (ToolAuthority, bool) {
+	authority, ok := plan.tools[id]
+	return authority, ok
+}
+
+func (plan AcceptedPlan) ToolAuthorities() map[string]ToolAuthority {
+	return maps.Clone(plan.tools)
+}
+
+func (plan AcceptedPlan) Recipes() map[string]operation.InstallRecipe {
+	result := make(map[string]operation.InstallRecipe, len(plan.recipes))
+	for id, recipe := range plan.recipes {
+		result[id] = operation.CloneInstallRecipe(recipe)
+	}
+	return result
+}
+
+type Result struct {
+	public      planpublic.Document
+	accepted    AcceptedPlan
+	hasAccepted bool
+}
+
+func (result Result) Public() planpublic.Document { return result.public }
+
+func (result Result) Accepted() (AcceptedPlan, bool) {
+	if !result.hasAccepted {
+		return AcceptedPlan{}, false
+	}
+	return cloneAccepted(result.accepted), true
+}
+
+func Build(request Request, dependencies Dependencies) (Result, error) {
+	intent, intentRequired, err := validateIntent(request.Intent)
+	if err != nil {
+		return Result{}, err
+	}
+	if intentRequired {
+		document, documentErr := planpublic.NewDocument(planpublic.DocumentSpec{
+			Status: planpublic.StatusIntentRequired,
+			Intent: planpublic.Intent{Source: "explicit_tools", Tools: []string{}},
+		})
+		if documentErr != nil {
+			return Result{}, ErrInvalidRequest
+		}
+		return Result{public: document}, nil
+	}
+	if dependencies.LookupTool == nil || dependencies.DescribeInstall == nil || dependencies.CaptureStatePlan == nil || dependencies.Now == nil {
+		return Result{}, ErrInvalidRequest
+	}
+	if !validRequestSnapshot(request.Snapshot, request.Environment) {
+		return Result{}, ErrInvalidRequest
+	}
+	if request.Snapshot.Generation() != request.Environment.ExpectedGeneration {
+		return blockedResult(intent, request.Snapshot, "stale")
+	}
+	if request.Snapshot.Platform() != string(request.Environment.Platform) || request.Snapshot.Manager() != request.Environment.Manager {
+		return blockedResult(intent, request.Snapshot, "environment_mismatch")
+	}
+
+	publicActions := make([]planpublic.ActionSpec, 0, len(intent.Tools))
+	mutationRequired := false
+	toolAuthorities := make(map[string]ToolAuthority, len(intent.Tools))
+	for _, id := range intent.Tools {
+		observation, observed := request.Snapshot.Tool(id)
+		if !observed {
+			return blockedResult(intent, request.Snapshot, "stale")
+		}
+		if observation.Presence() == health.PresenceUnknown || observation.Installability() == health.InstallabilityUnknown {
+			return blockedResult(intent, request.Snapshot, "unknown")
+		}
+		if observation.Presence() != health.PresencePresent && observation.Installability() == health.InstallabilityUnsupported {
+			return blockedResult(intent, request.Snapshot, "unsupported")
+		}
+		if observation.Presence() == health.PresencePresent {
+			publicActions = append(publicActions, publicDecisionAction(id, "skip", "present", publicObservation(observation, true)))
+			toolAuthorities[id] = ToolAuthority{Presence: health.PresencePresent, Intent: "none"}
+			continue
+		}
+		if observation.Presence() != health.PresenceMissing && observation.Presence() != health.PresencePartial {
+			return blockedResult(intent, request.Snapshot, "unknown")
+		}
+		mutationRequired = true
+	}
+	if !mutationRequired {
+		document, err := planpublic.NewDocument(planpublic.DocumentSpec{
+			Status: planpublic.StatusNoChanges, Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Intent: intent,
+			Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(),
+			Summary: planpublic.Summary{Skip: len(publicActions)}, Actions: publicActions,
+		})
+		if err != nil {
+			return Result{}, ErrInvalidRequest
+		}
+		return Result{public: document}, nil
+	}
+
+	validatedRecipes := make(map[string]operation.InstallRecipe)
+	publicInstalls := make(map[string]*planpublic.InstallSpec)
+	for _, id := range intent.Tools {
+		observation, _ := request.Snapshot.Tool(id)
+		if observation.Presence() == health.PresencePresent {
+			continue
+		}
+		tool, found := dependencies.LookupTool(id)
+		if !found || toolIsNil(tool) || tool.ID() != id {
+			return blockedResult(intent, request.Snapshot, "recipe_drift")
+		}
+		recipe, err := dependencies.DescribeInstall(tool, tools.InstallEnvironment{Platform: request.Environment.Platform, Manager: request.Environment.Manager})
+		if err != nil {
+			return Result{}, err
+		}
+		digest, err := operation.InstallRecipeDigest(recipe)
+		if err != nil || recipe.ToolID != id || recipe.Platform != string(request.Environment.Platform) || recipe.Manager != request.Environment.Manager || digest != observation.InstallRecipeDigest() {
+			return blockedResult(intent, request.Snapshot, "recipe_drift")
+		}
+		validatedRecipes[id] = operation.CloneInstallRecipe(recipe)
+		publicInstall, publicErr := projectInstallRecipe(recipe, digest)
+		if publicErr != nil {
+			return Result{}, publicErr
+		}
+		publicInstalls[id] = publicInstall
+		installIntent := "install"
+		if observation.Presence() == health.PresencePartial {
+			installIntent = "repair"
+		}
+		toolAuthorities[id] = ToolAuthority{Presence: observation.Presence(), Intent: installIntent, RecipeDigest: digest}
+	}
+
+	statePlan, err := dependencies.CaptureStatePlan()
+	if err != nil || statePlan == nil {
+		return Result{}, errors.Join(ErrInvalidRequest, err)
+	}
+	now := dependencies.Now()
+	if now.IsZero() {
+		return Result{}, ErrInvalidRequest
+	}
+	privateActions := make([]operation.Action, 0, len(validatedRecipes))
+	publicActions = make([]planpublic.ActionSpec, 0, len(intent.Tools))
+	for _, id := range intent.Tools {
+		authority := toolAuthorities[id]
+		if authority.Intent == "none" {
+			observation, _ := request.Snapshot.Tool(id)
+			publicActions = append(publicActions, publicDecisionAction(id, "skip", "present", publicObservation(observation, true)))
+			continue
+		}
+		recipe := operation.CloneInstallRecipe(validatedRecipes[id])
+		detected := false
+		privateActions = append(privateActions, operation.Action{
+			ID: "install:" + id, Kind: operation.KindInstallTool, ToolID: id, Target: id,
+			Description: authority.Intent + " " + id, Disposition: operation.DispositionApply,
+			DesiredDigest: authority.RecipeDigest, Ownership: operation.OwnershipPackageManager,
+			Reversibility: operation.ReversibilityManual, InstallRecipe: &recipe, InstallDetected: &detected,
+		})
+		publicActions = append(publicActions, planpublic.ActionSpec{
+			ActionID: "install:" + id, Kind: "install_tool", ToolID: id, Description: "install " + id,
+			Disposition: "apply", Ownership: "package_manager", Reversibility: "external",
+			Observation: publicObservationForTool(request.Snapshot, id), Install: clonePublicInstall(publicInstalls[id]),
+		})
+	}
+	document, err := operation.NewPlan(now, privateActions)
+	if err != nil {
+		return Result{}, err
+	}
+	snapshotAuthority := SnapshotAuthority{
+		SchemaVersion: request.Snapshot.SchemaVersion(), Generation: request.Snapshot.Generation(),
+		Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Digest: request.Snapshot.Digest(),
+	}
+	accepted := AcceptedPlan{
+		document: document, statePlan: statePlan, snapshot: snapshotAuthority,
+		tools: maps.Clone(toolAuthorities), recipes: cloneRecipes(validatedRecipes), intent: cloneIntent(intent),
+	}
+	accepted.hash = acceptedPlanHash(accepted)
+	publicDocument, err := planpublic.NewDocument(planpublic.DocumentSpec{
+		Status: planpublic.StatusReady, Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Intent: intent,
+		Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(),
+		Summary: planpublic.Summary{Apply: len(privateActions), Skip: len(intent.Tools) - len(privateActions)}, Actions: publicActions,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{public: publicDocument, accepted: accepted, hasAccepted: true}, nil
+}
+
+func validRequestSnapshot(snapshot health.InstallationSnapshot, environment Environment) bool {
+	return snapshot.SchemaVersion() == health.CurrentInstallationSchemaVersion && snapshot.Generation() > 0 &&
+		snapshot.Digest() != "" && environment.Platform != "" && environment.Manager != "" && environment.ExpectedGeneration > 0
+}
+
+func blockedResult(intent planpublic.Intent, snapshot health.InstallationSnapshot, code string) (Result, error) {
+	actions := make([]planpublic.ActionSpec, len(intent.Tools))
+	for index, id := range intent.Tools {
+		actions[index] = publicDecisionAction(id, "blocked", code, publicObservationForTool(snapshot, id))
+	}
+	document, err := planpublic.NewDocument(planpublic.DocumentSpec{
+		Status: planpublic.StatusBlocked, Platform: snapshot.Platform(), Manager: snapshot.Manager(), Intent: cloneIntent(intent),
+		Snapshot: publicSnapshot(snapshot, intent.Tools), Capabilities: plannedCapabilities(),
+		Summary: planpublic.Summary{Blocked: len(actions)}, Actions: actions,
+	})
+	if err != nil {
+		return Result{}, ErrInvalidRequest
+	}
+	return Result{public: document}, nil
+}
+
+func publicDecisionAction(id, disposition, code string, observation *planpublic.ObservationSpec) planpublic.ActionSpec {
+	reasons := map[string]string{
+		"present": "already present", "unsupported": "installation unsupported", "unknown": "installation status unknown",
+		"stale": "installation evidence stale", "environment_mismatch": "installation environment changed", "recipe_drift": "installation recipe changed",
+	}
+	return planpublic.ActionSpec{
+		ActionID: "install:" + id, Kind: "install_tool", ToolID: id, Description: "install " + id,
+		Disposition: disposition, ReasonCode: code, Reason: reasons[code], Ownership: "package_manager", Reversibility: "external",
+		Observation: observation,
+	}
+}
+
+func publicObservationForTool(snapshot health.InstallationSnapshot, id string) *planpublic.ObservationSpec {
+	observation, observed := snapshot.Tool(id)
+	return publicObservation(observation, observed)
+}
+
+func publicObservation(observation health.InstallationObservation, observed bool) *planpublic.ObservationSpec {
+	exists := false
+	if observed {
+		exists = observation.Presence() == health.PresencePresent || observation.Presence() == health.PresencePartial
+	}
+	return &planpublic.ObservationSpec{Exists: exists, Managed: false}
+}
+
+func toolIsNil(tool tools.Tool) bool {
+	if tool == nil {
+		return true
+	}
+	value := reflect.ValueOf(tool)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func plannedCapabilities() planpublic.Capabilities {
+	return planpublic.Capabilities{Installation: "planned", Config: "not_planned", Service: "not_collected", Auth: "not_collected", Apply: "not_available"}
+}
+
+func publicSnapshot(snapshot health.InstallationSnapshot, selected []string) *planpublic.Snapshot {
+	type publicTool struct {
+		ToolID         string                `json:"tool_id"`
+		Observed       bool                  `json:"observed"`
+		Presence       health.Presence       `json:"presence"`
+		Installability health.Installability `json:"installability"`
+		RecipeDigest   string                `json:"recipe_digest"`
+	}
+	projection := struct {
+		SchemaVersion int          `json:"schema_version"`
+		Generation    uint64       `json:"generation"`
+		Platform      string       `json:"platform"`
+		Manager       string       `json:"manager"`
+		Tools         []publicTool `json:"tools"`
+	}{SchemaVersion: snapshot.SchemaVersion(), Generation: snapshot.Generation(), Platform: snapshot.Platform(), Manager: snapshot.Manager(), Tools: make([]publicTool, 0, len(selected))}
+	for _, id := range selected {
+		entry := publicTool{ToolID: id}
+		if observation, ok := snapshot.Tool(id); ok {
+			entry.Observed = true
+			entry.Presence = observation.Presence()
+			entry.Installability = observation.Installability()
+			entry.RecipeDigest = observation.InstallRecipeDigest()
+		}
+		projection.Tools = append(projection.Tools, entry)
+	}
+	canonical, _ := json.Marshal(projection)
+	digest := sha256.Sum256(canonical)
+	return &planpublic.Snapshot{SchemaVersion: health.CurrentInstallationSchemaVersion, Generation: snapshot.Generation(), PublicDigest: hex.EncodeToString(digest[:])}
+}
+
+func projectInstallRecipe(recipe operation.InstallRecipe, digest string) (*planpublic.InstallSpec, error) {
+	authentication, ok := publicAuthentication(recipe.Authentication)
+	if !ok {
+		return nil, fmt.Errorf("%w: unsupported public authentication vocabulary", ErrInvalidRequest)
+	}
+	risk, ok := publicRisk(recipe.Risk)
+	if !ok {
+		return nil, fmt.Errorf("%w: unsupported public risk vocabulary", ErrInvalidRequest)
+	}
+	steps := make([]planpublic.InstallStepSpec, len(recipe.Steps))
+	for index, step := range recipe.Steps {
+		kind := ""
+		switch step.Kind {
+		case operation.InstallStepPackageManager:
+			kind = "package_manager"
+		case operation.InstallStepNPMGlobal:
+			kind = "npm_global"
+		case operation.InstallStepHomebrewCask:
+			kind = "homebrew_cask"
+		default:
+			return nil, fmt.Errorf("%w: unsupported public install step", ErrInvalidRequest)
+		}
+		steps[index] = planpublic.InstallStepSpec{
+			Kind: kind, Provider: step.Provider, Packages: nonnilStrings(step.Packages),
+			Casks: nonnilStrings(step.Casks), Arguments: nonnilStrings(step.Args),
+		}
+	}
+	detectorKind := ""
+	switch recipe.Detector.Kind {
+	case operation.InstallDetectorBinary:
+		detectorKind = "binary"
+	case operation.InstallDetectorPackageReceipt:
+		detectorKind = "package_receipt"
+	case operation.InstallDetectorAppBundle:
+		detectorKind = "app_bundle"
+	default:
+		return nil, fmt.Errorf("%w: unsupported public detector", ErrInvalidRequest)
+	}
+	return &planpublic.InstallSpec{
+		SchemaVersion: recipe.SchemaVersion, Platform: recipe.Platform, Manager: recipe.Manager,
+		Steps: steps, Detector: planpublic.DetectorSpec{Kind: detectorKind, Values: nonnilStrings(recipe.Detector.Values)},
+		Authentication: authentication, Risk: risk, RecipeDigest: digest,
+	}, nil
+}
+
+func publicAuthentication(value string) (string, bool) {
+	mapping := map[string]string{
+		"":                                     "none",
+		"interactive provider login":           "interactive_provider_login",
+		"ChatGPT sign-in or an OpenAI API key": "chatgpt_or_openai_api_key",
+		"provider login or API key; local providers may require neither":                             "provider_login_or_api_key",
+		"uses existing coding-agent authentication; T3 Code stores no dashboard-managed credentials": "existing_app_auth",
+	}
+	result, ok := mapping[value]
+	return result, ok
+}
+
+func publicRisk(value string) (string, bool) {
+	mapping := map[string]string{
+		"installs packages from the configured system package manager":                                                   "package_manager_install",
+		"downloads and executes npm package lifecycle code":                                                              "npm_lifecycle_code",
+		"installs an npm package with lifecycle scripts disabled; package code runs when Pi is launched":                 "npm_scripts_disabled_runtime_code",
+		"resolves the current OpenCode release from the reviewed package-manager source; artifact content is not pinned": "package_manager_current_release_unpinned",
+		"installs the current t3-code Homebrew cask; artifact content is not pinned":                                     "homebrew_cask_unpinned",
+	}
+	result, ok := mapping[value]
+	return result, ok
+}
+
+func clonePublicInstall(install *planpublic.InstallSpec) *planpublic.InstallSpec {
+	if install == nil {
+		return nil
+	}
+	copy := *install
+	copy.Steps = make([]planpublic.InstallStepSpec, len(install.Steps))
+	for index, step := range install.Steps {
+		copy.Steps[index] = step
+		copy.Steps[index].Packages = nonnilStrings(step.Packages)
+		copy.Steps[index].Casks = nonnilStrings(step.Casks)
+		copy.Steps[index].Arguments = nonnilStrings(step.Arguments)
+	}
+	copy.Detector.Values = nonnilStrings(install.Detector.Values)
+	return &copy
+}
+
+func nonnilStrings(values []string) []string {
+	result := slices.Clone(values)
+	if result == nil {
+		return []string{}
+	}
+	return result
+}
+
+func cloneRecipes(recipes map[string]operation.InstallRecipe) map[string]operation.InstallRecipe {
+	result := make(map[string]operation.InstallRecipe, len(recipes))
+	for id, recipe := range recipes {
+		result[id] = operation.CloneInstallRecipe(recipe)
+	}
+	return result
+}
+
+func acceptedPlanHash(plan AcceptedPlan) string {
+	ids := make([]string, 0, len(plan.tools))
+	for id := range plan.tools {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	authorities := make([]string, 0, len(ids))
+	for _, id := range ids {
+		authority := plan.tools[id]
+		authorities = append(authorities, id+":"+string(authority.Presence)+":"+authority.Intent+":"+authority.RecipeDigest)
+	}
+	canonical, _ := json.Marshal(struct {
+		Document   string
+		Schema     int
+		Generation uint64
+		Platform   string
+		Manager    string
+		Snapshot   string
+		Recipes    []string
+	}{plan.document.Hash(), plan.snapshot.SchemaVersion, plan.snapshot.Generation, plan.snapshot.Platform,
+		plan.snapshot.Manager, plan.snapshot.Digest, authorities})
+	digest := sha256.Sum256(canonical)
+	return hex.EncodeToString(digest[:])
+}
+
+func validateIntent(value planpublic.Intent) (planpublic.Intent, bool, error) {
+	if value.Source == "explicit_tools" && len(value.Tools) == 0 && value.Digest == "" {
+		return planpublic.Intent{Source: "explicit_tools", Tools: []string{}}, true, nil
+	}
+	normalized, err := planpublic.NormalizeExplicitTools(value.Tools, value.Tools)
+	if err != nil || value.Source != normalized.Source || value.Digest != normalized.Digest || !slices.Equal(value.Tools, normalized.Tools) {
+		return planpublic.Intent{}, false, planpublic.ErrInvalidIntent
+	}
+	return normalized, false, nil
+}
+
+func cloneIntent(intent planpublic.Intent) planpublic.Intent {
+	intent.Tools = slices.Clone(intent.Tools)
+	if intent.Tools == nil {
+		intent.Tools = []string{}
+	}
+	return intent
+}
+
+func cloneAccepted(plan AcceptedPlan) AcceptedPlan {
+	plan.intent = cloneIntent(plan.intent)
+	plan.tools = maps.Clone(plan.tools)
+	plan.recipes = plan.Recipes()
+	return plan
+}
