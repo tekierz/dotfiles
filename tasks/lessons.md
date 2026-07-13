@@ -1,5 +1,10 @@
 # Working Lessons
 
+- If a slice crosses a second delivery surface or a default scope ceiling, stop and split it
+  before production grows. Repeated reviewer expansion becomes a named child slice, and
+  completion is recorded only in the delivering commit.
+- Verification is commit-candidate evidence, not a reusable historical claim. Any production
+  edit expires it; run the frozen acceptance gates again before marking or committing work.
 - For this remediation program, use a Sol-named agent to orchestrate and review
   each bounded slice and a Terra-named agent to implement it; the root agent
   coordinates verification and logical commits rather than bypassing that split.

@@ -1,4 +1,4 @@
-.PHONY: build install test clean run dev release release-check
+.PHONY: build install test clean run dev release release-check slice-check slice-check-candidate
 
 # Binary names
 DOTFILES_BIN = bin/dotfiles
@@ -46,6 +46,14 @@ install: build
 test:
 	@echo "Running tests..."
 	go test -v ./...
+
+# Fail closed when the active remediation slice drifts beyond its frozen contract.
+slice-check:
+	bash scripts/check-slice-scope.sh
+
+# Verify the exact staged bytes that will be committed, with no worktree shadow.
+slice-check-candidate:
+	bash scripts/check-slice-scope.sh --candidate
 
 # Run tests with coverage
 test-coverage:
@@ -104,6 +112,8 @@ help:
 	@echo "  run-quick    - Run without intro animation"
 	@echo "  install      - Install to /usr/local/bin"
 	@echo "  test         - Run tests"
+	@echo "  slice-check  - Verify the active remediation slice scope"
+	@echo "  slice-check-candidate - Verify the exact staged slice"
 	@echo "  test-coverage- Run tests with coverage report"
 	@echo "  clean        - Remove build artifacts"
 	@echo "  fmt          - Format code"
