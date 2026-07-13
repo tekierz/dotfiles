@@ -19,7 +19,6 @@ type recipeManager struct {
 	*pkg.MockPackageManager
 	order     []string
 	casks     [][]string
-	lines     []string
 	onInstall func()
 }
 

@@ -129,7 +129,9 @@ func TestReadJournalSummariesValidatesAllCandidatesBeforeTruncation(t *testing.T
 	if _, err := ReadJournalSummaries(context.Background()); !errors.Is(err, ErrJournalSummariesInvalid) {
 		t.Fatalf("invalid truncated candidate error = %v", err)
 	}
-	os.Remove(filepath.Join(operations, oldest.OperationID+".json"))
+	if err := os.Remove(filepath.Join(operations, oldest.OperationID+".json")); err != nil {
+		t.Fatal(err)
+	}
 	set, err := ReadJournalSummaries(context.Background())
 	if err != nil || !set.Truncated || len(set.Records) != journalSummaryRecordLimit {
 		t.Fatalf("truncated set = %+v, %v", set, err)

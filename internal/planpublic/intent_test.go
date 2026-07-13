@@ -60,7 +60,7 @@ func TestNormalizeExplicitToolsRejectsUnknownOrNoncanonicalIDsAtomically(t *test
 		{"codex", " "},
 		{" ", "codex"},
 		{"codex\npi"},
-		{"codex‮"},
+		{"codex\u202e"},
 		{"-codex"},
 		{"codex-"},
 		{"co--dex"},

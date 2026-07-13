@@ -115,7 +115,8 @@ func TestPlanFreshRejectsInvalidBoundaryValues(t *testing.T) {
 	if _, err := PlanFresh(context.Background(), []string{"git"}, FreshDependencies{}); !errors.Is(err, ErrFreshPlan) {
 		t.Fatalf("missing dependencies error=%v", err)
 	}
-	if _, err := PlanFresh(nil, []string{"git"}, FreshDependencies{}); !errors.Is(err, ErrFreshPlan) {
+	var nilContext context.Context
+	if _, err := PlanFresh(nilContext, []string{"git"}, FreshDependencies{}); !errors.Is(err, ErrFreshPlan) {
 		t.Fatalf("nil context error=%v", err)
 	}
 	var nilTool *tools.GitTool

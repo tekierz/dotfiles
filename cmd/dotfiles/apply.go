@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/tekierz/dotfiles/internal/installapply"
@@ -178,11 +177,26 @@ func validPublicOperationID(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if r > unicode.MaxASCII || !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '.') {
+		if !validPublicOperationIDRune(r) {
 			return false
 		}
 	}
 	return true
+}
+
+func validPublicOperationIDRune(value rune) bool {
+	switch {
+	case value >= 'a' && value <= 'z':
+		return true
+	case value >= 'A' && value <= 'Z':
+		return true
+	case value >= '0' && value <= '9':
+		return true
+	case value == '-' || value == '.':
+		return true
+	default:
+		return false
+	}
 }
 
 func writeApplyResult(writer io.Writer, output []byte) error {

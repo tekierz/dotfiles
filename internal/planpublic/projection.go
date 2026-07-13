@@ -442,7 +442,7 @@ func validInstall(install *InstallSpec, platform, manager string) bool {
 			}
 		}
 	}
-	if install.Detector.Values == nil || len(install.Detector.Values) == 0 || len(install.Detector.Values) > 32 {
+	if len(install.Detector.Values) == 0 || len(install.Detector.Values) > 32 {
 		return false
 	}
 	switch install.Detector.Kind {

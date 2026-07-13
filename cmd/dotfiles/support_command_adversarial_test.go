@@ -303,7 +303,6 @@ func TestAdversarialSupportCommandCancellationAndSignalLifecycle(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 func TestAdversarialSupportCommandOversizeFailsBeforeWriter(t *testing.T) {
