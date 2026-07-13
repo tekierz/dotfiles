@@ -253,10 +253,53 @@ func ExtendParentChainWithinDirectory(root, targetRel, directoryRel string, pare
 // ReadWithinAuthorized reads a file only while the complete bound parent chain
 // matches before and after the descriptor-stable read.
 func ReadWithinAuthorized(root, rel string, parents *ParentChain) ([]byte, Revision, error) {
-	if _, err := BindParentChainWithin(root, rel, parents, nil); err != nil {
+	return readWithinAuthorized(root, rel, parents, nil)
+}
+
+// ReadWithinAuthorizedLimit is ReadWithinAuthorized with an explicit
+// allocation and byte limit. The complete accepted parent chain is bound both
+// before and after the descriptor-stable limited read. A size, read, or
+// authority failure returns neither source bytes nor revision evidence.
+func ReadWithinAuthorizedLimit(root, rel string, parents *ParentChain, limit int64) ([]byte, Revision, error) {
+	if limit < 0 {
+		return nil, Revision{}, fmt.Errorf("%w: negative limit %d", ErrSizeLimit, limit)
+	}
+	return readWithinAuthorized(root, rel, parents, &limit)
+}
+
+func readWithinAuthorized(root, rel string, parents *ParentChain, limit *int64) ([]byte, Revision, error) {
+	directories, target, err := splitRelativePath(rel)
+	if err != nil {
 		return nil, Revision{}, err
 	}
-	data, revision, err := ReadWithin(root, rel)
+	if !parents.Tracked() || len(parents.entries) != len(directories)+1 {
+		return nil, Revision{}, fmt.Errorf("%w: parent-chain authority does not match target", ErrParentChanged)
+	}
+	for _, entry := range parents.entries[1:] {
+		if !entry.exists {
+			if _, err := BindParentChainWithin(root, rel, parents, nil); err != nil {
+				return nil, Revision{}, err
+			}
+			return nil, missingRevision(), nil
+		}
+	}
+
+	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, Revision{}, fmt.Errorf("open trusted root: %w", err)
+	}
+	defer func() { _ = unix.Close(rootFD) }()
+	parentFD, err := openAuthorizedParent(rootFD, directories, parents)
+	if err != nil {
+		return nil, Revision{}, err
+	}
+	defer func() { _ = unix.Close(parentFD) }()
+	if hook := replaceTestHooks.afterAuthorizedParentOpen; hook != nil {
+		if err := hook(rootFD, parentFD, target); err != nil {
+			return nil, Revision{}, fmt.Errorf("after opening authorized parent: %w", err)
+		}
+	}
+	data, revision, err := readLeafWithinParent(parentFD, target, limit)
 	if err != nil {
 		return nil, Revision{}, err
 	}

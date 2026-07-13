@@ -3,6 +3,7 @@
 package safefile
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 )
@@ -24,6 +25,13 @@ func ExtendParentChainWithinDirectory(_ string, _, _ string, _ *ParentChain, _ *
 }
 
 func ReadWithinAuthorized(_ string, _ string, _ *ParentChain) ([]byte, Revision, error) {
+	return nil, Revision{}, ErrUnsupported
+}
+
+func ReadWithinAuthorizedLimit(_ string, _ string, _ *ParentChain, limit int64) ([]byte, Revision, error) {
+	if limit < 0 {
+		return nil, Revision{}, fmt.Errorf("%w: negative limit %d", ErrSizeLimit, limit)
+	}
 	return nil, Revision{}, ErrUnsupported
 }
 

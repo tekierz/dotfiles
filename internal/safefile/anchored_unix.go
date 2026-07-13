@@ -66,7 +66,10 @@ func readWithin(root, rel string, limit *int64) ([]byte, Revision, error) {
 		return nil, Revision{}, err
 	}
 	defer func() { _ = unix.Close(parentFD) }()
+	return readLeafWithinParent(parentFD, target, limit)
+}
 
+func readLeafWithinParent(parentFD int, target string, limit *int64) ([]byte, Revision, error) {
 	_, fileType, err := identityAt(parentFD, target)
 	if errors.Is(err, unix.ENOENT) {
 		return nil, missingRevision(), nil

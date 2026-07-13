@@ -41,6 +41,12 @@ func TestDescriptorAnchoredOperationsAreTypedUnsupported(t *testing.T) {
 	if _, _, err := ReadWithinAuthorized(".", "file", &ParentChain{}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("ReadWithinAuthorized error = %v, want ErrUnsupported", err)
 	}
+	if _, _, err := ReadWithinAuthorizedLimit(".", "file", &ParentChain{}, 1); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("ReadWithinAuthorizedLimit error = %v, want ErrUnsupported", err)
+	}
+	if _, _, err := ReadWithinAuthorizedLimit(".", "../file", &ParentChain{}, -1); !errors.Is(err, ErrSizeLimit) {
+		t.Fatalf("negative ReadWithinAuthorizedLimit error = %v, want ErrSizeLimit", err)
+	}
 	if err := RestoreDirectoryWithin(".", "directory", &DirectorySnapshot{}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("RestoreDirectoryWithin error = %v, want ErrUnsupported", err)
 	}
