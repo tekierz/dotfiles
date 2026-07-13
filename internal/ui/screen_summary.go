@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -49,59 +51,85 @@ func (s *SummaryScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // than hardcoded hex values, so the summary matches the rest of the UI and the
 // user's selected theme.
 func (s *SummaryScreen) View(width, height int) string {
-	title := lipgloss.NewStyle().
-		Foreground(ColorGreen).
-		Bold(true).
-		Render("✓ Installation Complete!")
-
 	theme := s.Theme()
 	navStyle := s.NavStyle()
+	facts := installationSummaryFacts{}
+	outcome := installationOutcomePending
+	complete := false
+	if app := s.App(); app != nil {
+		facts = app.installSummaryFacts
+		outcome = app.installOutcome
+		complete = app.installComplete
+	}
+	succeeded := complete && outcome == installationOutcomeSucceeded && facts.outcome == installationOutcomeSucceeded
+
+	titleText := "! Installation Incomplete"
+	titleColor := ColorYellow
+	if succeeded {
+		titleText = "✓ Installation Complete!"
+		titleColor = ColorGreen
+	}
+	title := lipgloss.NewStyle().Foreground(titleColor).Bold(true).Render(titleText)
+
 	planHash := "unavailable"
 	operationID := "unavailable"
-	actionCount := 0
-	backupCount := 0
-	if app := s.App(); app != nil {
-		if app.pendingInstallPlan != nil {
-			planHash = app.pendingInstallPlan.hash()
-			if len(planHash) > 12 {
-				planHash = planHash[:12]
-			}
-			actionCount = len(app.pendingInstallPlan.actions())
-			backupCount = len(app.pendingInstallPlan.backupTargets())
-		}
-		if app.lastOperationID != "" {
-			operationID = app.lastOperationID
+	if facts.planHash != "" {
+		planHash = facts.planHash
+		if len(planHash) > 12 {
+			planHash = planHash[:12]
 		}
 	}
+	if facts.operationID != "" {
+		operationID = facts.operationID
+	}
 
-	summary := lipgloss.NewStyle().Foreground(ColorText).Render(fmt.Sprintf(`
-  Theme:      %s
-  Navigation: %s
-  Plan:       %s (%d actions)
-  Operation:  %s
-  Rollback:   %d plan-derived target(s), including newly created paths
+	lines := []string{
+		fmt.Sprintf("Plan:       %s (%d actions)", lipgloss.NewStyle().Foreground(ColorCyan).Render(planHash), facts.actionCount),
+		fmt.Sprintf("Operation:  %s", lipgloss.NewStyle().Foreground(ColorCyan).Render(operationID)),
+		fmt.Sprintf("Rollback scope: %d verified target(s)", facts.rollbackTargetCount),
+	}
+	if height < 18 {
+		if succeeded {
+			lines = append(lines, "", "Next: "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles status"))
+		} else {
+			lines = append(lines, "", "Not verified. Review plan before retry.")
+		}
+	} else {
+		lines = append([]string{
+			fmt.Sprintf("Theme:      %s", lipgloss.NewStyle().Foreground(ColorCyan).Render(theme)),
+			fmt.Sprintf("Navigation: %s", lipgloss.NewStyle().Foreground(ColorCyan).Render(navStyle)),
+		}, lines...)
+	}
+	if height >= 18 && succeeded {
+		lines = append(lines,
+			"",
+			"Next steps:",
+			"1. Run "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles status")+" to verify health",
+			"2. Open "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles manage")+" for settings",
+		)
+	} else if height >= 18 {
+		lines = append(lines,
+			"",
+			"Completion was not verified.",
+			"Some actions may have completed.",
+			"Review the plan before retrying.",
+		)
+	}
 
-  Next steps:
-
-  1. %s or restart terminal
-  2. %s to start tmux
-  3. %s to finish plugin installation
-  4. %s to customize prompt
-  5. %s to see hotkey reference
-`,
-		lipgloss.NewStyle().Foreground(ColorCyan).Render(theme),
-		lipgloss.NewStyle().Foreground(ColorCyan).Render(navStyle),
-		lipgloss.NewStyle().Foreground(ColorCyan).Render(planHash),
-		actionCount,
-		lipgloss.NewStyle().Foreground(ColorCyan).Render(operationID),
-		backupCount,
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("source ~/.zshrc"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("tmux"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("nvim"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("p10k configure"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("hk"),
-	))
-	summary = lipgloss.NewStyle().MaxWidth(max(20, width-6)).Render(summary)
+	horizontalPadding := 2
+	if width < 60 {
+		horizontalPadding = 1
+	}
+	contentWidth := max(12, width-2-(horizontalPadding*2))
+	wrapped := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			wrapped = append(wrapped, "")
+			continue
+		}
+		wrapped = append(wrapped, strings.Split(ansi.Wrap(line, contentWidth, " /-_"), "\n")...)
+	}
+	summary := lipgloss.NewStyle().Foreground(ColorText).MaxWidth(contentWidth).Render(strings.Join(wrapped, "\n"))
 
 	helpStyle := lipgloss.NewStyle().
 		Foreground(ColorTextMuted)
@@ -110,7 +138,7 @@ func (s *SummaryScreen) View(width, height int) string {
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorCyan).
-		Padding(1, 2)
+		Padding(1, horizontalPadding)
 
 	return lipgloss.Place(
 		width, height,

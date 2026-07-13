@@ -67,6 +67,7 @@ func (s *progressScreen) Init() tea.Cmd {
 	if a.installRunning {
 		return nil
 	}
+	a.stageInstallationAttempt(a.pendingInstallPlan)
 	if runner.NeedsSudo() && !runner.CheckSudoCached() {
 		// Prompt for sudo (exits the alt screen), then start the install.
 		return tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
@@ -109,6 +110,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		if a.installRunning {
 			return s, nil
 		}
+		a.stageInstallationAttempt(a.pendingInstallPlan)
 		if runner.NeedsSudo() && !runner.CheckSudoCached() {
 			return s, func() tea.Msg { return sudoRequiredMsg{} }
 		}
@@ -121,7 +123,9 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 	case sudoCachedMsg:
 		if msg.err != nil {
+			a.stageInstallationAttempt(a.pendingInstallPlan)
 			a.lastError = msg.err
+			a.finishInstallationAttempt(installationOutcomeFailed)
 			return s, a.showError(msg.err)
 		}
 		return s, a.startInstallation()
@@ -157,8 +161,11 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		return s, a.listenInstallEventsCmd()
 
 	case installDoneMsg:
-		a.installRunning = false
-		a.installComplete = true
+		outcome := installationOutcomeSucceeded
+		if msg.err != nil {
+			outcome = installationOutcomeFailed
+		}
+		a.finishInstallationAttempt(outcome)
 		// The install worker has finished; drop the retained cancel handle so a
 		// later teardown (Ctrl+C on the summary) is a harmless no-op.
 		a.streamCancel = nil
@@ -184,6 +191,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			}
 			return s, tea.Batch(a.showError(a.lastError), reloadCmd)
 		}
+		a.lastError = nil
 		// Successful install: the Manage / Deep-Dive install-status caches now
 		// show stale "not installed" for the just-installed tools. Invalidate both
 		// the registry's IsInstalled() cache and the App's manageInstalled cache so
@@ -213,8 +221,10 @@ func (s *progressScreen) View(width, height int) string {
 	a := s.App()
 
 	title := TitleStyle.Render("Installing...")
-	if a.installComplete {
+	if a.installComplete && a.installOutcome == installationOutcomeSucceeded {
 		title = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true).Render("✓ Installation Complete!")
+	} else if a.installComplete {
+		title = lipgloss.NewStyle().Foreground(ColorYellow).Bold(true).Render("! Installation Incomplete")
 	}
 
 	// Build a concise display list from the always-core phases only; selected
@@ -247,10 +257,12 @@ func (s *progressScreen) View(width, height int) string {
 	// Map a.installStep (cumulative step count, one per worker stepLine) onto
 	// displaySteps so the highlighted entry tracks rough progress without ever
 	// flipping the whole list to complete while the install is still running.
+	succeeded := a.installComplete && a.installOutcome == installationOutcomeSucceeded
+	failed := a.installComplete && !succeeded
 	currentPhase := 0
-	if a.installComplete {
+	if succeeded {
 		currentPhase = len(displaySteps)
-	} else if a.installRunning && a.installStep > 0 {
+	} else if a.installStep > 0 {
 		// Scale the raw step counter proportionally onto the display list.
 		scaled := int(float64(a.installStep) / float64(totalSteps) * float64(len(displaySteps)))
 		if scaled >= len(displaySteps) {
@@ -265,6 +277,12 @@ func (s *progressScreen) View(width, height int) string {
 		var style lipgloss.Style
 
 		switch {
+		case failed && i < currentPhase:
+			status = "•"
+			style = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		case failed && i == currentPhase:
+			status = "✗"
+			style = lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
 		case i < currentPhase:
 			status = "✓"
 			style = lipgloss.NewStyle().Foreground(ColorGreen)
@@ -281,8 +299,12 @@ func (s *progressScreen) View(width, height int) string {
 	// Progress fraction derived from the ACTUAL planned phase count, so the bar
 	// reflects real completion rather than the fixed display list length.
 	progressPercent := float64(a.installStep) / float64(totalSteps)
-	if a.installComplete {
+	if succeeded {
 		progressPercent = 1.0
+	} else if failed && progressPercent >= 1.0 {
+		// The terminal failed phase is not completed. Keep at least its share of
+		// the bar empty so a failed attempt can never flash a full progress bar.
+		progressPercent = float64(maxInt(0, totalSteps-1)) / float64(totalSteps)
 	}
 	if progressPercent < 0 {
 		progressPercent = 0

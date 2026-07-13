@@ -290,6 +290,8 @@ type App struct {
 	installOutput       []string
 	installRunning      bool
 	installComplete     bool
+	installOutcome      installationOutcome
+	installSummaryFacts installationSummaryFacts
 	pendingInstallPlan  *installPlan
 	installPlanError    error
 	lastOperationID     string

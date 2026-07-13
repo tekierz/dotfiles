@@ -248,6 +248,10 @@ func (a *App) startInstallation() tea.Cmd {
 
 	a.installRunning = true
 	a.installComplete = false // reset so a retry re-renders as "installing", not "complete"
+	a.installOutcome = installationOutcomeRunning
+	a.installSummaryFacts = installationSummaryFacts{}
+	a.lastError = nil
+	a.lastOperationID = ""
 	a.installStep = 0
 	a.installPlannedSteps = 0
 	a.installOutput = []string{}
@@ -256,6 +260,7 @@ func (a *App) startInstallation() tea.Cmd {
 		a.refreshPendingInstallPlan()
 		plan = a.pendingInstallPlan
 	}
+	a.beginInstallationAttempt(plan)
 	if a.installPlanError != nil {
 		return func() tea.Msg {
 			return installDoneMsg{err: fmt.Errorf("installation plan is invalid: %w", a.installPlanError)}

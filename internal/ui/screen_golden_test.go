@@ -80,8 +80,8 @@ func TestErrorScreenGolden(t *testing.T) {
 	wantSubstrings := []string{
 		"Error Occurred",
 		errText,
-		"[R] Retry",
-		"[S] Skip",
+		"[R] Review Plan",
+		"[S] Skip to Summary",
 		"[Q] Quit",
 	}
 	for _, want := range wantSubstrings {
@@ -106,6 +106,9 @@ func TestErrorScreenGoldenNilError(t *testing.T) {
 // It renders the key summary labels deterministically and reflects the theme.
 func TestSummaryScreenGolden(t *testing.T) {
 	ctx := newGoldenContext(t)
+	ctx.app.installComplete = true
+	ctx.app.installOutcome = installationOutcomeSucceeded
+	ctx.app.installSummaryFacts.outcome = installationOutcomeSucceeded
 	screen := NewSummaryScreen(ctx)
 
 	out := screen.View(ctx.Width, ctx.Height)
@@ -119,7 +122,7 @@ func TestSummaryScreenGolden(t *testing.T) {
 		"Theme:",
 		"Navigation:",
 		"Next steps:",
-		"source ~/.zshrc",
+		"dotfiles status",
 		"[ENTER] Exit",
 		// Theme/nav values come from the context.
 		"neon-seapunk",
@@ -1086,6 +1089,9 @@ func TestMigratedScreensReachableViaManager(t *testing.T) {
 	}
 
 	// Summary should also be reachable through the manager.
+	app.installComplete = true
+	app.installOutcome = installationOutcomeSucceeded
+	app.installSummaryFacts.outcome = installationOutcomeSucceeded
 	scmd := app.showSummary()
 	if scmd == nil {
 		t.Fatal("showSummary should return a NavigateTo command when manager is active")
@@ -1887,6 +1893,8 @@ func TestProgressScreenCompleteGolden(t *testing.T) {
 	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
 	ctx.app.installRunning = false
 	ctx.app.installComplete = true
+	ctx.app.installOutcome = installationOutcomeSucceeded
+	ctx.app.installSummaryFacts.outcome = installationOutcomeSucceeded
 
 	screen := NewProgressScreen(ctx)
 	out := screen.View(ctx.Width, ctx.Height)
@@ -1959,6 +1967,9 @@ func TestProgressScreenInstallDoneSuccess(t *testing.T) {
 	if !ctx.app.installComplete {
 		t.Error("done event should set installComplete")
 	}
+	if ctx.app.installOutcome != installationOutcomeSucceeded || ctx.app.installSummaryFacts.outcome != installationOutcomeSucceeded {
+		t.Errorf("done event outcome=%q facts=%q, want succeeded", ctx.app.installOutcome, ctx.app.installSummaryFacts.outcome)
+	}
 	if ctx.app.installEvents != nil {
 		t.Error("done event should nil out installEvents")
 	}
@@ -1974,6 +1985,9 @@ func TestProgressScreenInstallDoneError(t *testing.T) {
 	_, cmd := screen.Update(installEventMsg{done: true, err: errors.New("boom"), context: "last lines"})
 	if ctx.app.lastError == nil || !strings.Contains(ctx.app.lastError.Error(), "boom") {
 		t.Errorf("done error event should record lastError, got %v", ctx.app.lastError)
+	}
+	if ctx.app.installOutcome != installationOutcomeFailed || ctx.app.installSummaryFacts.outcome != installationOutcomeFailed {
+		t.Errorf("error event outcome=%q facts=%q, want failed", ctx.app.installOutcome, ctx.app.installSummaryFacts.outcome)
 	}
 	if !strings.Contains(ctx.app.lastError.Error(), "last lines") {
 		t.Errorf("done error event should include the output context, got %v", ctx.app.lastError)

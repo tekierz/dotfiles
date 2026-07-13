@@ -501,10 +501,11 @@ func TestInstallationSnapshotCacheHelperScreenUsesSeparateUtilityResults(t *test
 
 func TestInstallationSnapshotCacheFileTreeSuccessRefreshesReviewedPlanBeforeEnter(t *testing.T) {
 	app, _, _ := newPlanTestApp(t)
-	app.screen = ScreenFileTree
+	app.screen = ScreenWelcome // stale legacy value must not control managed routing
 	app.manageInstalledReady = false
 	app.pendingInstallPlan, app.installPlanError = nil, nil
 	app.beginInstallationSnapshotLoad(installationSnapshotCacheRuntime{})
+	app.screenMgr.Navigate(ScreenFileTree)
 	generation := app.installationSnapshotGeneration
 	observations := make([]health.InstallationObservation, 0, len(tools.GetRegistry().All()))
 	for _, tool := range tools.GetRegistry().All() {

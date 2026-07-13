@@ -54,12 +54,16 @@ observability land before new integrations or broad UI work.
       fallbacks, reduced motion, and explicit Save/Cancel semantics.
 - [ ] Centralize async operations with IDs/single-flight reducers and eliminate synchronous
       detection from input handlers.
+- [x] Make installer terminal outcomes and summaries fail closed: retry/escape require a fresh
+      reviewed plan, failed/skipped/unknown attempts never render success, and sealed plan,
+      rollback-scope, and operation facts survive post-attempt cache refreshes at 40x14,
+      60x18, and 80x24.
 - [ ] Add `doctor`, `plan --json`, noninteractive apply, deterministic exit codes, and a
       redacted support bundle.
   - [x] Add deterministic, versioned `status --json` v1 directly from the installation-health
         collector, with redacted public evidence, explicit uncollected capabilities, and stable
-        success/failure exit behavior. Plan and apply are now complete; the support bundle
-        remains open until its documentation and final verification gates pass.
+        success/failure exit behavior. Plan, apply, and the bounded support JSON contract are
+        complete; the broader CLI/release and install/apply deployment gates remain open.
   - [x] Implement the reviewed `plan --json` contract in
         `tasks/plan-json-contract.md`: public projection tests first, then a neutral headless
         install-only planner accepting explicit repeated `--tool` intent with no defaults or
@@ -200,8 +204,8 @@ observability land before new integrations or broad UI work.
   detectors must refer to packages installed by the same recipe.
 - Mutable vendor shell scripts are deliberately unrepresentable. Manage refuses direct
   installation for recipe-backed tools and routes users to the reviewed installer flow.
-- Remaining provenance work includes binding exact package-manager/npm executable identity,
-  a redacted support bundle, and full Manage plan/preview parity.
+- Remaining provenance work includes binding exact package-manager/npm executable identity
+  and full Manage plan/preview parity.
 - Codex and Pi now use version-pinned, macOS-only npm recipes; OpenCode uses only
   its reviewed Homebrew/Arch routes; T3 Code uses an exact typed Homebrew-cask
   action. Unsupported platform rows are disabled instead of poisoning the plan.

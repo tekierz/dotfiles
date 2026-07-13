@@ -151,9 +151,22 @@ func (a *App) applyInstallationSnapshotDone(message installationSnapshotDoneMsg)
 	a.installCacheLoading = false
 	a.manageInstalled = maps.Clone(cosmetic)
 	a.manageInstalledReady = true
-	if a.screen == ScreenFileTree {
+	if a.currentScreenIs(ScreenFileTree) {
 		a.refreshPendingInstallPlan()
 	}
+}
+
+// currentScreenIs uses the ScreenManager as the live navigation authority. The
+// legacy App.screen field is only a safe fallback for small unit-test/embedding
+// contexts that do not have a current managed handler.
+func (a *App) currentScreenIs(screen Screen) bool {
+	if a == nil {
+		return false
+	}
+	if a.screenMgr != nil && a.screenMgr.Current() != nil {
+		return a.screenMgr.Current().ID() == screen
+	}
+	return a.screen == screen
 }
 
 func (a *App) installationSnapshotCacheView() installationSnapshotCacheView {
