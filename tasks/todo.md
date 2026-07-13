@@ -54,6 +54,16 @@ observability land before new integrations or broad UI work.
         textually, fail closed on loading/stale/error or generation mismatch, keep Cursor
         Agent/Hermes discovery-only and Claude Code context-only, and bound keyboard/mouse
         views at 60x18, 80x24, and 120x40.
+- [ ] Bind exact executable observations into reviewed package and npm installation authority.
+  - [x] Add an independently reviewed, bounded, path-redacted executable-identity observation
+        primitive with deterministic drift revalidation; do not claim it closes the final
+        revalidation-to-exec race.
+  - [ ] Adopt the primitive in Brew, Apt, Pacman, and Paru construction without widening the
+        package-manager interface, and route manager invocations through the observed path.
+  - [ ] Bind accepted package-manager identities into private plan authority and revalidate
+        immediately before mutation while documenting the remaining spawn boundary.
+  - [ ] Add the equivalent npm executable/interpreter-chain authority before enabling npm
+        recipes for owner-hardware Apply testing.
 - [ ] Add current-source/provenance, Essentials/Advanced/raw layers, diff, and capability badges.
 - [ ] Make 60x18/80x24/120x40 layouts responsive with viewports, compact tabs, glyph/color
       fallbacks, reduced motion, and explicit Save/Cancel semantics.
@@ -209,6 +219,14 @@ observability land before new integrations or broad UI work.
   detectors must refer to packages installed by the same recipe.
 - Mutable vendor shell scripts are deliberately unrepresentable. Manage refuses direct
   installation for recipe-backed tools and routes users to the reviewed installer flow.
+- The neutral executable-identity foundation now captures a bounded, path-private, immutable
+  Darwin/Linux snapshot over invocation and canonical paths, mode, size, device/inode, and
+  content digest. Deterministic race tests cover alias/parent retargeting, atomic replacement,
+  growth during hashing, and pre-open FIFO/symlink swaps; nonblocking no-follow descriptor
+  opening prevents those swaps from hanging. Sol and Terra independently accepted the slice,
+  and focused/full-package/race/vet/pinned lint/static checks pass. This is drift observation,
+  not spawn authority: manager adoption, accepted-plan binding, npm/interpreter identity, and
+  the final revalidation-to-exec race remain open.
 - Remaining provenance work includes binding exact package-manager/npm executable identity
   and full Manage plan/preview parity.
 - Codex and Pi now use version-pinned, macOS-only npm recipes; OpenCode uses only
