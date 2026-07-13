@@ -76,8 +76,12 @@ observability land before new integrations or broad UI work.
   - [x] Publish review-before-sharing guidance and exact stdout-only scope in command help,
         README, the tool reference, and maintainer CLI guidance. Raw `doctor --json`, operation
         journals, configuration, and logs are explicitly not share-safe substitutes.
-  - [ ] Complete the final adversarial/static verification and owner-hardware read-only gate
-        before closing the support bundle or the parent CLI-contract item.
+  - [x] Complete the final adversarial/static verification and owner-hardware read-only gate:
+        the fresh `6fff1ac` binary emitted byte-identical complete documents, passed framing and
+        forbidden-field/path checks, and left the existing operation-state directory metadata
+        unchanged. Full test/race/vet, pinned lint/static/vulnerability tools, GoReleaser,
+        ShellCheck, module checks, and release-target cross-compiles pass. The broader parent
+        CLI/release and install/apply deployment gates remain open.
 - [ ] Generate settings/help/hotkeys/docs/tests from tool manifests where practical.
 
 ### Batch 4 — integrations, distribution, and deployment gates
@@ -406,9 +410,9 @@ Retired Bash installer (historical findings; source and execution docs removed):
 
 ## Pre-release checklist (run in order, after P0–P2 land)
 
-- [ ] `go build ./... && go vet ./... && gofmt -l . && go test -race ./...` all clean
-- [ ] golangci-lint clean with the repaired config; CI fully blocking
-- [ ] `govulncheck ./...` re-run clean
+- [x] `go build ./... && go vet ./... && gofmt -l . && go test -race ./...` all clean
+- [x] golangci-lint clean with the repaired config; CI fully blocking
+- [x] `govulncheck ./...` re-run clean
 - [ ] Run the `pre-pr-tests` skill checklist (manual TUI pass on macOS + one Linux)
 - [x] Automated macOS Glow path parity: planner, importer, registry, and writer resolve
       the same go-app-paths/Viper-precedence target with revision-bound tests.
