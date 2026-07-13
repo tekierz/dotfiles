@@ -171,6 +171,9 @@ func registryRuntime(platform pkg.Platform, installed map[string]bool) toolInsta
 	case pkg.PlatformUnknown:
 		manager.ManagerName = "unknown"
 	}
+	if err := manager.SetExecutableIdentity(stableUIManagerIdentity()); err != nil {
+		panic(err)
+	}
 	return toolInstallRuntime{
 		lookupTool: reg.Get,
 		registeredToolIDs: func() []string {
@@ -466,6 +469,7 @@ func TestWizardInstallPhaseInvokesCustomToolAndReportsProgress(t *testing.T) {
 
 func acceptedSentinelSnapshot(t *testing.T, runtime toolInstallRuntime, manager pkg.PackageManager) installExecutionSnapshot {
 	t.Helper()
+	managerIdentity := setUIManagerIdentity(t, manager, "sentinel-manager")
 	platform := runtime.detectPlatform()
 	recipe := operation.InstallRecipe{
 		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
@@ -483,12 +487,13 @@ func acceptedSentinelSnapshot(t *testing.T, runtime toolInstallRuntime, manager 
 		t.Fatal(err)
 	}
 	return installExecutionSnapshot{
-		platform:  platform,
-		manager:   manager.Name(),
-		recipes:   map[string]operation.InstallRecipe{"custom-sentinel": recipe},
-		detected:  map[string]bool{"custom-sentinel": false},
-		digests:   map[string]string{"custom-sentinel": digest},
-		authority: map[string]installToolAuthority{"custom-sentinel": {presence: health.PresenceMissing, intent: "install", recipeDigest: digest}},
+		platform:        platform,
+		manager:         manager.Name(),
+		managerIdentity: managerIdentity,
+		recipes:         map[string]operation.InstallRecipe{"custom-sentinel": recipe},
+		detected:        map[string]bool{"custom-sentinel": false},
+		digests:         map[string]string{"custom-sentinel": digest},
+		authority:       map[string]installToolAuthority{"custom-sentinel": {presence: health.PresenceMissing, intent: "install", recipeDigest: digest}},
 	}
 }
 
@@ -549,6 +554,98 @@ func TestAcceptedRecipeFailsClosedOnEnvironmentOrDetectorDrift(t *testing.T) {
 	}
 }
 
+func TestAcceptedRecipeRejectsSameNameManagerIdentityAndDetectorDriftBeforeMutation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*testing.T, *pkg.MockPackageManager, *installExecutionSnapshot)
+	}{
+		{name: "same manager name different executable", mutate: func(t *testing.T, manager *pkg.MockPackageManager, _ *installExecutionSnapshot) {
+			if err := manager.SetExecutableIdentity(uiManagerIdentity(t, "replacement-brew", "exit 1")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "detector flips after review", mutate: func(_ *testing.T, manager *pkg.MockPackageManager, _ *installExecutionSnapshot) {
+			manager.InstalledPkgs["reviewed-package"] = "1"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sentinel := &customInstallSentinel{}
+			manager := pkg.NewMockPackageManager()
+			runtime := sentinelRuntime(sentinel, manager)
+			snapshot := acceptedSentinelSnapshot(t, runtime, manager)
+			test.mutate(t, manager, &snapshot)
+			result := runSelectedToolInstalls(context.Background(), []string{sentinel.ID()}, runtime, func(string) {}, func(string) {}, snapshot)
+			if len(result.failures) == 0 || len(manager.InstallCalls) != 0 || sentinel.installCalls != 0 {
+				t.Fatalf("drift reached mutation: result=%#v installs=%v legacy=%d", result, manager.InstallCalls, sentinel.installCalls)
+			}
+		})
+	}
+}
+
+func TestAcceptedPartialRepairPreservesTrueDetectorAuthority(t *testing.T) {
+	sentinel := &customInstallSentinel{}
+	manager := pkg.NewMockPackageManager()
+	runtime := sentinelRuntime(sentinel, manager)
+	snapshot := acceptedSentinelSnapshot(t, runtime, manager)
+	snapshot.authority[sentinel.ID()] = installToolAuthority{presence: health.PresencePartial, intent: "repair", recipeDigest: snapshot.digests[sentinel.ID()]}
+	snapshot.detected[sentinel.ID()] = true
+	manager.InstalledPkgs["reviewed-package"] = "1"
+	result := runSelectedToolInstalls(context.Background(), []string{sentinel.ID()}, runtime, func(string) {}, func(string) {}, snapshot)
+	if len(result.failures) != 0 || result.successCount != 1 || len(manager.InstallCalls) != 1 {
+		t.Fatalf("true detector repair authority was not preserved: result=%#v calls=%v", result, manager.InstallCalls)
+	}
+}
+
+func TestAcceptedOverlappingPackageReceiptSkipsLaterSatisfiedAction(t *testing.T) {
+	registry := tools.NewRegistry()
+	manager := pkg.NewMockPackageManager()
+	manager.ManagerName = "brew"
+	identity := setUIManagerIdentity(t, manager, "overlap-brew")
+	recipes := make(map[string]operation.InstallRecipe)
+	digests := make(map[string]string)
+	detected := make(map[string]bool)
+	authority := make(map[string]installToolAuthority)
+	for _, id := range []string{"yazi", "zoxide"} {
+		tool, ok := registry.Get(id)
+		if !ok {
+			t.Fatalf("missing registry tool %s", id)
+		}
+		recipe, err := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := installRecipeDigest(recipe)
+		recipes[id], digests[id], detected[id] = recipe, digest, false
+		authority[id] = installToolAuthority{presence: health.PresenceMissing, intent: "install", recipeDigest: digest}
+	}
+	runtime := toolInstallRuntime{
+		lookupTool:     registry.Get,
+		detectManager:  func() pkg.PackageManager { return manager },
+		detectPlatform: func() pkg.Platform { return pkg.PlatformMacOS },
+	}
+	snapshot := installExecutionSnapshot{platform: pkg.PlatformMacOS, manager: "brew", managerIdentity: identity, recipes: recipes, detected: detected, digests: digests, authority: authority}
+	result := runSelectedToolInstalls(context.Background(), []string{"yazi", "zoxide"}, runtime, func(string) {}, func(string) {}, snapshot)
+	if len(result.failures) != 0 || result.successCount != 1 || result.skippedCount != 1 || !result.installed["yazi"] || !result.satisfied["zoxide"] {
+		t.Fatalf("overlap result=%#v", result)
+	}
+	if len(manager.InstallCalls) != 1 || !slices.Contains(manager.InstallCalls[0], "zoxide") {
+		t.Fatalf("overlap mutations=%v, want only Yazi recipe containing zoxide", manager.InstallCalls)
+	}
+
+	driftedManager := pkg.NewMockPackageManager()
+	driftedManager.ManagerName = "brew"
+	driftedIdentity := setUIManagerIdentity(t, driftedManager, "preflight-brew")
+	driftedManager.InstalledPkgs["zoxide"] = "1"
+	driftedRuntime := runtime
+	driftedRuntime.detectManager = func() pkg.PackageManager { return driftedManager }
+	driftedSnapshot := snapshot
+	driftedSnapshot.managerIdentity = driftedIdentity
+	drifted := runSelectedToolInstalls(context.Background(), []string{"yazi", "zoxide"}, driftedRuntime, func(string) {}, func(string) {}, driftedSnapshot)
+	if len(drifted.failures) == 0 || len(driftedManager.InstallCalls) != 0 || !drifted.failed["zoxide"] || drifted.failed["yazi"] {
+		t.Fatalf("all-action preflight did not stop before first mutation: result=%#v calls=%v", drifted, driftedManager.InstallCalls)
+	}
+}
+
 func TestAcceptedRecipeRejectsOmittedAndDuplicateSelections(t *testing.T) {
 	for _, selected := range [][]string{{}, {"custom-sentinel", "custom-sentinel"}} {
 		sentinel := &customInstallSentinel{}
@@ -566,6 +663,7 @@ func TestAcceptedT3RecipeUsesOnlyHomebrewCaskCapability(t *testing.T) {
 	home := withTempHome(t)
 	mgr := &caskInstallManager{MockPackageManager: pkg.NewMockPackageManager(), home: home}
 	mgr.ManagerName = "brew"
+	managerIdentity := setUIManagerIdentity(t, mgr, "cask-brew")
 	tool := tools.NewT3CodeTool()
 	runtime := toolInstallRuntime{
 		lookupTool:      func(id string) (tools.Tool, bool) { return tool, id == tool.ID() },
@@ -581,7 +679,7 @@ func TestAcceptedT3RecipeUsesOnlyHomebrewCaskCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := installExecutionSnapshot{platform: pkg.PlatformMacOS, manager: "brew", recipes: map[string]operation.InstallRecipe{tool.ID(): recipe}, detected: map[string]bool{tool.ID(): false}, digests: map[string]string{tool.ID(): digest}, authority: map[string]installToolAuthority{tool.ID(): {presence: health.PresenceMissing, intent: "install", recipeDigest: digest}}}
+	snapshot := installExecutionSnapshot{platform: pkg.PlatformMacOS, manager: "brew", managerIdentity: managerIdentity, recipes: map[string]operation.InstallRecipe{tool.ID(): recipe}, detected: map[string]bool{tool.ID(): false}, digests: map[string]string{tool.ID(): digest}, authority: map[string]installToolAuthority{tool.ID(): {presence: health.PresenceMissing, intent: "install", recipeDigest: digest}}}
 	result := runSelectedToolInstalls(context.Background(), []string{tool.ID()}, runtime, func(string) {}, func(string) {}, snapshot)
 	if len(result.failures) != 0 || result.successCount != 1 || !reflect.DeepEqual(mgr.calls, [][]string{{"t3-code"}}) {
 		t.Fatalf("T3 execution result=%#v cask calls=%v", result, mgr.calls)

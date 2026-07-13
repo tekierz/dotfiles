@@ -28,6 +28,7 @@ var ErrInvalidRequest = errors.New("invalid install plan request")
 type Environment struct {
 	Platform           pkg.Platform
 	Manager            string
+	ManagerIdentity    pkg.ExecutableIdentity
 	ExpectedGeneration uint64
 }
 
@@ -59,19 +60,27 @@ type ToolAuthority struct {
 }
 
 type AcceptedPlan struct {
-	document  operation.Plan
-	statePlan *operation.StatePlan
-	snapshot  SnapshotAuthority
-	tools     map[string]ToolAuthority
-	recipes   map[string]operation.InstallRecipe
-	intent    planpublic.Intent
-	hash      string
+	document        operation.Plan
+	statePlan       *operation.StatePlan
+	snapshot        SnapshotAuthority
+	tools           map[string]ToolAuthority
+	recipes         map[string]operation.InstallRecipe
+	intent          planpublic.Intent
+	managerIdentity pkg.ExecutableIdentity
+	hash            string
 }
 
 func (plan AcceptedPlan) Operation() operation.Plan            { return plan.document }
 func (plan AcceptedPlan) StatePlan() *operation.StatePlan      { return plan.statePlan }
 func (plan AcceptedPlan) SnapshotAuthority() SnapshotAuthority { return plan.snapshot }
 func (plan AcceptedPlan) Hash() string                         { return plan.hash }
+
+func (plan AcceptedPlan) ManagerExecutableIdentity() (pkg.ExecutableIdentity, bool) {
+	if !validManagerExecutableIdentity(plan.managerIdentity) {
+		return pkg.ExecutableIdentity{}, false
+	}
+	return plan.managerIdentity, true
+}
 
 func (plan AcceptedPlan) Intent() planpublic.Intent {
 	return cloneIntent(plan.intent)
@@ -179,7 +188,6 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		}
 		return Result{public: document}, nil
 	}
-
 	validatedRecipes := make(map[string]operation.InstallRecipe)
 	detectorObservations := make(map[string]bool)
 	publicInstalls := make(map[string]*planpublic.InstallSpec)
@@ -200,7 +208,7 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		if err != nil || recipe.ToolID != id || recipe.Platform != string(request.Environment.Platform) || recipe.Manager != request.Environment.Manager || digest != observation.InstallRecipeDigest() {
 			return blockedResult(intent, request.Snapshot, "recipe_drift")
 		}
-		detected, known := observedInstallDetector(observation, recipe.Detector)
+		detected, known := ObservedInstallDetector(observation, recipe.Detector)
 		if !known {
 			return blockedResult(intent, request.Snapshot, "unknown")
 		}
@@ -218,6 +226,13 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		toolAuthorities[id] = ToolAuthority{Presence: observation.Presence(), Intent: installIntent, RecipeDigest: digest}
 	}
 
+	managerIdentity := pkg.ExecutableIdentity{}
+	if recipesRequireManagerIdentity(validatedRecipes) {
+		if !validManagerExecutableIdentity(request.Environment.ManagerIdentity) {
+			return Result{}, ErrInvalidRequest
+		}
+		managerIdentity = request.Environment.ManagerIdentity
+	}
 	statePlan, err := dependencies.CaptureStatePlan()
 	if err != nil || statePlan == nil {
 		return Result{}, errors.Join(ErrInvalidRequest, err)
@@ -262,7 +277,7 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	}
 	accepted := AcceptedPlan{
 		document: document, statePlan: statePlan, snapshot: snapshotAuthority,
-		tools: maps.Clone(toolAuthorities), recipes: cloneRecipes(validatedRecipes), intent: cloneIntent(intent),
+		tools: maps.Clone(toolAuthorities), recipes: cloneRecipes(validatedRecipes), intent: cloneIntent(intent), managerIdentity: managerIdentity,
 	}
 	accepted.hash, err = acceptedPlanHash(accepted)
 	if err != nil {
@@ -279,7 +294,9 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	return Result{public: publicDocument, accepted: accepted, hasAccepted: true}, nil
 }
 
-func observedInstallDetector(observation health.InstallationObservation, detector operation.InstallDetector) (bool, bool) {
+// ObservedInstallDetector derives the exact reviewed detector result from one
+// generation-bound health observation without performing any live probes.
+func ObservedInstallDetector(observation health.InstallationObservation, detector operation.InstallDetector) (bool, bool) {
 	contains := func(values []string, target string) bool {
 		return slices.Contains(values, target)
 	}
@@ -342,6 +359,26 @@ func observedInstallDetector(observation health.InstallationObservation, detecto
 func validRequestSnapshot(snapshot health.InstallationSnapshot, environment Environment) bool {
 	return snapshot.SchemaVersion() == health.CurrentInstallationSchemaVersion && snapshot.Generation() > 0 &&
 		snapshot.Digest() != "" && environment.Platform != "" && environment.Manager != "" && environment.ExpectedGeneration > 0
+}
+
+func validManagerExecutableIdentity(identity pkg.ExecutableIdentity) bool {
+	return identity.SchemaVersion() == pkg.CurrentExecutableIdentitySchemaVersion && validAcceptedAuthorityDigest(identity.Digest())
+}
+
+func recipesRequireManagerIdentity(recipes map[string]operation.InstallRecipe) bool {
+	for _, recipe := range recipes {
+		for _, step := range recipe.Steps {
+			if step.Kind == operation.InstallStepPackageManager || step.Kind == operation.InstallStepHomebrewCask {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func validAcceptedAuthorityDigest(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size && hex.EncodeToString(decoded) == value
 }
 
 func blockedResult(intent planpublic.Intent, snapshot health.InstallationSnapshot, code string) (Result, error) {
@@ -542,6 +579,11 @@ func acceptedPlanHash(plan AcceptedPlan) (string, error) {
 	if plan.snapshot.SchemaVersion != health.CurrentInstallationSchemaVersion {
 		return "", ErrInvalidRequest
 	}
+	requiresManagerIdentity := recipesRequireManagerIdentity(plan.recipes)
+	hasManagerIdentity := validManagerExecutableIdentity(plan.managerIdentity)
+	if requiresManagerIdentity != hasManagerIdentity || (!hasManagerIdentity && plan.managerIdentity != (pkg.ExecutableIdentity{})) {
+		return "", ErrInvalidRequest
+	}
 	stateDigest, err := operation.StatePlanAuthorityDigest(plan.statePlan)
 	if err != nil {
 		return "", err
@@ -562,18 +604,32 @@ func acceptedPlanHash(plan AcceptedPlan) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	var managerIdentityDigest []byte
+	if hasManagerIdentity {
+		managerIdentityDigest, err = decodeAcceptedAuthorityDigest(plan.managerIdentity.Digest())
+		if err != nil {
+			return "", err
+		}
+	}
 	ids := make([]string, 0, len(plan.tools))
 	for id := range plan.tools {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	digest := sha256.New()
-	_, _ = digest.Write([]byte("dotfiles/installplan-accepted-authority/v1\x00"))
+	_, _ = digest.Write([]byte("dotfiles/installplan-accepted-authority/v2\x00"))
 	hashAcceptedAuthorityBytes(digest, documentDigest)
 	hashAcceptedAuthorityUint64(digest, uint64(health.CurrentInstallationSchemaVersion))
 	hashAcceptedAuthorityUint64(digest, plan.snapshot.Generation)
 	hashAcceptedAuthorityBytes(digest, []byte(plan.snapshot.Platform))
 	hashAcceptedAuthorityBytes(digest, []byte(plan.snapshot.Manager))
+	if hasManagerIdentity {
+		hashAcceptedAuthorityUint64(digest, 1)
+		hashAcceptedAuthorityUint64(digest, uint64(pkg.CurrentExecutableIdentitySchemaVersion))
+		hashAcceptedAuthorityBytes(digest, managerIdentityDigest)
+	} else {
+		hashAcceptedAuthorityUint64(digest, 0)
+	}
 	hashAcceptedAuthorityBytes(digest, snapshotDigest)
 	hashAcceptedAuthorityBytes(digest, stateDigestBytes)
 	hashAcceptedAuthorityBytes(digest, intentDigest)

@@ -32,7 +32,7 @@ func (m *pinnedRecipeExecutionManager) IsInstalled(string) bool {
 	} else {
 		m.preProbe++
 	}
-	return true
+	return m.installed
 }
 
 func (m *pinnedRecipeExecutionManager) InstallStreaming(_ context.Context, packages ...string) (*runner.StreamingCmd, error) {
@@ -41,10 +41,9 @@ func (m *pinnedRecipeExecutionManager) InstallStreaming(_ context.Context, packa
 	return nil, nil
 }
 
-// TestInstallSnapshotExecutionDispatchesPinnedRecipeWithoutPreProbe proves the
-// accepted plan, rather than a fresh boolean installation probe, authorizes the
-// package mutation performed by the isolated install runner.
-func TestInstallSnapshotExecutionDispatchesPinnedRecipeWithoutPreProbe(t *testing.T) {
+// TestInstallSnapshotExecutionRechecksPinnedDetectorBeforeMutation proves the
+// exact accepted detector result is rechecked immediately before mutation.
+func TestInstallSnapshotExecutionRechecksPinnedDetectorBeforeMutation(t *testing.T) {
 	for _, presence := range []health.Presence{health.PresenceMissing, health.PresencePartial} {
 		t.Run(string(presence), func(t *testing.T) {
 			app, _, planRuntime := newPlanTestApp(t)
@@ -95,6 +94,10 @@ func TestInstallSnapshotExecutionDispatchesPinnedRecipeWithoutPreProbe(t *testin
 
 			mgr := &pinnedRecipeExecutionManager{MockPackageManager: pkg.NewMockPackageManager()}
 			mgr.ManagerName = "brew"
+			mgr.installed = accepted.detected["zsh"]
+			if err := mgr.SetExecutableIdentity(accepted.managerIdentity); err != nil {
+				t.Fatal(err)
+			}
 			runtimeBoolCalls := 0
 			executionRuntime := toolInstallRuntime{
 				lookupTool:     planRuntime.lookupTool,
@@ -109,7 +112,11 @@ func TestInstallSnapshotExecutionDispatchesPinnedRecipeWithoutPreProbe(t *testin
 			if len(result.failures) != 0 || result.successCount != 1 || !result.installed["zsh"] {
 				t.Fatalf("execution result=%#v", result)
 			}
-			if mgr.preProbe != 0 || runtimeBoolCalls != 0 {
+			wantPreProbes := 2 * len(wantRecipe.Detector.Values)
+			if !accepted.detected["zsh"] {
+				wantPreProbes = 2
+			}
+			if mgr.preProbe != wantPreProbes || runtimeBoolCalls != 0 {
 				t.Fatalf("pre-mutation probes: recipe=%d runtime-bool=%d", mgr.preProbe, runtimeBoolCalls)
 			}
 			if mgr.postProbe != len(wantRecipe.Detector.Values) {

@@ -82,7 +82,7 @@ func TestBuildOneMissingReviewedToolReturnsReadyPrivateAndPublicPlan(t *testing.
 
 	result, err := Build(Request{
 		Intent: intent, Snapshot: snapshot,
-		Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 9},
+		Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 9),
 	}, countingDependencies(counts, recipe))
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestBuildOneMissingReviewedToolReturnsReadyPrivateAndPublicPlan(t *testing.
 	}
 	secondResult, err := Build(Request{
 		Intent: intent, Snapshot: snapshot,
-		Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 9},
+		Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 9),
 	}, secondDependencies)
 	if err != nil {
 		t.Fatal(err)

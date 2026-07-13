@@ -31,7 +31,7 @@ func TestBuildMixedPresentMissingAndPartialPreservesCanonicalIntentAndAuthority(
 		return operation.CloneInstallRecipe(recipes[tool.ID()]), nil
 	}
 	intent := mustIntent(t, "zsh", "codex", "git")
-	result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 23}}, deps)
+	result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 23)}, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestBuildEquivalentIntentOrderIsDeterministic(t *testing.T) {
 			counts.sequence = append(counts.sequence, "describe:"+tool.ID())
 			return operation.CloneInstallRecipe(map[string]operation.InstallRecipe{"git": gitRecipe, "pi": piRecipe}[tool.ID()]), nil
 		}
-		result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 29}}, deps)
+		result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 29)}, deps)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -141,12 +141,12 @@ func TestSelectedToolPublicSnapshotDigestIsScopedAndPrivateDriftChangesOnlyPubli
 	publicFactSnapshot := mustSnapshot(t, 31, mustPartialObservation(t, "git", gitRecipe), mustObservation(t, "pi", health.PackagePresent, otherRecipe))
 	generationSnapshot := mustSnapshot(t, 32, baseObservation, mustObservation(t, "pi", health.PackagePresent, otherRecipe))
 
-	baseEnvironment := Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 31}
+	baseEnvironment := managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 31)
 	first := build(baseSnapshot, gitRecipe, baseEnvironment)
 	second := build(unselectedDriftSnapshot, gitRecipe, baseEnvironment)
 	privateDrift := build(privateEvidenceSnapshot, gitRecipe, baseEnvironment)
 	publicDrift := build(publicFactSnapshot, gitRecipe, baseEnvironment)
-	generationDrift := build(generationSnapshot, gitRecipe, Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 32})
+	generationDrift := build(generationSnapshot, gitRecipe, managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 32))
 	firstDigest := publicSnapshotDigest(t, first.Public())
 	secondDigest := publicSnapshotDigest(t, second.Public())
 	privateDriftDigest := publicSnapshotDigest(t, privateDrift.Public())
@@ -198,7 +198,7 @@ func TestSelectedToolPublicSnapshotDigestIsScopedAndPrivateDriftChangesOnlyPubli
 
 	archRecipe := recipeForEnvironment(gitRecipe, pkg.PlatformArch, "paru")
 	archSnapshot := mustSnapshotForEnvironment(t, 31, pkg.PlatformArch, "paru", mustObservation(t, "git", health.PackageMissing, archRecipe))
-	archResult := build(archSnapshot, archRecipe, Environment{Platform: pkg.PlatformArch, Manager: "paru", ExpectedGeneration: 31})
+	archResult := build(archSnapshot, archRecipe, managerTestEnvironment(t, pkg.PlatformArch, "paru", 31))
 	if firstDigest == publicSnapshotDigest(t, archResult.Public()) {
 		t.Fatal("platform/manager drift did not change public snapshot digest")
 	}
@@ -208,7 +208,7 @@ func TestAcceptedAndPublicAccessorsAreDeeplyDefensive(t *testing.T) {
 	recipe := reviewedPackageRecipe("git")
 	intent := mustIntent(t, "git")
 	snapshot := mustSnapshot(t, 41, mustObservation(t, "git", health.PackageMissing, recipe))
-	result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 41}}, countingDependencies(&dependencyCounts{}, recipe))
+	result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 41)}, countingDependencies(&dependencyCounts{}, recipe))
 	if err != nil {
 		t.Fatal(err)
 	}

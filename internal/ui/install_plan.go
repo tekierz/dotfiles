@@ -18,6 +18,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/health"
+	"github.com/tekierz/dotfiles/internal/installapply"
 	headless "github.com/tekierz/dotfiles/internal/installplan"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
@@ -59,17 +60,65 @@ type installPlan struct {
 }
 
 type installationSnapshotAuthority struct {
-	schema     int
-	generation uint64
-	platform   string
-	manager    string
-	digest     string
+	schema          int
+	generation      uint64
+	platform        string
+	manager         string
+	digest          string
+	managerIdentity pkg.ExecutableIdentity
 }
 
 type installToolAuthority struct {
 	presence     health.Presence
 	intent       string
 	recipeDigest string
+}
+
+func validUIManagerExecutableIdentity(identity pkg.ExecutableIdentity) bool {
+	return identity.SchemaVersion() == pkg.CurrentExecutableIdentitySchemaVersion && validAdapterDigest(identity.Digest())
+}
+
+func installRecipeRequiresManagerIdentity(recipe operation.InstallRecipe) bool {
+	for _, step := range recipe.Steps {
+		if step.Kind == operation.InstallStepPackageManager || step.Kind == operation.InstallStepHomebrewCask {
+			return true
+		}
+	}
+	return false
+}
+
+func installRecipesRequireManagerIdentity(recipes map[string]operation.InstallRecipe) bool {
+	for _, recipe := range recipes {
+		if installRecipeRequiresManagerIdentity(recipe) {
+			return true
+		}
+	}
+	return false
+}
+
+func recipeDetectorRequiresManagerIdentity(detector operation.InstallDetector) bool {
+	return detector.Kind == operation.InstallDetectorPackageReceipt
+}
+
+func validateUIManagerExecutableIdentity(manager pkg.PackageManager, accepted pkg.ExecutableIdentity, revalidate bool) error {
+	if manager == nil || !validUIManagerExecutableIdentity(accepted) {
+		return installapply.ErrManagerIdentityChanged
+	}
+	provider, ok := manager.(pkg.ExecutableIdentityProvider)
+	if !ok {
+		return installapply.ErrManagerIdentityChanged
+	}
+	current, available := provider.ExecutableIdentity()
+	if !available || !validUIManagerExecutableIdentity(current) || current.SchemaVersion() != accepted.SchemaVersion() || current.Digest() != accepted.Digest() {
+		return installapply.ErrManagerIdentityChanged
+	}
+	if revalidate && (accepted.Revalidate() != nil || current.Revalidate() != nil) {
+		return installapply.ErrManagerIdentityChanged
+	}
+	// A revalidation-to-spawn race remains because PackageManager does not expose
+	// a descriptor-bound process launch API; ExecuteRecipe repeats this check at
+	// each manager-backed mutation boundary to keep that interval minimal.
+	return nil
 }
 
 type acceptedTargetKind uint8
@@ -214,7 +263,8 @@ func (p *installPlan) installExecutionSnapshot() (installExecutionSnapshot, erro
 	}
 	snapshot := installExecutionSnapshot{
 		platform: pkg.Platform(p.installSnapshot.platform), manager: p.installSnapshot.manager,
-		recipes: make(map[string]operation.InstallRecipe), detected: make(map[string]bool),
+		managerIdentity: p.installSnapshot.managerIdentity,
+		recipes:         make(map[string]operation.InstallRecipe), detected: make(map[string]bool),
 		digests: make(map[string]string), authority: make(map[string]installToolAuthority),
 	}
 	for _, action := range p.actions() {
@@ -243,6 +293,10 @@ func (p *installPlan) installExecutionSnapshot() (installExecutionSnapshot, erro
 		snapshot.detected[action.ToolID] = *action.InstallDetected
 		snapshot.digests[action.ToolID] = action.DesiredDigest
 		snapshot.authority[action.ToolID] = authority
+	}
+	identityRequired := installRecipesRequireManagerIdentity(snapshot.recipes)
+	if identityRequired != validUIManagerExecutableIdentity(snapshot.managerIdentity) {
+		return installExecutionSnapshot{}, fmt.Errorf("install manager executable authority is inconsistent")
 	}
 	return snapshot, nil
 }
@@ -495,7 +549,10 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 		}
 		installAuthorities[toolID] = installToolAuthority{presence: presence, intent: intent, recipeDigest: recipeDigest}
 		pinnedRecipes[toolID] = operation.CloneInstallRecipe(recipe)
-		detected := false
+		detected, detectorKnown := headless.ObservedInstallDetector(observation, recipe.Detector)
+		if !detectorKnown {
+			return nil, errors.New(installationSnapshotUnavailable)
+		}
 		actions = append(actions, operation.Action{
 			ID:              "install:" + toolID,
 			Kind:            operation.KindInstallTool,
@@ -509,6 +566,13 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 			InstallRecipe:   &recipe,
 			InstallDetected: &detected,
 		})
+	}
+	managerIdentity := pkg.ExecutableIdentity{}
+	if installRecipesRequireManagerIdentity(pinnedRecipes) {
+		if !validUIManagerExecutableIdentity(a.installationSnapshotManagerIdentity) {
+			return nil, errors.New(installationSnapshotUnavailable)
+		}
+		managerIdentity = a.installationSnapshotManagerIdentity
 	}
 
 	for _, helper := range enabledHelpers(cfg.Utilities) {
@@ -687,18 +751,30 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 	}
 	snapshotAuthority := installationSnapshotAuthority{
 		schema: snapshot.SchemaVersion(), generation: snapshot.Generation(), platform: snapshot.Platform(),
-		manager: snapshot.Manager(), digest: snapshot.Digest(),
+		manager: snapshot.Manager(), digest: snapshot.Digest(), managerIdentity: managerIdentity,
+	}
+	identityDiscriminator := 0
+	identitySchema := 0
+	identityDigest := ""
+	if validUIManagerExecutableIdentity(managerIdentity) {
+		identityDiscriminator = 1
+		identitySchema = managerIdentity.SchemaVersion()
+		identityDigest = managerIdentity.Digest()
 	}
 	installHash := digestPlanValue(struct {
-		Document   string
-		Schema     int
-		Generation uint64
-		Platform   string
-		Manager    string
-		Snapshot   string
-		Recipes    []string
+		Document                     string
+		Schema                       int
+		Generation                   uint64
+		Platform                     string
+		Manager                      string
+		Snapshot                     string
+		Recipes                      []string
+		ManagerIdentityDiscriminator int
+		ManagerIdentitySchema        int
+		ManagerIdentityDigest        string
 	}{document.Hash(), snapshotAuthority.schema, snapshotAuthority.generation, snapshotAuthority.platform,
-		snapshotAuthority.manager, snapshotAuthority.digest, sortedInstallRecipeAuthorities(installAuthorities)})
+		snapshotAuthority.manager, snapshotAuthority.digest, sortedInstallRecipeAuthorities(installAuthorities),
+		identityDiscriminator, identitySchema, identityDigest})
 	return &installPlan{
 		document:            document,
 		installHash:         installHash,
@@ -736,6 +812,7 @@ func buildPackageOnlyInstallPlan(a *App, installRuntime toolInstallRuntime, now 
 		Environment: headless.Environment{
 			Platform:           pkg.Platform(snapshot.Platform()),
 			Manager:            snapshot.Manager(),
+			ManagerIdentity:    a.installationSnapshotManagerIdentity,
 			ExpectedGeneration: snapshot.Generation(),
 		},
 	}, headless.Dependencies{

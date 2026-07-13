@@ -17,7 +17,7 @@ import (
 func TestAcceptedHashSupersedesLegacyPackageOnlyAuthorityFormula(t *testing.T) {
 	gitRecipe := reviewedPackageRecipe("git")
 	missingSnapshot := mustSnapshot(t, 51, mustObservation(t, "git", health.PackageMissing, gitRecipe))
-	missing, err := Build(Request{Intent: mustIntent(t, "git"), Snapshot: missingSnapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 51}}, countingDependencies(&dependencyCounts{}, gitRecipe))
+	missing, err := Build(Request{Intent: mustIntent(t, "git"), Snapshot: missingSnapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 51)}, countingDependencies(&dependencyCounts{}, gitRecipe))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestAcceptedHashSupersedesLegacyPackageOnlyAuthorityFormula(t *testing.T) {
 		counts.sequence = append(counts.sequence, "describe:"+tool.ID())
 		return operation.CloneInstallRecipe(map[string]operation.InstallRecipe{"git": gitRecipe, "zsh": zshRecipe}[tool.ID()]), nil
 	}
-	mixed, err := Build(Request{Intent: mustIntent(t, "zsh", "codex", "git"), Snapshot: mixedSnapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 52}}, deps)
+	mixed, err := Build(Request{Intent: mustIntent(t, "zsh", "codex", "git"), Snapshot: mixedSnapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 52)}, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestPublicPackageObservationFactsReflectPresenceWithoutClaimingManagement(t
 		counts.sequence = append(counts.sequence, "describe:"+tool.ID())
 		return operation.CloneInstallRecipe(map[string]operation.InstallRecipe{"git": gitRecipe, "zsh": zshRecipe}[tool.ID()]), nil
 	}
-	result, err := Build(Request{Intent: mustIntent(t, "zsh", "git", "codex"), Snapshot: snapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 53}}, deps)
+	result, err := Build(Request{Intent: mustIntent(t, "zsh", "git", "codex"), Snapshot: snapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 53)}, deps)
 	if err != nil {
 		t.Fatal(err)
 	}

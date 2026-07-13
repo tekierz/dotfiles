@@ -3,6 +3,7 @@ package installapply
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -117,7 +118,7 @@ func TestApplyHappyPathUsesExactSessionManagerAndJournalsPackageOnlyWarning(t *t
 			sequence = append(sequence, "now")
 			return time.Date(2026, 7, 12, 22, nowCalls, 0, 0, time.UTC)
 		},
-		ExecuteRecipe: func(_ context.Context, recipe operation.InstallRecipe, gotManager pkg.PackageManager, _ func(string)) error {
+		ExecuteRecipe: func(_ context.Context, recipe operation.InstallRecipe, gotManager pkg.PackageManager, _ pkg.ExecutableIdentity, _ func(string)) error {
 			sequence = append(sequence, "execute:"+recipe.ToolID)
 			executed, executedManager = operation.CloneInstallRecipe(recipe), gotManager
 			return nil
@@ -183,6 +184,10 @@ func applyFreshSession(t *testing.T, presence health.Presence) (installplan.Fres
 	}
 	manager := pkg.NewMockPackageManager()
 	manager.ManagerName = "brew"
+	managerIdentity, _ := applyManagerIdentity(t, "planned-brew", "exit 0")
+	if err := manager.SetExecutableIdentity(managerIdentity); err != nil {
+		t.Fatal(err)
+	}
 	session, err := installplan.PlanFresh(context.Background(), []string{"git"}, installplan.FreshDependencies{
 		Registry: func() []tools.Tool { return []tools.Tool{tool} }, DetectPlatform: func() pkg.Platform { return pkg.PlatformMacOS }, DetectManager: func() pkg.PackageManager { return manager },
 		Collect: func(context.Context, []tools.Tool, pkg.PackageManager, pkg.Platform, uint64) (health.InstallationSnapshot, error) {
@@ -221,7 +226,7 @@ func rejectingMutationDependencies(t *testing.T, plan func(context.Context, []st
 			return operation.Record{}, nil
 		},
 		Now: func() time.Time { panicCall("clock"); return time.Time{} },
-		ExecuteRecipe: func(context.Context, operation.InstallRecipe, pkg.PackageManager, func(string)) error {
+		ExecuteRecipe: func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error {
 			panicCall("execute")
 			return nil
 		},
@@ -328,7 +333,7 @@ func TestApplyCancellationAfterRunningJournalSkipsMutationAndReleasesOnce(t *tes
 	deps.AcquireLock = func(*operation.StateAuthority, string, string) (func() error, error) {
 		return func() error { releases++; return nil }, nil
 	}
-	deps.ExecuteRecipe = func(context.Context, operation.InstallRecipe, pkg.PackageManager, func(string)) error {
+	deps.ExecuteRecipe = func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error {
 		executes++
 		return nil
 	}
@@ -344,7 +349,7 @@ func TestApplyCancellationAfterRunningJournalSkipsMutationAndReleasesOnce(t *tes
 	}
 }
 
-func TestApplyLockedDetectorDriftFailsBeforeExecutionAndReleasesOnce(t *testing.T) {
+func TestApplyLockedDetectorBecomingSatisfiedSkipsWithoutExecutionAndReleasesOnce(t *testing.T) {
 	session, manager, hash := applyFreshSession(t, health.PresenceMissing)
 	var sequence []string
 	journal := &applyJournal{sequence: &sequence}
@@ -357,16 +362,86 @@ func TestApplyLockedDetectorDriftFailsBeforeExecutionAndReleasesOnce(t *testing.
 		detects++
 		return detects == 2, nil
 	}
-	deps.ExecuteRecipe = func(context.Context, operation.InstallRecipe, pkg.PackageManager, func(string)) error {
+	deps.ExecuteRecipe = func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error {
 		executes++
 		return nil
 	}
 	result, err := Apply(context.Background(), Request{RawTools: []string{"git"}, ExpectedHash: hash}, deps)
-	if !errors.Is(err, ErrApplyFailed) || result.Status != operation.StatusFailed || result.Failed != 1 || executes != 0 || detects != 2 || releases != 1 {
+	if err != nil || result.Status != operation.StatusSucceeded || result.Succeeded != 0 || result.Failed != 0 || executes != 0 || detects != 2 || releases != 1 {
 		t.Fatalf("result=%+v error=%v executes=%d detects=%d releases=%d", result, err, executes, detects, releases)
 	}
-	if len(journal.records) != 2 || journal.records[1].Actions[0].Status != operation.ActionFailed {
+	if len(journal.records) != 2 || journal.records[1].Actions[0].Status != operation.ActionSkipped || journal.records[1].Actions[0].Summary != "already satisfied after review" {
 		t.Fatalf("records=%+v", journal.records)
+	}
+}
+
+func TestApplyOverlappingReceiptSkipsLaterSatisfiedAction(t *testing.T) {
+	session, manager, hash := applyMultiFreshSession(t)
+	var sequence []string
+	journal := &applyJournal{sequence: &sequence}
+	deps := successfulApplyDependencies(t, session, manager, journal, &sequence)
+	detectCalls := make(map[string]int)
+	firstExecuted := false
+	deps.DetectRecipe = func(recipe operation.InstallRecipe, _ pkg.PackageManager) (bool, error) {
+		detectCalls[recipe.ToolID]++
+		switch recipe.ToolID {
+		case "git":
+			return firstExecuted && detectCalls[recipe.ToolID] >= 3, nil
+		case "zsh":
+			return firstExecuted && detectCalls[recipe.ToolID] >= 2, nil
+		default:
+			return false, nil
+		}
+	}
+	var executed []string
+	deps.ExecuteRecipe = func(_ context.Context, recipe operation.InstallRecipe, _ pkg.PackageManager, _ pkg.ExecutableIdentity, _ func(string)) error {
+		executed = append(executed, recipe.ToolID)
+		if recipe.ToolID == "git" {
+			firstExecuted = true
+		}
+		return nil
+	}
+	result, err := Apply(context.Background(), Request{RawTools: []string{"zsh", "git"}, ExpectedHash: hash}, deps)
+	if err != nil || result.Status != operation.StatusSucceeded || result.Succeeded != 1 || result.Failed != 0 || !reflect.DeepEqual(executed, []string{"git"}) {
+		t.Fatalf("result=%+v error=%v executed=%v detects=%v", result, err, executed, detectCalls)
+	}
+	if len(journal.records) != 2 || len(journal.records[1].Actions) != 2 || journal.records[1].Actions[0].Status != operation.ActionSucceeded || journal.records[1].Actions[1].Status != operation.ActionSkipped || journal.records[1].Actions[1].Summary != "already satisfied after review" {
+		t.Fatalf("terminal overlap record=%+v", journal.records)
+	}
+}
+
+func TestApplyAllActionPreflightStopsFirstMutationWhenLaterActionDrifted(t *testing.T) {
+	session, _, hash := applyMultiFreshSession(t)
+	executes := 0
+	deps := rejectingMutationDependencies(t, func(context.Context, []string) (installplan.FreshSession, error) { return session, nil })
+	deps.DetectRecipe = func(recipe operation.InstallRecipe, _ pkg.PackageManager) (bool, error) {
+		return recipe.ToolID == "zsh", nil
+	}
+	deps.ExecuteRecipe = func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error {
+		executes++
+		return nil
+	}
+	if _, err := Apply(context.Background(), Request{RawTools: []string{"git", "zsh"}, ExpectedHash: hash}, deps); !errors.Is(err, ErrPlanNotReady) || executes != 0 {
+		t.Fatalf("error=%v executes=%d, want preflight refusal before mutation", err, executes)
+	}
+}
+
+func TestApplyManagerIdentitySentinelStopsLaterActions(t *testing.T) {
+	session, manager, hash := applyMultiFreshSession(t)
+	var sequence []string
+	journal := &applyJournal{sequence: &sequence}
+	deps := successfulApplyDependencies(t, session, manager, journal, &sequence)
+	executes := 0
+	deps.ExecuteRecipe = func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error {
+		executes++
+		return fmt.Errorf("step boundary: %w", ErrManagerIdentityChanged)
+	}
+	result, err := Apply(context.Background(), Request{RawTools: []string{"git", "zsh"}, ExpectedHash: hash}, deps)
+	if !errors.Is(err, ErrApplyFailed) || !errors.Is(err, ErrManagerIdentityChanged) || result.Status != operation.StatusFailed || result.Failed != 1 || executes != 1 {
+		t.Fatalf("result=%+v error=%v executes=%d", result, err, executes)
+	}
+	if len(journal.records) != 2 || len(journal.records[1].Actions) != 2 || journal.records[1].Actions[0].Status != operation.ActionFailed || journal.records[1].Actions[1].Status != operation.ActionSkipped {
+		t.Fatalf("sentinel terminal record=%+v", journal.records)
 	}
 }
 
@@ -488,7 +563,7 @@ func TestApplyMultiActionContinuesOrdinaryFailureButStopsOnCancellation(t *testi
 			journal := &applyJournal{sequence: &sequence}
 			deps := successfulApplyDependencies(t, session, manager, journal, &sequence)
 			executes := 0
-			deps.ExecuteRecipe = func(context.Context, operation.InstallRecipe, pkg.PackageManager, func(string)) error {
+			deps.ExecuteRecipe = func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error {
 				executes++
 				if executes == 1 {
 					return tc.firstError
@@ -518,7 +593,7 @@ func TestApplyMixedPresentAndMissingExecutesOnlyMissingAuthority(t *testing.T) {
 	var sequence, executed []string
 	journal := &applyJournal{sequence: &sequence}
 	deps := successfulApplyDependencies(t, session, manager, journal, &sequence)
-	deps.ExecuteRecipe = func(_ context.Context, recipe operation.InstallRecipe, _ pkg.PackageManager, _ func(string)) error {
+	deps.ExecuteRecipe = func(_ context.Context, recipe operation.InstallRecipe, _ pkg.PackageManager, _ pkg.ExecutableIdentity, _ func(string)) error {
 		executed = append(executed, recipe.ToolID)
 		return nil
 	}
@@ -548,7 +623,7 @@ func TestApplyRecipeArgumentsAreDefensiveAgainstDependencyPoisoning(t *testing.T
 		recipe.Detector.Values[0] = "poison-detect"
 		return detects == 3, nil
 	}
-	deps.ExecuteRecipe = func(_ context.Context, recipe operation.InstallRecipe, _ pkg.PackageManager, _ func(string)) error {
+	deps.ExecuteRecipe = func(_ context.Context, recipe operation.InstallRecipe, _ pkg.PackageManager, _ pkg.ExecutableIdentity, _ func(string)) error {
 		if !reflect.DeepEqual(recipe, want) {
 			t.Fatalf("executor received poisoned recipe: %+v", recipe)
 		}
@@ -574,10 +649,12 @@ func successfulApplyDependencies(t *testing.T, session installplan.FreshSession,
 		AcquireLock: func(*operation.StateAuthority, string, string) (func() error, error) {
 			return func() error { return nil }, nil
 		},
-		OpenJournal:   func(*operation.StateAuthority) (JournalWriter, error) { return journal, nil },
-		StartRecord:   operation.StartRecord,
-		Now:           func() time.Time { return time.Now().UTC() },
-		ExecuteRecipe: func(context.Context, operation.InstallRecipe, pkg.PackageManager, func(string)) error { return nil },
+		OpenJournal: func(*operation.StateAuthority) (JournalWriter, error) { return journal, nil },
+		StartRecord: operation.StartRecord,
+		Now:         func() time.Time { return time.Now().UTC() },
+		ExecuteRecipe: func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error {
+			return nil
+		},
 		DetectRecipe: func(recipe operation.InstallRecipe, gotManager pkg.PackageManager) (bool, error) {
 			if gotManager != manager {
 				t.Fatal("manager identity changed")
@@ -603,6 +680,10 @@ func applyMultiFreshSessionWithPresence(t *testing.T, presences map[string]healt
 	all := []tools.Tool{tools.NewGitTool(), tools.NewZshTool()}
 	manager := pkg.NewMockPackageManager()
 	manager.ManagerName = "brew"
+	managerIdentity, _ := applyManagerIdentity(t, "multi-brew", "exit 0")
+	if err := manager.SetExecutableIdentity(managerIdentity); err != nil {
+		t.Fatal(err)
+	}
 	observations := make([]health.InstallationObservation, 0, len(all))
 	for _, tool := range all {
 		recipe, err := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})

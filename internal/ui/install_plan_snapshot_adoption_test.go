@@ -149,6 +149,7 @@ func TestInstallSnapshotPlannerDecisionMatrix(t *testing.T) {
 		legacyValue    bool
 		wantApply      bool
 		wantRepair     bool
+		wantDetected   bool
 		wantIntent     string
 		wantErr        bool
 		partialFixture func(*testing.T, toolInstallRuntime, string) health.InstallationObservation
@@ -158,8 +159,8 @@ func TestInstallSnapshotPlannerDecisionMatrix(t *testing.T) {
 		{name: "present and unknown installability still skips install", presence: health.PresencePresent, installability: health.InstallabilityUnknown, legacyValue: false, wantIntent: "none"},
 		{name: "missing and supported applies", presence: health.PresenceMissing, installability: health.InstallabilitySupported, legacyValue: true, wantApply: true, wantIntent: "install"},
 		{name: "receipt partial and supported repairs", presence: health.PresencePartial, installability: health.InstallabilitySupported, legacyValue: true, wantApply: true, wantRepair: true, wantIntent: "repair"},
-		{name: "authoritative package and direct disagreement repairs", presence: health.PresencePartial, installability: health.InstallabilitySupported, legacyValue: true, wantApply: true, wantRepair: true, wantIntent: "repair", partialFixture: plannerDisagreementPartialObservation},
-		{name: "nonauthoritative receipt positive evidence repairs", presence: health.PresencePartial, installability: health.InstallabilitySupported, legacyValue: true, wantApply: true, wantRepair: true, wantIntent: "repair", partialFixture: plannerReceiptPositivePartialObservation},
+		{name: "authoritative package and direct disagreement repairs", presence: health.PresencePartial, installability: health.InstallabilitySupported, legacyValue: true, wantApply: true, wantRepair: true, wantIntent: "repair", wantDetected: true, partialFixture: plannerDisagreementPartialObservation},
+		{name: "nonauthoritative receipt positive evidence is unresolved", presence: health.PresencePartial, installability: health.InstallabilitySupported, legacyValue: true, wantErr: true, partialFixture: plannerReceiptPositivePartialObservation},
 		{name: "unknown returns error without install actions", presence: health.PresenceUnknown, installability: health.InstallabilitySupported, legacyValue: false, wantErr: true},
 		{name: "missing and unsupported returns error without actions", presence: health.PresenceMissing, installability: health.InstallabilityUnsupported, legacyValue: false, wantErr: true},
 		{name: "missing and unknown installability returns error without actions", presence: health.PresenceMissing, installability: health.InstallabilityUnknown, legacyValue: false, wantErr: true},
@@ -204,6 +205,7 @@ func TestInstallSnapshotPlannerDecisionMatrix(t *testing.T) {
 			app.installationSnapshotGeneration = 1
 			app.installationSnapshotTerminal = true
 			app.installationSnapshot = snapshot
+			app.installationSnapshotManagerIdentity = stableUIManagerIdentity()
 			app.installationSnapshotReady = true
 			app.installationSnapshotLoading = false
 			app.installationSnapshotStale = false
@@ -244,6 +246,9 @@ func TestInstallSnapshotPlannerDecisionMatrix(t *testing.T) {
 			}
 			if len(targetActions) != 1 || targetActions[0].Disposition != operation.DispositionApply {
 				t.Fatalf("install actions = %+v, want one Apply action", targetActions)
+			}
+			if targetActions[0].InstallDetected == nil || *targetActions[0].InstallDetected != tt.wantDetected {
+				t.Fatalf("accepted detector=%v, want %v", targetActions[0].InstallDetected, tt.wantDetected)
 			}
 			if tt.wantRepair && !strings.Contains(strings.ToLower(targetActions[0].Description), "repair") {
 				t.Fatalf("partial install action description = %q, want explicit repair semantics", targetActions[0].Description)
@@ -319,6 +324,7 @@ func TestInstallSnapshotPlannerRequiresLatestBoundEnvironment(t *testing.T) {
 			app.installationSnapshotGeneration = 1
 			app.installationSnapshotTerminal = true
 			app.installationSnapshot = snapshot
+			app.installationSnapshotManagerIdentity = stableUIManagerIdentity()
 			app.installationSnapshotReady = true
 			app.installationSnapshotLoading = false
 			app.installationSnapshotStale = false
@@ -398,6 +404,7 @@ func TestInstallSnapshotPlannerRejectsRecipeDriftAndPinsIdentity(t *testing.T) {
 		app.installationSnapshotGeneration = generation
 		app.installationSnapshotTerminal = true
 		app.installationSnapshot = snapshot
+		app.installationSnapshotManagerIdentity = stableUIManagerIdentity()
 		app.installationSnapshotReady = true
 		app.installationSnapshotLoading = false
 		app.installationSnapshotStale = false
@@ -503,6 +510,7 @@ func TestInstallSnapshotPlannerUsesReadySnapshotEnvironmentWithoutLiveProbes(t *
 	app.installationSnapshotGeneration = snapshot.Generation()
 	app.installationSnapshotTerminal = true
 	app.installationSnapshot = snapshot
+	app.installationSnapshotManagerIdentity = stableUIManagerIdentity()
 	app.installationSnapshotReady = true
 	app.installationSnapshotLoading = false
 	app.installationSnapshotStale = false

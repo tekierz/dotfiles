@@ -97,7 +97,7 @@ func TestAcceptedPlanHashRejectsCorruptedSnapshotSchemaBeforeHashing(t *testing.
 	snapshot := mustSnapshot(t, 12, mustObservation(t, "git", health.PackageMissing, recipe))
 	result, err := Build(Request{
 		Intent: mustIntent(t, "git"), Snapshot: snapshot,
-		Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 12},
+		Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 12),
 	}, countingDependencies(&dependencyCounts{}, recipe))
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestBuildReturnsBlockedDomainOutcomesWithoutPrivateAuthority(t *testing.T) 
 
 func TestBuildFatalDependencyDescribeCaptureAndClockFailuresExposeNoPublicDocument(t *testing.T) {
 	recipe := reviewedPackageRecipe("git")
-	request := Request{Intent: mustIntent(t, "git"), Snapshot: mustSnapshot(t, 17, mustObservation(t, "git", health.PackageMissing, recipe)), Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 17}}
+	request := Request{Intent: mustIntent(t, "git"), Snapshot: mustSnapshot(t, 17, mustObservation(t, "git", health.PackageMissing, recipe)), Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 17)}
 	for _, missing := range []string{"lookup", "describe", "capture", "clock"} {
 		counts := &dependencyCounts{}
 		deps := countingDependencies(counts, recipe)

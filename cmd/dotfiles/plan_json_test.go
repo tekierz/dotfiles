@@ -308,6 +308,7 @@ func planRuntimeFixture(t *testing.T, presence health.Presence) (planJSONRuntime
 			calls.manager++
 			manager := pkg.NewMockPackageManager()
 			manager.ManagerName = "brew"
+			setCommandManagerIdentity(t, manager)
 			return manager
 		},
 		collect: func(_ context.Context, _ []tools.Tool, manager pkg.PackageManager, platform pkg.Platform, generation uint64) (health.InstallationSnapshot, error) {

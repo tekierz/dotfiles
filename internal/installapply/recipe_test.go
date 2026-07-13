@@ -66,12 +66,16 @@ func reviewedExecutionRecipe(steps ...operation.InstallStep) operation.InstallRe
 func TestExecuteRecipePreservesStepOrderStreamingAndCaskTyping(t *testing.T) {
 	manager := &recipeManager{MockPackageManager: pkg.NewMockPackageManager()}
 	manager.ManagerName = "brew"
+	managerIdentity, _ := applyManagerIdentity(t, "ordered-brew", "exit 0")
+	if err := manager.SetExecutableIdentity(managerIdentity); err != nil {
+		t.Fatal(err)
+	}
 	recipe := reviewedExecutionRecipe(
 		operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"node"}},
 		operation.InstallStep{Kind: operation.InstallStepHomebrewCask, Provider: "brew", Casks: []string{"t3-code"}},
 	)
 	var output []string
-	if err := ExecuteRecipe(context.Background(), recipe, manager, func(line string) { output = append(output, line) }); err != nil {
+	if err := ExecuteRecipe(context.Background(), recipe, manager, managerIdentity, func(line string) { output = append(output, line) }); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(manager.order, []string{"package:node", "cask:t3-code"}) || !reflect.DeepEqual(output, []string{"package output", "cask output"}) || !reflect.DeepEqual(manager.casks, [][]string{{"t3-code"}}) {
@@ -80,7 +84,7 @@ func TestExecuteRecipePreservesStepOrderStreamingAndCaskTyping(t *testing.T) {
 
 	plain := pkg.NewMockPackageManager()
 	plain.ManagerName = "brew"
-	if err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepHomebrewCask, Provider: "brew", Casks: []string{"t3-code"}}), plain, nil); err == nil {
+	if err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepHomebrewCask, Provider: "brew", Casks: []string{"t3-code"}}), plain, pkg.ExecutableIdentity{}, nil); err == nil {
 		t.Fatal("non-cask manager accepted cask step")
 	}
 }
@@ -92,12 +96,12 @@ func TestExecuteRecipePreflightsProviderAndCancellationBeforeMutation(t *testing
 		operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"first"}},
 		operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "apt", Packages: []string{"second"}},
 	)
-	if err := ExecuteRecipe(context.Background(), recipe, manager, nil); err == nil || len(manager.order) != 0 {
+	if err := ExecuteRecipe(context.Background(), recipe, manager, pkg.ExecutableIdentity{}, nil); err == nil || len(manager.order) != 0 {
 		t.Fatalf("mismatch error=%v mutations=%v", err, manager.order)
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := ExecuteRecipe(cancelled, reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"first"}}), manager, nil); !errors.Is(err, context.Canceled) || len(manager.order) != 0 {
+	if err := ExecuteRecipe(cancelled, reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"first"}}), manager, pkg.ExecutableIdentity{}, nil); !errors.Is(err, context.Canceled) || len(manager.order) != 0 {
 		t.Fatalf("cancel error=%v mutations=%v", err, manager.order)
 	}
 }
@@ -115,7 +119,7 @@ func TestExecuteRecipeNPMUsesExactArgvWithoutShell(t *testing.T) {
 	t.Setenv("ARG_LOG", logPath)
 	args := []string{"install", "-g", "package;touch " + marker}
 	var output []string
-	if err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: args}), nil, func(line string) { output = append(output, line) }); err != nil {
+	if err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: args}), nil, pkg.ExecutableIdentity{}, func(line string) { output = append(output, line) }); err != nil {
 		t.Fatal(err)
 	}
 	logged, err := os.ReadFile(logPath)
@@ -146,10 +150,10 @@ func TestDetectRecipeExactPostconditionsAndUnsupportedFailClosed(t *testing.T) {
 	if _, err := DetectRecipe(operation.InstallRecipe{Detector: operation.InstallDetector{Kind: operation.InstallDetectorKind("future")}}, manager); err == nil {
 		t.Fatal("unsupported detector did not fail closed")
 	}
-	if err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepKind("future"), Provider: "future"}), manager, nil); err == nil {
+	if err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepKind("future"), Provider: "future"}), manager, pkg.ExecutableIdentity{}, nil); err == nil {
 		t.Fatal("unsupported step did not fail closed")
 	}
-	if err := ExecuteRecipe(context.Background(), operation.InstallRecipe{}, manager, nil); err == nil {
+	if err := ExecuteRecipe(context.Background(), operation.InstallRecipe{}, manager, pkg.ExecutableIdentity{}, nil); err == nil {
 		t.Fatal("structurally invalid recipe crossed the apply boundary")
 	}
 	if detected, err := DetectRecipe(operation.InstallRecipe{}, manager); err == nil || detected {
@@ -220,6 +224,10 @@ func TestExecuteRecipeResolvesNPMAtReviewedStepAndCancelsRunningProcess(t *testi
 	npm := filepath.Join(dir, "npm")
 	manager := &recipeManager{MockPackageManager: pkg.NewMockPackageManager()}
 	manager.ManagerName = "brew"
+	managerIdentity, _ := applyManagerIdentity(t, "prerequisite-brew", "exit 0")
+	if err := manager.SetExecutableIdentity(managerIdentity); err != nil {
+		t.Fatal(err)
+	}
 	manager.onInstall = func() {
 		if err := os.WriteFile(npm, []byte("#!/bin/sh\nprintf 'after prerequisite\\n'\n"), 0o700); err != nil {
 			t.Fatal(err)
@@ -230,7 +238,7 @@ func TestExecuteRecipeResolvesNPMAtReviewedStepAndCancelsRunningProcess(t *testi
 		operation.InstallStep{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: []string{"install", "-g", "pi@1.2.3"}},
 	)
 	var output []string
-	if err := ExecuteRecipe(context.Background(), recipe, manager, func(line string) { output = append(output, line) }); err != nil {
+	if err := ExecuteRecipe(context.Background(), recipe, manager, managerIdentity, func(line string) { output = append(output, line) }); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(manager.order, []string{"package:node"}) || !reflect.DeepEqual(output, []string{"package output", "after prerequisite"}) {
@@ -243,7 +251,7 @@ func TestExecuteRecipeResolvesNPMAtReviewedStepAndCancelsRunningProcess(t *testi
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	npmOnly := reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: []string{"install", "-g", "pi@1.2.3"}})
-	if err := ExecuteRecipe(ctx, npmOnly, nil, nil); !errors.Is(err, context.DeadlineExceeded) {
+	if err := ExecuteRecipe(ctx, npmOnly, nil, pkg.ExecutableIdentity{}, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("running npm cancellation=%v", err)
 	}
 }
@@ -251,10 +259,14 @@ func TestExecuteRecipeResolvesNPMAtReviewedStepAndCancelsRunningProcess(t *testi
 func TestExecuteRecipeCancellationBoundsMalformedStreamingManager(t *testing.T) {
 	manager := &nonClosingRecipeManager{MockPackageManager: pkg.NewMockPackageManager()}
 	manager.ManagerName = "brew"
+	managerIdentity, _ := applyManagerIdentity(t, "nonclosing-brew", "exit 0")
+	if err := manager.SetExecutableIdentity(managerIdentity); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	recipe := reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"node"}})
-	if err := ExecuteRecipe(ctx, recipe, manager, nil); !errors.Is(err, context.DeadlineExceeded) {
+	if err := ExecuteRecipe(ctx, recipe, manager, managerIdentity, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("non-closing manager cancellation=%v", err)
 	}
 }
@@ -262,7 +274,7 @@ func TestExecuteRecipeCancellationBoundsMalformedStreamingManager(t *testing.T) 
 func TestRecipeBoundaryRejectsTypedNilManagerWithoutPanic(t *testing.T) {
 	var manager *pkg.MockPackageManager
 	recipe := reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"node"}})
-	if err := ExecuteRecipe(context.Background(), recipe, manager, nil); err == nil {
+	if err := ExecuteRecipe(context.Background(), recipe, manager, pkg.ExecutableIdentity{}, nil); err == nil {
 		t.Fatal("typed-nil manager crossed execution boundary")
 	}
 	packageRecipe := operation.CloneInstallRecipe(recipe)

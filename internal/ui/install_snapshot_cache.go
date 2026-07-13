@@ -24,13 +24,14 @@ type installationSnapshotCacheRuntime struct {
 }
 
 type installationSnapshotDoneMsg struct {
-	Generation uint64
-	Platform   pkg.Platform
-	Manager    string
-	Snapshot   health.InstallationSnapshot
-	Utilities  map[string]bool
-	Err        error
-	UtilityErr error
+	Generation      uint64
+	Platform        pkg.Platform
+	Manager         string
+	ManagerIdentity pkg.ExecutableIdentity
+	Snapshot        health.InstallationSnapshot
+	Utilities       map[string]bool
+	Err             error
+	UtilityErr      error
 }
 
 type installationSnapshotCacheView struct {
@@ -96,8 +97,14 @@ func (a *App) beginInstallationSnapshotLoad(runtime installationSnapshotCacheRun
 			manager = runtime.detectManager()
 		}
 		managerName := ""
+		managerIdentity := pkg.ExecutableIdentity{}
 		if manager != nil {
 			managerName = manager.Name()
+			if provider, ok := manager.(pkg.ExecutableIdentityProvider); ok {
+				if observed, available := provider.ExecutableIdentity(); available && validUIManagerExecutableIdentity(observed) {
+					managerIdentity = observed
+				}
+			}
 		}
 		var snapshot health.InstallationSnapshot
 		var healthErr error
@@ -115,7 +122,7 @@ func (a *App) beginInstallationSnapshotLoad(runtime installationSnapshotCacheRun
 		if runtime.observeUtilities != nil {
 			utilities, utilityErr = runtime.observeUtilities(context.Background(), generation)
 		}
-		return installationSnapshotDoneMsg{Generation: generation, Platform: platform, Manager: managerName, Snapshot: snapshot, Utilities: utilities, Err: healthErr, UtilityErr: utilityErr}
+		return installationSnapshotDoneMsg{Generation: generation, Platform: platform, Manager: managerName, ManagerIdentity: managerIdentity, Snapshot: snapshot, Utilities: utilities, Err: healthErr, UtilityErr: utilityErr}
 	}
 }
 
@@ -140,6 +147,7 @@ func (a *App) applyInstallationSnapshotDone(message installationSnapshotDoneMsg)
 		cosmetic[observation.ToolID()] = observation.Presence() == health.PresencePresent
 	}
 	a.installationSnapshot = message.Snapshot
+	a.installationSnapshotManagerIdentity = message.ManagerIdentity
 	if message.UtilityErr == nil {
 		a.installationSnapshotUtilities = maps.Clone(message.Utilities)
 	}

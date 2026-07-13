@@ -50,7 +50,7 @@ func TestAcceptedHashBindsPrivateStateAuthorityAndPublishesOnlyItsFingerprint(t 
 	}
 	recipe := reviewedPackageRecipe("git")
 	snapshot := mustSnapshot(t, 61, mustObservation(t, "git", health.PackageMissing, recipe))
-	request := Request{Intent: mustIntent(t, "git"), Snapshot: snapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 61}}
+	request := Request{Intent: mustIntent(t, "git"), Snapshot: snapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 61)}
 	build := func(state *operation.StatePlan) Result {
 		t.Helper()
 		result, buildErr := Build(request, Dependencies{
@@ -108,7 +108,7 @@ func TestBuildRejectsMalformedStateAuthority(t *testing.T) {
 	snapshot := mustSnapshot(t, 62, mustObservation(t, "git", health.PackageMissing, recipe))
 	result, err := Build(Request{
 		Intent: mustIntent(t, "git"), Snapshot: snapshot,
-		Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 62},
+		Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 62),
 	}, Dependencies{
 		LookupTool: tools.GetRegistry().Get,
 		DescribeInstall: func(tools.Tool, tools.InstallEnvironment) (operation.InstallRecipe, error) {

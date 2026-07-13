@@ -28,6 +28,14 @@ type installHookManager struct {
 	hook func()
 }
 
+func (m *installHookManager) ExecutableIdentity() (pkg.ExecutableIdentity, bool) {
+	provider, ok := m.PackageManager.(pkg.ExecutableIdentityProvider)
+	if !ok {
+		return pkg.ExecutableIdentity{}, false
+	}
+	return provider.ExecutableIdentity()
+}
+
 func (m *installHookManager) InstallStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if m.hook != nil {
 		m.hook()
@@ -55,6 +63,51 @@ func newPlanTestApp(t *testing.T) (*App, string, toolInstallRuntime) {
 	runtime := registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
 	runtime.backupTargets = func([]backup.Target) (autoBackupResult, error) { return autoBackupResult{}, nil }
 	return app, home, runtime
+}
+
+func TestFullInstallPlanHashBindsManagerIdentityOnlyWhenRecipesRequireIt(t *testing.T) {
+	now := time.Date(2026, 7, 13, 19, 30, 0, 0, time.UTC)
+	app, _, runtime := newPlanTestApp(t)
+	identityA := uiManagerIdentity(t, "brew-a", "exit 0")
+	identityB := uiManagerIdentity(t, "brew-b", "exit 1")
+	app.installationSnapshotManagerIdentity = identityA
+	first, err := buildInstallPlan(app, runtime, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.installationSnapshotManagerIdentity = identityB
+	second, err := buildInstallPlan(app, runtime, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.hash() == second.hash() || first.installSnapshot.managerIdentity.Digest() != identityA.Digest() || second.installSnapshot.managerIdentity.Digest() != identityB.Digest() {
+		t.Fatal("manager-backed full plan did not bind identity into its private hash")
+	}
+	app.installationSnapshotManagerIdentity = pkg.ExecutableIdentity{}
+	if missing, missingErr := buildInstallPlan(app, runtime, now); missing != nil || missingErr == nil || missingErr.Error() != installationSnapshotUnavailable {
+		t.Fatalf("manager-backed plan with missing cached identity=(%v,%v), want unavailable", missing, missingErr)
+	}
+
+	installed := make(map[string]bool)
+	for _, tool := range tools.GetRegistry().All() {
+		installed[tool.ID()] = true
+	}
+	configOnly := NewApp(true)
+	seedTypedReadyInstallCache(t, configOnly, installed)
+	configRuntime := registryRuntime(pkg.PlatformMacOS, installed)
+	configOnly.installationSnapshotManagerIdentity = identityA
+	third, err := buildInstallPlan(configOnly, configRuntime, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configOnly.installationSnapshotManagerIdentity = identityB
+	fourth, err := buildInstallPlan(configOnly, configRuntime, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.hash() != fourth.hash() || validUIManagerExecutableIdentity(third.installSnapshot.managerIdentity) || validUIManagerExecutableIdentity(fourth.installSnapshot.managerIdentity) {
+		t.Fatal("unrequired manager identity changed config-only full-plan authority")
+	}
 }
 
 func TestBuildInstallPlanContainsCoreInstallsAndExactConfigActions(t *testing.T) {
@@ -947,6 +1000,7 @@ func TestInstallPlanWorkerJournalsExactReviewedHash(t *testing.T) {
 	for _, tool := range tools.GetRegistry().All() {
 		app.manageInstalled[tool.ID()] = true
 	}
+	seedTypedReadyInstallCache(t, app, app.manageInstalled)
 	runtime = registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
 	runtime.backupTargets = func(targets []backup.Target) (autoBackupResult, error) {
 		if len(targets) == 0 {
@@ -1043,6 +1097,7 @@ func TestInstallPlanWorkerUsesFrozenYaziAndGlobalPathsAfterEnvironmentDrift(t *t
 	for _, tool := range tools.GetRegistry().All() {
 		app.manageInstalled[tool.ID()] = true
 	}
+	seedTypedReadyInstallCache(t, app, app.manageInstalled)
 	app.deepDiveConfig.NeovimConfig = "custom"
 	app.deepDiveConfig.TmuxTPMEnabled = false
 	for id := range app.deepDiveConfig.CLITools {
@@ -1424,7 +1479,13 @@ func TestSecondRevalidationRefusalDoesNotRollbackExternalEdit(t *testing.T) {
 }
 
 func TestPostPackageRevalidationPreservesExternalEditWithoutRollback(t *testing.T) {
-	app, _, runtime := newPlanTestApp(t)
+	app, _, _ := newPlanTestApp(t)
+	for _, tool := range tools.GetRegistry().All() {
+		app.manageInstalled[tool.ID()] = true
+	}
+	app.manageInstalled["zsh"] = false
+	seedTypedReadyInstallCache(t, app, app.manageInstalled)
+	runtime := registryRuntime(pkg.PlatformMacOS, app.manageInstalled)
 	app.deepDiveConfig.NeovimConfig = "custom"
 	app.deepDiveConfig.TmuxTPMEnabled = false
 	for id := range app.deepDiveConfig.CLITools {
@@ -1487,6 +1548,7 @@ func TestPostPackageRevalidationPreservesExternalConfigCollision(t *testing.T) {
 		app.manageInstalled[tool.ID()] = true
 	}
 	app.manageInstalled["zsh"] = false
+	seedTypedReadyInstallCache(t, app, app.manageInstalled)
 	app.deepDiveConfig.NeovimConfig = "custom"
 	app.deepDiveConfig.TmuxTPMEnabled = false
 	for id := range app.deepDiveConfig.CLITools {

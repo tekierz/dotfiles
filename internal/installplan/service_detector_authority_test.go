@@ -43,7 +43,7 @@ func TestBuildBindsActualDetectorObservationForPartialRepairs(t *testing.T) {
 				t.Fatalf("presence=%q", observation.Presence())
 			}
 			snapshot := mustSnapshot(t, 73, observation)
-			result, err := Build(Request{Intent: mustIntent(t, "git"), Snapshot: snapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 73}}, countingDependencies(&dependencyCounts{}, recipe))
+			result, err := Build(Request{Intent: mustIntent(t, "git"), Snapshot: snapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 73)}, countingDependencies(&dependencyCounts{}, recipe))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +80,7 @@ func TestDetectorObservationChangesAcceptedAuthorityHash(t *testing.T) {
 			directFacet,
 		)
 		result, err := Build(
-			Request{Intent: mustIntent(t, "git"), Snapshot: mustSnapshot(t, 74, observation), Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 74}},
+			Request{Intent: mustIntent(t, "git"), Snapshot: mustSnapshot(t, 74, observation), Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 74)},
 			countingDependencies(&dependencyCounts{}, recipe),
 		)
 		if err != nil {
@@ -182,7 +182,7 @@ func TestMultiValuePackageDetectorRequiresEveryReceipt(t *testing.T) {
 				health.PackageFacet{State: state, Provider: "brew", ExpectedReceipts: []string{"git", "git-runtime"}, ObservedReceipts: test.observed, MissingReceipts: test.missing, Authoritative: true, Complete: true},
 				health.DirectFacet{State: health.ComponentNotApplicable},
 			)
-			got, known := observedInstallDetector(observation, recipe.Detector)
+			got, known := ObservedInstallDetector(observation, recipe.Detector)
 			if !known || got != test.want {
 				t.Fatalf("detector=(%v,%v), want (%v,true)", got, known, test.want)
 			}
@@ -210,7 +210,7 @@ func TestDirectDetectorEvidenceMapsBinaryAndAppBundleBooleans(t *testing.T) {
 				health.PackageFacet{State: health.PackageNotApplicable},
 				health.DirectFacet{State: test.state, Authoritative: true, Alternatives: []health.DirectAlternative{{Kind: test.source, Identifiers: []string{"candidate-detector"}, State: test.state}}},
 			)
-			got, known := observedInstallDetector(observation, recipe.Detector)
+			got, known := ObservedInstallDetector(observation, recipe.Detector)
 			if !known || got != test.want {
 				t.Fatalf("detector=(%v,%v), want (%v,true)", got, known, test.want)
 			}

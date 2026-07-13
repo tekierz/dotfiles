@@ -36,6 +36,10 @@ func TestPlanFreshReadyBindsOriginalSnapshotAndManagerOnce(t *testing.T) {
 	snapshot := mustSnapshot(t, 1, mustObservation(t, "git", health.PackageMissing, recipe))
 	manager := pkg.NewMockPackageManager()
 	manager.ManagerName = "brew"
+	identity, _ := observedManagerIdentity(t, "brew", "exit 0")
+	if err := manager.SetExecutableIdentity(identity); err != nil {
+		t.Fatal(err)
+	}
 	dependencies, counts := freshFixture(t, manager, snapshot, recipe)
 	before, err := os.ReadDir(os.Getenv("HOME"))
 	if err != nil {

@@ -245,18 +245,19 @@ type App struct {
 	manageConfigBaselineTheme string
 	managePane                int // 0 = tools pane, 1 = settings pane (ScreenManage)
 	// Cached install status for tools to avoid running package-manager checks every render.
-	manageInstalled                map[string]bool
-	manageInstalledReady           bool
-	installCacheLoading            bool // Currently loading cache asynchronously
-	installationSnapshot           health.InstallationSnapshot
-	installationSnapshotGeneration uint64
-	installationSnapshotReady      bool
-	installationSnapshotLoading    bool
-	installationSnapshotStale      bool
-	installationSnapshotTerminal   bool
-	installationSnapshotError      string
-	installationSnapshotUtilities  map[string]bool
-	installationSnapshotCosmetic   map[string]bool
+	manageInstalled                     map[string]bool
+	manageInstalledReady                bool
+	installCacheLoading                 bool // Currently loading cache asynchronously
+	installationSnapshot                health.InstallationSnapshot
+	installationSnapshotManagerIdentity pkg.ExecutableIdentity
+	installationSnapshotGeneration      uint64
+	installationSnapshotReady           bool
+	installationSnapshotLoading         bool
+	installationSnapshotStale           bool
+	installationSnapshotTerminal        bool
+	installationSnapshotError           string
+	installationSnapshotUtilities       map[string]bool
+	installationSnapshotCosmetic        map[string]bool
 	// Manage metadata sources are injectable for deterministic tests. Once a
 	// typed snapshot exists, its platform and observations are authoritative and
 	// manageDetectPlatform must not be called.

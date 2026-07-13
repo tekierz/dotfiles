@@ -17,6 +17,11 @@ import (
 	"github.com/tekierz/dotfiles/internal/runner"
 )
 
+// ErrManagerIdentityChanged is the path-free authority failure returned when
+// the reviewed package-manager executable is unavailable, substituted, or
+// changes before a manager-backed detector or mutation.
+var ErrManagerIdentityChanged = errors.New("reviewed package manager identity changed")
+
 type streamingInstallManager struct {
 	pkg.PackageManager
 	ctx      context.Context
@@ -41,7 +46,7 @@ func (manager *streamingInstallManager) Install(packages ...string) error {
 // recipe and all manager/cask requirements are checked before mutation. An npm
 // executable is resolved at its step boundary because an earlier reviewed
 // package step may intentionally install the Node/npm prerequisite.
-func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager pkg.PackageManager, emitLine func(string)) error {
+func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager pkg.PackageManager, acceptedIdentity pkg.ExecutableIdentity, emitLine func(string)) error {
 	if ctx == nil {
 		return fmt.Errorf("reviewed install context is unavailable")
 	}
@@ -57,6 +62,9 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 			if packageManagerNil(manager) || manager.Name() != step.Provider {
 				return fmt.Errorf("reviewed package manager %q is unavailable", step.Provider)
 			}
+			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, false); err != nil {
+				return err
+			}
 		case operation.InstallStepNPMGlobal:
 			// Full recipe validation above pins this provider to npm. Resolve it
 			// only after any reviewed prerequisite package step has completed.
@@ -66,6 +74,9 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 			}
 			if _, ok := manager.(pkg.HomebrewCaskManager); !ok {
 				return fmt.Errorf("reviewed Homebrew cask installer is unavailable")
+			}
+			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, false); err != nil {
+				return err
 			}
 		default:
 			return fmt.Errorf("unsupported reviewed install step %q", step.Kind)
@@ -77,6 +88,9 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 		}
 		switch step.Kind {
 		case operation.InstallStepPackageManager:
+			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, true); err != nil {
+				return err
+			}
 			adapted := &streamingInstallManager{PackageManager: manager, ctx: ctx, emitLine: emitLine}
 			if err := adapted.Install(step.Packages...); err != nil {
 				return err
@@ -97,6 +111,9 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 				return err
 			}
 		case operation.InstallStepHomebrewCask:
+			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, true); err != nil {
+				return err
+			}
 			command, err := manager.(pkg.HomebrewCaskManager).InstallCasksStreaming(ctx, step.Casks...)
 			if err != nil {
 				return err
@@ -110,6 +127,28 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// validateAcceptedManagerIdentity intentionally reports no executable path or
+// digest. Revalidation immediately precedes each manager mutation, but the OS
+// spawn still occurs after this check; that remaining revalidate-to-spawn race
+// is explicit and is not claimed closed by this authority layer.
+func validateAcceptedManagerIdentity(manager pkg.PackageManager, accepted pkg.ExecutableIdentity, revalidate bool) error {
+	if packageManagerNil(manager) || accepted.SchemaVersion() != pkg.CurrentExecutableIdentitySchemaVersion || accepted.Digest() == "" {
+		return ErrManagerIdentityChanged
+	}
+	provider, ok := manager.(pkg.ExecutableIdentityProvider)
+	if !ok {
+		return ErrManagerIdentityChanged
+	}
+	current, ok := provider.ExecutableIdentity()
+	if !ok || current.SchemaVersion() != accepted.SchemaVersion() || current.Digest() != accepted.Digest() {
+		return ErrManagerIdentityChanged
+	}
+	if revalidate && accepted.Revalidate() != nil {
+		return ErrManagerIdentityChanged
 	}
 	return nil
 }

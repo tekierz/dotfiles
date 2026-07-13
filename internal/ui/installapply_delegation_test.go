@@ -19,10 +19,17 @@ func TestUIReviewedRecipeHelpersDelegateWithInstallapplyParity(t *testing.T) {
 	}
 	directManager, uiManager := pkg.NewMockPackageManager(), pkg.NewMockPackageManager()
 	directManager.ManagerName, uiManager.ManagerName = "brew", "brew"
-	if directErr := installapply.ExecuteRecipe(context.Background(), recipe, directManager, nil); directErr != nil {
+	identity := uiManagerIdentity(t, "brew", "exit 0")
+	if err := directManager.SetExecutableIdentity(identity); err != nil {
+		t.Fatal(err)
+	}
+	if err := uiManager.SetExecutableIdentity(identity); err != nil {
+		t.Fatal(err)
+	}
+	if directErr := installapply.ExecuteRecipe(context.Background(), recipe, directManager, identity, nil); directErr != nil {
 		t.Fatal(directErr)
 	}
-	if uiErr := executeInstallRecipe(context.Background(), recipe, uiManager, nil); uiErr != nil {
+	if uiErr := executeInstallRecipe(context.Background(), recipe, uiManager, identity, nil); uiErr != nil {
 		t.Fatal(uiErr)
 	}
 	if !reflect.DeepEqual(directManager.InstallCalls, uiManager.InstallCalls) {

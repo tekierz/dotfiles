@@ -53,6 +53,9 @@ func TestManageReviewedPackageOnlyPlanExecutesWithoutFilesystemBackup(t *testing
 	}
 	manager := &pinnedRecipeExecutionManager{MockPackageManager: pkg.NewMockPackageManager()}
 	manager.ManagerName = "brew"
+	if err := manager.SetExecutableIdentity(app.installationSnapshotManagerIdentity); err != nil {
+		t.Fatal(err)
+	}
 	runtime.detectManager = func() pkg.PackageManager { return manager }
 
 	events := make(chan installEventMsg, 128)
@@ -160,6 +163,10 @@ func TestManageInstallOnlyPlanningIgnoresUnrelatedConfigPreflight(t *testing.T) 
 			assertPackageOnly("direct", plan, err)
 			manager := &pinnedRecipeExecutionManager{MockPackageManager: pkg.NewMockPackageManager()}
 			manager.ManagerName = "brew"
+			manager.installed = plan.actions()[0].InstallDetected != nil && *plan.actions()[0].InstallDetected
+			if err := manager.SetExecutableIdentity(app.installationSnapshotManagerIdentity); err != nil {
+				t.Fatal(err)
+			}
 			executionRuntime := planRuntime
 			executionRuntime.detectManager = func() pkg.PackageManager { return manager }
 			events := make(chan installEventMsg, 128)

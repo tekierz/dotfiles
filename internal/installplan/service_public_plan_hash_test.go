@@ -15,7 +15,7 @@ func TestReadyPublicDocumentPublishesAcceptedHashAndNeutralDocumentsOmitIt(t *te
 	readySnapshot := mustSnapshot(t, 81, mustObservation(t, "git", health.PackageMissing, recipe))
 	ready, err := Build(Request{
 		Intent: mustIntent(t, "git"), Snapshot: readySnapshot,
-		Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 81},
+		Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 81),
 	}, countingDependencies(&dependencyCounts{}, recipe))
 	if err != nil {
 		t.Fatal(err)

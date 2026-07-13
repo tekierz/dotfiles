@@ -33,6 +33,11 @@ func adoptHeadlessInstallPlan(app *App, accepted headless.AcceptedPlan) (*instal
 	}
 	neutralAuthorities := accepted.ToolAuthorities()
 	neutralRecipes := accepted.Recipes()
+	managerIdentity, identityBound := accepted.ManagerExecutableIdentity()
+	identityRequired := installRecipesRequireManagerIdentity(neutralRecipes)
+	if identityBound != identityRequired || (identityBound && !validUIManagerExecutableIdentity(managerIdentity)) {
+		return nil, fmt.Errorf("headless manager executable authority is invalid")
+	}
 	if len(neutralAuthorities) != len(intent.Tools) {
 		return nil, fmt.Errorf("headless tool authority does not cover explicit intent")
 	}
@@ -83,7 +88,7 @@ func adoptHeadlessInstallPlan(app *App, accepted headless.AcceptedPlan) (*instal
 
 	plan := &installPlan{
 		document: document, installHash: accepted.Hash(),
-		installSnapshot: installationSnapshotAuthority{schema: snapshot.SchemaVersion, generation: snapshot.Generation, platform: snapshot.Platform, manager: snapshot.Manager, digest: snapshot.Digest},
+		installSnapshot: installationSnapshotAuthority{schema: snapshot.SchemaVersion, generation: snapshot.Generation, platform: snapshot.Platform, manager: snapshot.Manager, digest: snapshot.Digest, managerIdentity: managerIdentity},
 		installTools:    installAuthorities, installRecipes: cloneInstallRecipes(neutralRecipes),
 		selectedTools: nil, configTools: nil, config: DeepDiveConfig{},
 		theme: app.theme, navStyle: app.navStyle, animations: app.animationsEnabled,

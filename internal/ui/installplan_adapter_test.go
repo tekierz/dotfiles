@@ -48,7 +48,7 @@ func TestAdoptHeadlessInstallPlanPreservesPackageAuthorityWithoutConfigLeakage(t
 	}
 	result, err := headless.Build(headless.Request{
 		Intent: intent, Snapshot: snapshot,
-		Environment: headless.Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 61},
+		Environment: headless.Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ManagerIdentity: stableUIManagerIdentity(), ExpectedGeneration: 61},
 	}, headless.Dependencies{
 		LookupTool: func(id string) (tools.Tool, bool) {
 			if id != "zsh" {
@@ -87,6 +87,10 @@ func TestAdoptHeadlessInstallPlanPreservesPackageAuthorityWithoutConfigLeakage(t
 	}
 	if plan.hash() != accepted.Hash() || !reflect.DeepEqual(plan.actions(), accepted.Operation().Actions()) {
 		t.Fatalf("adapted document/hash drifted: hash=%q actions=%+v", plan.hash(), plan.actions())
+	}
+	acceptedIdentity, identityBound := accepted.ManagerExecutableIdentity()
+	if !identityBound || plan.installSnapshot.managerIdentity.Digest() != acceptedIdentity.Digest() {
+		t.Fatal("adapter did not preserve accepted manager executable authority")
 	}
 	authority := accepted.SnapshotAuthority()
 	schema, generation, platform, manager, snapshotDigest := plan.installSnapshotAuthority()
@@ -251,7 +255,8 @@ func adapterAcceptedFixture(t *testing.T, mixed bool) (headless.AcceptedPlan, *o
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := headless.Build(headless.Request{Intent: intent, Snapshot: snapshot, Environment: headless.Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 71}}, headless.Dependencies{
+	managerIdentity := uiManagerIdentity(t, "adapter-brew", "exit 0")
+	result, err := headless.Build(headless.Request{Intent: intent, Snapshot: snapshot, Environment: headless.Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ManagerIdentity: managerIdentity, ExpectedGeneration: 71}}, headless.Dependencies{
 		LookupTool: func(id string) (tools.Tool, bool) {
 			if id == "zsh" {
 				return tools.NewZshTool(), true

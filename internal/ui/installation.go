@@ -895,8 +895,12 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		for _, toolID := range selectedTools {
 			if result.installed[toolID] {
 				markAction("install:"+toolID, operation.ActionSucceeded, "installed and detected")
+			} else if result.satisfied[toolID] {
+				markAction("install:"+toolID, operation.ActionSkipped, "already satisfied after review")
+			} else if result.failed[toolID] {
+				markAction("install:"+toolID, operation.ActionFailed, "install or reviewed precondition failed")
 			} else {
-				markAction("install:"+toolID, operation.ActionFailed, "install or postcondition failed")
+				markAction("install:"+toolID, operation.ActionSkipped, "not attempted after an earlier failure")
 			}
 		}
 		for _, installErr := range result.failures {
@@ -908,6 +912,8 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		}
 		if result.successCount == len(selectedTools) {
 			emitLine(fmt.Sprintf("\n✓ All %d tools installed successfully!", result.successCount))
+		} else if result.successCount+result.skippedCount == len(selectedTools) {
+			emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools; %d already satisfied after review", result.successCount, len(selectedTools), result.skippedCount))
 		} else {
 			emitLine(fmt.Sprintf("\n✓ Installed %d/%d tools", result.successCount, len(selectedTools)))
 		}
@@ -1426,17 +1432,21 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 
 type selectedToolInstallResult struct {
 	successCount int
+	skippedCount int
 	installed    map[string]bool
+	satisfied    map[string]bool
+	failed       map[string]bool
 	failures     []error
 }
 
 type installExecutionSnapshot struct {
-	platform  pkg.Platform
-	manager   string
-	recipes   map[string]operation.InstallRecipe
-	detected  map[string]bool
-	digests   map[string]string
-	authority map[string]installToolAuthority
+	platform        pkg.Platform
+	manager         string
+	managerIdentity pkg.ExecutableIdentity
+	recipes         map[string]operation.InstallRecipe
+	detected        map[string]bool
+	digests         map[string]string
+	authority       map[string]installToolAuthority
 }
 
 func wrapMutationError(prefix string, err error) error {
@@ -1458,7 +1468,11 @@ func runSelectedToolInstalls(
 	stepLine func(string),
 	acceptedSnapshots ...installExecutionSnapshot,
 ) selectedToolInstallResult {
-	result := selectedToolInstallResult{installed: make(map[string]bool, len(selectedTools))}
+	result := selectedToolInstallResult{
+		installed: make(map[string]bool, len(selectedTools)),
+		satisfied: make(map[string]bool, len(selectedTools)),
+		failed:    make(map[string]bool, len(selectedTools)),
+	}
 	mgr := installRuntime.detectManager()
 	platform := pkg.Platform("")
 	managerName := ""
@@ -1471,6 +1485,15 @@ func runSelectedToolInstalls(
 		platform = accepted.platform
 		if accepted.platform == "" || accepted.manager != managerName {
 			result.failures = append(result.failures, fmt.Errorf("install environment changed after review: planned %s/%s, found manager %s", accepted.platform, accepted.manager, managerName))
+			return result
+		}
+		if installRecipesRequireManagerIdentity(accepted.recipes) {
+			if err := validateUIManagerExecutableIdentity(mgr, accepted.managerIdentity, false); err != nil {
+				result.failures = append(result.failures, err)
+				return result
+			}
+		} else if validUIManagerExecutableIdentity(accepted.managerIdentity) {
+			result.failures = append(result.failures, fmt.Errorf("install manager authority is inconsistent"))
 			return result
 		}
 		seen := make(map[string]struct{}, len(selectedTools))
@@ -1495,6 +1518,42 @@ func runSelectedToolInstalls(
 			result.failures = append(result.failures, fmt.Errorf("selected installs do not match accepted install actions"))
 			return result
 		}
+		// Validate every accepted recipe and detector before the first mutation.
+		// The per-action check below is repeated because an earlier reviewed action
+		// can legitimately satisfy a later overlapping package receipt.
+		for _, toolID := range selectedTools {
+			recipe := accepted.recipes[toolID]
+			if recipe.ToolID != toolID || recipe.Platform != string(platform) || recipe.Manager != managerName {
+				result.failed[toolID] = true
+				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer provenance is inconsistent", toolID))
+				return result
+			}
+			digest, digestErr := operation.InstallRecipeDigest(recipe)
+			if digestErr != nil || digest != accepted.digests[toolID] {
+				result.failed[toolID] = true
+				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer digest is invalid", toolID))
+				return result
+			}
+			acceptedDetected, detectedOK := accepted.detected[toolID]
+			if !detectedOK {
+				result.failed[toolID] = true
+				result.failures = append(result.failures, fmt.Errorf("%s: reviewed detector authority is missing", toolID))
+				return result
+			}
+			if recipeDetectorRequiresManagerIdentity(recipe.Detector) {
+				if err := validateUIManagerExecutableIdentity(mgr, accepted.managerIdentity, true); err != nil {
+					result.failed[toolID] = true
+					result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+					return result
+				}
+			}
+			currentDetected, detectorErr := installRecipeDetected(recipe, mgr)
+			if detectorErr != nil || currentDetected != acceptedDetected {
+				result.failed[toolID] = true
+				result.failures = append(result.failures, fmt.Errorf("%s: installation state changed after review", toolID))
+				return result
+			}
+		}
 	} else {
 		platform = installRuntime.detectPlatform()
 	}
@@ -1515,6 +1574,7 @@ func runSelectedToolInstalls(
 		if !ok {
 			emitLine(fmt.Sprintf("  ⚠ Unknown tool: %s", toolID))
 			result.failures = append(result.failures, fmt.Errorf("%s: unknown tool", toolID))
+			result.failed[toolID] = true
 			continue
 		}
 
@@ -1526,17 +1586,20 @@ func runSelectedToolInstalls(
 			if !recipeOK {
 				emitLine(fmt.Sprintf("  ✗ Cannot install %s: reviewed installer provenance is missing", toolID))
 				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer provenance is missing", toolID))
+				result.failed[toolID] = true
 				continue
 			}
 			if recipe.ToolID != toolID || recipe.Platform != string(platform) || recipe.Manager != managerName {
 				emitLine(fmt.Sprintf("  ✗ Cannot install %s: reviewed installer provenance is inconsistent", toolID))
 				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer provenance is inconsistent", toolID))
+				result.failed[toolID] = true
 				continue
 			}
 			digest, digestErr := operation.InstallRecipeDigest(recipe)
 			if digestErr != nil || digest != accepted.digests[toolID] {
 				emitLine(fmt.Sprintf("  ✗ Cannot install %s: reviewed installer digest is invalid", toolID))
 				result.failures = append(result.failures, fmt.Errorf("%s: reviewed installer digest is invalid", toolID))
+				result.failed[toolID] = true
 				continue
 			}
 		} else {
@@ -1549,30 +1612,81 @@ func runSelectedToolInstalls(
 			continue
 		}
 		if accepted != nil {
-			if err := executeInstallRecipe(ctx, recipe, mgr, func(line string) { emitLine("  " + line) }); err != nil {
+			acceptedDetected, detectedOK := accepted.detected[toolID]
+			if !detectedOK {
+				emitLine(fmt.Sprintf("  ✗ Cannot install %s: reviewed detector authority is missing", toolID))
+				result.failures = append(result.failures, fmt.Errorf("%s: reviewed detector authority is missing", toolID))
+				result.failed[toolID] = true
+				continue
+			}
+			if recipeDetectorRequiresManagerIdentity(recipe.Detector) {
+				if err := validateUIManagerExecutableIdentity(mgr, accepted.managerIdentity, true); err != nil {
+					emitLine(fmt.Sprintf("  ✗ Failed to verify %s before installation: %v", toolID, err))
+					result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+					result.failed[toolID] = true
+					return result
+				}
+			}
+			currentDetected, detectorErr := installRecipeDetected(recipe, mgr)
+			if detectorErr == nil && !acceptedDetected && currentDetected {
+				emitLine(fmt.Sprintf("  ↷ %s already satisfied after review; skipping install", toolID))
+				result.skippedCount++
+				result.satisfied[toolID] = true
+				continue
+			}
+			if detectorErr != nil || currentDetected != acceptedDetected {
+				emitLine(fmt.Sprintf("  ✗ Cannot install %s: installation state changed after review", toolID))
+				result.failures = append(result.failures, fmt.Errorf("%s: installation state changed after review", toolID))
+				result.failed[toolID] = true
+				return result
+			}
+			if installRecipeRequiresManagerIdentity(recipe) {
+				if err := validateUIManagerExecutableIdentity(mgr, accepted.managerIdentity, true); err != nil {
+					emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
+					result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+					result.failed[toolID] = true
+					return result
+				}
+			}
+			if err := executeInstallRecipe(ctx, recipe, mgr, accepted.managerIdentity, func(line string) { emitLine("  " + line) }); err != nil {
 				emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
 				result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+				result.failed[toolID] = true
+				if errors.Is(err, installapply.ErrManagerIdentityChanged) {
+					return result
+				}
 				continue
 			}
 		} else {
 			if !installerAvailable(t, platform) {
 				emitLine(fmt.Sprintf("  ⚠ %s is not available through a supported installer on %s", toolID, platform))
 				result.failures = append(result.failures, fmt.Errorf("%s: no supported installer for %s", toolID, platform))
+				result.failed[toolID] = true
 				continue
 			}
 			if mgr == nil && requiresPackageManager(t) {
 				emitLine(fmt.Sprintf("  ✗ Cannot install %s: no package manager detected", toolID))
 				result.failures = append(result.failures, fmt.Errorf("%s: no package manager detected", toolID))
+				result.failed[toolID] = true
 				continue
 			}
 			if err := installTool(ctx, t, mgr, platform, func(line string) { emitLine("  " + line) }); err != nil {
 				emitLine(fmt.Sprintf("  ✗ Failed to install %s: %v", toolID, err))
 				result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+				result.failed[toolID] = true
 				continue
 			}
 		}
 		postcondition := false
 		if accepted != nil {
+			if recipeDetectorRequiresManagerIdentity(recipe.Detector) {
+				if err := validateUIManagerExecutableIdentity(mgr, accepted.managerIdentity, true); err != nil {
+					emitLine(fmt.Sprintf("  ✗ %s install verification failed: %v", toolID, err))
+					result.failures = append(result.failures, fmt.Errorf("%s: %w", toolID, err))
+					result.failed[toolID] = true
+					return result
+				}
+			}
 			postcondition, _ = installRecipeDetected(recipe, mgr)
 		} else {
 			postcondition = installRuntime.isToolInstalled(t)
@@ -1580,6 +1694,7 @@ func runSelectedToolInstalls(
 		if !postcondition {
 			emitLine(fmt.Sprintf("  ✗ %s installer completed but the tool is still not detected", toolID))
 			result.failures = append(result.failures, fmt.Errorf("%s: install postcondition failed (tool not detected)", toolID))
+			result.failed[toolID] = true
 			continue
 		}
 
@@ -1595,8 +1710,8 @@ func installRecipeDetected(recipe operation.InstallRecipe, mgr pkg.PackageManage
 	return installapply.DetectRecipe(recipe, mgr)
 }
 
-func executeInstallRecipe(ctx context.Context, recipe operation.InstallRecipe, mgr pkg.PackageManager, emitLine func(string)) error {
-	return installapply.ExecuteRecipe(ctx, recipe, mgr, emitLine)
+func executeInstallRecipe(ctx context.Context, recipe operation.InstallRecipe, mgr pkg.PackageManager, managerIdentity pkg.ExecutableIdentity, emitLine func(string)) error {
+	return installapply.ExecuteRecipe(ctx, recipe, mgr, managerIdentity, emitLine)
 }
 
 // aggregateFailures builds the final installation error from a slice of per-step

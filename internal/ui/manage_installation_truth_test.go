@@ -165,6 +165,7 @@ func setManageTruthSnapshot(t *testing.T, app *App, generation uint64, platform 
 	app.installationSnapshotGeneration = generation
 	app.installationSnapshotTerminal = true
 	app.installationSnapshot = snapshot
+	app.installationSnapshotManagerIdentity = stableUIManagerIdentity()
 	app.installationSnapshotReady = true
 	app.installationSnapshotLoading = false
 	app.installationSnapshotStale = false
@@ -238,6 +239,7 @@ func TestManageInstallationTruthRendersFourStatesAtSupportedSizes(t *testing.T) 
 				app.installationSnapshotGeneration = generation
 				app.installationSnapshotTerminal = true
 				app.installationSnapshot = snapshot
+				app.installationSnapshotManagerIdentity = stableUIManagerIdentity()
 				app.installationSnapshotReady = true
 				app.installationSnapshotLoading = false
 				app.installationSnapshotStale = false

@@ -33,7 +33,7 @@ func TestReviewedPrivateRecipesMapToTruthfulPublicVocabularyAndOrderedSteps(t *t
 			snapshot := mustSnapshot(t, 37, mustObservation(t, test.tool.ID(), health.PackageMissing, recipe))
 			counts := &dependencyCounts{}
 			deps := countingDependencies(counts, recipe)
-			result, err := Build(Request{Intent: mustIntent(t, test.tool.ID()), Snapshot: snapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 37}}, deps)
+			result, err := Build(Request{Intent: mustIntent(t, test.tool.ID()), Snapshot: snapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 37)}, deps)
 			if err != nil {
 				t.Fatal(err)
 			}

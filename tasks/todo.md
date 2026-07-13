@@ -5,6 +5,21 @@
 The 2026-07-09 audit is the source of truth. Remediation is staged so safety and
 observability land before new integrations or broad UI work.
 
+### Mandatory execution guardrails
+
+Every remaining slice follows `tasks/workflow-guardrails.md` and the machine-checked
+`tasks/current-slice.scope`. The required state machine is `planned -> contract-frozen ->
+tests-red -> implemented -> reviewed -> verified -> committed`; active work is never checked
+complete. Run `make slice-check` at handoffs and before verification, then run
+`make slice-check-candidate` after exact staging. The default hard ceiling is six production
+files, sixteen total files, or 800 changed lines; crossing any ceiling stops edits until Sol
+splits the slice or root records a before-the-fact exception.
+
+Current slice: `manager-executable-private-authority` — **verified**, scope frozen under a
+one-time recovery exception. Sol and Terra report GO; full test/race, vet, pinned lint/static,
+vulnerability, formatting, diff, and scope gates pass. No npm/interpreter, helper-executable,
+settings, profile, rename, or aesthetic behavior entered this commit.
+
 ### Batch 1 — reachable safety blockers (complete)
 
 - [x] Replace dashboard package-only execution with a tool-aware install path so core
@@ -60,7 +75,7 @@ observability land before new integrations or broad UI work.
         revalidation-to-exec race.
   - [x] Adopt the primitive in Brew, Apt, Pacman, and Paru construction without widening the
         package-manager interface, and route manager invocations through the observed path.
-  - [ ] Bind accepted package-manager identities into private plan authority and revalidate
+  - [x] Bind accepted package-manager identities into private plan authority and revalidate
         immediately before mutation while documenting the remaining spawn boundary.
   - [ ] Add the equivalent npm executable/interpreter-chain authority before enabling npm
         recipes for owner-hardware Apply testing.
@@ -225,8 +240,8 @@ observability land before new integrations or broad UI work.
   growth during hashing, and pre-open FIFO/symlink swaps; nonblocking no-follow descriptor
   opening prevents those swaps from hanging. Sol and Terra independently accepted the slice,
   and focused/full-package/race/vet/pinned lint/static checks pass. This is drift observation,
-  not spawn authority: manager adoption, accepted-plan binding, npm/interpreter identity, and
-  the final revalidation-to-exec race remain open.
+  not spawn authority: npm/interpreter identity and the final revalidation-to-exec race remain
+  open.
 - Brew, Apt, Pacman, and Paru now capture one identity-only executable source at construction;
   absolute/clean/observable lookup results are required, unsafe Paru candidates cannot silently
   downgrade to Pacman, and automatic Arch detection performs no outer retry. Every current
@@ -235,8 +250,20 @@ observability land before new integrations or broad UI work.
   and all other Paru mutation routes remain direct. `sudo`, `dpkg`, `dpkg-query`,
   `checkupdates`, script interpreters, and post-construction drift are explicitly still outside
   this slice's authority.
-- Remaining provenance work includes binding exact package-manager/npm executable identity
-  and full Manage plan/preview parity.
+- Accepted headless, package-only Manage, and full-wizard plans now bind the exact manager
+  executable identity into private authority whenever a reviewed package-manager/cask step
+  requires it; npm-only and config-only plans retain no manager identity. Apply and TUI
+  execution reject same-name executable substitution, revalidate before manager-backed
+  detectors and every manager mutation, run an exact all-action detector preflight before the
+  first package/npm/cask mutation, and repeat a monotonic per-action check: false-to-true
+  transitions skip without mutation as already satisfied, while every other drift fails closed.
+  The documented revalidation-to-spawn race remains.
+- Remaining provenance work includes npm executable/interpreter-chain identity and broader
+  Manage plan/preview parity.
+- Nonblocking hardening remains: app-bundle/cask plans can create private operation-state
+  bookkeeping before same-path manager drift is refused. No package/cask mutation occurs;
+  a later slice may revalidate required manager identity before state bootstrap to avoid that
+  state churn.
 - Codex and Pi now use version-pinned, macOS-only npm recipes; OpenCode uses only
   its reviewed Homebrew/Arch routes; T3 Code uses an exact typed Homebrew-cask
   action. Unsupported platform rows are disabled instead of poisoning the plan.

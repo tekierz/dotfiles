@@ -27,6 +27,9 @@ type cacheSnapshotRuntimeCounters struct {
 func cacheSnapshotRuntime(counters *cacheSnapshotRuntimeCounters, snapshot health.InstallationSnapshot, healthErr error, utilities map[string]bool) installationSnapshotCacheRuntime {
 	manager := pkg.NewMockPackageManager()
 	manager.ManagerName = snapshot.Manager()
+	if err := manager.SetExecutableIdentity(stableUIManagerIdentity()); err != nil {
+		panic(err)
+	}
 	return installationSnapshotCacheRuntime{
 		allTools:       func() []tools.Tool { return nil },
 		detectPlatform: func() pkg.Platform { counters.platform.Add(1); return pkg.Platform(snapshot.Platform()) },
@@ -80,7 +83,31 @@ func applyCacheSnapshotResult(t *testing.T, app *App, message installationSnapsh
 }
 
 func coherentCacheResult(generation uint64, snapshot health.InstallationSnapshot, utilities map[string]bool) installationSnapshotDoneMsg {
-	return installationSnapshotDoneMsg{Generation: generation, Platform: pkg.Platform(snapshot.Platform()), Manager: snapshot.Manager(), Snapshot: snapshot, Utilities: utilities}
+	return installationSnapshotDoneMsg{Generation: generation, Platform: pkg.Platform(snapshot.Platform()), Manager: snapshot.Manager(), ManagerIdentity: stableUIManagerIdentity(), Snapshot: snapshot, Utilities: utilities}
+}
+
+func TestInstallationSnapshotCacheReplacesSnapshotAndManagerIdentityAtomically(t *testing.T) {
+	app := &App{}
+	firstSnapshot := cacheSnapshot(t, 1, cacheObservation(t, "first", health.PresencePresent))
+	secondSnapshot := cacheSnapshot(t, 2, cacheObservation(t, "second", health.PresenceMissing))
+	identityA := uiManagerIdentity(t, "brew-a", "exit 0")
+	identityB := uiManagerIdentity(t, "brew-b", "exit 1")
+
+	app.beginInstallationSnapshotLoad(installationSnapshotCacheRuntime{})
+	applyCacheSnapshotResult(t, app, installationSnapshotDoneMsg{Generation: 1, Platform: pkg.PlatformMacOS, Manager: "brew", ManagerIdentity: identityA, Snapshot: firstSnapshot})
+	if app.installationSnapshot.Digest() != firstSnapshot.Digest() || app.installationSnapshotManagerIdentity.Digest() != identityA.Digest() {
+		t.Fatal("first cache generation did not adopt snapshot and identity together")
+	}
+
+	app.beginInstallationSnapshotLoad(installationSnapshotCacheRuntime{})
+	applyCacheSnapshotResult(t, app, installationSnapshotDoneMsg{Generation: 1, Platform: pkg.PlatformMacOS, Manager: "brew", ManagerIdentity: identityB, Snapshot: firstSnapshot})
+	if app.installationSnapshot.Digest() != firstSnapshot.Digest() || app.installationSnapshotManagerIdentity.Digest() != identityA.Digest() {
+		t.Fatal("stale cache generation replaced part of the accepted authority pair")
+	}
+	applyCacheSnapshotResult(t, app, installationSnapshotDoneMsg{Generation: 2, Platform: pkg.PlatformMacOS, Manager: "brew", ManagerIdentity: identityB, Snapshot: secondSnapshot})
+	if app.installationSnapshot.Digest() != secondSnapshot.Digest() || app.installationSnapshotManagerIdentity.Digest() != identityB.Digest() {
+		t.Fatal("fresh cache generation did not replace snapshot and identity together")
+	}
 }
 
 // seedTypedReadyInstallCache gives screen tests one coherent, immutable cache
@@ -105,6 +132,7 @@ func seedTypedReadyInstallCache(t *testing.T, app *App, installed map[string]boo
 	app.installationSnapshotGeneration = 1
 	app.installationSnapshotTerminal = true
 	app.installationSnapshot = snapshot
+	app.installationSnapshotManagerIdentity = stableUIManagerIdentity()
 	app.installationSnapshotReady = true
 	app.installationSnapshotLoading = false
 	app.installationSnapshotStale = false

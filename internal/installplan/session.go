@@ -98,13 +98,19 @@ func PlanFresh(ctx context.Context, rawTools []string, dependencies FreshDepende
 	if managerName == "" {
 		return FreshSession{}, ErrFreshPlan
 	}
+	var managerIdentity pkg.ExecutableIdentity
+	if provider, ok := manager.(pkg.ExecutableIdentityProvider); ok {
+		if observed, available := provider.ExecutableIdentity(); available && validManagerExecutableIdentity(observed) {
+			managerIdentity = observed
+		}
+	}
 	const generation uint64 = 1
 	snapshot, err := dependencies.Collect(ctx, registryTools, manager, platform, generation)
 	if err != nil || snapshot.SchemaVersion() != health.CurrentInstallationSchemaVersion || snapshot.Generation() != generation ||
 		snapshot.Platform() != string(platform) || snapshot.Manager() != managerName || snapshot.Digest() == "" || !snapshotMatchesRegistry(snapshot, registryByID) {
 		return FreshSession{}, ErrFreshPlan
 	}
-	result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: Environment{Platform: platform, Manager: managerName, ExpectedGeneration: generation}}, Dependencies{
+	result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: Environment{Platform: platform, Manager: managerName, ManagerIdentity: managerIdentity, ExpectedGeneration: generation}}, Dependencies{
 		LookupTool:      func(id string) (tools.Tool, bool) { tool, ok := registryByID[id]; return tool, ok },
 		DescribeInstall: dependencies.DescribeInstall, CaptureStatePlan: dependencies.CaptureStatePlan, Now: dependencies.Now,
 	})
