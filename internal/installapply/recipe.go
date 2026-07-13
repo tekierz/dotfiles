@@ -22,6 +22,10 @@ import (
 // changes before a manager-backed detector or mutation.
 var ErrManagerIdentityChanged = errors.New("reviewed package manager identity changed")
 
+// ErrNPMExecutionAuthorityRequired is the fixed, path-free failure returned
+// while npm execution remains disabled pending accepted-chain integration.
+var ErrNPMExecutionAuthorityRequired = errors.New("reviewed npm execution authority is required")
+
 type streamingInstallManager struct {
 	pkg.PackageManager
 	ctx      context.Context
@@ -43,9 +47,9 @@ func (manager *streamingInstallManager) Install(packages ...string) error {
 }
 
 // ExecuteRecipe runs a reviewed recipe in exact step order. The complete
-// recipe and all manager/cask requirements are checked before mutation. An npm
-// executable is resolved at its step boundary because an earlier reviewed
-// package step may intentionally install the Node/npm prerequisite.
+// recipe and all manager/cask requirements are checked before mutation. Npm
+// execution is disabled until the reviewed accepted-chain authority is wired
+// into this boundary.
 func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager pkg.PackageManager, acceptedIdentity pkg.ExecutableIdentity, emitLine func(string)) error {
 	if ctx == nil {
 		return fmt.Errorf("reviewed install context is unavailable")
@@ -57,6 +61,11 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 		return fmt.Errorf("reviewed install recipe is invalid: %w", err)
 	}
 	for _, step := range recipe.Steps {
+		if step.Kind == operation.InstallStepNPMGlobal {
+			return ErrNPMExecutionAuthorityRequired
+		}
+	}
+	for _, step := range recipe.Steps {
 		switch step.Kind {
 		case operation.InstallStepPackageManager:
 			if packageManagerNil(manager) || manager.Name() != step.Provider {
@@ -66,8 +75,7 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 				return err
 			}
 		case operation.InstallStepNPMGlobal:
-			// Full recipe validation above pins this provider to npm. Resolve it
-			// only after any reviewed prerequisite package step has completed.
+			return ErrNPMExecutionAuthorityRequired
 		case operation.InstallStepHomebrewCask:
 			if step.Provider != "brew" || packageManagerNil(manager) || manager.Name() != "brew" {
 				return fmt.Errorf("reviewed Homebrew cask installer is unavailable")
@@ -96,20 +104,7 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 				return err
 			}
 		case operation.InstallStepNPMGlobal:
-			npmPath, err := exec.LookPath(step.Provider)
-			if err != nil {
-				return fmt.Errorf("reviewed npm executable is unavailable: %w", err)
-			}
-			command, err := runner.RunStreaming(ctx, npmPath, step.Args...)
-			if err != nil {
-				return err
-			}
-			if err := streamOutput(ctx, command, emitLine); err != nil {
-				return err
-			}
-			if err := waitStreaming(ctx, command); err != nil {
-				return err
-			}
+			return ErrNPMExecutionAuthorityRequired
 		case operation.InstallStepHomebrewCask:
 			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, true); err != nil {
 				return err

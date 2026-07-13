@@ -3,10 +3,12 @@ package installapply
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,31 +108,73 @@ func TestExecuteRecipePreflightsProviderAndCancellationBeforeMutation(t *testing
 	}
 }
 
-func TestExecuteRecipeNPMUsesExactArgvWithoutShell(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "args")
-	marker := filepath.Join(dir, "pwned")
-	npm := filepath.Join(dir, "npm")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARG_LOG\"\nprintf 'npm output\\n'\n"
-	if err := os.WriteFile(npm, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-	t.Setenv("ARG_LOG", logPath)
-	args := []string{"install", "-g", "package;touch " + marker}
+func TestExecuteRecipeNPMOnlyRequiresAcceptedAuthorityWithoutProcessStart(t *testing.T) {
+	npmPath, marker := installHostileNPM(t)
+	recipe := reviewedExecutionRecipe(
+		npmInstallStep("private-first-package@1.2.3"),
+		npmInstallStep("private-second-package@4.5.6"),
+	)
 	var output []string
-	if err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: args}), nil, pkg.ExecutableIdentity{}, func(line string) { output = append(output, line) }); err != nil {
-		t.Fatal(err)
+	err := ExecuteRecipe(context.Background(), recipe, nil, pkg.ExecutableIdentity{}, func(line string) { output = append(output, line) })
+	assertNPMExecutionAuthorityRequired(t, err, npmPath, marker, "private-first-package@1.2.3", "private-second-package@4.5.6")
+	if len(output) != 0 {
+		t.Fatalf("blocked npm emitted output: %v", output)
 	}
-	logged, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
+	assertNoNPMMarker(t, marker)
+}
+
+func TestExecuteRecipeNPMMixedWithManagerFailsBeforeEveryManagerMutation(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		steps []operation.InstallStep
+	}{
+		{name: "manager-then-npm", steps: []operation.InstallStep{
+			{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"node"}},
+			npmInstallStep("private-package@1.2.3"),
+		}},
+		{name: "npm-then-manager", steps: []operation.InstallStep{
+			npmInstallStep("private-package@1.2.3"),
+			{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"node"}},
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			npmPath, marker := installHostileNPM(t)
+			manager, identity := authorizedRecipeManager(t, test.name)
+			err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(test.steps...), manager, identity, nil)
+			assertNPMExecutionAuthorityRequired(t, err, npmPath, marker)
+			if len(manager.order) != 0 {
+				t.Fatalf("blocked mixed recipe called manager: %v", manager.order)
+			}
+			assertNoNPMMarker(t, marker)
+		})
 	}
-	if string(logged) != "install\n-g\npackage;touch "+marker+"\n" || !reflect.DeepEqual(output, []string{"npm output"}) {
-		t.Fatalf("argv=%q output=%v", logged, output)
-	}
-	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("npm arguments reached a shell: %v", err)
+}
+
+func TestExecuteRecipeNPMMixedWithCaskFailsBeforeEveryCaskMutationOrOutput(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		steps []operation.InstallStep
+	}{
+		{name: "cask-then-npm", steps: []operation.InstallStep{
+			{Kind: operation.InstallStepHomebrewCask, Provider: "brew", Casks: []string{"reviewed-app"}},
+			npmInstallStep("private-package@1.2.3"),
+		}},
+		{name: "npm-then-cask", steps: []operation.InstallStep{
+			npmInstallStep("private-package@1.2.3"),
+			{Kind: operation.InstallStepHomebrewCask, Provider: "brew", Casks: []string{"reviewed-app"}},
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			npmPath, marker := installHostileNPM(t)
+			manager, identity := authorizedRecipeManager(t, test.name)
+			var output []string
+			err := ExecuteRecipe(context.Background(), reviewedExecutionRecipe(test.steps...), manager, identity, func(line string) { output = append(output, line) })
+			assertNPMExecutionAuthorityRequired(t, err, npmPath, marker)
+			if len(manager.order) != 0 || len(manager.casks) != 0 || len(output) != 0 {
+				t.Fatalf("blocked mixed recipe mutated casks or emitted output: order=%v casks=%v output=%v", manager.order, manager.casks, output)
+			}
+			assertNoNPMMarker(t, marker)
+		})
 	}
 }
 
@@ -218,41 +262,82 @@ func TestDetectRecipeBinaryAndAppBundleRequireExactTargetTypes(t *testing.T) {
 	}
 }
 
-func TestExecuteRecipeResolvesNPMAtReviewedStepAndCancelsRunningProcess(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PATH", dir)
-	npm := filepath.Join(dir, "npm")
+func TestExecuteRecipeNPMGuardPreservesValidationAndCancellationPrecedence(t *testing.T) {
+	t.Run("nil-context", func(t *testing.T) {
+		_, marker := installHostileNPM(t)
+		var ctx context.Context
+		err := ExecuteRecipe(ctx, reviewedExecutionRecipe(npmInstallStep("private-package@1.2.3")), nil, pkg.ExecutableIdentity{}, nil)
+		if err == nil || errors.Is(err, ErrNPMExecutionAuthorityRequired) || !strings.Contains(err.Error(), "reviewed install context is unavailable") {
+			t.Fatalf("nil context precedence error=%v", err)
+		}
+		assertNoNPMMarker(t, marker)
+	})
+	t.Run("invalid-recipe", func(t *testing.T) {
+		_, marker := installHostileNPM(t)
+		recipe := reviewedExecutionRecipe(npmInstallStep("private-package@1.2.3"))
+		recipe.SchemaVersion = 0
+		err := ExecuteRecipe(context.Background(), recipe, nil, pkg.ExecutableIdentity{}, nil)
+		if err == nil || errors.Is(err, ErrNPMExecutionAuthorityRequired) || !strings.Contains(err.Error(), "reviewed install recipe is invalid") {
+			t.Fatalf("invalid recipe precedence error=%v", err)
+		}
+		assertNoNPMMarker(t, marker)
+	})
+	t.Run("pre-cancelled", func(t *testing.T) {
+		_, marker := installHostileNPM(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := ExecuteRecipe(ctx, reviewedExecutionRecipe(npmInstallStep("private-package@1.2.3")), nil, pkg.ExecutableIdentity{}, nil)
+		if !errors.Is(err, context.Canceled) || errors.Is(err, ErrNPMExecutionAuthorityRequired) {
+			t.Fatalf("pre-cancelled precedence error=%v", err)
+		}
+		assertNoNPMMarker(t, marker)
+	})
+}
+
+func npmInstallStep(packageName string) operation.InstallStep {
+	return operation.InstallStep{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: []string{"install", "-g", packageName}}
+}
+
+func authorizedRecipeManager(t *testing.T, name string) (*recipeManager, pkg.ExecutableIdentity) {
+	t.Helper()
 	manager := &recipeManager{MockPackageManager: pkg.NewMockPackageManager()}
 	manager.ManagerName = "brew"
-	managerIdentity, _ := applyManagerIdentity(t, "prerequisite-brew", "exit 0")
-	if err := manager.SetExecutableIdentity(managerIdentity); err != nil {
+	identity, _ := applyManagerIdentity(t, "mixed-"+name, "exit 0")
+	if err := manager.SetExecutableIdentity(identity); err != nil {
 		t.Fatal(err)
 	}
-	manager.onInstall = func() {
-		if err := os.WriteFile(npm, []byte("#!/bin/sh\nprintf 'after prerequisite\\n'\n"), 0o700); err != nil {
-			t.Fatal(err)
+	return manager, identity
+}
+
+func installHostileNPM(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "private-npm-mutation-marker")
+	npmPath := filepath.Join(dir, "npm")
+	if err := os.WriteFile(npmPath, []byte("#!/bin/sh\nprintf 'private npm output\\n'\n: > \""+marker+"\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	return npmPath, marker
+}
+
+func assertNPMExecutionAuthorityRequired(t *testing.T, err error, privateValues ...string) {
+	t.Helper()
+	if !errors.Is(err, ErrNPMExecutionAuthorityRequired) {
+		t.Fatalf("npm authority error=%v, want ErrNPMExecutionAuthorityRequired", err)
+	}
+	formatted := err.Error() + fmt.Sprintf(" %#v", err)
+	for _, value := range privateValues {
+		if value != "" && strings.Contains(formatted, value) {
+			t.Fatalf("npm authority error leaks private value %q: %q", value, formatted)
 		}
 	}
-	recipe := reviewedExecutionRecipe(
-		operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"node"}},
-		operation.InstallStep{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: []string{"install", "-g", "pi@1.2.3"}},
-	)
-	var output []string
-	if err := ExecuteRecipe(context.Background(), recipe, manager, managerIdentity, func(line string) { output = append(output, line) }); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(manager.order, []string{"package:node"}) || !reflect.DeepEqual(output, []string{"package output", "after prerequisite"}) {
-		t.Fatalf("order=%v output=%v", manager.order, output)
-	}
+}
 
-	if err := os.WriteFile(npm, []byte("#!/bin/sh\nprintf 'started\\n'\nwhile :; do :; done\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	npmOnly := reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepNPMGlobal, Provider: "npm", Args: []string{"install", "-g", "pi@1.2.3"}})
-	if err := ExecuteRecipe(ctx, npmOnly, nil, pkg.ExecutableIdentity{}, nil); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("running npm cancellation=%v", err)
+func assertNoNPMMarker(t *testing.T, marker string) {
+	t.Helper()
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("blocked npm process created marker: %v", err)
 	}
 }
 
