@@ -15,10 +15,10 @@ complete. Run `make slice-check` at handoffs and before verification, then run
 files, sixteen total files, or 800 changed lines; crossing any ceiling stops edits until Sol
 splits the slice or root records a before-the-fact exception.
 
-Current slice: `manager-executable-private-authority` — **verified**, scope frozen under a
-one-time recovery exception. Sol and Terra report GO; full test/race, vet, pinned lint/static,
-vulnerability, formatting, diff, and scope gates pass. No npm/interpreter, helper-executable,
-settings, profile, rename, or aesthetic behavior entered this commit.
+Current production checkpoint: `npm-executor-fail-closed` — **committed**. Every validated
+npm-containing recipe now stops at the shared executor before package-manager, cask, or npm
+mutation. This is a temporary disable, not npm plan/apply integration. The next strict linear
+slices are `npm-private-phase-authority`, then `npm-public-phase-projection`.
 
 ### Batch 1 — reachable safety blockers (complete)
 
@@ -77,8 +77,16 @@ settings, profile, rename, or aesthetic behavior entered this commit.
         package-manager interface, and route manager invocations through the observed path.
   - [x] Bind accepted package-manager identities into private plan authority and revalidate
         immediately before mutation while documenting the remaining spawn boundary.
-  - [ ] Add the equivalent npm executable/interpreter-chain authority before enabling npm
-        recipes for owner-hardware Apply testing.
+  - [x] Add opaque, path-private npm-script/direct native-Node chain observation and a narrow
+        exact-chain streaming start with sanitized environment and bounded lifecycle handling.
+        Native-format recognition is not Node provenance or authenticity; transitive runtime,
+        network, loader/library, and revalidation-to-spawn authority remain unbound.
+  - [x] Disable every npm-containing recipe at the shared executor until its accepted chain is
+        bound into reviewed authority.
+  - [ ] Bind npm into private install-plan/apply authority with a mandatory fresh replan and
+        confirmation after any prerequisite phase.
+  - [ ] Project the blocked/phase state through public plan and CLI/TUI surfaces before
+        owner-hardware npm Apply testing.
 - [ ] Add current-source/provenance, Essentials/Advanced/raw layers, diff, and capability badges.
 - [ ] Make 60x18/80x24/120x40 layouts responsive with viewports, compact tabs, glyph/color
       fallbacks, reduced motion, and explicit Save/Cancel semantics.
@@ -240,8 +248,7 @@ settings, profile, rename, or aesthetic behavior entered this commit.
   growth during hashing, and pre-open FIFO/symlink swaps; nonblocking no-follow descriptor
   opening prevents those swaps from hanging. Sol and Terra independently accepted the slice,
   and focused/full-package/race/vet/pinned lint/static checks pass. This is drift observation,
-  not spawn authority: npm/interpreter identity and the final revalidation-to-exec race remain
-  open.
+  not spawn authority; the manager revalidation-to-spawn boundary remains open.
 - Brew, Apt, Pacman, and Paru now capture one identity-only executable source at construction;
   absolute/clean/observable lookup results are required, unsafe Paru candidates cannot silently
   downgrade to Pacman, and automatic Arch detection performs no outer retry. Every current
@@ -258,8 +265,14 @@ settings, profile, rename, or aesthetic behavior entered this commit.
   first package/npm/cask mutation, and repeat a monotonic per-action check: false-to-true
   transitions skip without mutation as already satisfied, while every other drift fails closed.
   The documented revalidation-to-spawn race remains.
-- Remaining provenance work includes npm executable/interpreter-chain identity and broader
-  Manage plan/preview parity.
+- `npm` authority v2 now observes an exact env-node npm script plus a direct native executable,
+  then starts the accepted canonical Node/npm pair through the hardened exact streaming
+  lifecycle with a sanitized environment and path-private errors. Native recognition is not
+  provenance/authenticity, and transitive runtime/network/loader/library authority remains out
+  of scope.
+- `npm` recipes are disabled at the shared executor until `npm-private-phase-authority` binds the
+  chain into a newly confirmed post-prerequisite plan and `npm-public-phase-projection` exposes
+  that phase truthfully. Broader Manage plan/preview parity also remains open.
 - Nonblocking hardening remains: app-bundle/cask plans can create private operation-state
   bookkeeping before same-path manager drift is refused. No package/cask mutation occurs;
   a later slice may revalidate required manager identity before state bootstrap to avoid that
