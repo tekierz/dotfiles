@@ -1219,4 +1219,3 @@ Both the test file and the renderFileTree function it exercised are absent from 
 ### [LOW/bug] internal/ui/screens_test.go:199 — TestRenderFileTree_SelectedToolsWithConfig can silently become a no-op
 
 Finding cited TestRenderFileTree_SelectedToolsWithConfig in screens_test.go; both the test file and renderFileTree are gone on main. The replacement golden test has no vacuous-guard pattern, so the defect cannot recur in current code.
-
