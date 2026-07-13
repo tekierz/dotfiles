@@ -143,6 +143,13 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	for _, id := range intent.Tools {
 		observation, observed := request.Snapshot.Tool(id)
 		if !observed {
+			tool, found := dependencies.LookupTool(id)
+			if !found || toolIsNil(tool) {
+				return blockedResult(intent, request.Snapshot, "unknown")
+			}
+			if tool.ID() != id {
+				return blockedResult(intent, request.Snapshot, "recipe_drift")
+			}
 			return blockedResult(intent, request.Snapshot, "stale")
 		}
 		if observation.Presence() == health.PresenceUnknown || observation.Installability() == health.InstallabilityUnknown {

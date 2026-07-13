@@ -50,10 +50,46 @@ func TestBuildSeparatesFatalSnapshotShapeFromRepresentableStaleness(t *testing.T
 	}
 
 	missingSelected := mustSnapshot(t, 11, mustObservation(t, "codex", health.PackageMissing, reviewedPackageRecipe("codex")))
-	counts = &dependencyCounts{}
-	result, err = Build(Request{Intent: intent, Snapshot: missingSelected, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 11}}, countingDependencies(counts, recipe))
-	assertBlockedWithoutAccepted(t, result, err, "stale")
-	assertDependencyCounts(t, counts, 0, 0, 0, 0)
+	for _, test := range []struct {
+		name      string
+		code      string
+		configure func(*Dependencies)
+	}{
+		{name: "known canonical tool is stale", code: "stale"},
+		{name: "unknown tool identity is unknown", code: "unknown", configure: func(deps *Dependencies) {
+			original := deps.LookupTool
+			deps.LookupTool = func(id string) (tools.Tool, bool) { _, _ = original(id); return nil, false }
+		}},
+		{name: "typed nil tool identity is unknown", code: "unknown", configure: func(deps *Dependencies) {
+			original := deps.LookupTool
+			deps.LookupTool = func(id string) (tools.Tool, bool) {
+				_, _ = original(id)
+				var missing *tools.GitTool
+				return missing, true
+			}
+		}},
+		{name: "mismatched tool identity is recipe drift", code: "recipe_drift", configure: func(deps *Dependencies) {
+			original := deps.LookupTool
+			deps.LookupTool = func(id string) (tools.Tool, bool) {
+				_, _ = original(id)
+				return overrideIDTool{Tool: tools.NewGitTool(), id: "other"}, true
+			}
+		}},
+	} {
+		t.Run("missing selected observation/"+test.name, func(t *testing.T) {
+			counts := &dependencyCounts{}
+			deps := countingDependencies(counts, recipe)
+			if test.configure != nil {
+				test.configure(&deps)
+			}
+			result, err := Build(Request{Intent: intent, Snapshot: missingSelected, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 11}}, deps)
+			assertBlockedWithoutAccepted(t, result, err, test.code)
+			if !reflect.DeepEqual(counts.sequence, []string{"lookup:git"}) {
+				t.Fatalf("missing observation dependency sequence=%v", counts.sequence)
+			}
+			assertDependencyCounts(t, counts, 1, 0, 0, 0)
+		})
+	}
 }
 
 func TestBuildReturnsBlockedDomainOutcomesWithoutPrivateAuthority(t *testing.T) {

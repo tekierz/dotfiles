@@ -86,11 +86,12 @@ func TestInstallplanServiceWiringRejectsNeutralAndInvalidIntentWithoutAuthority(
 		selection    []string
 		observations []health.InstallationObservation
 		wantError    string
+		wantLookup   []string
 	}{
 		{name: "explicit empty", selection: []string{}, wantError: "explicit tool intent required"},
 		{name: "unknown id", selection: []string{"not-registered"}, wantError: installationSnapshotUnavailable},
 		{name: "noncanonical id", selection: []string{"Zsh"}, wantError: installationSnapshotUnavailable},
-		{name: "missing observation", selection: []string{"zsh"}, wantError: installationSnapshotUnavailable},
+		{name: "missing observation", selection: []string{"zsh"}, wantError: installationSnapshotUnavailable, wantLookup: []string{"zsh"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -102,7 +103,7 @@ func TestInstallplanServiceWiringRejectsNeutralAndInvalidIntentWithoutAuthority(
 			if plan != nil || err == nil || err.Error() != test.wantError {
 				t.Fatalf("fail-closed result = plan %v error %v", plan, err)
 			}
-			if len(calls.lookup) != 0 || len(calls.describe) != 0 || calls.capture != 0 {
+			if !slices.Equal(calls.lookup, test.wantLookup) || len(calls.describe) != 0 || calls.capture != 0 {
 				t.Fatalf("invalid/neutral intent acquired authority: %+v", *calls)
 			}
 		})
