@@ -184,6 +184,12 @@ func (d Document) Actions() []ActionSpec {
 	return cloneActions(d.actions)
 }
 
+// Status returns the validated public outcome represented by the document.
+// The zero value returns the invalid empty status.
+func (d Document) Status() Status {
+	return d.status
+}
+
 func MarshalDocument(document Document) ([]byte, error) {
 	if !validStatus(document.status) || document.publicDigest == "" {
 		return nil, ErrInvalidDocument
