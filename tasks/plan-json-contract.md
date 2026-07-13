@@ -1,7 +1,7 @@
 # `dotfiles plan --json` v1 contract
 
-Status: implemented on 2026-07-12 through the deterministic read-only command;
-hash-bound noninteractive apply remains a separate deferred slice.
+Status: implemented on 2026-07-12 through the deterministic read-only command and
+hash-bound noninteractive package apply.
 
 ## Decision
 
@@ -101,8 +101,7 @@ Allowed statuses are `ready`, `no_changes`, `blocked`, and `intent_required`.
 - `blocked` contains only bounded public decision codes/reasons and redacted public evidence.
   It omits `plan_hash` and every private digest.
 - `ready` includes the complete private-authority `plan_hash` and advertises apply as
-  `hash_required`. This declares that only an exact fresh-plan hash match can authorize apply;
-  it does not by itself register or promise availability of the apply command.
+  `hash_required`. Only an exact fresh-plan hash match can authorize apply.
 - `no_changes` and `blocked` omit `plan_hash` and advertise apply as `not_available`.
 - `intent_required` retains its zero capability object because collection and planning did not
   run.
@@ -215,13 +214,19 @@ already accepted by the OS.
 - Marshal completes before the writer is called; short writer and failing writer return exit 1.
 - Ready/no-change output is deterministic and contains no timestamps/operation IDs.
 
-### Slice 5 — apply precursor
+### Slice 5 — apply command (implemented)
 
 - Public JSON cannot reconstruct or mutate private authority.
 - Fresh replan plus exact hash is required; missing/wrong/expired hash performs no mutation.
 - Drift blocks before lock/journal/backup/product mutation.
-- Matching apply preserves current lock, journal, mandatory rollback point, revalidation,
-  cancellation, and rollback behavior.
+- Matching package apply uses the fresh session's exact package manager, revalidates detectors
+  before state bootstrap and again under the operation lock, writes running and terminal
+  journal records, and honors cancellation. Package-only actions have no managed-file backup
+  target, so the terminal journal explicitly records that no filesystem rollback point exists.
+- Exact grammar is `dotfiles apply --yes --plan-hash <hash> --tool <id>...`; there are no
+  positional arguments, inferred tools, profiles, prompts, or JSON/stdin authority ingestion.
+- Exit 0 writes one validated success line; syntax, hash drift, and not-ready outcomes use exit
+  2; cancellation uses 130; all other failures use 1 with bounded non-secret stderr.
 
 ## Commit boundaries
 

@@ -36,6 +36,7 @@ make build
 | `dotfiles update` | Check for package updates |
 | `dotfiles status [--json]` | Show current configuration, or versioned installation health JSON |
 | `dotfiles plan --json --tool <id>...` | Print a deterministic, read-only installation plan for explicit tools |
+| `dotfiles apply --yes --plan-hash <hash> --tool <id>...` | Freshly replan and apply the exact reviewed install-only authority |
 | `dotfiles doctor [--json]` | Diagnose which build is running, PATH collisions, Homebrew ownership, and stale legacy binaries |
 | `dotfiles doctor repair [--json]` | Preview or quarantine one ownership-proven stale `~/.local/bin/dotfiles` entry |
 | `dotfiles theme list` | List available themes |
@@ -50,7 +51,11 @@ make build
 
 `dotfiles plan --json` never infers dashboard defaults. Repeat `--tool` for each
 requested registry ID. Ready and no-change plans exit 0; blocked or missing
-intent exits 2 with one JSON object. Applying a plan is not implemented.
+intent exits 2 with one JSON object. To apply a ready plan, repeat the exact
+tool set and pass its `plan_hash` with explicit `--yes`. Apply collects a fresh
+snapshot and proceeds only if the complete private authority hash still
+matches; it never reads plan JSON or infers defaults. This v1 path installs or
+repairs reviewed packages only and does not write application configuration.
 
 ### Diagnosing stale local builds
 

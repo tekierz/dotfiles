@@ -64,8 +64,10 @@ observability land before new integrations or broad UI work.
         install-only planner accepting explicit repeated `--tool` intent with no defaults or
         `App`, followed by a complete private authority fingerprint and the Cobra command.
         Directly marshaling `operation.Plan` or wrapping the private TUI planner is prohibited.
-  - [ ] **Active:** add hash-bound noninteractive apply after the complete authority fingerprint;
-        preserve fresh replan, lock, journal, mandatory backup, revalidation, and rollback.
+  - [x] Add hash-bound noninteractive package apply after the complete authority fingerprint:
+        require explicit tools/confirmation/hash, fresh replan, detector revalidation, lock,
+        running/terminal journal, cancellation, and bounded deterministic exits. Package-only
+        actions truthfully record that no filesystem rollback point exists.
 - [ ] Generate settings/help/hotkeys/docs/tests from tool manifests where practical.
 
 ### Batch 4 — integrations, distribution, and deployment gates
@@ -183,15 +185,20 @@ observability land before new integrations or broad UI work.
 - Mutable vendor shell scripts are deliberately unrepresentable. Manage refuses direct
   installation for recipe-backed tools and routes users to the reviewed installer flow.
 - Remaining provenance work includes binding exact package-manager/npm executable identity,
-  a discoverable JSON export/noninteractive contract, and full Manage plan/preview parity.
+  a redacted support bundle, and full Manage plan/preview parity.
 - Codex and Pi now use version-pinned, macOS-only npm recipes; OpenCode uses only
   its reviewed Homebrew/Arch routes; T3 Code uses an exact typed Homebrew-cask
   action. Unsupported platform rows are disabled instead of poisoning the plan.
 - `dotfiles plan --json` now shares the neutral explicit install planner with the TUI. It
   accepts only repeated explicit `--tool` intent, collects one installation snapshot,
   publishes the complete private-authority fingerprint only as `plan_hash`, emits one
-  deterministic redacted document, and implements stable exit codes 0, 2, and 1. Apply
-  remains unavailable and public JSON cannot reconstruct private execution authority.
+  deterministic redacted document, and implements stable exit codes 0, 2, and 1. Public JSON
+  cannot reconstruct private execution authority.
+- `dotfiles apply --yes --plan-hash <hash> --tool <id>...` now rebuilds that private authority
+  from one fresh snapshot and executes only an exact hash match. Syntax, stale/no-change,
+  cancellation, operational failure, and post-mutation output failure have bounded exit and
+  stream contracts; package operations are locked and journaled, with detector checks both
+  before state bootstrap and immediately before execution.
 
 ### Current product-gap checkpoint — 2026-07-12
 

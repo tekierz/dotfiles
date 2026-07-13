@@ -106,7 +106,8 @@ Run `dotfiles` with no arguments to launch the TUI.
 | `dotfiles config <tool>` | Open configuration for one tool |
 | `dotfiles hotkeys [--tool <name>]` | View keybindings |
 | `dotfiles status [--json]` | Print current product configuration, or installation health JSON v1 |
-| `dotfiles plan --json --tool <id>...` | Print a deterministic install-only plan; no defaults or apply behavior |
+| `dotfiles plan --json --tool <id>...` | Print a deterministic install-only plan with no inferred defaults |
+| `dotfiles apply --yes --plan-hash <hash> --tool <id>...` | Freshly replan and apply only an exact matching reviewed package plan |
 | `dotfiles doctor [--json]` | Diagnose executable provenance and PATH collisions |
 | `dotfiles doctor repair [--json]` | Preview a stale user-local binary repair; confirmation is required to apply |
 | `dotfiles theme list` | List themes |
@@ -130,6 +131,14 @@ is bound to a SHA-256 plan hash; noninteractive apply requires `--yes` and
 `--plan-hash <hash>`. Successful repair preserves the exact binary as mode 0600
 and records its original mode plus restore guidance in a private manifest.
 `dotfiles-tui` and `dotfiles-setup` are never changed by this command.
+
+`dotfiles apply` accepts no plan document or profile input. It canonicalizes the
+explicit repeated tools, collects a fresh installation snapshot, and requires
+the exact private-authority hash printed by a matching ready `plan --json` run.
+Drift and no-change outcomes exit 2 before installation mutation. Successful
+v1 actions are package-only, journaled operations; because they do not mutate
+managed files, the journal explicitly records that no filesystem rollback point
+was created.
 
 ## Managed configuration locations
 

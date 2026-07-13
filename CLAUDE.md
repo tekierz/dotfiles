@@ -110,6 +110,7 @@ dotfiles hotkeys          # Launch TUI hotkey viewer
 dotfiles config <tool>    # Configure a specific tool
 dotfiles status           # Print status (CLI)
 dotfiles plan --json --tool <id> # Print an explicit, install-only public plan
+dotfiles apply --yes --plan-hash <hash> --tool <id> # Apply an exact fresh install plan
 dotfiles backups          # List backups (CLI)
 dotfiles restore <name>   # Restore backup (CLI)
 dotfiles theme list       # List themes (CLI)
