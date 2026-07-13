@@ -84,7 +84,9 @@ observability land before new integrations or broad UI work.
 - [ ] Make Linux and macOS tests fully blocking; add reproducible signed artifacts,
       checksums, SBOM/provenance, and Homebrew upgrade/rollback tests.
 - [ ] Complete owner-hardware, friends/family, and mock-enterprise gates from
-      `tasks/pre-deployment-audit-2026-07-09.md`.
+      `tasks/pre-deployment-audit-2026-07-09.md`. The active install/apply owner gate is
+      `tasks/install-apply-owner-test.md` and must pass on a disposable VM or spare Mac before
+      advancing to either broader deployment tier.
 - [ ] Execute a compatibility-first product rename (difficulty 8/10) before broader beta.
 
 ### Batch 1 review
