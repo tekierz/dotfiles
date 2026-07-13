@@ -3,7 +3,9 @@ package pkg
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -81,6 +83,52 @@ type PackageManager interface {
 	UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error)
 }
 
+// ExecutableIdentityProvider is an optional capability implemented by package
+// managers whose executable was observed during construction. PackageManager
+// deliberately does not require it so independent implementations remain
+// source-compatible.
+type ExecutableIdentityProvider interface {
+	ExecutableIdentity() (ExecutableIdentity, bool)
+}
+
+type executableLookup func(string) (string, error)
+
+type executableResolutionState uint8
+
+const (
+	executableResolutionInvalid executableResolutionState = iota
+	executableResolutionMissing
+	executableResolutionValid
+)
+
+var errPackageManagerUnavailable = errors.New("package manager executable unavailable")
+
+type executableResolution struct {
+	identity ExecutableIdentity
+	state    executableResolutionState
+}
+
+func resolveManagerExecutable(name string, lookup executableLookup) executableResolution {
+	if lookup == nil {
+		return executableResolution{state: executableResolutionInvalid}
+	}
+	path, err := lookup(name)
+	if err != nil {
+		if path == "" && errors.Is(err, exec.ErrNotFound) {
+			return executableResolution{state: executableResolutionMissing}
+		}
+		return executableResolution{state: executableResolutionInvalid}
+	}
+	if !validExecutableIdentityPath(path) {
+		return executableResolution{state: executableResolutionInvalid}
+	}
+	identity, err := ObserveExecutableIdentity(path)
+	if err != nil {
+		return executableResolution{state: executableResolutionInvalid}
+	}
+	return executableResolution{identity: identity, state: executableResolutionValid}
+}
+
 // HomebrewCaskManager is deliberately narrow: callers can request only fixed
 // cask tokens, never arbitrary Homebrew arguments.
 type HomebrewCaskManager interface {
@@ -150,9 +198,6 @@ func detectManagerImpl() PackageManager {
 		if paru := NewPacmanManager(true); paru.IsAvailable() {
 			return paru
 		}
-		if pacman := NewPacmanManager(false); pacman.IsAvailable() {
-			return pacman
-		}
 	case PlatformDebian, PlatformPi:
 		// Raspberry Pi uses apt like Debian
 		if apt := NewAptManager(); apt.IsAvailable() {
@@ -175,8 +220,6 @@ func AllManagers() []PackageManager {
 	// Prefer paru if available (handles both official + AUR)
 	if paru := NewPacmanManager(true); paru.IsAvailable() {
 		managers = append(managers, paru)
-	} else if pacman := NewPacmanManager(false); pacman.IsAvailable() {
-		managers = append(managers, pacman)
 	}
 	if apt := NewAptManager(); apt.IsAvailable() {
 		managers = append(managers, apt)

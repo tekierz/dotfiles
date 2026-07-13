@@ -47,7 +47,13 @@ printf 'alpha 1.0 1.1\nbeta 2.0\n'
 	if err := os.WriteFile(brew, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	packages, err := (&BrewManager{brewPath: brew}).ListInstalled()
+	manager := newBrewManager(func(name string) (string, error) {
+		if name != "brew" {
+			t.Fatalf("lookup requested %q, want brew", name)
+		}
+		return brew, nil
+	})
+	packages, err := manager.ListInstalled()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +212,12 @@ printf '%s' "$BREW_NONGREEDY_JSON"
 		"casks": [`+normalCask+`, `+latestOnlyGreedyCask+`]
 	}`)
 
-	mgr := &BrewManager{brewPath: fakeBrewPath}
+	mgr := newBrewManager(func(name string) (string, error) {
+		if name != "brew" {
+			t.Fatalf("lookup requested %q, want brew", name)
+		}
+		return fakeBrewPath, nil
+	})
 	packages, err := mgr.CheckOutdatedNonGreedy()
 	if err != nil {
 		t.Fatalf("CheckOutdatedNonGreedy returned error: %v", err)

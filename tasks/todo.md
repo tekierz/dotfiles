@@ -58,7 +58,7 @@ observability land before new integrations or broad UI work.
   - [x] Add an independently reviewed, bounded, path-redacted executable-identity observation
         primitive with deterministic drift revalidation; do not claim it closes the final
         revalidation-to-exec race.
-  - [ ] Adopt the primitive in Brew, Apt, Pacman, and Paru construction without widening the
+  - [x] Adopt the primitive in Brew, Apt, Pacman, and Paru construction without widening the
         package-manager interface, and route manager invocations through the observed path.
   - [ ] Bind accepted package-manager identities into private plan authority and revalidate
         immediately before mutation while documenting the remaining spawn boundary.
@@ -227,6 +227,14 @@ observability land before new integrations or broad UI work.
   and focused/full-package/race/vet/pinned lint/static checks pass. This is drift observation,
   not spawn authority: manager adoption, accepted-plan binding, npm/interpreter identity, and
   the final revalidation-to-exec race remain open.
+- Brew, Apt, Pacman, and Paru now capture one identity-only executable source at construction;
+  absolute/clean/observable lookup results are required, unsafe Paru candidates cannot silently
+  downgrade to Pacman, and automatic Arch detection performs no outer retry. Every current
+  direct, sudo-child, and streaming manager route uses the captured invocation path, while
+  zero or malformed identities block both manager and auxiliary subprocesses. Paru uninstall
+  and all other Paru mutation routes remain direct. `sudo`, `dpkg`, `dpkg-query`,
+  `checkupdates`, script interpreters, and post-construction drift are explicitly still outside
+  this slice's authority.
 - Remaining provenance work includes binding exact package-manager/npm executable identity
   and full Manage plan/preview parity.
 - Codex and Pi now use version-pinned, macOS-only npm recipes; OpenCode uses only

@@ -12,13 +12,18 @@ import (
 
 // AptManager implements PackageManager for Debian/Ubuntu
 type AptManager struct {
-	aptPath string
+	identity ExecutableIdentity
+	state    executableResolutionState
 }
 
 // NewAptManager creates a new apt manager
 func NewAptManager() *AptManager {
-	path, _ := exec.LookPath("apt")
-	return &AptManager{aptPath: path}
+	return newAptManager(exec.LookPath)
+}
+
+func newAptManager(lookup executableLookup) *AptManager {
+	resolution := resolveManagerExecutable("apt", lookup)
+	return &AptManager{identity: resolution.identity, state: resolution.state}
 }
 
 func (a *AptManager) Name() string {
@@ -26,17 +31,43 @@ func (a *AptManager) Name() string {
 }
 
 func (a *AptManager) IsAvailable() bool {
-	return a.aptPath != ""
+	return a.executablePath() != ""
+}
+
+func (a *AptManager) ExecutableIdentity() (ExecutableIdentity, bool) {
+	if a == nil || a.state != executableResolutionValid || !validExecutableIdentity(a.identity) {
+		return ExecutableIdentity{}, false
+	}
+	return a.identity, true
+}
+
+func (a *AptManager) executablePath() string {
+	identity, ok := a.ExecutableIdentity()
+	if !ok {
+		return ""
+	}
+	return identity.invocationPath
+}
+
+func (AptManager) String() string {
+	return "apt_manager"
+}
+
+func (manager AptManager) GoString() string {
+	return manager.String()
 }
 
 func (a *AptManager) Install(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if a.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
-	args := []string{"apt", "install", "-y"}
+	args := []string{"install", "-y"}
 	args = append(args, packages...)
-	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{a.executablePath()}, args...)...)
 	defer cancel()
 	return cmd.Run()
 }
@@ -45,19 +76,28 @@ func (a *AptManager) Uninstall(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if a.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
-	args := []string{"apt", "remove", "-y"}
+	args := []string{"remove", "-y"}
 	args = append(args, packages...)
-	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{a.executablePath()}, args...)...)
 	defer cancel()
 	return cmd.Run()
 }
 
 func (a *AptManager) IsInstalled(pkg string) bool {
+	if a.executablePath() == "" {
+		return false
+	}
 	return a.IsInstalledContext(context.Background(), pkg)
 }
 
 func (a *AptManager) IsInstalledContext(ctx context.Context, pkg string) bool {
+	if a.executablePath() == "" {
+		return false
+	}
 	// `dpkg -s` exits 0 even for a removed-but-not-purged package (status
 	// "deinstall ok config-files"), which would falsely report it installed.
 	// Query the Status field directly and require "install ok installed",
@@ -73,6 +113,9 @@ func (a *AptManager) IsInstalledContext(ctx context.Context, pkg string) bool {
 }
 
 func (a *AptManager) GetVersion(pkg string) (string, error) {
+	if a.executablePath() == "" {
+		return "", errPackageManagerUnavailable
+	}
 	// `dpkg -s` exits 0 and reports a Version for a removed-but-not-purged
 	// package (status "deinstall ok config-files"), which contradicts
 	// IsInstalled. Query Status and Version together and only report a version
@@ -99,6 +142,9 @@ func (a *AptManager) GetVersion(pkg string) (string, error) {
 }
 
 func (a *AptManager) CheckOutdated() ([]Package, error) {
+	if a.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	// CheckOutdated is a read-only query and may run from non-interactive code
 	// paths (e.g. the async update-check command, where Bubble Tea owns the TTY).
 	// Do NOT run `sudo apt update` here: with cached credentials it forces a
@@ -106,7 +152,7 @@ func (a *AptManager) CheckOutdated() ([]Package, error) {
 	// blocks on the controlling terminal. The repo index is refreshed inside
 	// Update/UpdateAll/UpdateAllStreaming, which is where the network side effect
 	// belongs. We report against the already-synced local cache.
-	cmd, cancel := packageCommand(packageQueryTimeout, "apt", "list", "--upgradable")
+	cmd, cancel := packageCommand(packageQueryTimeout, a.executablePath(), "list", "--upgradable")
 	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -154,6 +200,9 @@ func (a *AptManager) Update(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if a.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	// Best-effort index refresh so a targeted upgrade can't 404 on a stale index.
 	// sudo -n never blocks on an invisible password prompt (the install below may
@@ -161,34 +210,40 @@ func (a *AptManager) Update(packages ...string) error {
 	// device: this can run while the TUI owns the terminal, so writing to
 	// os.Stderr would splatter the alt-screen, and any genuine failure surfaces
 	// through the install below.
-	refreshCmd, refreshCancel := packageCommand(packageRefreshTimeout, "sudo", "-n", "apt", "update")
+	refreshCmd, refreshCancel := packageCommand(packageRefreshTimeout, "sudo", "-n", a.executablePath(), "update")
 	_ = refreshCmd.Run()
 	refreshCancel()
 
 	// Install specific packages (will upgrade if already installed)
-	args := []string{"apt", "install", "-y"}
+	args := []string{"install", "-y"}
 	args = append(args, packages...)
-	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{a.executablePath()}, args...)...)
 	defer cancel()
 	return cmd.Run()
 }
 
 func (a *AptManager) UpdateAll() error {
+	if a.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 	// Update package lists
-	updateCmd, updateCancel := packageCommand(packageRefreshTimeout, "sudo", "apt", "update")
+	updateCmd, updateCancel := packageCommand(packageRefreshTimeout, "sudo", a.executablePath(), "update")
 	defer updateCancel()
 	if err := updateCmd.Run(); err != nil {
 		return err
 	}
 
 	// Upgrade all packages
-	upgradeCmd, upgradeCancel := packageCommand(packageMutationTimeout, "sudo", "apt", "upgrade", "-y")
+	upgradeCmd, upgradeCancel := packageCommand(packageMutationTimeout, "sudo", a.executablePath(), "upgrade", "-y")
 	defer upgradeCancel()
 	return upgradeCmd.Run()
 }
 
 func (a *AptManager) Search(query string) ([]Package, error) {
-	cmd, cancel := packageCommand(packageQueryTimeout, "apt", "search", query)
+	if a.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, a.executablePath(), "search", query)
 	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -232,6 +287,9 @@ func (a *AptManager) Search(query string) ([]Package, error) {
 // using a single dpkg-query command instead of individual dpkg -s calls per package.
 // This eliminates the N+1 query problem that caused 5-25 second startup delays.
 func (a *AptManager) getInstalledVersions() (map[string]string, error) {
+	if a.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg-query", "-W", "-f=${Package}\t${Version}\n")
 	defer cancel()
 	var out bytes.Buffer
@@ -254,6 +312,9 @@ func (a *AptManager) getInstalledVersions() (map[string]string, error) {
 }
 
 func (a *AptManager) ListInstalled() ([]Package, error) {
+	if a.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	// Get all versions in a single batch query (avoids N+1 problem)
 	versions, err := a.getInstalledVersions()
 	if err != nil {
@@ -299,16 +360,22 @@ func (a *AptManager) InstallStreaming(ctx context.Context, packages ...string) (
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
 	}
+	if a.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 
 	args := []string{"install", "-y"}
 	args = append(args, packages...)
-	return runner.RunStreamingWithSudo(ctx, a.aptPath, args...)
+	return runner.RunStreamingWithSudo(ctx, a.executablePath(), args...)
 }
 
 // UpdateStreaming updates packages with real-time output streaming
 func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*runner.StreamingCmd, error) {
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
+	}
+	if a.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
 	}
 
 	// Refresh the package index before the targeted upgrade so it can't 404 on a
@@ -321,18 +388,22 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 	// writing to os.Stderr would splatter the alt-screen. Any genuine failure
 	// surfaces through the streamed install below, which owns the upgrade and may
 	// still prompt for sudo.
-	_ = exec.CommandContext(ctx, "sudo", "-n", "apt", "update").Run()
+	// #nosec G204 -- executablePath is a constructor-captured, validated absolute executable identity; all other arguments are fixed registry literals.
+	_ = exec.CommandContext(ctx, "sudo", "-n", a.executablePath(), "update").Run()
 
 	args := []string{"install", "-y"}
 	args = append(args, packages...)
-	return runner.RunStreamingWithSudo(ctx, a.aptPath, args...)
+	return runner.RunStreamingWithSudo(ctx, a.executablePath(), args...)
 }
 
 // UpdateAllStreaming updates all packages with real-time output streaming
 // This runs apt update && apt upgrade -y sequentially without shell injection risk
 func (a *AptManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
+	if a.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	// Run update first using safe exec.Command (no shell interpolation)
-	updateCmd, err := runner.RunStreamingWithSudo(ctx, a.aptPath, "update")
+	updateCmd, err := runner.RunStreamingWithSudo(ctx, a.executablePath(), "update")
 	if err != nil {
 		return nil, fmt.Errorf("apt update failed: %w", err)
 	}
@@ -341,5 +412,5 @@ func (a *AptManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingC
 		return nil, fmt.Errorf("apt update failed: %w", err)
 	}
 	// Then run upgrade using safe exec.Command
-	return runner.RunStreamingWithSudo(ctx, a.aptPath, "upgrade", "-y")
+	return runner.RunStreamingWithSudo(ctx, a.executablePath(), "upgrade", "-y")
 }

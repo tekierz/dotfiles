@@ -13,27 +13,63 @@ import (
 
 // PacmanManager implements PackageManager for Arch Linux (pacman/paru)
 type PacmanManager struct {
-	pacmanPath string
-	useParu    bool // Use paru for AUR support
+	useParu  bool // Use paru for AUR support
+	identity ExecutableIdentity
+	state    executableResolutionState
 }
 
 // NewPacmanManager creates a new pacman manager
 func NewPacmanManager(preferParu bool) *PacmanManager {
-	pm := &PacmanManager{}
+	return newPacmanManager(preferParu, exec.LookPath)
+}
+
+func newPacmanManager(preferParu bool, lookup executableLookup) *PacmanManager {
+	manager := &PacmanManager{}
 
 	if preferParu {
-		if path, err := exec.LookPath("paru"); err == nil {
-			pm.pacmanPath = path
-			pm.useParu = true
-			return pm
+		resolution := resolveManagerExecutable("paru", lookup)
+		if resolution.state == executableResolutionValid {
+			manager.identity = resolution.identity
+			manager.state = resolution.state
+			manager.useParu = true
+			return manager
+		}
+		if resolution.state != executableResolutionMissing {
+			manager.state = resolution.state
+			return manager
 		}
 	}
 
-	if path, err := exec.LookPath("pacman"); err == nil {
-		pm.pacmanPath = path
-	}
+	resolution := resolveManagerExecutable("pacman", lookup)
+	manager.identity = resolution.identity
+	manager.state = resolution.state
+	return manager
+}
 
-	return pm
+func (p *PacmanManager) ExecutableIdentity() (ExecutableIdentity, bool) {
+	if p == nil || p.state != executableResolutionValid || !validExecutableIdentity(p.identity) {
+		return ExecutableIdentity{}, false
+	}
+	return p.identity, true
+}
+
+func (p *PacmanManager) executablePath() string {
+	identity, ok := p.ExecutableIdentity()
+	if !ok {
+		return ""
+	}
+	return identity.invocationPath
+}
+
+func (p PacmanManager) String() string {
+	if p.useParu {
+		return "paru_manager"
+	}
+	return "pacman_manager"
+}
+
+func (p PacmanManager) GoString() string {
+	return p.String()
 }
 
 func (p *PacmanManager) Name() string {
@@ -44,26 +80,27 @@ func (p *PacmanManager) Name() string {
 }
 
 func (p *PacmanManager) IsAvailable() bool {
-	return p.pacmanPath != ""
+	return p.executablePath() != ""
 }
 
 func (p *PacmanManager) Install(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if p.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	args := []string{"-S", "--noconfirm", "--needed"}
 	args = append(args, packages...)
 
-	var cmd *exec.Cmd
-	var cancel context.CancelFunc
 	if p.useParu {
-		cmd, cancel = packageCommand(packageMutationTimeout, p.pacmanPath, args...)
-	} else {
-		cmd, cancel = packageCommand(packageMutationTimeout, "sudo", append([]string{p.pacmanPath}, args...)...)
+		cmd, cancel := packageCommand(packageMutationTimeout, p.executablePath(), args...)
+		defer cancel()
+		return cmd.Run()
 	}
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{p.executablePath()}, args...)...)
 	defer cancel()
-
 	return cmd.Run()
 }
 
@@ -71,26 +108,43 @@ func (p *PacmanManager) Uninstall(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if p.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	args := []string{"-R", "--noconfirm"}
 	args = append(args, packages...)
-	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{p.pacmanPath}, args...)...)
+	if p.useParu {
+		cmd, cancel := packageCommand(packageMutationTimeout, p.executablePath(), args...)
+		defer cancel()
+		return cmd.Run()
+	}
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{p.executablePath()}, args...)...)
 	defer cancel()
 	return cmd.Run()
 }
 
 func (p *PacmanManager) IsInstalled(pkg string) bool {
+	if p.executablePath() == "" {
+		return false
+	}
 	return p.IsInstalledContext(context.Background(), pkg)
 }
 
 func (p *PacmanManager) IsInstalledContext(ctx context.Context, pkg string) bool {
-	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, p.pacmanPath, "-Q", pkg)
+	if p.executablePath() == "" {
+		return false
+	}
+	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, p.executablePath(), "-Q", pkg)
 	defer cancel()
 	return cmd.Run() == nil
 }
 
 func (p *PacmanManager) GetVersion(pkg string) (string, error) {
-	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Q", pkg)
+	if p.executablePath() == "" {
+		return "", errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Q", pkg)
 	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -109,6 +163,9 @@ func (p *PacmanManager) GetVersion(pkg string) (string, error) {
 }
 
 func (p *PacmanManager) CheckOutdated() ([]Package, error) {
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	// Use checkupdates for official repos (safer, doesn't require root)
 	var packages []Package
 
@@ -121,7 +178,7 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 
 	// Check AUR updates if using paru
 	if p.useParu {
-		aurCmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Qua")
+		aurCmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Qua")
 		defer cancel()
 		var aurOut bytes.Buffer
 		aurCmd.Stdout = &aurOut
@@ -141,6 +198,9 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 // root), and falls back to `pacman -Qu` when checkupdates is not installed so a
 // missing optional dependency does not silently report "up to date".
 func (p *PacmanManager) checkOfficialUpdates() (string, error) {
+	if p.executablePath() == "" {
+		return "", errPackageManagerUnavailable
+	}
 	if _, err := exec.LookPath("checkupdates"); err == nil {
 		cmd, cancel := packageCommand(packageRefreshTimeout, "checkupdates")
 		defer cancel()
@@ -168,7 +228,7 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 	// diagnostics to stderr and/or use a different exit code. Distinguish the
 	// genuine no-updates case from a real error so failures aren't silently
 	// reported as "up to date".
-	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Qu")
+	cmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Qu")
 	defer cancel()
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
@@ -306,18 +366,19 @@ func (p *PacmanManager) Update(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if p.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	args := pacmanUpdateArgs(nil, packages)
 
-	var cmd *exec.Cmd
-	var cancel context.CancelFunc
 	if p.useParu {
-		cmd, cancel = packageCommand(packageMutationTimeout, p.pacmanPath, args...)
-	} else {
-		cmd, cancel = packageCommand(packageMutationTimeout, "sudo", append([]string{p.pacmanPath}, args...)...)
+		cmd, cancel := packageCommand(packageMutationTimeout, p.executablePath(), args...)
+		defer cancel()
+		return cmd.Run()
 	}
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{p.executablePath()}, args...)...)
 	defer cancel()
-
 	return cmd.Run()
 }
 
@@ -330,19 +391,24 @@ func pacmanUpdateArgs(extraFlags []string, packages []string) []string {
 }
 
 func (p *PacmanManager) UpdateAll() error {
-	var cmd *exec.Cmd
-	var cancel context.CancelFunc
-	if p.useParu {
-		cmd, cancel = packageCommand(packageMutationTimeout, p.pacmanPath, "-Syu", "--noconfirm")
-	} else {
-		cmd, cancel = packageCommand(packageMutationTimeout, "sudo", p.pacmanPath, "-Syu", "--noconfirm")
+	if p.executablePath() == "" {
+		return errPackageManagerUnavailable
 	}
+	if p.useParu {
+		cmd, cancel := packageCommand(packageMutationTimeout, p.executablePath(), "-Syu", "--noconfirm")
+		defer cancel()
+		return cmd.Run()
+	}
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", p.executablePath(), "-Syu", "--noconfirm")
 	defer cancel()
 	return cmd.Run()
 }
 
 func (p *PacmanManager) Search(query string) ([]Package, error) {
-	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Ss", query)
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Ss", query)
 	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -411,7 +477,10 @@ func parsePacmanSearch(output string) []Package {
 }
 
 func (p *PacmanManager) ListInstalled() ([]Package, error) {
-	cmd, cancel := packageCommand(packageQueryTimeout, p.pacmanPath, "-Q")
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Q")
 	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -448,19 +517,22 @@ func (p *PacmanManager) InstallStreaming(ctx context.Context, packages ...string
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
 	}
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally
 		// Running with sudo causes permission issues with AUR builds
 		args := []string{"-S", "--noconfirm", "--needed", "--skipreview", "--noprovides", "--removemake"}
 		args = append(args, packages...)
-		return runner.RunStreaming(ctx, p.pacmanPath, args...)
+		return runner.RunStreaming(ctx, p.executablePath(), args...)
 	}
 
 	// pacman needs sudo
 	args := []string{"-S", "--noconfirm", "--needed"}
 	args = append(args, packages...)
-	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+	return runner.RunStreamingWithSudo(ctx, p.executablePath(), args...)
 }
 
 // UpdateStreaming updates packages with real-time output streaming
@@ -468,23 +540,29 @@ func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string)
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
 	}
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally
 		args := pacmanUpdateArgs([]string{"--skipreview", "--noprovides"}, packages)
-		return runner.RunStreaming(ctx, p.pacmanPath, args...)
+		return runner.RunStreaming(ctx, p.executablePath(), args...)
 	}
 
 	// pacman needs sudo
 	args := pacmanUpdateArgs(nil, packages)
-	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+	return runner.RunStreamingWithSudo(ctx, p.executablePath(), args...)
 }
 
 // UpdateAllStreaming updates all packages with real-time output streaming
 func (p *PacmanManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally
-		return runner.RunStreaming(ctx, p.pacmanPath, "-Syu", "--noconfirm", "--skipreview", "--noprovides")
+		return runner.RunStreaming(ctx, p.executablePath(), "-Syu", "--noconfirm", "--skipreview", "--noprovides")
 	}
-	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, "-Syu", "--noconfirm")
+	return runner.RunStreamingWithSudo(ctx, p.executablePath(), "-Syu", "--noconfirm")
 }
