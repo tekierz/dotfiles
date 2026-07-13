@@ -1,11 +1,10 @@
-# Frozen native npm/Node accepted-chain start foundation.
+# Disable unbound npm mutations before planning authority integration.
 version=1
-slice_id=npm-native-accepted-chain-start
+slice_id=npm-executor-fail-closed
 state=contract-frozen
-max_total_files=3
+max_total_files=2
 max_production_files=1
-max_changed_lines=700
+max_changed_lines=350
 ignore=tasks/pi-agent-integration-spec.md
-allow=internal/pkg/npm_execution_identity.go
-allow=internal/pkg/npm_execution_identity_test.go
-allow=internal/pkg/npm_execution_identity_start_test.go
+allow=internal/installapply/recipe.go
+allow=internal/installapply/recipe_test.go
