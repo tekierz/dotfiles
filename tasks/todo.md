@@ -72,7 +72,12 @@ observability land before new integrations or broad UI work.
   - [x] Register the reviewed `dotfiles support --json` v1 command on the validated public
         projection and read-only journal summary boundary, with fixed collection order,
         cancellation precedence, closed partial reason codes, one-write output, and deterministic
-        complete/partial/fatal exits. Sharing guidance and the final adversarial/owner gate remain.
+        complete/partial/fatal exits.
+  - [x] Publish review-before-sharing guidance and exact stdout-only scope in command help,
+        README, the tool reference, and maintainer CLI guidance. Raw `doctor --json`, operation
+        journals, configuration, and logs are explicitly not share-safe substitutes.
+  - [ ] Complete the final adversarial/static verification and owner-hardware read-only gate
+        before closing the support bundle or the parent CLI-contract item.
 - [ ] Generate settings/help/hotkeys/docs/tests from tool manifests where practical.
 
 ### Batch 4 — integrations, distribution, and deployment gates

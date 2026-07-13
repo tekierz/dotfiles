@@ -108,6 +108,7 @@ Run `dotfiles` with no arguments to launch the TUI.
 | `dotfiles status [--json]` | Print current product configuration, or installation health JSON v1 |
 | `dotfiles plan --json --tool <id>...` | Print a deterministic install-only plan with no inferred defaults |
 | `dotfiles apply --yes --plan-hash <hash> --tool <id>...` | Freshly replan and apply only an exact matching reviewed package plan |
+| `dotfiles support --json` | Print one bounded, redacted support document to stdout for review |
 | `dotfiles doctor [--json]` | Diagnose executable provenance and PATH collisions |
 | `dotfiles doctor repair [--json]` | Preview a stale user-local binary repair; confirmation is required to apply |
 | `dotfiles theme list` | List themes |
@@ -131,6 +132,42 @@ is bound to a SHA-256 plan hash; noninteractive apply requires `--yes` and
 `--plan-hash <hash>`. Successful repair preserves the exact binary as mode 0600
 and records its original mode plus restore guidance in a private manifest.
 `dotfiles-tui` and `dotfiles-setup` are never changed by this command.
+
+### Support JSON
+
+`dotfiles support --json` emits exactly one newline-terminated JSON document to
+stdout. Version 1 has no human mode, archive format, `--output` flag, automatic
+attachment, or upload path. The command does not create a support directory or
+file. Redirecting stdout is an explicit user choice made after or alongside
+review; the application itself does not save the document.
+
+The public document collects only these bounded facts:
+
+- sanitized product/Go/OS/architecture metadata and a clean/modified/unavailable
+  VCS state, without a revision;
+- the existing validated, redacted `dotfiles.status` installation-health
+  document;
+- executable ownership as `homebrew` or `unverified`, PATH/legacy counts,
+  Homebrew presence, and allowlisted severity/code finding pairs; and
+- at most 20 recent operation summaries containing status, aggregate action
+  counts, backup-recorded state, bounded rollback counts, and duration.
+
+It omits usernames, hostnames, HOME/XDG/PATH values, executable and backup
+paths, symlink targets, environment and command output, config contents,
+credentials and tokens, raw errors, logs, operation IDs, plan hashes, journal
+filenames, exact timestamps, and private state digests. Config, service, and
+authentication capabilities are explicitly `not_collected`.
+
+| Exit | Streams |
+|------|---------|
+| `0` | One complete JSON document on stdout; stderr is empty |
+| `2` | One partial but valid JSON document on stdout; stderr is empty |
+| `2` | Invalid syntax or missing `--json`: stdout is empty and stderr is `invalid support request` |
+| `1` | Projection, size, or write failure: no valid success document and stderr is only `support collection failed` |
+
+Always inspect the support document before sharing it. `doctor --json`, private
+operation journals, configuration files, and logs are not share-safe artifacts;
+do not attach them as substitutes for `support --json`.
 
 `dotfiles apply` accepts no plan document or profile input. It canonicalizes the
 explicit repeated tools, collects a fresh installation snapshot, and requires

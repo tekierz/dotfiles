@@ -111,6 +111,7 @@ dotfiles config <tool>    # Configure a specific tool
 dotfiles status           # Print status (CLI)
 dotfiles plan --json --tool <id> # Print an explicit, install-only public plan
 dotfiles apply --yes --plan-hash <hash> --tool <id> # Apply an exact fresh install plan
+dotfiles support --json   # Print bounded, redacted support JSON to stdout for review
 dotfiles backups          # List backups (CLI)
 dotfiles restore <name>   # Restore backup (CLI)
 dotfiles theme list       # List themes (CLI)
@@ -121,6 +122,16 @@ dotfiles update           # Check for updates
 dotfiles version          # Print version
 dotfiles uninstall        # Remove dotfiles and restore config
 ```
+
+### Support-output guidance
+
+`dotfiles support --json` is the only reviewed support-sharing projection. It
+writes one bounded JSON document to stdout and never creates an archive/file or
+uploads output. Users must inspect it before sharing. Do not describe
+`doctor --json`, private operation journals, configuration files, or logs as
+share-safe; they contain diagnostic/private data outside the public allowlist.
+Exit 0 means complete JSON, exit 2 may mean partial valid JSON (or syntax failure
+with no JSON), and exit 1 is a generic fatal projection/output failure.
 
 ## Key Concepts
 

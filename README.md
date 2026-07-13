@@ -37,6 +37,7 @@ make build
 | `dotfiles status [--json]` | Show current configuration, or versioned installation health JSON |
 | `dotfiles plan --json --tool <id>...` | Print a deterministic, read-only installation plan for explicit tools |
 | `dotfiles apply --yes --plan-hash <hash> --tool <id>...` | Freshly replan and apply the exact reviewed install-only authority |
+| `dotfiles support --json` | Print one bounded, redacted support document to stdout for review |
 | `dotfiles doctor [--json]` | Diagnose which build is running, PATH collisions, Homebrew ownership, and stale legacy binaries |
 | `dotfiles doctor repair [--json]` | Preview or quarantine one ownership-proven stale `~/.local/bin/dotfiles` entry |
 | `dotfiles theme list` | List available themes |
@@ -57,6 +58,28 @@ snapshot and proceeds only if the complete private authority hash still
 matches; it never reads plan JSON or infers defaults. This v1 path installs or
 repairs reviewed packages only and does not write application configuration.
 
+### Review support output before sharing
+
+`dotfiles support --json` prints one redacted JSON document to stdout. It does
+not create an archive or file, and it does not upload, transmit, or attach the
+output. The document contains bounded build facts, the public installation
+health document, reduced executable-provenance findings, and up to 20 recent
+operation summaries. It omits usernames, hostnames, paths, environment values,
+credentials, config contents, logs, raw errors, operation IDs, plan hashes, and
+exact activity timestamps.
+
+Inspect the document before deciding whether to save or share it:
+
+```bash
+dotfiles support --json | less
+```
+
+A complete document exits 0. A partial document still writes valid JSON and
+exits 2; invalid syntax also exits 2 but writes no JSON. Projection or output
+failure exits 1 with only a generic error. `doctor --json`, raw operation
+journals, configuration files, and logs are diagnostic/private inputs and are
+not designed as share-safe artifacts.
+
 ### Diagnosing stale local builds
 
 If `dotfiles` behaves differently across terminals or appears to be missing newer features, run:
@@ -66,7 +89,7 @@ dotfiles doctor
 dotfiles doctor --json
 ```
 
-Doctor reports the executable currently running, every `dotfiles` match reachable through `PATH`, safe static version/build hints, Homebrew's managed executable, and stale `dotfiles-tui` or `dotfiles-setup` candidates. It is read-only and does not execute discovered `dotfiles` binaries or modify files. JSON output uses a stable schema and omits timestamps so repeated runs against unchanged state are deterministic.
+Doctor reports the executable currently running, every `dotfiles` match reachable through `PATH`, static version/build hints, Homebrew's managed executable, and stale `dotfiles-tui` or `dotfiles-setup` candidates. It is read-only and does not execute discovered `dotfiles` binaries or modify files. JSON output uses a stable schema and omits timestamps so repeated runs against unchanged state are deterministic, but raw Doctor JSON is not the reviewed support-sharing format.
 
 If Doctor finds the exact historical `~/.local/bin/dotfiles` shadow, run
 `dotfiles doctor repair --json` to preview a deterministic repair plan. Repair

@@ -85,8 +85,13 @@ func newRegisteredSupportCommand() *cobra.Command {
 
 func newSupportCommand(commandRuntime supportCommandRuntime) *cobra.Command {
 	command := &cobra.Command{
-		Use:           "support",
-		Short:         "Print a redacted support document",
+		Use:   "support",
+		Short: "Print redacted support JSON for review",
+		Long: `Print one bounded, redacted JSON support document to stdout for inspection.
+
+This command does not create an archive or file and does not upload, transmit,
+or attach its output. Review the document before sharing it. Raw doctor JSON,
+operation journals, configuration files, and logs are not share-safe artifacts.`,
 		Args:          supportNoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -125,7 +130,7 @@ func newSupportCommand(commandRuntime supportCommandRuntime) *cobra.Command {
 	command.SetFlagErrorFunc(func(*cobra.Command, error) error {
 		return supportCommandExit(2, supportSyntaxMessage, false)
 	})
-	command.Flags().Bool("json", false, "Print a redacted, share-safe support document")
+	command.Flags().Bool("json", false, "Print the redacted support JSON document")
 	return command
 }
 

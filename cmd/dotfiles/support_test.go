@@ -5,10 +5,38 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/tekierz/dotfiles/internal/operation"
 )
+
+func TestSupportCommandHelpDescribesReviewAndOutputBoundary(t *testing.T) {
+	command := newSupportCommand(supportTestCommandRuntime(t))
+	var output bytes.Buffer
+	command.SetArgs([]string{"--help"})
+	command.SetOut(&output)
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"stdout for inspection",
+		"does not create an archive or file",
+		"does not upload, transmit",
+		"Review the document before sharing",
+		"Raw doctor JSON",
+		"not share-safe artifacts",
+		"--json",
+		"redacted support JSON document",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("help missing %q:\n%s", expected, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "--output") || strings.Contains(output.String(), "share-safe support document") {
+		t.Fatalf("help overclaims or advertises forbidden output behavior:\n%s", output.String())
+	}
+}
 
 func TestSupportCommandRejectsInvalidSyntaxBeforeSignalSetup(t *testing.T) {
 	tests := [][]string{
