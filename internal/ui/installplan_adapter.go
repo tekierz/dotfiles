@@ -64,7 +64,7 @@ func adoptHeadlessInstallPlan(app *App, accepted headless.AcceptedPlan) (*instal
 
 	mutationCount := 0
 	for _, action := range actions {
-		if action.Kind != operation.KindInstallTool || action.Disposition != operation.DispositionApply || action.ToolID == "" || action.Target != action.ToolID || action.InstallRecipe == nil || action.InstallDetected == nil || *action.InstallDetected {
+		if action.Kind != operation.KindInstallTool || action.Disposition != operation.DispositionApply || action.ToolID == "" || action.Target != action.ToolID || action.InstallRecipe == nil || action.InstallDetected == nil {
 			return nil, fmt.Errorf("headless action %s is not a reviewed package mutation", action.ID)
 		}
 		authority, ok := installAuthorities[action.ToolID]

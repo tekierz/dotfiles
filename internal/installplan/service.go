@@ -181,6 +181,7 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	}
 
 	validatedRecipes := make(map[string]operation.InstallRecipe)
+	detectorObservations := make(map[string]bool)
 	publicInstalls := make(map[string]*planpublic.InstallSpec)
 	for _, id := range intent.Tools {
 		observation, _ := request.Snapshot.Tool(id)
@@ -199,7 +200,12 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		if err != nil || recipe.ToolID != id || recipe.Platform != string(request.Environment.Platform) || recipe.Manager != request.Environment.Manager || digest != observation.InstallRecipeDigest() {
 			return blockedResult(intent, request.Snapshot, "recipe_drift")
 		}
+		detected, known := observedInstallDetector(observation, recipe.Detector)
+		if !known {
+			return blockedResult(intent, request.Snapshot, "unknown")
+		}
 		validatedRecipes[id] = operation.CloneInstallRecipe(recipe)
+		detectorObservations[id] = detected
 		publicInstall, publicErr := projectInstallRecipe(recipe, digest)
 		if publicErr != nil {
 			return Result{}, publicErr
@@ -233,7 +239,7 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 			continue
 		}
 		recipe := operation.CloneInstallRecipe(validatedRecipes[id])
-		detected := false
+		detected := detectorObservations[id]
 		privateActions = append(privateActions, operation.Action{
 			ID: "install:" + id, Kind: operation.KindInstallTool, ToolID: id, Target: id,
 			Description: authority.Intent + " " + id, Disposition: operation.DispositionApply,
@@ -271,6 +277,64 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		return Result{}, err
 	}
 	return Result{public: publicDocument, accepted: accepted, hasAccepted: true}, nil
+}
+
+func observedInstallDetector(observation health.InstallationObservation, detector operation.InstallDetector) (bool, bool) {
+	contains := func(values []string, target string) bool {
+		return slices.Contains(values, target)
+	}
+	switch detector.Kind {
+	case operation.InstallDetectorPackageReceipt:
+		facet := observation.Package()
+		if !facet.Authoritative || !facet.Complete {
+			return false, false
+		}
+		for _, value := range detector.Values {
+			if contains(facet.ObservedReceipts, value) {
+				continue
+			}
+			if contains(facet.MissingReceipts, value) {
+				return false, true
+			}
+			return false, false
+		}
+		return true, true
+	case operation.InstallDetectorBinary, operation.InstallDetectorAppBundle:
+		facet := observation.Direct()
+		if !facet.Authoritative {
+			return false, false
+		}
+		kind := health.DirectSourceBinary
+		if detector.Kind == operation.InstallDetectorAppBundle {
+			kind = health.DirectSourceAppBundle
+		}
+		unknown := false
+		for _, value := range detector.Values {
+			matched := false
+			for _, alternative := range facet.Alternatives {
+				if alternative.Kind != kind || !contains(alternative.Identifiers, value) {
+					continue
+				}
+				matched = true
+				switch alternative.State {
+				case health.ComponentPresent:
+				case health.ComponentMissing:
+					return false, true
+				default:
+					unknown = true
+				}
+			}
+			if !matched {
+				unknown = true
+			}
+		}
+		if unknown {
+			return false, false
+		}
+		return true, true
+	default:
+		return false, false
+	}
 }
 
 func validRequestSnapshot(snapshot health.InstallationSnapshot, environment Environment) bool {

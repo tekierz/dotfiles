@@ -31,26 +31,117 @@ func manageTruthObservationWithInstallability(t *testing.T, id string, presence 
 		Installability: installability,
 		Direct:         health.DirectFacet{State: health.ComponentNotApplicable},
 	}
+	var recipe operation.InstallRecipe
 	if installability == health.InstallabilitySupported {
 		tool, ok := tools.NewRegistry().Get(id)
 		if !ok {
 			t.Fatalf("registry tool %q missing", id)
 		}
-		recipe, err := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
+		var err error
+		recipe, err = tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
 		if err != nil {
 			t.Fatalf("describe %s install: %v", id, err)
 		}
 		spec.InstallRecipeDigest = installRecipeDigest(recipe)
+	} else {
+		switch presence {
+		case health.PresencePresent:
+			spec.Package = health.PackageFacet{State: health.PackagePresent, Provider: "brew", ExpectedReceipts: []string{id}, ObservedReceipts: []string{id}, Authoritative: true, Complete: true}
+		case health.PresencePartial:
+			spec.Package = health.PackageFacet{State: health.PackagePartial, Provider: "brew", ExpectedReceipts: []string{id, id + "-extra"}, ObservedReceipts: []string{id}, MissingReceipts: []string{id + "-extra"}, Authoritative: true, Complete: true}
+		case health.PresenceMissing:
+			spec.Package = health.PackageFacet{State: health.PackageMissing, Provider: "brew", ExpectedReceipts: []string{id}, MissingReceipts: []string{id}, Authoritative: true, Complete: true}
+		case health.PresenceUnknown:
+			spec.Package = health.PackageFacet{State: health.PackageUnknown, Provider: "brew", ExpectedReceipts: []string{id}, UnresolvedReceipts: []string{id}, Authoritative: true, Complete: false}
+		default:
+			t.Fatalf("unsupported test presence %q", presence)
+		}
+		observation, err := health.NewInstallationObservation(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return observation
 	}
+
+	packageReceipts := make([]string, 0)
+	seenReceipts := make(map[string]struct{})
+	for _, step := range recipe.Steps {
+		var receipts []string
+		switch step.Kind {
+		case operation.InstallStepPackageManager:
+			receipts = step.Packages
+		case operation.InstallStepHomebrewCask:
+			receipts = step.Casks
+		}
+		for _, receipt := range receipts {
+			if _, seen := seenReceipts[receipt]; seen {
+				continue
+			}
+			seenReceipts[receipt] = struct{}{}
+			packageReceipts = append(packageReceipts, receipt)
+		}
+	}
+
+	directKind := health.DirectSourceKind("")
+	switch recipe.Detector.Kind {
+	case operation.InstallDetectorBinary:
+		directKind = health.DirectSourceBinary
+	case operation.InstallDetectorAppBundle:
+		directKind = health.DirectSourceAppBundle
+	}
+	setDirect := func(state health.ComponentState) {
+		if directKind == "" {
+			spec.Direct = health.DirectFacet{State: health.ComponentNotApplicable}
+			return
+		}
+		spec.Direct = health.DirectFacet{
+			State:         state,
+			Authoritative: true,
+			Alternatives:  []health.DirectAlternative{{Kind: directKind, Identifiers: recipe.Detector.Values, State: state}},
+		}
+	}
+	setPackages := func(state health.PackageState, observed, missing, unresolved []string, complete bool) {
+		if len(packageReceipts) == 0 {
+			spec.Package = health.PackageFacet{State: health.PackageNotApplicable}
+			return
+		}
+		spec.Package = health.PackageFacet{
+			State: state, Provider: "brew", ExpectedReceipts: packageReceipts,
+			ObservedReceipts: observed, MissingReceipts: missing, UnresolvedReceipts: unresolved,
+			Authoritative: true, Complete: complete,
+		}
+	}
+
 	switch presence {
 	case health.PresencePresent:
-		spec.Package = health.PackageFacet{State: health.PackagePresent, Provider: "brew", ExpectedReceipts: []string{id}, ObservedReceipts: []string{id}, Authoritative: true, Complete: true}
+		setPackages(health.PackagePresent, packageReceipts, nil, nil, true)
+		setDirect(health.ComponentPresent)
 	case health.PresencePartial:
-		spec.Package = health.PackageFacet{State: health.PackagePartial, Provider: "brew", ExpectedReceipts: []string{id, id + "-extra"}, ObservedReceipts: []string{id}, MissingReceipts: []string{id + "-extra"}, Authoritative: true, Complete: true}
+		if directKind != "" {
+			setPackages(health.PackagePresent, packageReceipts, nil, nil, true)
+			setDirect(health.ComponentMissing)
+		} else {
+			detectorReceipt := recipe.Detector.Values[0]
+			observed := make([]string, 0, len(packageReceipts))
+			missing := []string{detectorReceipt}
+			for _, receipt := range packageReceipts {
+				if receipt != detectorReceipt {
+					observed = append(observed, receipt)
+				}
+			}
+			if len(observed) == 0 {
+				observed = append(observed, detectorReceipt+"-repair")
+				packageReceipts = append(packageReceipts, detectorReceipt+"-repair")
+			}
+			setPackages(health.PackagePartial, observed, missing, nil, true)
+			setDirect(health.ComponentNotApplicable)
+		}
 	case health.PresenceMissing:
-		spec.Package = health.PackageFacet{State: health.PackageMissing, Provider: "brew", ExpectedReceipts: []string{id}, MissingReceipts: []string{id}, Authoritative: true, Complete: true}
+		setPackages(health.PackageMissing, nil, packageReceipts, nil, true)
+		setDirect(health.ComponentMissing)
 	case health.PresenceUnknown:
-		spec.Package = health.PackageFacet{State: health.PackageUnknown, Provider: "brew", ExpectedReceipts: []string{id}, UnresolvedReceipts: []string{id}, Authoritative: true, Complete: false}
+		setPackages(health.PackageUnknown, nil, nil, packageReceipts, false)
+		setDirect(health.ComponentUnknown)
 	default:
 		t.Fatalf("unsupported test presence %q", presence)
 	}

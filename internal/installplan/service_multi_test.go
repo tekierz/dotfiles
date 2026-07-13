@@ -262,13 +262,15 @@ func TestAcceptedAndPublicAccessorsAreDeeplyDefensive(t *testing.T) {
 func mustPartialObservation(t *testing.T, id string, recipe operation.InstallRecipe) health.InstallationObservation {
 	t.Helper()
 	digest := mustRecipeDigest(t, recipe)
+	packageFacet := completePackageFacet(health.PackagePresent, recipePackageReceipts(recipe))
+	directFacet := directDetectorFacet(recipe.Detector, health.ComponentMissing)
+	if recipe.Detector.Kind == operation.InstallDetectorPackageReceipt {
+		directFacet = health.DirectFacet{State: health.ComponentUnknown, Authoritative: true, Alternatives: []health.DirectAlternative{{Kind: health.DirectSourceBinary, Identifiers: []string{id}, State: health.ComponentUnknown}}}
+	}
 	observation, err := health.NewInstallationObservation(health.InstallationObservationSpec{
 		ToolID: id, Installability: health.InstallabilitySupported, InstallRecipeDigest: digest,
-		Package: health.PackageFacet{
-			State: health.PackagePresent, Provider: "brew", ExpectedReceipts: []string{id}, ObservedReceipts: []string{id}, Authoritative: false, Complete: true,
-			Namespaces: []health.PackageNamespaceFacet{{Namespace: health.PackageNamespaceFormula, State: health.PackagePresent, ExpectedReceipts: []string{id}, ObservedReceipts: []string{id}, Complete: true}},
-		},
-		Direct: health.DirectFacet{State: health.ComponentUnknown, Authoritative: true, Alternatives: []health.DirectAlternative{{Kind: health.DirectSourceBinary, Identifiers: []string{id}, State: health.ComponentUnknown}}},
+		Package: packageFacet,
+		Direct:  directFacet,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -278,13 +280,21 @@ func mustPartialObservation(t *testing.T, id string, recipe operation.InstallRec
 
 func mustObservationWithReceipt(t *testing.T, id, receipt string, recipe operation.InstallRecipe) health.InstallationObservation {
 	t.Helper()
+	receipts := append([]string(nil), recipe.Detector.Values...)
+	found := false
+	for _, candidate := range receipts {
+		if candidate == receipt {
+			found = true
+			break
+		}
+	}
+	if !found {
+		receipts = append(receipts, receipt)
+	}
 	observation, err := health.NewInstallationObservation(health.InstallationObservationSpec{
 		ToolID: id, Installability: health.InstallabilitySupported, InstallRecipeDigest: mustRecipeDigest(t, recipe),
-		Package: health.PackageFacet{
-			State: health.PackageMissing, Provider: "brew", ExpectedReceipts: []string{receipt}, MissingReceipts: []string{receipt}, Authoritative: true, Complete: true,
-			Namespaces: []health.PackageNamespaceFacet{{Namespace: health.PackageNamespaceFormula, State: health.PackageMissing, ExpectedReceipts: []string{receipt}, MissingReceipts: []string{receipt}, Complete: true}},
-		},
-		Direct: health.DirectFacet{State: health.ComponentNotApplicable},
+		Package: completePackageFacet(health.PackageMissing, receipts),
+		Direct:  health.DirectFacet{State: health.ComponentNotApplicable},
 	})
 	if err != nil {
 		t.Fatal(err)

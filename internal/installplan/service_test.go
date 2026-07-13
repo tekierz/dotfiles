@@ -245,25 +245,76 @@ func mustObservation(t *testing.T, toolID string, state health.PackageState, rec
 	if err != nil {
 		t.Fatal(err)
 	}
-	facet := health.PackageFacet{
-		State: state, Provider: "brew", ExpectedReceipts: []string{toolID}, Authoritative: true, Complete: true,
-		Namespaces: []health.PackageNamespaceFacet{{Namespace: health.PackageNamespaceFormula, State: state, ExpectedReceipts: []string{toolID}, Complete: true}},
-	}
-	if state == health.PackagePresent {
-		facet.ObservedReceipts = []string{toolID}
-		facet.Namespaces[0].ObservedReceipts = []string{toolID}
-	} else {
-		facet.MissingReceipts = []string{toolID}
-		facet.Namespaces[0].MissingReceipts = []string{toolID}
-	}
+	receipts := recipePackageReceipts(recipe)
+	facet := completePackageFacet(state, receipts)
+	direct := directDetectorFacet(recipe.Detector, componentStateForPackageState(state))
 	observation, err := health.NewInstallationObservation(health.InstallationObservationSpec{
 		ToolID: toolID, Installability: health.InstallabilitySupported, InstallRecipeDigest: digest,
-		Package: facet, Direct: health.DirectFacet{State: health.ComponentNotApplicable},
+		Package: facet, Direct: direct,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return observation
+}
+
+func recipePackageReceipts(recipe operation.InstallRecipe) []string {
+	seen := make(map[string]struct{})
+	var receipts []string
+	for _, step := range recipe.Steps {
+		var values []string
+		switch step.Kind {
+		case operation.InstallStepPackageManager:
+			values = step.Packages
+		case operation.InstallStepHomebrewCask:
+			values = step.Casks
+		}
+		for _, value := range values {
+			if _, duplicate := seen[value]; duplicate {
+				continue
+			}
+			seen[value] = struct{}{}
+			receipts = append(receipts, value)
+		}
+	}
+	return receipts
+}
+
+func completePackageFacet(state health.PackageState, receipts []string) health.PackageFacet {
+	if len(receipts) == 0 {
+		return health.PackageFacet{State: health.PackageNotApplicable}
+	}
+	facet := health.PackageFacet{State: state, Provider: "brew", ExpectedReceipts: append([]string(nil), receipts...), Authoritative: true, Complete: true}
+	switch state {
+	case health.PackagePresent:
+		facet.ObservedReceipts = append([]string(nil), receipts...)
+	case health.PackageMissing:
+		facet.MissingReceipts = append([]string(nil), receipts...)
+	}
+	return facet
+}
+
+func componentStateForPackageState(state health.PackageState) health.ComponentState {
+	if state == health.PackagePresent {
+		return health.ComponentPresent
+	}
+	return health.ComponentMissing
+}
+
+func directDetectorFacet(detector operation.InstallDetector, state health.ComponentState) health.DirectFacet {
+	var kind health.DirectSourceKind
+	switch detector.Kind {
+	case operation.InstallDetectorBinary:
+		kind = health.DirectSourceBinary
+	case operation.InstallDetectorAppBundle:
+		kind = health.DirectSourceAppBundle
+	default:
+		return health.DirectFacet{State: health.ComponentNotApplicable}
+	}
+	return health.DirectFacet{
+		State: state, Authoritative: true,
+		Alternatives: []health.DirectAlternative{{Kind: kind, Identifiers: append([]string(nil), detector.Values...), State: state}},
+	}
 }
 
 func mustSnapshot(t *testing.T, generation uint64, observations ...health.InstallationObservation) health.InstallationSnapshot {
