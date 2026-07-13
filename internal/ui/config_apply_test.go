@@ -7,16 +7,17 @@ import (
 	"testing"
 )
 
-// withTempHome points HOME at a fresh temp dir (and clears XDG_CONFIG_HOME) so
-// both config.ConfigDir() and the tools.Write*Config generators (which use
-// os.UserHomeDir / $HOME) land their output inside the temp dir. It restores
-// the previous environment on cleanup.
+// withTempHome points HOME at a fresh temp dir and clears XDG config/state
+// overrides so configuration and private operation-state fixtures cannot read
+// or write the host environment. It restores the previous environment on
+// cleanup.
 func withTempHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
 
 	return dir
 }
