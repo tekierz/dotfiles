@@ -43,7 +43,7 @@ func installplanWiringRuntime(t *testing.T, base toolInstallRuntime, calls *inst
 	}
 	base.captureStatePlan = func() (*operation.StatePlan, error) {
 		calls.capture++
-		return &operation.StatePlan{}, nil
+		return operation.CaptureStatePlan()
 	}
 	base.isToolInstalled = func(tools.Tool) bool {
 		t.Fatal("explicit planning consulted a poisoned live installation probe")

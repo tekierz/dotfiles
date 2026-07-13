@@ -3,9 +3,11 @@ package operation
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +43,85 @@ type stateDirectoryAuthority struct {
 	rel     string
 	parents *safefile.ParentChain
 	leaf    *safefile.DirectorySnapshot
+}
+
+// StatePlanAuthorityDigest returns a domain-separated private fingerprint of
+// the exact trusted root, state-relative namespace, ordered entry shape, parent
+// chains, and existing root-only directory leaves accepted during planning.
+func StatePlanAuthorityDigest(plan *StatePlan) (string, error) {
+	if plan == nil || plan.root == "" || !filepath.IsAbs(plan.root) || filepath.Clean(plan.root) != plan.root ||
+		plan.stateRel == "" || plan.stateRel == "." || plan.stateRel == ".." || strings.HasPrefix(plan.stateRel, "../") ||
+		filepath.IsAbs(filepath.FromSlash(plan.stateRel)) || filepath.ToSlash(filepath.Clean(filepath.FromSlash(plan.stateRel))) != plan.stateRel {
+		return "", fmt.Errorf("operation state plan authority is invalid")
+	}
+	expected := statePathPrefixes(plan.stateRel)
+	for _, child := range stateNamespaceChildren {
+		expected = append(expected, filepath.ToSlash(filepath.Join(plan.stateRel, child)))
+	}
+	if len(plan.entries) != len(expected) {
+		return "", fmt.Errorf("operation state plan authority is incomplete")
+	}
+	digest := sha256.New()
+	_, _ = digest.Write([]byte("dotfiles/operation-state-plan-authority/v1\x00"))
+	hashStateAuthorityBytes(digest, []byte(plan.root))
+	hashStateAuthorityBytes(digest, []byte(plan.stateRel))
+	hashStateAuthorityUint64(digest, uint64(len(plan.entries)))
+	entryPresence := make(map[string]bool, len(plan.entries))
+	for index, entry := range plan.entries {
+		if entry.rel != expected[index] || entry.parents == nil {
+			return "", fmt.Errorf("operation state plan entry authority is invalid")
+		}
+		parentRel := filepath.ToSlash(filepath.Dir(filepath.FromSlash(entry.rel)))
+		if parentRel != "." {
+			if parentExists, tracked := entryPresence[parentRel]; tracked && !parentExists && entry.exists {
+				return "", fmt.Errorf("operation state plan descendant exists below a missing prefix")
+			}
+		}
+		entryPresence[entry.rel] = entry.exists
+		parentDigest, err := safefile.ParentChainAuthorityDigest(entry.parents)
+		if err != nil {
+			return "", fmt.Errorf("operation state plan parent authority is invalid")
+		}
+		parentBytes, err := hex.DecodeString(parentDigest)
+		if err != nil || len(parentBytes) != sha256.Size {
+			return "", fmt.Errorf("operation state plan parent digest is invalid")
+		}
+		hashStateAuthorityBytes(digest, []byte(entry.rel))
+		if entry.exists {
+			if entry.leaf == nil || entry.leaf.Digest() != ([32]byte{}) {
+				return "", fmt.Errorf("operation state plan leaf authority is invalid")
+			}
+			leafDigest, leafErr := safefile.DirectorySnapshotAuthorityDigest(entry.leaf)
+			if leafErr != nil {
+				return "", fmt.Errorf("operation state plan leaf authority is invalid")
+			}
+			leafBytes, decodeErr := hex.DecodeString(leafDigest)
+			if decodeErr != nil || len(leafBytes) != sha256.Size {
+				return "", fmt.Errorf("operation state plan leaf digest is invalid")
+			}
+			_, _ = digest.Write([]byte{1})
+			hashStateAuthorityBytes(digest, leafBytes)
+		} else {
+			if entry.leaf != nil {
+				return "", fmt.Errorf("operation state plan missing entry has leaf authority")
+			}
+			_, _ = digest.Write([]byte{0})
+			hashStateAuthorityBytes(digest, nil)
+		}
+		hashStateAuthorityBytes(digest, parentBytes)
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+func hashStateAuthorityBytes(digest hash.Hash, value []byte) {
+	hashStateAuthorityUint64(digest, uint64(len(value)))
+	_, _ = digest.Write(value)
+}
+
+func hashStateAuthorityUint64(digest hash.Hash, value uint64) {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], value)
+	_, _ = digest.Write(encoded[:])
 }
 
 // CaptureStatePlan records the exact existing/missing operational namespace

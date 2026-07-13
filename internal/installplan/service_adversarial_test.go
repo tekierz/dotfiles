@@ -14,7 +14,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-func TestAcceptedHashMatchesLegacyPackageOnlyAuthorityFormula(t *testing.T) {
+func TestAcceptedHashSupersedesLegacyPackageOnlyAuthorityFormula(t *testing.T) {
 	gitRecipe := reviewedPackageRecipe("git")
 	missingSnapshot := mustSnapshot(t, 51, mustObservation(t, "git", health.PackageMissing, gitRecipe))
 	missing, err := Build(Request{Intent: mustIntent(t, "git"), Snapshot: missingSnapshot, Environment: Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 51}}, countingDependencies(&dependencyCounts{}, gitRecipe))
@@ -25,8 +25,8 @@ func TestAcceptedHashMatchesLegacyPackageOnlyAuthorityFormula(t *testing.T) {
 	if !ok {
 		t.Fatal("missing-tool plan omitted accepted authority")
 	}
-	if want := legacyPackageOnlyHash(missingAccepted); missingAccepted.Hash() != want {
-		t.Fatalf("missing accepted hash=%q, want legacy %q", missingAccepted.Hash(), want)
+	if legacy := legacyPackageOnlyHash(missingAccepted); missingAccepted.Hash() == legacy {
+		t.Fatalf("missing accepted hash still matches incomplete legacy authority %q", legacy)
 	}
 
 	codexRecipe := reviewedPackageRecipe("codex")
@@ -51,8 +51,8 @@ func TestAcceptedHashMatchesLegacyPackageOnlyAuthorityFormula(t *testing.T) {
 	if !ok {
 		t.Fatal("mixed plan omitted accepted authority")
 	}
-	if want := legacyPackageOnlyHash(mixedAccepted); mixedAccepted.Hash() != want {
-		t.Fatalf("mixed accepted hash=%q, want legacy %q", mixedAccepted.Hash(), want)
+	if legacy := legacyPackageOnlyHash(mixedAccepted); mixedAccepted.Hash() == legacy {
+		t.Fatalf("mixed accepted hash still matches incomplete legacy authority %q", legacy)
 	}
 }
 

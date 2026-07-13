@@ -208,8 +208,9 @@ func countingDependencies(counts *dependencyCounts, recipe operation.InstallReci
 		CaptureStatePlan: func() (*operation.StatePlan, error) {
 			counts.capture++
 			counts.sequence = append(counts.sequence, "capture")
-			counts.statePlan = &operation.StatePlan{}
-			return counts.statePlan, nil
+			var err error
+			counts.statePlan, err = operation.CaptureStatePlan()
+			return counts.statePlan, err
 		},
 		Now: func() time.Time {
 			counts.clock++

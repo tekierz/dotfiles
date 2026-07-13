@@ -4,10 +4,12 @@ package installplan
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"maps"
 	"reflect"
 	"slices"
@@ -207,6 +209,9 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	if err != nil || statePlan == nil {
 		return Result{}, errors.Join(ErrInvalidRequest, err)
 	}
+	if _, err := operation.StatePlanAuthorityDigest(statePlan); err != nil {
+		return Result{}, ErrInvalidRequest
+	}
 	now := dependencies.Now()
 	if now.IsZero() {
 		return Result{}, ErrInvalidRequest
@@ -246,7 +251,10 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		document: document, statePlan: statePlan, snapshot: snapshotAuthority,
 		tools: maps.Clone(toolAuthorities), recipes: cloneRecipes(validatedRecipes), intent: cloneIntent(intent),
 	}
-	accepted.hash = acceptedPlanHash(accepted)
+	accepted.hash, err = acceptedPlanHash(accepted)
+	if err != nil {
+		return Result{}, ErrInvalidRequest
+	}
 	publicDocument, err := planpublic.NewDocument(planpublic.DocumentSpec{
 		Status: planpublic.StatusReady, Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Intent: intent,
 		Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(),
@@ -452,29 +460,78 @@ func cloneRecipes(recipes map[string]operation.InstallRecipe) map[string]operati
 	return result
 }
 
-func acceptedPlanHash(plan AcceptedPlan) string {
+func acceptedPlanHash(plan AcceptedPlan) (string, error) {
+	stateDigest, err := operation.StatePlanAuthorityDigest(plan.statePlan)
+	if err != nil {
+		return "", err
+	}
+	documentDigest, err := decodeAcceptedAuthorityDigest(plan.document.Hash())
+	if err != nil {
+		return "", err
+	}
+	snapshotDigest, err := decodeAcceptedAuthorityDigest(plan.snapshot.Digest)
+	if err != nil {
+		return "", err
+	}
+	stateDigestBytes, err := decodeAcceptedAuthorityDigest(stateDigest)
+	if err != nil {
+		return "", err
+	}
+	intentDigest, err := decodeAcceptedAuthorityDigest(plan.intent.Digest)
+	if err != nil {
+		return "", err
+	}
 	ids := make([]string, 0, len(plan.tools))
 	for id := range plan.tools {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	authorities := make([]string, 0, len(ids))
+	digest := sha256.New()
+	_, _ = digest.Write([]byte("dotfiles/installplan-accepted-authority/v1\x00"))
+	hashAcceptedAuthorityBytes(digest, documentDigest)
+	hashAcceptedAuthorityUint64(digest, uint64(plan.snapshot.SchemaVersion))
+	hashAcceptedAuthorityUint64(digest, plan.snapshot.Generation)
+	hashAcceptedAuthorityBytes(digest, []byte(plan.snapshot.Platform))
+	hashAcceptedAuthorityBytes(digest, []byte(plan.snapshot.Manager))
+	hashAcceptedAuthorityBytes(digest, snapshotDigest)
+	hashAcceptedAuthorityBytes(digest, stateDigestBytes)
+	hashAcceptedAuthorityBytes(digest, intentDigest)
+	hashAcceptedAuthorityUint64(digest, uint64(len(ids)))
 	for _, id := range ids {
 		authority := plan.tools[id]
-		authorities = append(authorities, id+":"+string(authority.Presence)+":"+authority.Intent+":"+authority.RecipeDigest)
+		hashAcceptedAuthorityBytes(digest, []byte(id))
+		hashAcceptedAuthorityBytes(digest, []byte(authority.Presence))
+		hashAcceptedAuthorityBytes(digest, []byte(authority.Intent))
+		if authority.RecipeDigest == "" {
+			hashAcceptedAuthorityBytes(digest, nil)
+			continue
+		}
+		recipeDigest, decodeErr := decodeAcceptedAuthorityDigest(authority.RecipeDigest)
+		if decodeErr != nil {
+			return "", decodeErr
+		}
+		hashAcceptedAuthorityBytes(digest, recipeDigest)
 	}
-	canonical, _ := json.Marshal(struct {
-		Document   string
-		Schema     int
-		Generation uint64
-		Platform   string
-		Manager    string
-		Snapshot   string
-		Recipes    []string
-	}{plan.document.Hash(), plan.snapshot.SchemaVersion, plan.snapshot.Generation, plan.snapshot.Platform,
-		plan.snapshot.Manager, plan.snapshot.Digest, authorities})
-	digest := sha256.Sum256(canonical)
-	return hex.EncodeToString(digest[:])
+	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+func decodeAcceptedAuthorityDigest(value string) ([]byte, error) {
+	decoded, err := hex.DecodeString(value)
+	if err != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != value {
+		return nil, ErrInvalidRequest
+	}
+	return decoded, nil
+}
+
+func hashAcceptedAuthorityBytes(digest hash.Hash, value []byte) {
+	hashAcceptedAuthorityUint64(digest, uint64(len(value)))
+	_, _ = digest.Write(value)
+}
+
+func hashAcceptedAuthorityUint64(digest hash.Hash, value uint64) {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], value)
+	_, _ = digest.Write(encoded[:])
 }
 
 func validateIntent(value planpublic.Intent) (planpublic.Intent, bool, error) {

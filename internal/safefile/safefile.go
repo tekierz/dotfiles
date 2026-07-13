@@ -4,9 +4,13 @@
 package safefile
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
+	"strings"
 )
 
 // restorableOwner is the portable policy kernel for ownership observations.
@@ -56,6 +60,9 @@ var (
 	// ErrUnsupported reports that descriptor-anchored file operations are
 	// unavailable on the current operating system.
 	ErrUnsupported = errors.New("safe file operation is unsupported on this platform")
+	// ErrInvalidAuthority reports an opaque authority value that was not
+	// produced by a complete tracked capture or whose private shape is invalid.
+	ErrInvalidAuthority = errors.New("invalid private filesystem authority")
 )
 
 // DirectorySnapshot is an immutable, opaque capture produced by this package.
@@ -115,6 +122,61 @@ func SameParentChain(left, right *ParentChain) bool {
 	return true
 }
 
+// ParentChainAuthorityDigest returns a domain-separated private fingerprint of
+// the complete tracked root-to-parent authority. Only the digest leaves this
+// package; relative names and filesystem identities remain opaque.
+func ParentChainAuthorityDigest(chain *ParentChain) (string, error) {
+	if chain == nil || !chain.tracked || len(chain.entries) == 0 {
+		return "", ErrInvalidAuthority
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("dotfiles/safefile-parent-chain-authority/v1\x00"))
+	hashSnapshotUint64(hash, uint64(len(chain.entries)))
+	previousRel := ""
+	missing := false
+	for index, entry := range chain.entries {
+		if index == 0 {
+			if entry.rel != "" || !entry.exists {
+				return "", ErrInvalidAuthority
+			}
+		} else {
+			if entry.rel == "" || strings.ContainsRune(entry.rel, '\x00') || path.Clean(entry.rel) != entry.rel || path.IsAbs(entry.rel) || path.Dir(entry.rel) != normalizedAuthorityParent(previousRel) {
+				return "", ErrInvalidAuthority
+			}
+			previousRel = entry.rel
+		}
+		if entry.exists {
+			if missing || entry.device == 0 || entry.inode == 0 || entry.mode&^uint32(0o7777) != 0 || entry.mode&0o022 != 0 {
+				return "", ErrInvalidAuthority
+			}
+		} else {
+			missing = true
+			if entry.device != 0 || entry.inode != 0 || entry.mode != 0 || entry.uid != 0 || entry.gid != 0 {
+				return "", ErrInvalidAuthority
+			}
+		}
+		hashSnapshotBytes(hash, []byte(entry.rel))
+		if entry.exists {
+			_, _ = hash.Write([]byte{1})
+		} else {
+			_, _ = hash.Write([]byte{0})
+		}
+		hashSnapshotUint64(hash, entry.device)
+		hashSnapshotUint64(hash, entry.inode)
+		hashSnapshotUint64(hash, uint64(entry.mode))
+		hashSnapshotUint64(hash, uint64(entry.uid))
+		hashSnapshotUint64(hash, uint64(entry.gid))
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func normalizedAuthorityParent(previous string) string {
+	if previous == "" {
+		return "."
+	}
+	return previous
+}
+
 type directorySnapshotNode struct {
 	mode    fs.FileMode
 	entries []directorySnapshotEntry
@@ -139,6 +201,39 @@ func (s *DirectorySnapshot) Digest() [32]byte {
 		return [32]byte{}
 	}
 	return s.digest
+}
+
+// DirectorySnapshotAuthorityDigest returns a domain-separated private
+// fingerprint of root identity, ownership, permissions, capture kind, and—if
+// recursive—the already-validated recursive content digest. It intentionally
+// does not change Digest's root-only zero semantics.
+func DirectorySnapshotAuthorityDigest(snapshot *DirectorySnapshot) (string, error) {
+	if snapshot == nil || !snapshot.tracked || snapshot.device == 0 || snapshot.inode == 0 || snapshot.root.mode != snapshot.root.mode.Perm() {
+		return "", ErrInvalidAuthority
+	}
+	if snapshot.rootOnly {
+		if snapshot.digest != ([32]byte{}) || len(snapshot.root.entries) != 0 {
+			return "", ErrInvalidAuthority
+		}
+	} else {
+		if snapshot.digest == ([32]byte{}) || newDirectorySnapshot(snapshot.root).digest != snapshot.digest {
+			return "", ErrInvalidAuthority
+		}
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("dotfiles/safefile-directory-authority/v1\x00"))
+	if snapshot.rootOnly {
+		_, _ = hash.Write([]byte{1})
+	} else {
+		_, _ = hash.Write([]byte{0})
+	}
+	hashSnapshotUint64(hash, snapshot.device)
+	hashSnapshotUint64(hash, snapshot.inode)
+	hashSnapshotUint64(hash, uint64(snapshot.uid))
+	hashSnapshotUint64(hash, uint64(snapshot.gid))
+	hashSnapshotUint64(hash, uint64(snapshot.root.mode.Perm()))
+	hashSnapshotBytes(hash, snapshot.digest[:])
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func recursiveDirectorySnapshot(snapshot *DirectorySnapshot) bool {

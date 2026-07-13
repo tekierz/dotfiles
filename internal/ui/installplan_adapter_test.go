@@ -15,6 +15,7 @@ import (
 )
 
 func TestAdoptHeadlessInstallPlanPreservesPackageAuthorityWithoutConfigLeakage(t *testing.T) {
+	withTempHome(t)
 	recipe := adapterPackageRecipe("zsh")
 	digest, err := operation.InstallRecipeDigest(recipe)
 	if err != nil {
@@ -41,7 +42,10 @@ func TestAdoptHeadlessInstallPlanPreservesPackageAuthorityWithoutConfigLeakage(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	statePlan := &operation.StatePlan{}
+	statePlan, err := operation.CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := headless.Build(headless.Request{
 		Intent: intent, Snapshot: snapshot,
 		Environment: headless.Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 61},
@@ -226,6 +230,7 @@ func adapterPackageRecipe(id string) operation.InstallRecipe {
 
 func adapterAcceptedFixture(t *testing.T, mixed bool) (headless.AcceptedPlan, *operation.StatePlan) {
 	t.Helper()
+	withTempHome(t)
 	zshRecipe := adapterPackageRecipe("zsh")
 	observations := []health.InstallationObservation{adapterObservation(t, "zsh", health.PackageMissing, zshRecipe)}
 	ids := []string{"zsh"}
@@ -242,7 +247,10 @@ func adapterAcceptedFixture(t *testing.T, mixed bool) (headless.AcceptedPlan, *o
 	if err != nil {
 		t.Fatal(err)
 	}
-	statePlan := &operation.StatePlan{}
+	statePlan, err := operation.CaptureStatePlan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := headless.Build(headless.Request{Intent: intent, Snapshot: snapshot, Environment: headless.Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 71}}, headless.Dependencies{
 		LookupTool: func(id string) (tools.Tool, bool) {
 			if id == "zsh" {
