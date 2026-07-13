@@ -214,14 +214,31 @@ func (s *progressScreen) capOutput() {
 	}
 }
 
-// View renders the installation progress screen. It ports renderProgress,
-// reading the live App state. The width/height args are accepted for interface
-// conformance; the layout reads a.width/a.height directly.
+// View renders the installation progress screen. The supplied dimensions are
+// authoritative: ScreenManager owns the current terminal size, while the
+// dimensions retained on App can briefly lag during a resize.
 func (s *progressScreen) View(width, height int) string {
 	a := s.App()
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	// Below the minimum full-layout footprint, render a truthful one-line state
+	// instead of asking lipgloss to place an oversized bordered panel.
+	if width < 30 || height < 14 {
+		label := "Installing..."
+		if a.installComplete {
+			label = "Incomplete"
+			if a.installOutcome == installationOutcomeSucceeded && a.installSummaryFacts.outcome == installationOutcomeSucceeded {
+				label = "Complete"
+			}
+		}
+		return PlaceWithBackground(width, height, truncateVisible(label, width))
+	}
 
 	title := TitleStyle.Render("Installing...")
-	if a.installComplete && a.installOutcome == installationOutcomeSucceeded {
+	succeeded := a.installComplete && a.installOutcome == installationOutcomeSucceeded &&
+		a.installSummaryFacts.outcome == installationOutcomeSucceeded
+	if succeeded {
 		title = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true).Render("✓ Installation Complete!")
 	} else if a.installComplete {
 		title = lipgloss.NewStyle().Foreground(ColorYellow).Bold(true).Render("! Installation Incomplete")
@@ -257,7 +274,6 @@ func (s *progressScreen) View(width, height int) string {
 	// Map a.installStep (cumulative step count, one per worker stepLine) onto
 	// displaySteps so the highlighted entry tracks rough progress without ever
 	// flipping the whole list to complete while the install is still running.
-	succeeded := a.installComplete && a.installOutcome == installationOutcomeSucceeded
 	failed := a.installComplete && !succeeded
 	currentPhase := 0
 	if succeeded {
@@ -271,8 +287,24 @@ func (s *progressScreen) View(width, height int) string {
 		currentPhase = scaled
 	}
 
-	var stepList strings.Builder
-	for i, st := range displaySteps {
+	phaseCount := 5
+	containerPadY := 1
+	if height <= 20 {
+		phaseCount = 2
+		containerPadY = 0
+	} else if height >= 34 {
+		phaseCount = len(displaySteps)
+	}
+	phaseStart := currentPhase - phaseCount + 1
+	if succeeded {
+		phaseStart = len(displaySteps) - phaseCount
+	}
+	phaseStart = clampInt(phaseStart, 0, maxInt(0, len(displaySteps)-phaseCount))
+	phaseEnd := min(len(displaySteps), phaseStart+phaseCount)
+
+	phaseLines := make([]string, 0, phaseEnd-phaseStart)
+	for i := phaseStart; i < phaseEnd; i++ {
+		st := displaySteps[i]
 		var status string
 		var style lipgloss.Style
 
@@ -283,9 +315,12 @@ func (s *progressScreen) View(width, height int) string {
 		case failed && i == currentPhase:
 			status = "✗"
 			style = lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
-		case i < currentPhase:
+		case succeeded && i < currentPhase:
 			status = "✓"
 			style = lipgloss.NewStyle().Foreground(ColorGreen)
+		case i < currentPhase:
+			status = "•"
+			style = lipgloss.NewStyle().Foreground(ColorTextMuted)
 		case i == currentPhase && a.installRunning:
 			status = "▶"
 			style = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
@@ -293,17 +328,19 @@ func (s *progressScreen) View(width, height int) string {
 			status = "○"
 			style = lipgloss.NewStyle().Foreground(ColorTextMuted)
 		}
-		stepList.WriteString(style.Render(fmt.Sprintf("  %s %s\n", status, st.name)))
+		phaseLines = append(phaseLines, style.Render(fmt.Sprintf("  %s %s", status, st.name)))
 	}
+	stepList := strings.Join(phaseLines, "\n")
 
 	// Progress fraction derived from the ACTUAL planned phase count, so the bar
 	// reflects real completion rather than the fixed display list length.
 	progressPercent := float64(a.installStep) / float64(totalSteps)
 	if succeeded {
 		progressPercent = 1.0
-	} else if failed && progressPercent >= 1.0 {
-		// The terminal failed phase is not completed. Keep at least its share of
-		// the bar empty so a failed attempt can never flash a full progress bar.
+	} else if progressPercent >= 1.0 {
+		// Only a sealed successful attempt may render a full bar. A failed,
+		// running, stale, or otherwise unknown attempt keeps its terminal phase
+		// visibly incomplete.
 		progressPercent = float64(maxInt(0, totalSteps-1)) / float64(totalSteps)
 	}
 	if progressPercent < 0 {
@@ -311,51 +348,71 @@ func (s *progressScreen) View(width, height int) string {
 	} else if progressPercent > 1 {
 		progressPercent = 1
 	}
-	progressW := min(50, maxInt(20, a.width-30))
+	containerPadX := 1
+	if width >= 100 {
+		containerPadX = 2
+	}
+	contentWidth := maxInt(1, width-2-(2*containerPadX))
+	progressW := min(50, contentWidth)
 	progress := ProgressBar(progressPercent, progressW)
 
 	// Output panel - show real output.
-	var outputLines string
+	outputCapacity := 3
+	if height <= 20 {
+		outputCapacity = 1
+	} else if height >= 34 {
+		outputCapacity = 8
+	}
+	panelOuterWidth := min(72, contentWidth)
+	panelInnerWidth := maxInt(1, panelOuterWidth-2)
+	var outputRows []string
 	switch {
 	case len(a.installOutput) > 0:
-		// Show last 6 lines.
 		start := 0
-		if len(a.installOutput) > 6 {
-			start = len(a.installOutput) - 6
+		if len(a.installOutput) > outputCapacity {
+			start = len(a.installOutput) - outputCapacity
 		}
-		outputLines = strings.Join(a.installOutput[start:], "\n")
+		outputRows = make([]string, 0, len(a.installOutput)-start)
+		for _, line := range a.installOutput[start:] {
+			outputRows = append(outputRows, truncateVisible(sanitizeLogLine(line), panelInnerWidth))
+		}
 	case a.installRunning:
-		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Starting installation...")
+		outputRows = []string{"Starting installation..."}
 	case !a.installComplete:
-		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Press ENTER to start")
+		outputRows = []string{"Press ENTER to start"}
+	default:
+		outputRows = []string{"No installer output captured"}
+	}
+	for len(outputRows) < outputCapacity {
+		outputRows = append(outputRows, "")
+	}
+	outputLines := strings.Join(outputRows, "\n")
+	if len(a.installOutput) == 0 {
+		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render(outputLines)
 	}
 
 	output := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorBorder).
-		// Keep the output panel responsive so it doesn't overflow smaller terminals.
-		// Note: Width/Height apply before borders in lipgloss, so subtract 2 to
-		// target an approximate outer size.
-		Width(maxInt(20, min(72, a.width-10)-2)).
-		Height(clampInt(a.height/4, 6, 10)).
-		Padding(0, 1).
+		Width(panelInnerWidth).
+		Height(outputCapacity).
 		Render(outputLines)
 
 	var help string
 	switch {
 	case a.installComplete:
-		help = HelpStyle.Render("[ENTER] Continue")
+		help = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("[ENTER] Continue")
 	case a.installRunning:
-		help = HelpStyle.Render("Installation in progress...")
+		help = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Installation in progress...")
 	default:
-		help = HelpStyle.Render("[ENTER] Start    [ESC] Back")
+		help = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("[ENTER] Start    [ESC] Back")
 	}
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
 		"",
-		stepList.String(),
+		stepList,
 		"",
 		progress,
 		"",
@@ -364,5 +421,9 @@ func (s *progressScreen) View(width, height int) string {
 		help,
 	)
 
-	return PlaceWithBackground(a.width, a.height, ContainerStyle.Render(content))
+	container := ContainerStyle.
+		Padding(containerPadY, containerPadX).
+		Width(maxInt(1, width-2)).
+		Render(content)
+	return PlaceWithBackground(width, height, container)
 }

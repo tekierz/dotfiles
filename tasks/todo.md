@@ -219,6 +219,11 @@ observability land before new integrations or broad UI work.
   cancellation, operational failure, and post-mutation output failure have bounded exit and
   stream contracts; package operations are locked and journaled, with detector checks both
   before state bootstrap and immediately before execution.
+- Installation progress now treats the active screen dimensions as authoritative and uses
+  compact, detailed, or expanded phase/output windows at 60x18, 80x24, and 120x40. Long
+  installer output is sanitized and visibly bounded, while only matching live and sealed
+  success facts may render a completed title, check marks, or a full progress bar. Focused,
+  full-UI, race, and pinned static checks pass; broader responsive-screen work remains open.
 
 ### Current product-gap checkpoint — 2026-07-12
 
