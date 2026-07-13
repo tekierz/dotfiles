@@ -141,6 +141,9 @@ var statusCmd = newRegisteredStatusCommand()
 // planCmd prints the deterministic, install-only public plan contract.
 var planCmd = newRegisteredPlanCommand()
 
+// applyCmd executes only an exact freshly reviewed installation plan.
+var applyCmd = newRegisteredApplyCommand()
+
 // backupsCmd lists available backups
 var backupsCmd = &cobra.Command{
 	Use:   "backups",
@@ -307,6 +310,7 @@ func init() {
 	rootCmd.AddCommand(hotkeysCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(planCmd)
+	rootCmd.AddCommand(applyCmd)
 	rootCmd.AddCommand(backupsCmd)
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(versionCmd)
