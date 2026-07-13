@@ -58,13 +58,13 @@ observability land before new integrations or broad UI work.
       redacted support bundle.
   - [x] Add deterministic, versioned `status --json` v1 directly from the installation-health
         collector, with redacted public evidence, explicit uncollected capabilities, and stable
-        success/failure exit behavior. `plan --json`, apply, and the support bundle remain open.
-  - [ ] **Active:** implement the reviewed `plan --json` contract in
+        success/failure exit behavior. Apply and the support bundle remain open.
+  - [x] Implement the reviewed `plan --json` contract in
         `tasks/plan-json-contract.md`: public projection tests first, then a neutral headless
         install-only planner accepting explicit repeated `--tool` intent with no defaults or
         `App`, followed by a complete private authority fingerprint and the Cobra command.
         Directly marshaling `operation.Plan` or wrapping the private TUI planner is prohibited.
-  - [ ] Add hash-bound noninteractive apply only after the complete authority fingerprint;
+  - [ ] **Active:** add hash-bound noninteractive apply after the complete authority fingerprint;
         preserve fresh replan, lock, journal, mandatory backup, revalidation, and rollback.
 - [ ] Generate settings/help/hotkeys/docs/tests from tool manifests where practical.
 
@@ -187,6 +187,11 @@ observability land before new integrations or broad UI work.
 - Codex and Pi now use version-pinned, macOS-only npm recipes; OpenCode uses only
   its reviewed Homebrew/Arch routes; T3 Code uses an exact typed Homebrew-cask
   action. Unsupported platform rows are disabled instead of poisoning the plan.
+- `dotfiles plan --json` now shares the neutral explicit install planner with the TUI. It
+  accepts only repeated explicit `--tool` intent, collects one installation snapshot,
+  publishes the complete private-authority fingerprint only as `plan_hash`, emits one
+  deterministic redacted document, and implements stable exit codes 0, 2, and 1. Apply
+  remains unavailable and public JSON cannot reconstruct private execution authority.
 
 ### Current product-gap checkpoint — 2026-07-12
 

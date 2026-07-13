@@ -35,6 +35,7 @@ make build
 | `dotfiles hotkeys` | View keybindings cheatsheet |
 | `dotfiles update` | Check for package updates |
 | `dotfiles status [--json]` | Show current configuration, or versioned installation health JSON |
+| `dotfiles plan --json --tool <id>...` | Print a deterministic, read-only installation plan for explicit tools |
 | `dotfiles doctor [--json]` | Diagnose which build is running, PATH collisions, Homebrew ownership, and stale legacy binaries |
 | `dotfiles doctor repair [--json]` | Preview or quarantine one ownership-proven stale `~/.local/bin/dotfiles` entry |
 | `dotfiles theme list` | List available themes |
@@ -46,6 +47,10 @@ make build
 | `dotfiles restore [name]` | Restore a backup (opens TUI picker if no name) |
 | `dotfiles version` / `dotfiles --version` | Show version information |
 | `dotfiles uninstall` | Restore backups and show conservative manual uninstall guidance; automatic deletion is disabled |
+
+`dotfiles plan --json` never infers dashboard defaults. Repeat `--tool` for each
+requested registry ID. Ready and no-change plans exit 0; blocked or missing
+intent exits 2 with one JSON object. Applying a plan is not implemented.
 
 ### Diagnosing stale local builds
 

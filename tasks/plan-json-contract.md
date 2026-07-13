@@ -1,6 +1,7 @@
 # `dotfiles plan --json` v1 contract
 
-Status: reviewed architecture contract; implementation has not started.
+Status: implemented on 2026-07-12 through the deterministic read-only command;
+hash-bound noninteractive apply remains a separate deferred slice.
 
 ## Decision
 

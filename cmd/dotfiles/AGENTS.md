@@ -18,6 +18,7 @@ dotfiles hotkeys            # Launch TUI hotkey viewer (alias: hk)
 dotfiles update             # Launch interactive TUI update screen
 dotfiles update check       # Print outdated packages (CLI)
 dotfiles status             # Print status (CLI)
+dotfiles plan --json --tool <id> # Print deterministic explicit install plan JSON
 dotfiles doctor [--json]    # Diagnose executable provenance and PATH collisions
 dotfiles doctor repair      # Preview/confirm ownership-proven stale binary quarantine
 dotfiles backups            # List backups (CLI)

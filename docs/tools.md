@@ -106,6 +106,7 @@ Run `dotfiles` with no arguments to launch the TUI.
 | `dotfiles config <tool>` | Open configuration for one tool |
 | `dotfiles hotkeys [--tool <name>]` | View keybindings |
 | `dotfiles status [--json]` | Print current product configuration, or installation health JSON v1 |
+| `dotfiles plan --json --tool <id>...` | Print a deterministic install-only plan; no defaults or apply behavior |
 | `dotfiles doctor [--json]` | Diagnose executable provenance and PATH collisions |
 | `dotfiles doctor repair [--json]` | Preview a stale user-local binary repair; confirmation is required to apply |
 | `dotfiles theme list` | List themes |
