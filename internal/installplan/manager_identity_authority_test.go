@@ -120,6 +120,7 @@ func TestReadyPlanRejectsMissingManagerExecutableIdentity(t *testing.T) {
 }
 
 func TestNPMOnlyReadyPlanOmitsManagerIdentityEvenWhenEnvironmentSuppliesOne(t *testing.T) {
+	npmIdentity, _ := observedNPMExecutionIdentity(t, "manager-neutral-npm")
 	recipe := operation.InstallRecipe{
 		SchemaVersion: operation.CurrentInstallRecipeSchemaVersion,
 		ToolID:        "pi",
@@ -147,8 +148,10 @@ func TestNPMOnlyReadyPlanOmitsManagerIdentityEvenWhenEnvironmentSuppliesOne(t *t
 		return accepted
 	}
 
-	withoutIdentity := build(Environment{Platform: pkg.PlatformMacOS, Manager: "brew", ExpectedGeneration: 93})
-	withIdentity := build(managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 93))
+	withoutIdentity := build(Environment{Platform: pkg.PlatformMacOS, Manager: "brew", NPMIdentity: npmIdentity, ExpectedGeneration: 93})
+	withManager := managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 93)
+	withManager.NPMIdentity = npmIdentity
+	withIdentity := build(withManager)
 	if _, ok := withoutIdentity.ManagerExecutableIdentity(); ok {
 		t.Fatal("npm-only plan unexpectedly bound a manager executable identity")
 	}
@@ -157,5 +160,41 @@ func TestNPMOnlyReadyPlanOmitsManagerIdentityEvenWhenEnvironmentSuppliesOne(t *t
 	}
 	if withoutIdentity.Hash() != withIdentity.Hash() {
 		t.Fatal("unrequired manager identity changed npm-only accepted authority")
+	}
+}
+
+func TestNonNPMReadyPlanDiscardsSuppliedNPMIdentityWithoutChangingAuthority(t *testing.T) {
+	recipe := reviewedPackageRecipe("git")
+	snapshot := mustSnapshot(t, 94, mustObservation(t, "git", health.PackageMissing, recipe))
+	npmA, _ := observedNPMExecutionIdentity(t, "discarded-npm-a")
+	npmB, _ := observedNPMExecutionIdentity(t, "discarded-npm-b")
+	build := func(npmIdentity pkg.NPMExecutionIdentity) Result {
+		t.Helper()
+		environment := managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 94)
+		environment.NPMIdentity = npmIdentity
+		result, err := Build(Request{Intent: mustIntent(t, "git"), Snapshot: snapshot, Environment: environment}, countingDependencies(&dependencyCounts{}, recipe))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	without, first, second := build(pkg.NPMExecutionIdentity{}), build(npmA), build(npmB)
+	acceptedWithout, ok := without.Accepted()
+	if !ok {
+		t.Fatal("package-only plan omitted accepted authority")
+	}
+	acceptedFirst, firstOK := first.Accepted()
+	acceptedSecond, secondOK := second.Accepted()
+	if !firstOK || !secondOK || acceptedWithout.Hash() != acceptedFirst.Hash() || acceptedWithout.Hash() != acceptedSecond.Hash() {
+		t.Fatalf("discarded npm identity changed hash: %q %q %q", acceptedWithout.Hash(), acceptedFirst.Hash(), acceptedSecond.Hash())
+	}
+	for _, accepted := range []AcceptedPlan{acceptedWithout, acceptedFirst, acceptedSecond} {
+		if _, retained := accepted.NPMExecutionIdentity(); retained {
+			t.Fatal("package-only plan retained an unrequired npm identity")
+		}
+	}
+	if string(mustPublicJSON(t, without.Public())) != string(mustPublicJSON(t, first.Public())) || string(mustPublicJSON(t, without.Public())) != string(mustPublicJSON(t, second.Public())) {
+		t.Fatal("discarded npm identity changed public projection")
 	}
 }

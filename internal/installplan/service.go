@@ -23,12 +23,17 @@ import (
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-var ErrInvalidRequest = errors.New("invalid install plan request")
+var (
+	ErrInvalidRequest                   = errors.New("invalid install plan request")
+	ErrNPMPhaseBoundaryRequired         = errors.New("npm execution requires a fresh phase boundary")
+	ErrNPMExecutionAuthorityUnavailable = errors.New("npm execution authority is unavailable")
+)
 
 type Environment struct {
 	Platform           pkg.Platform
 	Manager            string
 	ManagerIdentity    pkg.ExecutableIdentity
+	NPMIdentity        pkg.NPMExecutionIdentity
 	ExpectedGeneration uint64
 }
 
@@ -67,6 +72,7 @@ type AcceptedPlan struct {
 	recipes         map[string]operation.InstallRecipe
 	intent          planpublic.Intent
 	managerIdentity pkg.ExecutableIdentity
+	npmIdentity     pkg.NPMExecutionIdentity
 	hash            string
 }
 
@@ -80,6 +86,13 @@ func (plan AcceptedPlan) ManagerExecutableIdentity() (pkg.ExecutableIdentity, bo
 		return pkg.ExecutableIdentity{}, false
 	}
 	return plan.managerIdentity, true
+}
+
+func (plan AcceptedPlan) NPMExecutionIdentity() (pkg.NPMExecutionIdentity, bool) {
+	if !validNPMExecutionIdentity(plan.npmIdentity) {
+		return pkg.NPMExecutionIdentity{}, false
+	}
+	return plan.npmIdentity, true
 }
 
 func (plan AcceptedPlan) Intent() planpublic.Intent {
@@ -226,8 +239,18 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		toolAuthorities[id] = ToolAuthority{Presence: observation.Presence(), Intent: installIntent, RecipeDigest: digest}
 	}
 
+	phase := classifyNPMExecutionPhase(validatedRecipes)
+	if phase == npmExecutionPhaseMixed {
+		return Result{}, errors.Join(ErrInvalidRequest, ErrNPMPhaseBoundaryRequired)
+	}
 	managerIdentity := pkg.ExecutableIdentity{}
-	if recipesRequireManagerIdentity(validatedRecipes) {
+	npmIdentity := pkg.NPMExecutionIdentity{}
+	if phase == npmExecutionPhasePure {
+		if !validNPMExecutionIdentity(request.Environment.NPMIdentity) {
+			return Result{}, errors.Join(ErrInvalidRequest, ErrNPMExecutionAuthorityUnavailable)
+		}
+		npmIdentity = request.Environment.NPMIdentity
+	} else if recipesRequireManagerIdentity(validatedRecipes) {
 		if !validManagerExecutableIdentity(request.Environment.ManagerIdentity) {
 			return Result{}, ErrInvalidRequest
 		}
@@ -277,7 +300,8 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	}
 	accepted := AcceptedPlan{
 		document: document, statePlan: statePlan, snapshot: snapshotAuthority,
-		tools: maps.Clone(toolAuthorities), recipes: cloneRecipes(validatedRecipes), intent: cloneIntent(intent), managerIdentity: managerIdentity,
+		tools: maps.Clone(toolAuthorities), recipes: cloneRecipes(validatedRecipes), intent: cloneIntent(intent),
+		managerIdentity: managerIdentity, npmIdentity: npmIdentity,
 	}
 	accepted.hash, err = acceptedPlanHash(accepted)
 	if err != nil {
@@ -363,6 +387,39 @@ func validRequestSnapshot(snapshot health.InstallationSnapshot, environment Envi
 
 func validManagerExecutableIdentity(identity pkg.ExecutableIdentity) bool {
 	return identity.SchemaVersion() == pkg.CurrentExecutableIdentitySchemaVersion && validAcceptedAuthorityDigest(identity.Digest())
+}
+
+func validNPMExecutionIdentity(identity pkg.NPMExecutionIdentity) bool {
+	return identity.SchemaVersion() == pkg.CurrentNPMExecutionIdentitySchemaVersion && validAcceptedAuthorityDigest(identity.Digest())
+}
+
+type npmExecutionPhase uint8
+
+const (
+	npmExecutionPhaseNone npmExecutionPhase = iota
+	npmExecutionPhasePure
+	npmExecutionPhaseMixed
+)
+
+func classifyNPMExecutionPhase(recipes map[string]operation.InstallRecipe) npmExecutionPhase {
+	hasNPM, hasManager := false, false
+	for _, recipe := range recipes {
+		for _, step := range recipe.Steps {
+			switch step.Kind {
+			case operation.InstallStepNPMGlobal:
+				hasNPM = true
+			case operation.InstallStepPackageManager, operation.InstallStepHomebrewCask:
+				hasManager = true
+			}
+		}
+	}
+	if hasNPM && hasManager {
+		return npmExecutionPhaseMixed
+	}
+	if hasNPM {
+		return npmExecutionPhasePure
+	}
+	return npmExecutionPhaseNone
 }
 
 func recipesRequireManagerIdentity(recipes map[string]operation.InstallRecipe) bool {
@@ -579,9 +636,21 @@ func acceptedPlanHash(plan AcceptedPlan) (string, error) {
 	if plan.snapshot.SchemaVersion != health.CurrentInstallationSchemaVersion {
 		return "", ErrInvalidRequest
 	}
-	requiresManagerIdentity := recipesRequireManagerIdentity(plan.recipes)
+	phase := classifyNPMExecutionPhase(plan.recipes)
+	if phase == npmExecutionPhaseMixed {
+		return "", errors.Join(ErrInvalidRequest, ErrNPMPhaseBoundaryRequired)
+	}
+	requiresManagerIdentity := phase == npmExecutionPhaseNone && recipesRequireManagerIdentity(plan.recipes)
 	hasManagerIdentity := validManagerExecutableIdentity(plan.managerIdentity)
 	if requiresManagerIdentity != hasManagerIdentity || (!hasManagerIdentity && plan.managerIdentity != (pkg.ExecutableIdentity{})) {
+		return "", ErrInvalidRequest
+	}
+	requiresNPMIdentity := phase == npmExecutionPhasePure
+	hasNPMIdentity := validNPMExecutionIdentity(plan.npmIdentity)
+	if requiresNPMIdentity != hasNPMIdentity || (!hasNPMIdentity && plan.npmIdentity != (pkg.NPMExecutionIdentity{})) {
+		if requiresNPMIdentity {
+			return "", errors.Join(ErrInvalidRequest, ErrNPMExecutionAuthorityUnavailable)
+		}
 		return "", ErrInvalidRequest
 	}
 	stateDigest, err := operation.StatePlanAuthorityDigest(plan.statePlan)
@@ -611,13 +680,20 @@ func acceptedPlanHash(plan AcceptedPlan) (string, error) {
 			return "", err
 		}
 	}
+	var npmIdentityDigest []byte
+	if hasNPMIdentity {
+		npmIdentityDigest, err = decodeAcceptedAuthorityDigest(plan.npmIdentity.Digest())
+		if err != nil {
+			return "", err
+		}
+	}
 	ids := make([]string, 0, len(plan.tools))
 	for id := range plan.tools {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	digest := sha256.New()
-	_, _ = digest.Write([]byte("dotfiles/installplan-accepted-authority/v2\x00"))
+	_, _ = digest.Write([]byte("dotfiles/installplan-accepted-authority/v3\x00"))
 	hashAcceptedAuthorityBytes(digest, documentDigest)
 	hashAcceptedAuthorityUint64(digest, uint64(health.CurrentInstallationSchemaVersion))
 	hashAcceptedAuthorityUint64(digest, plan.snapshot.Generation)
@@ -627,6 +703,13 @@ func acceptedPlanHash(plan AcceptedPlan) (string, error) {
 		hashAcceptedAuthorityUint64(digest, 1)
 		hashAcceptedAuthorityUint64(digest, uint64(pkg.CurrentExecutableIdentitySchemaVersion))
 		hashAcceptedAuthorityBytes(digest, managerIdentityDigest)
+	} else {
+		hashAcceptedAuthorityUint64(digest, 0)
+	}
+	if hasNPMIdentity {
+		hashAcceptedAuthorityUint64(digest, 1)
+		hashAcceptedAuthorityUint64(digest, uint64(pkg.CurrentNPMExecutionIdentitySchemaVersion))
+		hashAcceptedAuthorityBytes(digest, npmIdentityDigest)
 	} else {
 		hashAcceptedAuthorityUint64(digest, 0)
 	}

@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	currentNPMExecutionIdentitySchemaVersion = 2
+	// CurrentNPMExecutionIdentitySchemaVersion is the accepted npm chain schema.
+	CurrentNPMExecutionIdentitySchemaVersion = 2
 	maxNPMExecutionShebangBytes              = 64
 	npmEnvNodeShebang                        = "#!/usr/bin/env node\n"
 )
@@ -127,7 +128,7 @@ func ObserveNPMExecutionIdentity(npmPath, nodePath string) (NPMExecutionIdentity
 		return NPMExecutionIdentity{}, errNPMExecutionIdentityObservation
 	}
 	identity := NPMExecutionIdentity{
-		schemaVersion: currentNPMExecutionIdentitySchemaVersion,
+		schemaVersion: CurrentNPMExecutionIdentitySchemaVersion,
 		npm:           secondNPM,
 		node:          secondNode,
 		nodeFormat:    nodeFormat,
@@ -225,7 +226,7 @@ func readNPMExecutionShebang(identity ExecutableIdentity) ([]byte, error) {
 }
 
 func validNPMExecutionIdentity(identity NPMExecutionIdentity) bool {
-	if identity.schemaVersion != currentNPMExecutionIdentitySchemaVersion ||
+	if identity.schemaVersion != CurrentNPMExecutionIdentitySchemaVersion ||
 		!validExecutableIdentity(identity.npm) || !validExecutableIdentity(identity.node) ||
 		identity.nodeFormat == npmNodeNativeFormatInvalid || identity.nodeFormat > npmNodeNativeFormatFat64 ||
 		sameNPMExecutionComponent(identity.npm, identity.node) || !validLowerHexDigest(identity.digest) {

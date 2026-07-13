@@ -56,26 +56,26 @@ func TestInstallplanServiceWiringCanonicalizesOnceAndAdoptsReady(t *testing.T) {
 	app, _, base := newPlanTestApp(t)
 	setManageTruthSnapshot(t, app, 141, pkg.PlatformMacOS, "brew",
 		manageTruthObservation(t, "zsh", health.PresenceMissing),
-		manageTruthObservation(t, "pi", health.PresenceMissing),
+		manageTruthObservation(t, "git", health.PresenceMissing),
 	)
 	calls := &installplanWiringCalls{}
 	runtime := installplanWiringRuntime(t, base, calls)
 	now := time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC)
 
-	plan, err := buildInstallPlanForTools(app, runtime, now, []string{"zsh", "pi", "zsh"})
+	plan, err := buildInstallPlanForTools(app, runtime, now, []string{"zsh", "git", "zsh"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan == nil || plan.hash() == "" || plan.statePlan == nil {
 		t.Fatalf("adopted plan = %+v", plan)
 	}
-	if got := plan.actions(); len(got) != 2 || got[0].ID != "install:pi" || got[1].ID != "install:zsh" {
+	if got := plan.actions(); len(got) != 2 || got[0].ID != "install:git" || got[1].ID != "install:zsh" {
 		t.Fatalf("canonical adopted actions = %+v", got)
 	}
 	if plan.selectedTools != nil || plan.configTools != nil || len(plan.authority) != 0 || len(plan.parentDirs) != 0 {
 		t.Fatalf("package-only plan leaked wizard authority: selected=%v config=%v authority=%v parents=%v", plan.selectedTools, plan.configTools, plan.authority, plan.parentDirs)
 	}
-	if calls.registered != 1 || !slices.Equal(calls.lookup, []string{"pi", "zsh"}) || !slices.Equal(calls.describe, []string{"pi", "zsh"}) || calls.capture != 1 {
+	if calls.registered != 1 || !slices.Equal(calls.lookup, []string{"git", "zsh"}) || !slices.Equal(calls.describe, []string{"git", "zsh"}) || calls.capture != 1 {
 		t.Fatalf("service dependency calls = %+v", *calls)
 	}
 }
@@ -182,29 +182,32 @@ func TestInstallplanServiceWiringRejectsPresentUnknownAndRecipeDrift(t *testing.
 }
 
 func TestInstallplanServiceWiringPreservesReviewedPiAndT3Recipes(t *testing.T) {
-	for _, id := range []string{"pi", "t3-code"} {
-		t.Run(id, func(t *testing.T) {
-			app, _, base := newPlanTestApp(t)
-			setManageTruthSnapshot(t, app, 144, pkg.PlatformMacOS, "brew",
-				manageTruthObservation(t, id, health.PresenceMissing),
-			)
-			calls := &installplanWiringCalls{}
-			runtime := installplanWiringRuntime(t, base, calls)
-			plan, err := buildInstallPlanForTools(app, runtime, time.Now(), []string{id})
-			if err != nil {
-				t.Fatal(err)
-			}
-			tool, _ := tools.NewRegistry().Get(id)
-			want, describeErr := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
-			if describeErr != nil {
-				t.Fatal(describeErr)
-			}
-			actions := plan.actions()
-			if len(actions) != 1 || actions[0].InstallRecipe == nil || !reflect.DeepEqual(*actions[0].InstallRecipe, want) {
-				t.Fatalf("%s adopted recipe = %+v, want %+v", id, actions, want)
-			}
-		})
-	}
+	t.Run("pi-phase-blocked", func(t *testing.T) {
+		app, _, base := newPlanTestApp(t)
+		setManageTruthSnapshot(t, app, 144, pkg.PlatformMacOS, "brew", manageTruthObservation(t, "pi", health.PresenceMissing))
+		calls := &installplanWiringCalls{}
+		plan, err := buildInstallPlanForTools(app, installplanWiringRuntime(t, base, calls), time.Now(), []string{"pi"})
+		if plan != nil || err == nil || err.Error() != installationSnapshotUnavailable || !slices.Equal(calls.lookup, []string{"pi"}) || !slices.Equal(calls.describe, []string{"pi"}) || calls.capture != 0 {
+			t.Fatalf("Pi phase result=plan %v error %v calls %+v", plan, err, *calls)
+		}
+	})
+	t.Run("t3-ready", func(t *testing.T) {
+		app, _, base := newPlanTestApp(t)
+		setManageTruthSnapshot(t, app, 144, pkg.PlatformMacOS, "brew", manageTruthObservation(t, "t3-code", health.PresenceMissing))
+		plan, err := buildInstallPlanForTools(app, installplanWiringRuntime(t, base, &installplanWiringCalls{}), time.Now(), []string{"t3-code"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tool, _ := tools.NewRegistry().Get("t3-code")
+		want, describeErr := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})
+		if describeErr != nil {
+			t.Fatal(describeErr)
+		}
+		actions := plan.actions()
+		if len(actions) != 1 || actions[0].InstallRecipe == nil || !reflect.DeepEqual(*actions[0].InstallRecipe, want) {
+			t.Fatalf("T3 adopted recipe = %+v, want %+v", actions, want)
+		}
+	})
 }
 
 func TestInstallplanServiceWiringMixedIntentUsesSnapshotAndIgnoresWizardState(t *testing.T) {

@@ -7,71 +7,18 @@ import (
 	"testing"
 
 	"github.com/tekierz/dotfiles/internal/health"
-	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-func assertReviewedPiPlan(t *testing.T, app *App, cmdPresent bool) {
+func assertPiPhaseBlocked(t *testing.T, app *App, cmdPresent bool) {
 	t.Helper()
-	if !cmdPresent {
-		t.Fatal("Pi install returned no navigation to reviewed plan")
-	}
-	plan := app.pendingInstallPlan
-	if app.installPlanError != nil || plan == nil {
-		t.Fatalf("Pi reviewed plan nonnil=%v error=%v", plan != nil, app.installPlanError)
-	}
-	actions := plan.actions()
-	if len(actions) != 1 {
-		t.Fatalf("Pi actions=%+v, want exactly one install action", actions)
-	}
-	action := actions[0]
-	if action.ID != "install:pi" || action.Kind != operation.KindInstallTool || action.ToolID != "pi" || action.Disposition != operation.DispositionApply {
-		t.Fatalf("Pi action=%+v, want one applicable typed install action", action)
-	}
-	if action.InstallRecipe == nil {
-		t.Fatal("Pi action omitted reviewed install recipe")
-	}
-	recipe := action.InstallRecipe
-	wantArgs := []string{"install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent@0.80.3"}
-	if recipe.SchemaVersion != operation.CurrentInstallRecipeSchemaVersion || recipe.ToolID != "pi" || recipe.Platform != string(pkg.PlatformMacOS) || recipe.Manager != "brew" {
-		t.Fatalf("Pi recipe identity=%+v", recipe)
-	}
-	if len(recipe.Steps) != 2 || recipe.Steps[0].Kind != operation.InstallStepPackageManager || recipe.Steps[0].Provider != "brew" || !slices.Equal(recipe.Steps[0].Packages, []string{"node"}) || recipe.Steps[1].Kind != operation.InstallStepNPMGlobal || recipe.Steps[1].Provider != "npm" || !slices.Equal(recipe.Steps[1].Args, wantArgs) {
-		t.Fatalf("Pi recipe steps=%+v, want Brew node then exact pinned npm arguments %v", recipe.Steps, wantArgs)
-	}
-	if recipe.Detector.Kind != operation.InstallDetectorBinary || !slices.Equal(recipe.Detector.Values, []string{"pi"}) {
-		t.Fatalf("Pi detector=%+v, want binary:pi", recipe.Detector)
-	}
-	if want := "provider login or API key; local providers may require neither"; recipe.Authentication != want {
-		t.Fatalf("Pi authentication=%q, want %q", recipe.Authentication, want)
-	}
-	if want := "installs an npm package with lifecycle scripts disabled; package code runs when Pi is launched"; recipe.Risk != want {
-		t.Fatalf("Pi risk=%q, want %q", recipe.Risk, want)
-	}
-	digest := installRecipeDigest(*recipe)
-	if digest == "" || action.DesiredDigest != digest || plan.installRecipes["pi"].ToolID != "pi" || plan.installTools["pi"].recipeDigest != digest {
-		t.Fatalf("Pi recipe authority mismatch: action=%q recipe=%q plan=%+v", action.DesiredDigest, digest, plan.installTools["pi"])
-	}
-	for _, candidate := range actions {
-		if candidate.Kind == operation.KindUpdateState || candidate.Kind == operation.KindWriteConfig || candidate.Kind == operation.KindInstallFile {
-			t.Fatalf("Pi package-only review leaked state/config/helper action: %+v", candidate)
-		}
-	}
-
-	// The action projection is a defensive clone. Mutating it after review must
-	// neither change the accepted plan nor its authority hash/digest.
-	hashBefore := plan.hash()
-	actions[0].Description = "mutated"
-	actions[0].InstallRecipe.Steps[0].Packages[0] = "mutated-node"
-	actions[0].InstallRecipe.Steps[1].Args[len(wantArgs)-1] = "mutated-package"
-	reread := plan.actions()
-	if plan.hash() != hashBefore || reread[0].Description == "mutated" || !slices.Equal(reread[0].InstallRecipe.Steps[0].Packages, []string{"node"}) || !slices.Equal(reread[0].InstallRecipe.Steps[1].Args, wantArgs) || reread[0].DesiredDigest != digest {
-		t.Fatalf("Pi plan projection mutation changed accepted authority: hash %q/%q action=%+v", hashBefore, plan.hash(), reread[0])
+	if cmdPresent || app.pendingInstallPlan != nil || app.installPlanError == nil || app.installPlanError.Error() != installationSnapshotUnavailable || app.manageStatus != installationSnapshotUnavailable {
+		t.Fatalf("Pi phase block=(cmd=%v,plan=%v,error=%v,status=%q), want nil/nil/%q/%q", cmdPresent, app.pendingInstallPlan != nil, app.installPlanError, app.manageStatus, installationSnapshotUnavailable, installationSnapshotUnavailable)
 	}
 }
 
-func TestManagePiInstallIsReachableFromEitherPaneAndCase(t *testing.T) {
+func TestManagePiInstallIsReachableButTemporarilyFailsClosedFromEitherPaneAndCase(t *testing.T) {
 	for _, presence := range []health.Presence{health.PresenceMissing, health.PresencePartial} {
 		for _, pane := range []int{managePaneTools, managePaneSettings} {
 			for _, key := range []string{"i", "I"} {
@@ -83,21 +30,7 @@ func TestManagePiInstallIsReachableFromEitherPaneAndCase(t *testing.T) {
 					selectManageTruthItem(t, app, "pi")
 					app.managePane = pane
 					cmd := NewManageScreen(ctx).handleKey(keyMsg(key))
-					assertReviewedPiPlan(t, app, cmd != nil)
-					msg, ok := cmd().(NavigateMsg)
-					if !ok || msg.To != ScreenFileTree {
-						t.Fatalf("Pi navigation=%#v, want FileTree review", msg)
-					}
-					view := stripANSITest(NewFileTreeScreen(ctx).View(80, 24))
-					actionVerb := "install pi"
-					if presence == health.PresencePartial {
-						actionVerb = "repair pi"
-					}
-					for _, want := range []string{actionVerb, "@earendil-works/pi-c", "Auth:", "Risk:"} {
-						if !strings.Contains(view, want) {
-							t.Errorf("Pi confirmation omitted %q:\n%s", want, view)
-						}
-					}
+					assertPiPhaseBlocked(t, app, cmd != nil)
 				})
 			}
 		}

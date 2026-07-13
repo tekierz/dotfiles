@@ -4,7 +4,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -30,18 +29,15 @@ func TestReviewedPrivateRecipesMapToTruthfulPublicVocabularyAndOrderedSteps(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			snapshot := mustSnapshot(t, 37, mustObservation(t, test.tool.ID(), health.PackageMissing, recipe))
-			counts := &dependencyCounts{}
-			deps := countingDependencies(counts, recipe)
-			result, err := Build(Request{Intent: mustIntent(t, test.tool.ID()), Snapshot: snapshot, Environment: managerTestEnvironment(t, pkg.PlatformMacOS, "brew", 37)}, deps)
+			digest := mustRecipeDigest(t, recipe)
+			projected, err := projectInstallRecipe(recipe, digest)
 			if err != nil {
 				t.Fatal(err)
 			}
-			projected := result.Public().Actions()[0].Install
 			if projected == nil || projected.Authentication != test.wantAuth || projected.Risk != test.wantRisk {
 				t.Fatalf("public auth/risk=%+v, want %q/%q from private %q/%q", projected, test.wantAuth, test.wantRisk, recipe.Authentication, recipe.Risk)
 			}
-			if projected.RecipeDigest != mustRecipeDigest(t, recipe) || projected.Platform != recipe.Platform || projected.Manager != recipe.Manager || len(projected.Steps) != len(recipe.Steps) {
+			if projected.RecipeDigest != digest || projected.Platform != recipe.Platform || projected.Manager != recipe.Manager || len(projected.Steps) != len(recipe.Steps) {
 				t.Fatalf("public recipe identity/order=%+v, private=%+v", projected, recipe)
 			}
 			for index, privateStep := range recipe.Steps {
