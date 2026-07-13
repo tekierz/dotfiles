@@ -1,10 +1,9 @@
-# Disable unbound npm mutations before planning authority integration.
+# Reconcile the release plan with landed npm authority checkpoints.
 version=1
-slice_id=npm-executor-fail-closed
+slice_id=npm-authority-plan-reconcile
 state=contract-frozen
-max_total_files=2
+max_total_files=1
 max_production_files=1
-max_changed_lines=350
+max_changed_lines=80
 ignore=tasks/pi-agent-integration-spec.md
-allow=internal/installapply/recipe.go
-allow=internal/installapply/recipe_test.go
+allow=tasks/todo.md
