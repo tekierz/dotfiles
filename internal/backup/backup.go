@@ -297,6 +297,257 @@ func Restore(backupDir, home string) (RestoreResult, error) {
 	return restoreWithOperations(backupDir, home, defaultRestoreOperations())
 }
 
+type catalogRestoreItem struct {
+	relPath              string
+	sourceRel            string
+	mode                 os.FileMode
+	existed              bool
+	isDir                bool
+	data                 []byte
+	sourceDirectory      *safefile.DirectorySnapshot
+	destinationRevision  safefile.Revision
+	destinationDirectory *safefile.DirectorySnapshot
+	destinationExists    bool
+}
+
+// restoreCatalogSnapshot restores only from the immutable recursive capture
+// accepted by the catalog. It strictly materializes every source and validates
+// every destination before the first mutation, so a fatal error always returns
+// an empty result and cannot produce a partial restore.
+func restoreCatalogSnapshot(snapshot *safefile.DirectorySnapshot, home string) (RestoreResult, error) {
+	cleanHome, err := validateCatalogRestoreHome(home)
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	manifest, _, err := safefile.ReadDirectorySnapshotFile(snapshot, ManifestName)
+	if err != nil {
+		return RestoreResult{}, fmt.Errorf("read immutable backup manifest: %w", err)
+	}
+	items, err := parseCatalogRestoreManifest(manifest, cleanHome)
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	if err := preflightCatalogRestore(snapshot, cleanHome, items); err != nil {
+		return RestoreResult{}, err
+	}
+	return executeCatalogRestore(cleanHome, items, defaultRestoreOperations()), nil
+}
+
+func validateCatalogRestoreHome(home string) (string, error) {
+	if home == "" || !filepath.IsAbs(home) {
+		return "", fmt.Errorf("restore home %q must be absolute", home)
+	}
+	clean := filepath.Clean(home)
+	if clean != home {
+		return "", fmt.Errorf("restore home %q must be clean", home)
+	}
+	info, err := os.Lstat(clean)
+	if err != nil {
+		return "", fmt.Errorf("inspect restore home: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", fmt.Errorf("restore home %q must be a real directory", home)
+	}
+	real, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		return "", fmt.Errorf("resolve restore home: %w", err)
+	}
+	real = filepath.Clean(real)
+	// Go's temporary directory on macOS is spelled /var/... even though the
+	// platform's fixed system alias resolves it to /private/var/.... Preserve
+	// that platform spelling without accepting a caller-controlled symlink.
+	macVarAlias := strings.HasPrefix(clean, "/var/") && real == "/private"+clean
+	if real != clean && !macVarAlias {
+		return "", fmt.Errorf("restore home %q contains a symlink", home)
+	}
+	return clean, nil
+}
+
+func parseCatalogRestoreManifest(data []byte, home string) ([]*catalogRestoreItem, error) {
+	items := make([]*catalogRestoreItem, 0)
+	seen := make(map[string]struct{})
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		item := &catalogRestoreItem{mode: defaultFileMode, existed: true}
+		var rawRel string
+		if strings.Contains(line, "|") {
+			original, backupPath, existed, itemType, mode, err := parseBashManifestFields(line)
+			if err != nil {
+				return nil, fmt.Errorf("invalid catalog manifest line %q: %w", line, err)
+			}
+			if existed == "yes" && backupPath == "" {
+				return nil, fmt.Errorf("invalid catalog manifest line for %q: missing backup path", original)
+			}
+			rawRel, err = catalogRelFromAbsoluteHome(home, original)
+			if err != nil {
+				return nil, err
+			}
+			item.existed = existed == "yes"
+			item.isDir = itemType == "directory"
+			item.mode = mode.Perm()
+			if item.existed {
+				item.sourceRel = rawRel
+			}
+		} else {
+			if strings.Count(line, "\t") > 1 {
+				return nil, fmt.Errorf("invalid catalog manifest line %q: too many fields", line)
+			}
+			rawRel = line
+			if tab := strings.LastIndexByte(line, '\t'); tab >= 0 {
+				rawRel = line[:tab]
+				mode, err := parseOctalMode(line[tab+1:])
+				if err != nil {
+					return nil, fmt.Errorf("invalid catalog manifest mode for %q: %w", rawRel, err)
+				}
+				item.mode = mode.Perm()
+			}
+		}
+
+		rel, err := normalizeCatalogRestoreRel(rawRel)
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := seen[rel]; duplicate {
+			return nil, fmt.Errorf("catalog manifest repeats normalized destination %q", rel)
+		}
+		seen[rel] = struct{}{}
+		item.relPath = rel
+		if item.existed && item.sourceRel == "" {
+			item.sourceRel = EncodeName(rel)
+		}
+		items = append(items, item)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan catalog manifest: %w", err)
+	}
+	return items, nil
+}
+
+func catalogRelFromAbsoluteHome(home, original string) (string, error) {
+	if original == "" || !filepath.IsAbs(original) || catalogHasRawTraversal(original) {
+		return "", fmt.Errorf("catalog destination %q is not an absolute child of home", original)
+	}
+	cleanOriginal := filepath.Clean(original)
+	rel, err := filepath.Rel(home, cleanOriginal)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || catalogHasRawTraversal(rel) {
+		return "", fmt.Errorf("catalog destination %q is outside home", original)
+	}
+	normalized, err := normalizeCatalogRestoreRel(rel)
+	if err != nil {
+		return "", fmt.Errorf("catalog destination %q is outside home: %w", original, err)
+	}
+	if filepath.Clean(filepath.Join(home, filepath.FromSlash(normalized))) != cleanOriginal {
+		return "", fmt.Errorf("catalog destination %q is outside home", original)
+	}
+	return normalized, nil
+}
+
+func normalizeCatalogRestoreRel(rel string) (string, error) {
+	if rel == "" || strings.ContainsRune(rel, 0) || filepath.IsAbs(rel) || catalogHasRawTraversal(rel) {
+		return "", fmt.Errorf("invalid catalog restore path %q", rel)
+	}
+	normalized := filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+	if normalized == "." || normalized == "" || filepath.IsAbs(normalized) || strings.HasPrefix(normalized, "../") {
+		return "", fmt.Errorf("invalid catalog restore path %q", rel)
+	}
+	return normalized, nil
+}
+
+func catalogHasRawTraversal(path string) bool {
+	for _, component := range strings.Split(filepath.ToSlash(path), "/") {
+		if component == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func preflightCatalogRestore(snapshot *safefile.DirectorySnapshot, home string, items []*catalogRestoreItem) error {
+	for _, item := range items {
+		if item.existed {
+			if item.isDir {
+				directory, err := safefile.SubdirectorySnapshot(snapshot, item.sourceRel)
+				if err != nil {
+					return fmt.Errorf("materialize immutable directory source for %s: %w", item.relPath, err)
+				}
+				item.sourceDirectory = directory
+			} else {
+				data, _, err := safefile.ReadDirectorySnapshotFile(snapshot, item.sourceRel)
+				if err != nil {
+					return fmt.Errorf("materialize immutable file source for %s: %w", item.relPath, err)
+				}
+				item.data = data
+			}
+		}
+
+		if item.isDir {
+			current, _, err := safefile.ObserveDirectoryWithin(home, item.relPath)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("preflight directory destination %s: %w", item.relPath, err)
+			}
+			item.destinationDirectory = current
+			item.destinationExists = current != nil
+		} else {
+			_, revision, _, err := safefile.ObserveFileWithin(home, item.relPath)
+			if err != nil {
+				return fmt.Errorf("preflight file destination %s: %w", item.relPath, err)
+			}
+			item.destinationRevision = revision
+			item.destinationExists = revision.Exists()
+		}
+	}
+	return nil
+}
+
+func executeCatalogRestore(home string, items []*catalogRestoreItem, operations restoreOperations) RestoreResult {
+	result := RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}
+	for _, item := range items {
+		var err error
+		action := "restore"
+		if !item.existed {
+			action = "remove"
+			if item.destinationExists {
+				if item.isDir {
+					err = operations.removeDirectorySnapshot(home, item.relPath, item.destinationDirectory)
+				} else {
+					err = operations.removeFileRevision(home, item.relPath, item.destinationRevision)
+				}
+			}
+		} else if item.isDir {
+			err = operations.restoreDirectorySnapshot(home, item.relPath, item.sourceDirectory, item.destinationDirectory)
+		} else {
+			err = operations.replaceFileRevision(home, item.relPath, item.destinationRevision, item.data, item.mode.Perm())
+		}
+
+		if err == nil {
+			if item.existed {
+				result.Restored = append(result.Restored, item.relPath)
+			} else {
+				result.Removed = append(result.Removed, item.relPath)
+			}
+			continue
+		}
+		var committed *safefile.CommittedError
+		if errors.As(err, &committed) {
+			if item.existed {
+				result.Restored = append(result.Restored, item.relPath)
+			} else {
+				result.Removed = append(result.Removed, item.relPath)
+			}
+			result.Warnings[item.relPath] = fmt.Sprintf("%s committed with a durability/cleanup warning: %v", action, err)
+			continue
+		}
+		result.Skipped[item.relPath] = fmt.Sprintf("%s: %v", action, err)
+	}
+	return result
+}
+
 // RestoreExpected restores only targets whose live state still exactly matches
 // a captured post-mutation state. Changed or uncaptured targets are skipped and
 // therefore make the rollback incomplete instead of overwriting external work.
