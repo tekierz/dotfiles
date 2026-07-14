@@ -1,12 +1,15 @@
-# Bind red, verified, payload, ledger, and committed checkpoints in order.
+# Publish executable guardrails and close the first normal ledger slice.
 version=2
-slice_id=g1b-ledger-closure
-state=committed
-max_total_files=3
+slice_id=g1c-guardrail-adoption
+state=planned
+max_total_files=5
 max_production_files=1
 max_changed_lines=800
 ignore=tasks/pi-agent-integration-spec.md
+allow=Makefile
 allow=scripts/check-slice-scope.sh
 allow=tests/check-slice-scope_test.sh
 allow=tasks/slice-commit-ledger.tsv
+allow=tasks/todo.md
+allow=tasks/workflow-guardrails.md
 test=tests/check-slice-scope_test.sh
