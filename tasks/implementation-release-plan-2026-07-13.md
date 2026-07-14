@@ -1,6 +1,6 @@
 # Implementation and Release Program — 2026-07-13
 
-Status: **execution active; G3A plan catalog reconciliation in progress; three safety foundations closed branch-locally**
+Status: **execution active; G3C restore-leaf resplit in progress; three safety foundations closed branch-locally**
 
 Audit input: [release-audit-2026-07-13.md](release-audit-2026-07-13.md)
 
@@ -99,16 +99,18 @@ flowchart TD
   G0["G0 Plan and state reset"] --> G1["G1 Enforce slice-state gate"]
   G1 --> G1C["G1C Guardrail adoption"]
   G1C --> G3A["G3A Plan catalog resplit"]
-  G3A --> G3B["G3B Active roadmap control sync"]
-  G3B --> G2["G2 Worktrees, draft PR, and remote baseline"]
+  G3A --> G3C["G3C Restore-leaf plan resplit"]
+  G3C --> G3D["G3D Active roadmap control sync"]
+  G3D --> G2["G2 Worktrees, draft PR, and remote baseline"]
   G1C --> RK1UO["RK1UO Native exit observer"]
   RK1UO --> RK1ULK["RK1ULK Private lifecycle kernel"]
   RK1ULK --> RK1ULA["RK1ULA Public streaming adapters"]
   RK1ULA --> RK1P["RK1P Privileged supervisor"]
   G1C --> BA1A["BA1A Snapshot extraction"]
   BA1A --> BA1SF1["BA1SF1 Restore-parent authority"]
-  BA1SF1 --> BA1SF2["BA1SF2 Exact restore leaves"]
-  BA1SF2 --> BA1B2["BA1B2 Immutable catalog kernel"]
+  BA1SF1 -->|serialized| BA1SF2F["BA1SF2F Exact file restore leaves"]
+  BA1SF2F --> BA1SF2D["BA1SF2D Exact directory restore leaves"]
+  BA1SF2D --> BA1B2["BA1B2 Immutable catalog kernel"]
   BA1B2 --> BA1C["BA1C Opaque public authority"]
   G1C --> SH["SH sshh contract"]
   RK1P --> RS["RS Sequential streaming"]
@@ -170,15 +172,18 @@ exact list before each slice.
 | G1B | Bind contract-frozen, red-test, verified-scope, payload, ledger, and committed evidence in order with unique slice IDs | scripts/check-slice-scope.sh, tests/check-slice-scope_test.sh, tasks/slice-commit-ledger.tsv | G1A |
 | G1C | Publish executable Make targets and final workflow guidance through the first normal ledger closure | Makefile, tests/check-slice-scope_test.sh, tasks/workflow-guardrails.md | G1B |
 | G3A | Reconcile the rejected runner/restore parents, stopped combined lifecycle, fixed catalog, waves, accounting, and gates in the implementation plan only | this plan and release-plan test | G1C |
-| G3B | Synchronize the active control projection without mixing it into G3A's ordinary candidate digest | tasks/todo.md and its focused control-projection test | G3A |
-| G2 | Establish two authorized worktrees, draft PR, and remote CI baseline | Git/external state only | G3B and user authorization |
+| G3C | Replace the stopped combined restore-leaf slice with serialized file and directory slices in the implementation plan only | this plan and release-plan test | G3A |
+| G3D | Synchronize the active control projection without mixing it into G3C's ordinary candidate digest | tasks/todo.md and its focused control-projection test | G3C |
+| G2 | Establish two authorized worktrees, draft PR, and remote CI baseline | Git/external state only | G3D and user authorization |
 
-Existing aggregate `Depends on G1` references mean `Depends on G1C`; G3A changes only the
-runner and restore dependency chains named below, and G3B serially updates active control truth.
+Existing aggregate `Depends on G1` references mean `Depends on G1C`; G3C changes only the
+restore dependency chain named below, and G3D serially updates active control truth.
+The stopped G3B control attempt has no ledger row, candidate digest, or execution authority; G3C and G3D replace it without inheriting its candidate history.
+G3C is plan-only and G3D is todo-only; neither candidate may contain or inherit the stopped G3B payload.
 
-The fixed execution catalog contains 47 slices: G2, 21 safety slices, 20 Wave 2 engineering
-slices, and five external slices; the G3A/G3B governance closures are not catalog slices.
-RK1UO, BA1A, and BA1SF1 are closed branch-locally but not integrated, so 44 catalog slices remain incomplete and 18 safety slices remain.
+The fixed execution catalog contains 48 slices: G2, 22 safety slices, 20 Wave 2 engineering
+slices, and five external slices; the G3A/G3C/G3D governance closures are not catalog slices.
+RK1UO, BA1A, and BA1SF1 are closed branch-locally but not integrated, so 45 catalog slices remain incomplete and 19 safety slices remain.
 
 ### Runtime and update safety
 
@@ -204,8 +209,9 @@ capacity or discard apt output.
 |----|---------|--------------|------------|
 | BA1A | Expose immutable file and subtree extraction from recursive snapshots without mutation | internal/safefile/safefile.go, directory_unix_test.go | G1C |
 | BA1SF1 | Bind restore-parent identity and reject replacement before any restore mutation | internal/safefile restore-parent files and tests | BA1A |
-| BA1SF2 | Restore exact captured file, directory, mode, and removal leaves without reopening mutable sources | internal/safefile restore-leaf files and tests | BA1SF1 |
-| BA1B2 | Parse and validate an immutable catalog snapshot completely before applying any restore item | internal/backup/backup.go and catalog tests | BA1SF2 |
+| BA1SF2F | Restore exact captured file bytes and mode, return the exact installed Revision, remove only the exact accepted file leaf, and reject invalid source authority before parent creation | internal/safefile restore-session file and unsupported files/tests | BA1SF1 |
+| BA1SF2D | Restore exact captured recursive directory names, bytes, and modes, return exact installed recursive evidence, remove only the exact accepted directory leaf, and reject invalid source authority before parent creation | internal/safefile restore-session directory and unsupported files/tests | BA1SF2F |
+| BA1B2 | Parse and validate an immutable catalog snapshot completely before applying any restore item | internal/backup/backup.go and catalog tests | BA1SF2D |
 | BA1C | Expose RestoreCatalogEntry through opaque private authority; mutable display fields cannot redirect bytes | internal/backup/catalog.go and catalog tests | BA1B2 |
 | BC1 | CLI restore consumes the accepted entry | cmd/dotfiles/main.go and restore tests | BA1C |
 | BC2 | TUI Backups retains and consumes the accepted entry | internal/ui/app.go, screen_backups.go, tests | BA1C |
@@ -306,10 +312,10 @@ cross-review and root integration.
 
 | Wave | Parallel pair | Barrier |
 |------|---------------|---------|
-| 0 | G0, original G1 red checkpoint, G1A-G1C, then G3A and G3B | Canonical plan/control projections, split catalog, and state checker green |
+| 0 | G0, original G1 red checkpoint, G1A-G1C, then G3A, G3C, and G3D | Canonical plan/control projections, split catalog, and state checker green |
 | 1A | RK1UO + BA1A | Native observer and snapshot extraction foundations |
-| 1B | RK1ULK + BA1SF1 | Private lifecycle kernel and restore-parent authority |
-| 1C | RK1ULA + BA1SF2 | Public streaming adapters and exact restore leaves |
+| 1B | RK1ULK + BA1SF2F | Private lifecycle kernel and exact file restore leaves |
+| 1C | RK1ULA + BA1SF2D | Public streaming adapters and exact directory restore leaves |
 | 1D | RK1P + BA1B2 | Privileged supervisor and immutable catalog kernel |
 | 1E | RS1 + BA1C | Sequential streaming and opaque restore authority |
 | 1F | UR1 + BC1 | Provider domain and CLI restore |
@@ -335,15 +341,19 @@ cross-review and root integration.
 | 3C | Manual platform lanes in parallel | Same candidate hash on all systems |
 | MB3 | Candidate evidence barrier | Eligible for destructive owner gates |
 
+Wave 1A is complete branch-locally; exactly ten Wave 1 barriers remain (1B-1K).
+
 Serialization rules:
 
 - cmd/dotfiles/main.go: RK1P -> BC1 -> BU1 -> CL1 -> PO2 -> NP5.
 - internal/ui/installation.go: UR2 -> CX1 -> SP2 -> NP6.
 - internal/runner lifecycle: RK1UO -> RK1ULK -> RK1ULA -> RK1P -> RS1.
-- internal/safefile restore authority: BA1A -> BA1SF1 -> BA1SF2.
+- internal/safefile restore authority: BA1A -> BA1SF1 -> BA1SF2F -> BA1SF2D.
 - internal/backup restore authority: BA1B2 -> BA1C -> BR3.
 - release workflow: CI1 -> CI2 -> CI3 -> CI4.
 - README/docs/tools: capability implementation -> DT1.
+
+BA1SF2F and BA1SF2D are serialized because both modify internal/safefile/restore_session_unsupported.go and internal/safefile/unsupported_test.go.
 
 ## 7. Slice acceptance contracts
 
@@ -371,7 +381,8 @@ Frozen split budgets use `total files / production files / changed lines`:
 | RK1P | 8/5/800 |
 | BA1A | 2/1/250 |
 | BA1SF1 | 5/3/760 |
-| BA1SF2 | 4/2/780 |
+| BA1SF2F | 4/2/650 |
+| BA1SF2D | 4/2/780 |
 | BA1B2 | 2/1/800 |
 | BA1C | 2/1/360 |
 
@@ -389,8 +400,8 @@ The commit exit gate is:
 
 ### MB1 — safety substrate
 
-Requires all 21 safety slices: RK1UO, RK1ULK, RK1ULA, RK1P, RS1, AP1, UR1-UR2, CX1, BA1A,
-BA1SF1, BA1SF2, BA1B2, BA1C, BC1-BC2, BU1, BR1-BR3, and SH1:
+Requires all 22 safety slices: RK1UO, RK1ULK, RK1ULA, RK1P, RS1, AP1, UR1-UR2, CX1, BA1A,
+BA1SF1, BA1SF2F, BA1SF2D, BA1B2, BA1C, BC1-BC2, BU1, BR1-BR3, and SH1:
 
 - 1,000-line apt Update All cannot deadlock;
 - update/cancel process trees terminate;
@@ -473,7 +484,7 @@ The ten RG0-RG9 gates remain sequential and candidate-bound.
 
 | Gate | Exit evidence | Promotion |
 |------|---------------|-----------|
-| RG0 Plan/control freeze | G0 canonical bootstrap evidence plus normal-v1 closures for the prior RG0 roadmap reconciliation, G1C, G3A, and G3B; fixed 47-slice catalog; live 44 incomplete/18 safety accounting; no stale active state | G2 may close; Wave 1 product integration remains gated by G2 |
+| RG0 Plan/control freeze | G0 canonical bootstrap evidence plus normal-v1 closures for the prior RG0 roadmap reconciliation, G1C, G3A, G3C, and G3D; fixed 48-slice catalog; live 45 incomplete/19 safety accounting; no stale active state | G2 may close; Wave 1 product integration remains gated by G2 |
 | RG1 Safety | MB1 plus disposable Debian/mixed-manager evidence | npm/product work may integrate |
 | RG2 Engineering candidate | MB2, remote PR green, exact candidate dossier | Platform/manual QA |
 | RG3 Release construction | MB3 and duplicate reproducible snapshots | Owner destructive tests |
@@ -490,9 +501,9 @@ Any production change after RG2 invalidates RG2 and all later evidence.
 
 Branch-local Wave 1 product work may proceed while G2 is open, but no closed Wave 1 product candidate may integrate until G2's draft PR and remote CI baseline close.
 
-The serial G3A/G3B governance fast-forward re-closes RG0 and is not Wave 1 product integration.
+The serial G3C/G3D governance fast-forward re-closes RG0 and is not Wave 1 product integration.
 
-1. Freeze features and complete G0/G1/G3A/G3B roadmap governance.
+1. Freeze features and complete G0/G1/G3A/G3C/G3D roadmap governance.
 2. Continue branch-local Wave 1 work while completing G2's draft PR and remote baseline.
 3. After G2 closes, integrate completed Wave 1 candidates and execute the remaining Waves 1 and 2 with pairwise implementation/review.
 4. Pass MB1 and MB2.
