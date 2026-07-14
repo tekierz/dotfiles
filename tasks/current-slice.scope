@@ -1,7 +1,7 @@
 # Enforce legal slice transitions, verified candidate authority, and closure ledgering.
 version=1
 slice_id=g1-slice-state-enforcement
-state=planned
+state=contract-frozen
 max_total_files=5
 max_production_files=1
 max_changed_lines=800
