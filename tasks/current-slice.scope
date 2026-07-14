@@ -1,11 +1,12 @@
-# Enforce adjacent states, explicit red-test authority, and exact verified candidates.
+# Bind red, verified, payload, ledger, and committed checkpoints in order.
 version=2
-slice_id=g1a-candidate-authority
-state=committed
-max_total_files=2
+slice_id=g1b-ledger-closure
+state=planned
+max_total_files=3
 max_production_files=1
 max_changed_lines=800
 ignore=tasks/pi-agent-integration-spec.md
 allow=scripts/check-slice-scope.sh
 allow=tests/check-slice-scope_test.sh
+allow=tasks/slice-commit-ledger.tsv
 test=tests/check-slice-scope_test.sh
