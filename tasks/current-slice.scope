@@ -5,7 +5,7 @@
 # Deferred: opaque public CatalogEntry binding (BA1C), CLI restore (BC1), TUI restore (BC2).
 version=2
 slice_id=ba1b-immutable-restore-kernel
-state=planned
+state=contract-frozen
 max_total_files=2
 max_production_files=1
 max_changed_lines=380
