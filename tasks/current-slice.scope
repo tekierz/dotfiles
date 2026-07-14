@@ -3,7 +3,7 @@
 # The stale G3B control attempt has no ledger/candidate authority; control sync is deferred to G3D.
 version=2
 slice_id=g3c-restore-leaf-resplit
-state=verified
+state=committed
 max_total_files=2
 max_production_files=1
 max_changed_lines=220
