@@ -5,7 +5,7 @@
 # Deferred: process-group lifecycle and bounded readers (RK1UL), privileged sudo (RK1P).
 version=2
 slice_id=rk1uo-native-exit-observer
-state=contract-frozen
+state=tests-red
 max_total_files=4
 max_production_files=3
 max_changed_lines=220
