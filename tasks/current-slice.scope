@@ -1,7 +1,8 @@
-# Install the canonical audit, implementation catalog, and active roadmap reset.
+# Pre-G1 governance bootstrap: committed means the frozen payload landed;
+# tests-red, review, verified evidence, and a normal ledger row do not exist.
 version=1
 slice_id=g0-plan-state-reset
-state=contract-frozen
+state=committed
 max_total_files=3
 max_production_files=1
 max_changed_lines=1000
