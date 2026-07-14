@@ -5,7 +5,7 @@
 # Deferred: file/directory restore/remove leaves (BA1SF2), catalog kernel (BA1B2).
 version=2
 slice_id=ba1sf1-restore-parent-authority
-state=verified
+state=committed
 max_total_files=5
 max_production_files=3
 max_changed_lines=760
