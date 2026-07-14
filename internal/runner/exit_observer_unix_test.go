@@ -22,7 +22,7 @@ func TestStreamingExitObserverRejectsInvalidOrMissingProcess(t *testing.T) {
 }
 
 func TestStreamingExitObserverBlocksUntilRealExit(t *testing.T) {
-	cmd := exec.Command("/bin/sleep", "30")
+	cmd := exec.CommandContext(t.Context(), "/bin/sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestStreamingExitObserverBlocksUntilRealExit(t *testing.T) {
 }
 
 func TestStreamingExitObserverPreservesExactWaitStatus(t *testing.T) {
-	cmd := exec.Command("/bin/sh", "-c", "exit 7")
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "exit 7")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestStreamingExitObserverPreservesExactWaitStatus(t *testing.T) {
 }
 
 func TestStreamingExitObserverCloseIsIdempotentAndUnblocksWait(t *testing.T) {
-	cmd := exec.Command("/bin/sleep", "30")
+	cmd := exec.CommandContext(t.Context(), "/bin/sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
