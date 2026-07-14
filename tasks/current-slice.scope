@@ -6,7 +6,7 @@
 # Deferred: privileged/setuid execution and deliberately escaped descendants beyond FD cleanup.
 version=2
 slice_id=rk1ul-ordinary-streaming-lifecycle
-state=planned
+state=contract-frozen
 max_total_files=5
 max_production_files=3
 max_changed_lines=800
