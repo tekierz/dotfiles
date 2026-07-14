@@ -7,7 +7,7 @@
 # Deferred: directory leaves (BA1SF2D), catalog kernel (BA1B2).
 version=2
 slice_id=ba1sf2f-restore-file-mutations
-state=verified
+state=committed
 max_total_files=4
 max_production_files=2
 max_changed_lines=650
