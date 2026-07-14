@@ -1,7 +1,7 @@
 # Unify streaming subprocess ownership and terminal-error semantics.
 version=2
 slice_id=rk1-runner-kernel
-state=planned
+state=contract-frozen
 max_total_files=3
 max_production_files=3
 max_changed_lines=800
