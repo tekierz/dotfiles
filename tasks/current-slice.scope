@@ -3,7 +3,7 @@
 # G3B remains stopped without ledger/candidate authority; G3C closed at b74c799.
 version=2
 slice_id=g3d-todo-policy-sync
-state=tests-red
+state=implemented
 max_total_files=3
 max_production_files=1
 max_changed_lines=180
