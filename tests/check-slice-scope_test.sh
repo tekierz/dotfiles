@@ -319,6 +319,17 @@ assert_rejected_exactly \
   "$repo" \
   '--contract-candidate'
 
+repo="$(new_fixture 'g1a-candidate-authority' 'committed')" || exit 1
+stage_contract "$repo" 'g1b-ledger-closure' 'planned' || exit 1
+assert_accepted 'G1A bootstrap starts G1B ledger closure' "$repo" '--contract-candidate'
+
+repo="$(new_fixture 'g1a-candidate-authority' 'committed')" || exit 1
+stage_contract "$repo" 'rk1-runner-kernel' 'planned' || exit 1
+assert_rejected_exactly \
+  'G1A bootstrap rejects other next slice' \
+  'slice-check: G1A bootstrap permits only g1b-ledger-closure; found: rk1-runner-kernel' \
+  "$repo" '--contract-candidate'
+
 repo="$(new_fixture 'slice-one' 'contract-frozen')" || exit 1
 replace_contract_line "$repo" 'test=' 'test=tests/check-slice-scope_test.sh' || exit 1
 git -C "$repo" add tasks/current-slice.scope || exit 1
@@ -473,8 +484,8 @@ for mutation in test allow budget; do
     "$repo" '--contract-candidate'
 done
 
-if (( test_count != 25 )); then
-  printf 'test harness error: expected 25 assertions, ran %d\n' "$test_count" >&2
+if (( test_count != 27 )); then
+  printf 'test harness error: expected 27 assertions, ran %d\n' "$test_count" >&2
   exit 1
 fi
 
