@@ -368,7 +368,7 @@ assert_digest_equivalence() {
   [[ "$before_objects" == "$(find "$repo/.git/objects" -type f -print | sort)" ]] || problem="${problem:+$problem; }object database leaked"
   [[ "$before_locks" == "$(find "$repo/.git" -name '*.lock' -print | sort)" ]] || problem="${problem:+$problem; }lock leaked"
   git -C "$repo" commit -q -m 'verified scope' -m "$trailer" || return 1
-  git -C "$repo" add "$@" || return 1
+  git -C "$repo" add -A -- "$@" || return 1
   output="$(cd "$repo" && bash scripts/check-slice-scope.sh "$mode" 2>&1)"
   status=$?
   (( status == 0 )) || problem="${problem:+$problem; }candidate equivalence: $output"
@@ -588,8 +588,14 @@ new_digest_rejection_fixture() {
       printf '%s\n' user-owned > "$repo/tasks/pi-agent-integration-spec.md" || return 1
       git -C "$repo" add -f tasks/pi-agent-integration-spec.md || return 1
       ;;
+    over-files)
+      printf '%s\n' 'allow=scripts/check-slice-scope.sh' 'allow=tasks/todo.md' 'allow=tasks/workflow-guardrails.md' >> "$repo/tasks/current-slice.scope" || return 1
+      printf '%s\n' todo > "$repo/tasks/todo.md" && printf '%s\n' workflow > "$repo/tasks/workflow-guardrails.md" || return 1
+      git -C "$repo" add tasks/current-slice.scope tasks/todo.md tasks/workflow-guardrails.md && git -C "$repo" commit -q -m 'digest file budget authority' || return 1
+      for path in Makefile scripts/check-slice-scope.sh tests/check-slice-scope_test.sh tasks/todo.md tasks/workflow-guardrails.md; do printf '%s\n' '# budget payload' >> "$repo/$path" || return 1; done
+      ;;
   esac
-  if [[ "$shape" != empty && "$shape" != ledger && "$shape" != staged-ignored ]]; then
+  if [[ "$shape" != empty && "$shape" != ledger && "$shape" != staged-ignored && "$shape" != over-files ]]; then
     stage_payload "$repo" || return 1
     git -C "$repo" reset -q internal/payload.go || return 1
   fi
@@ -600,6 +606,7 @@ new_digest_rejection_fixture() {
     staged-payload) git -C "$repo" add internal/payload.go || return 1 ;;
     mixed-xy) git -C "$repo" add internal/payload.go && printf '%s\n' '// worktree shadow' >> "$repo/internal/payload.go" || return 1 ;;
     mixed-control-product) printf '%s\n' '# control worktree' >> "$repo/Makefile" || return 1 ;;
+    over-lines) for ((i = 0; i < 90; i++)); do printf '%s\n' '# budget line' >> "$repo/internal/payload.go" || return 1; done ;;
     outside) mkdir -p "$repo/docs" && printf '%s\n' outside > "$repo/docs/outside.md" || return 1 ;;
     symlink) rm -f "$repo/internal/payload.go" && ln -s payload_test.go "$repo/internal/payload.go" || return 1 ;;
     fifo) rm -f "$repo/internal/payload.go" && mkfifo "$repo/internal/payload.go" || return 1 ;;
@@ -1223,6 +1230,14 @@ digest="$(expected_worktree_digest "$digest_repo" internal/new.txt internal/payl
 assert_digest_equivalence "$digest_repo" "$digest" --candidate \
   'candidate digest is exact, index-neutral, and equivalent' internal/payload.go internal/new.txt
 
+delete_digest_repo="$(new_fixture slice-one reviewed)" || exit 1
+rm "$delete_digest_repo/internal/payload.go" || exit 1
+replace_contract_line "$delete_digest_repo" state= state=verified || exit 1
+git -C "$delete_digest_repo" add tasks/current-slice.scope || exit 1
+delete_digest="$(expected_worktree_digest "$delete_digest_repo" internal/payload.go)" || exit 1
+assert_digest_equivalence "$delete_digest_repo" "$delete_digest" --candidate \
+  'tracked deletion digest is equivalent to staged candidate' internal/payload.go
+
 staged_repo="$(new_digest_rejection_fixture staged-payload)" || exit 1
 unstaged_scope_repo="$(new_digest_rejection_fixture unstaged-scope)" || exit 1
 empty_repo="$(new_digest_rejection_fixture empty)" || exit 1
@@ -1235,6 +1250,8 @@ mixed_xy_repo="$(new_digest_rejection_fixture mixed-xy)" || exit 1
 mixed_control_repo="$(new_digest_rejection_fixture mixed-control-product)" || exit 1
 ledger_digest_repo="$(new_digest_rejection_fixture ledger)" || exit 1
 ignored_digest_repo="$(new_digest_rejection_fixture staged-ignored)" || exit 1
+line_budget_repo="$(new_digest_rejection_fixture over-lines)" || exit 1
+file_budget_repo="$(new_digest_rejection_fixture over-files)" || exit 1
 assert_rejection_matrix 'candidate digest rejects every unsafe shape' \
   "$staged_repo" --candidate-digest 'slice-check: candidate digest requires payload to remain unstaged: internal/payload.go' \
   "$unstaged_scope_repo" --candidate-digest 'slice-check: candidate digest requires exactly staged verified scope' \
@@ -1247,12 +1264,15 @@ assert_rejection_matrix 'candidate digest rejects every unsafe shape' \
   "$mixed_xy_repo" --candidate-digest 'slice-check: mixed staged/unstaged payload is forbidden: internal/payload.go' \
   "$mixed_control_repo" --candidate-digest 'slice-check: candidate digest may not mix control-plane and production paths' \
   "$ledger_digest_repo" --candidate-digest 'slice-check: tasks/slice-commit-ledger.tsv requires --ledger-candidate' \
-  "$ignored_digest_repo" --candidate-digest 'slice-check: ignored/user-owned path must never be staged: tasks/pi-agent-integration-spec.md'
+  "$ignored_digest_repo" --candidate-digest 'slice-check: ignored/user-owned path must never be staged: tasks/pi-agent-integration-spec.md' \
+  "$line_budget_repo" --candidate-digest 'slice-check: 92 changed lines exceed ceiling 80' \
+  "$file_budget_repo" --candidate-digest 'slice-check: 5 files exceed ceiling 4'
 
 assert_make_candidate_targets
 
 guardrail_repo="$(new_fixture g1c-guardrail-adoption reviewed)" || exit 1
 replace_contract_line "$guardrail_repo" test= test=tests/check-slice-scope_test.sh || exit 1
+replace_contract_line "$guardrail_repo" max_total_files= max_total_files=5 || exit 1
 printf '%s\n' 'allow=scripts/check-slice-scope.sh' 'allow=tasks/todo.md' 'allow=tasks/workflow-guardrails.md' \
   >> "$guardrail_repo/tasks/current-slice.scope" || exit 1
 printf '%s\n' todo > "$guardrail_repo/tasks/todo.md" || exit 1
@@ -1303,8 +1323,8 @@ stage_contract "$duplicate_plan_repo" rk1-runner-kernel planned || exit 1
 assert_rejected_exactly 'duplicate ledger slice ID rejected at planning' \
   'slice-check: slice_id already exists in ledger: rk1-runner-kernel' "$duplicate_plan_repo" '--contract-candidate'
 
-if (( test_count != 67 )); then
-  printf 'test harness error: expected 67 assertions, ran %d\n' "$test_count" >&2
+if (( test_count != 68 )); then
+  printf 'test harness error: expected 68 assertions, ran %d\n' "$test_count" >&2
   exit 1
 fi
 

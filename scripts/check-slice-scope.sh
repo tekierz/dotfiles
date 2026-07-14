@@ -8,6 +8,10 @@ case "${1:-}" in
     mode="candidate"
     shift
     ;;
+  --candidate-digest)
+    mode="candidate-digest"
+    shift
+    ;;
   --test-candidate)
     mode="test-candidate"
     shift
@@ -207,6 +211,7 @@ control_paths=(
   "tests/check-slice-scope_test.sh"
   "tasks/current-slice.scope"
   "tasks/lessons.md"
+  "tasks/todo.md"
   "tasks/workflow-guardrails.md"
 )
 
@@ -304,7 +309,7 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 status_file="$tmp_dir/status"
 numstat_file="$tmp_dir/numstat"
-if ! git -c status.renames=false status --porcelain=v1 -z --untracked-files=all > "$status_file"; then
+if ! GIT_OPTIONAL_LOCKS=0 git -c status.renames=false status --porcelain=v1 -z --untracked-files=all > "$status_file"; then
   echo "slice-check: git status failed" >&2
   exit 1
 fi
@@ -333,7 +338,7 @@ while IFS= read -r -d '' entry; do
       ;;
   esac
   case "$worktree_state" in
-    " "|M|D|"?") ;;
+    " "|M|D|T|"?") ;;
     *)
       echo "slice-check: unrecognized worktree status '$worktree_state': $path" >&2
       exit 1
@@ -353,6 +358,9 @@ scoped_index_states=()
 contract_change_found=0
 test_candidate_paths=0
 guardrail_paths=0
+digest_scope_staged=0
+digest_control_paths=0
+digest_product_paths=0
 g1b_genesis=0
 g1b_genesis_attempt=0
 if [[ "$mode" == "guardrail-candidate" && "$slice_id" == "g1b-ledger-closure" ]] && \
@@ -393,6 +401,47 @@ for ((i = 0; i < ${#changed_paths[@]}; i++)); do
   if [[ "$index_state" != " " && "$index_state" != "?" && "$worktree_state" != " " ]]; then
     echo "slice-check: mixed staged/unstaged payload is forbidden: $path" >&2
     exit 1
+  fi
+
+  if [[ "$path" == "$ledger_file" && "$mode" != "ledger-candidate" && "$mode" != "worktree" && "$mode" != "install" ]] && \
+      [[ "$g1b_genesis_attempt" != "1" ]] && \
+      [[ "$mode" != "guardrail-candidate" || ${#changed_paths[@]} -eq 1 ]]; then
+    echo "slice-check: $ledger_file requires --ledger-candidate" >&2
+    exit 1
+  fi
+
+  if [[ "$mode" == "candidate-digest" ]]; then
+    if [[ "$path" == "$scope_file" ]]; then
+      if [[ "$index_state" == "M" && "$worktree_state" == " " ]]; then
+        digest_scope_staged=1
+      fi
+      continue
+    fi
+    if [[ "$index_state" != " " && "$index_state" != "?" ]]; then
+      echo "slice-check: candidate digest requires payload to remain unstaged: $path" >&2
+      exit 1
+    fi
+    if ! listed "$path" "${allows[@]}"; then
+      echo "slice-check: path outside frozen allowlist: $path" >&2
+      exit 1
+    fi
+    if [[ -L "$path" ]]; then
+      echo "slice-check: candidate digest rejects symlink payload: $path" >&2
+      exit 1
+    elif [[ "$worktree_state" == "D" && ! -e "$path" ]]; then
+      :
+    elif [[ ! -f "$path" ]]; then
+      echo "slice-check: candidate digest rejects unsupported payload type: $path" >&2
+      exit 1
+    fi
+    if listed "$path" "${control_paths[@]}"; then
+      digest_control_paths=$((digest_control_paths + 1))
+    else
+      digest_product_paths=$((digest_product_paths + 1))
+    fi
+    scoped_paths+=("$path")
+    scoped_index_states+=("$index_state")
+    continue
   fi
 
   if [[ "$mode" == "test-candidate" && "$path" != "$scope_file" ]]; then
@@ -489,7 +538,20 @@ for ((i = 0; i < ${#changed_paths[@]}; i++)); do
   fi
 done
 
-if [[ "$mode" == "test-candidate" && "$test_candidate_paths" == "0" ]]; then
+if [[ "$mode" == "candidate-digest" ]]; then
+  (( digest_scope_staged == 1 )) || {
+    echo "slice-check: candidate digest requires exactly staged verified scope" >&2
+    exit 1
+  }
+  (( ${#scoped_paths[@]} > 0 )) || {
+    echo "slice-check: candidate digest contains no worktree payload" >&2
+    exit 1
+  }
+  if (( digest_control_paths > 0 && digest_product_paths > 0 )); then
+    echo "slice-check: candidate digest may not mix control-plane and production paths" >&2
+    exit 1
+  fi
+elif [[ "$mode" == "test-candidate" && "$test_candidate_paths" == "0" ]]; then
   echo "slice-check: test candidate contains no staged tests" >&2
   exit 1
 fi
@@ -593,6 +655,20 @@ if [[ "$mode" == "contract-candidate" ]]; then
     if [[ "$head_slice_id" == "g1b-ledger-closure" && "$slice_id" != "g1c-guardrail-adoption" ]]; then
       echo "slice-check: G1B bootstrap permits only g1c-guardrail-adoption; found: $slice_id" >&2
       exit 1
+    fi
+    if [[ "$head_slice_id" != "g1a-candidate-authority" && "$head_slice_id" != "g1b-ledger-closure" ]]; then
+      planning_ledger="$tmp_dir/planning-ledger"
+      git show "HEAD:$ledger_file" > "$planning_ledger" 2>/dev/null || true
+      closure_count="$(awk -F '\t' -v slice="$head_slice_id" 'NR > 1 && $2 == slice {n++} END {print n + 0}' "$planning_ledger")"
+      closing_slice="$(awk -F '\t' 'END {print $2}' "$planning_ledger")"
+      if awk -F '\t' -v slice="$slice_id" 'NR > 1 && $2 == slice {found=1} END {exit !found}' "$planning_ledger"; then
+        echo "slice-check: slice_id already exists in ledger: $slice_id" >&2
+        exit 1
+      fi
+      if [[ "$closure_count" != "1" || "$closing_slice" != "$head_slice_id" ]]; then
+        echo "slice-check: cannot start $slice_id without committed ledger closure for $head_slice_id" >&2
+        exit 1
+      fi
     fi
   else
     expected_state=""
@@ -742,6 +818,43 @@ staged_candidate_digest() {
   sha256_file "$manifest"
 }
 
+worktree_candidate_digest() {
+  local head_scope="$tmp_dir/digest-head-scope" staged_scope="$tmp_dir/digest-staged-scope"
+  local index_file="$tmp_dir/digest-index" objects="$tmp_dir/digest-objects" manifest="$tmp_dir/digest-manifest"
+  local entry scope_mode scope_blob head_state head_slice common_dir
+
+  git show "HEAD:$scope_file" > "$head_scope" 2>/dev/null || true
+  git show ":$scope_file" > "$staged_scope" 2>/dev/null || true
+  head_state="$(sed -n 's/^state=//p' "$head_scope")"
+  head_slice="$(sed -n 's/^slice_id=//p' "$head_scope")"
+  if [[ "$state" != "verified" || "$head_state" != "reviewed" || "$head_slice" != "$slice_id" ]]; then
+    echo "slice-check: --candidate-digest requires reviewed -> verified scope transition" >&2
+    return 1
+  fi
+  grep -Ev '^(#|$|state=)' "$head_scope" > "$tmp_dir/digest-head-frozen"
+  grep -Ev '^(#|$|state=)' "$staged_scope" > "$tmp_dir/digest-staged-frozen"
+  if ! cmp -s "$tmp_dir/digest-head-frozen" "$tmp_dir/digest-staged-frozen"; then
+    echo "slice-check: frozen contract fields changed after reviewed" >&2
+    return 1
+  fi
+  entry="$(git ls-files -s -- "$scope_file")" || return 1
+  read -r scope_mode scope_blob _ <<< "$entry"
+  [[ -n "$scope_mode" && -n "$scope_blob" ]] || return 1
+  common_dir="$(git rev-parse --git-common-dir)" || return 1
+  common_dir="$(CDPATH='' cd -- "$common_dir" && pwd)" || return 1
+  mkdir "$objects" || return 1
+  GIT_OPTIONAL_LOCKS=0 GIT_INDEX_FILE="$index_file" GIT_OBJECT_DIRECTORY="$objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$common_dir/objects" \
+    git read-tree HEAD || return 1
+  GIT_OPTIONAL_LOCKS=0 GIT_INDEX_FILE="$index_file" GIT_OBJECT_DIRECTORY="$objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$common_dir/objects" \
+    git update-index --add --cacheinfo "$scope_mode" "$scope_blob" "$scope_file" || return 1
+  GIT_OPTIONAL_LOCKS=0 GIT_INDEX_FILE="$index_file" GIT_OBJECT_DIRECTORY="$objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$common_dir/objects" \
+    git add -A -- "${scoped_paths[@]}" || return 1
+  printf 'scope\0%s\0%s\0' "$scope_mode" "$scope_blob" > "$manifest" || return 1
+  GIT_OPTIONAL_LOCKS=0 GIT_INDEX_FILE="$index_file" GIT_OBJECT_DIRECTORY="$objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$common_dir/objects" \
+    git diff --cached --raw --no-renames --no-abbrev -z HEAD -- "${scoped_paths[@]}" >> "$manifest" || return 1
+  sha256_file "$manifest"
+}
+
 committed_candidate_digest() {
   local verified="$1" payload="$2" manifest="$tmp_dir/committed-manifest"
   local entry scope_mode scope_blob
@@ -758,6 +871,8 @@ validate_ledger_candidate() {
   local head_ledger="$tmp_dir/head-ledger" candidate_ledger="$tmp_dir/candidate-ledger"
   local prefix="$tmp_dir/ledger-prefix" row record row_slice frozen tests_commit verified payload digest reason
   local head_lines candidate_lines commit role_state role_slice parent_state path trailer computed count=0 delta_count=0
+  local chain_state expected_state chain_index=0 state_delta=0 payload_count=0
+  local expected_states=(tests-red implemented reviewed verified)
 
   git show "$base_ref:$ledger_file" > "$head_ledger" 2>/dev/null || {
     echo "slice-check: ledger history is append-only" >&2
@@ -798,12 +913,16 @@ validate_ledger_candidate() {
     echo "slice-check: ledger row slice_id does not match active slice: $row_slice" >&2
     return 1
   fi
-  if [[ "$record" == "normal-v1" ]]; then
-    echo "slice-check: normal-v1 ledger rows remain disabled until G1C" >&2
+  if [[ "$record" == "bootstrap-v1" ]]; then
+    echo "slice-check: bootstrap-v1 is reserved for pre-G1C closure" >&2
     return 1
   fi
-  if [[ "$record" != "bootstrap-v1" ]]; then
+  if [[ "$record" != "normal-v1" ]]; then
     echo "slice-check: unsupported ledger record_type: $record" >&2
+    return 1
+  fi
+  if [[ "$reason" != "-" ]]; then
+    echo "slice-check: normal-v1 ledger reason must be -" >&2
     return 1
   fi
   if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
@@ -843,6 +962,39 @@ validate_ledger_candidate() {
     echo "slice-check: ledger evidence commits are not in required first-parent order" >&2
     return 1
   fi
+  git rev-list --first-parent --reverse "$tests_commit..$verified" > "$tmp_dir/ledger-state-chain"
+  git show "$frozen:$scope_file" | grep -Ev '^(#|$|state=)' > "$tmp_dir/ledger-frozen-fields"
+  while IFS= read -r commit; do
+    expected_state="${expected_states[$chain_index]:-}"
+    chain_state="$(git show "$commit:$scope_file" 2>/dev/null | sed -n 's/^state=//p')"
+    if [[ -z "$expected_state" || "$chain_state" != "$expected_state" ]]; then
+      echo "slice-check: ledger evidence state sequence is incomplete: ${expected_state:-committed}" >&2
+      return 1
+    fi
+    git show "$commit:$scope_file" | grep -Ev '^(#|$|state=)' > "$tmp_dir/ledger-state-fields"
+    if ! cmp -s "$tmp_dir/ledger-frozen-fields" "$tmp_dir/ledger-state-fields"; then
+      echo "slice-check: ledger $expected_state commit changed frozen authority" >&2
+      return 1
+    fi
+    state_delta=0
+    git diff-tree --no-commit-id --name-only -r --no-renames -z "$commit^" "$commit" > "$tmp_dir/ledger-state-delta"
+    while IFS= read -r -d '' path; do
+      state_delta=$((state_delta + 1))
+      if [[ "$path" != "$scope_file" ]]; then
+        echo "slice-check: ledger $expected_state commit contains non-scope path: $path" >&2
+        return 1
+      fi
+    done < "$tmp_dir/ledger-state-delta"
+    if (( state_delta != 1 )); then
+      echo "slice-check: ledger evidence state sequence is incomplete: $expected_state" >&2
+      return 1
+    fi
+    chain_index=$((chain_index + 1))
+  done < "$tmp_dir/ledger-state-chain"
+  if (( chain_index != ${#expected_states[@]} )); then
+    echo "slice-check: ledger evidence state sequence is incomplete: ${expected_states[$chain_index]}" >&2
+    return 1
+  fi
   parent_state="$(git show "$verified^:$scope_file" 2>/dev/null | sed -n 's/^state=//p')"
   git diff-tree --no-commit-id --name-only -r --no-renames -z "$verified^" "$verified" > "$tmp_dir/verified-ledger-delta"
   while IFS= read -r -d '' path; do
@@ -876,19 +1028,24 @@ validate_ledger_candidate() {
   }
   git diff-tree --no-commit-id --name-only -r --no-renames -z "$payload^" "$payload" > "$tmp_dir/ledger-payload"
   while IFS= read -r -d '' path; do
+    payload_count=$((payload_count + 1))
+    if [[ "$path" == "$ledger_file" ]]; then
+      echo "slice-check: ledger payload commit may not contain $ledger_file" >&2
+      return 1
+    fi
     if ! listed "$path" "${allows[@]}"; then
       echo "slice-check: ledger payload commit contains path outside frozen allowlist: $path" >&2
       return 1
     fi
   done < "$tmp_dir/ledger-payload"
+  if (( payload_count == 0 )); then
+    echo "slice-check: ledger payload_commit contains no payload path" >&2
+    return 1
+  fi
   trailer="$(verified_trailer "$verified")" || return 1
   computed="$(committed_candidate_digest "$verified" "$payload")" || return 1
   if ! [[ "$digest" == "$trailer" && "$digest" == "$computed" ]]; then
     echo "slice-check: ledger candidate digest does not match verified authority" >&2
-    return 1
-  fi
-  if [[ "$row_slice" == "g1b-ledger-closure" && "$reason" != "ledger-checker-self-upgrade-bootstrap" ]]; then
-    echo "slice-check: G1B bootstrap reason must be ledger-checker-self-upgrade-bootstrap" >&2
     return 1
   fi
 }
@@ -952,6 +1109,12 @@ if (( changed_lines > max_changed_lines )); then
   failed=1
 fi
 (( failed == 0 )) || exit 1
+
+if [[ "$mode" == "candidate-digest" ]]; then
+  candidate_digest="$(worktree_candidate_digest)" || exit 1
+  echo "Candidate-SHA256: $candidate_digest"
+  exit 0
+fi
 
 if [[ "$mode" == "candidate" || "$mode" == "guardrail-candidate" ]]; then
   expected_digest="$(verify_candidate_authority)"

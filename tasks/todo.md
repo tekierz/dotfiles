@@ -6,8 +6,8 @@
 - [x] Persist the original seven G1 checker-policy failures at commit `4675a1a`.
 - [x] Stop the rejected five-file G1 candidate at 594/800 lines after independent review
       found additional security contracts that could not fit honestly under the ceiling.
-- [ ] Deliver G1A state, explicit-test, exact-candidate, and control authority.
-- [ ] Deliver G1B red-evidence, unique-ledger, and mandatory-closure authority.
+- [x] Deliver G1A state, explicit-test, exact-candidate, and control authority.
+- [x] Deliver G1B red-evidence, unique-ledger, and mandatory-closure authority.
 - [ ] Deliver G1C Make targets and workflow adoption through the first normal closure.
 - [ ] Pass RG0 and open parallel Wave 1A (`RK1` plus `BA1`).
 

@@ -41,6 +41,24 @@ staged product work even when recovering around an existing unstaged slice. Run
 verification run. Any path outside the allowlist, exceeded budget, malformed contract,
 mixed index/worktree payload, ignored staged path, or unrecognized Git status fails closed.
 
+The executable workflow uses hardcoded Make targets; environment variables never select
+a weaker mode:
+
+- `make slice-check-test` runs the policy harness.
+- `make slice-check-contract-candidate` checks the staged scope-only transition.
+- `make slice-check-test-candidate` checks the isolated red-test commit.
+- `make slice-check-candidate-digest` prints the exact `Candidate-SHA256: <digest>` trailer
+  from a staged reviewed-to-verified scope and an unstaged homogeneous payload.
+- After committing that verified scope with the printed trailer, stage the unchanged payload
+  and run either `make slice-check-candidate` or `make slice-check-guardrail-candidate`.
+- `make slice-check-ledger-candidate` checks the isolated final ledger row.
+
+Digest calculation uses disposable index and object storage and must not mutate the real
+index, refs, object database, status, or locks. The ledger path is reserved to its dedicated
+mode. Each ordinary closure appends one `normal-v1` row with reason `-`, a complete adjacent
+scope-only state chain, a nonempty payload, and exact digest evidence. A new planned slice
+requires its predecessor's unique final closure and a slice ID never previously reserved.
+
 ## Agent ownership
 
 - Sol owns the contract, scope decisions, and final read-only review.
@@ -86,7 +104,7 @@ Once this gate is green, commit immediately. Optional improvements become named
 follow-up slices instead of extending the verified diff. Full integration gates are
 rerun after combining any parallel lanes.
 
-After exact staging, `make slice-check-candidate` must also pass. It rejects unstaged
+After exact staging, the matching hardcoded candidate target must also pass. It rejects unstaged
 scoped work and measures the staged bytes from the index, preventing an unstaged
 revert from hiding a different commit payload from tests or review.
 

@@ -1,4 +1,4 @@
-.PHONY: build install test clean run dev release release-check slice-check slice-check-candidate
+.PHONY: build install test clean run dev release release-check slice-check slice-check-test slice-check-contract-candidate slice-check-test-candidate slice-check-guardrail-candidate slice-check-ledger-candidate slice-check-candidate-digest slice-check-candidate
 
 # Binary names
 DOTFILES_BIN = bin/dotfiles
@@ -51,7 +51,24 @@ test:
 slice-check:
 	bash scripts/check-slice-scope.sh
 
-# Verify the exact staged bytes that will be committed, with no worktree shadow.
+slice-check-test:
+	bash tests/check-slice-scope_test.sh
+
+slice-check-contract-candidate:
+	bash scripts/check-slice-scope.sh --contract-candidate
+
+slice-check-test-candidate:
+	bash scripts/check-slice-scope.sh --test-candidate
+
+slice-check-guardrail-candidate:
+	bash scripts/check-slice-scope.sh --guardrail-candidate
+
+slice-check-ledger-candidate:
+	bash scripts/check-slice-scope.sh --ledger-candidate
+
+slice-check-candidate-digest:
+	@bash scripts/check-slice-scope.sh --candidate-digest
+
 slice-check-candidate:
 	bash scripts/check-slice-scope.sh --candidate
 
@@ -113,6 +130,12 @@ help:
 	@echo "  install      - Install to /usr/local/bin"
 	@echo "  test         - Run tests"
 	@echo "  slice-check  - Verify the active remediation slice scope"
+	@echo "  slice-check-test - Run the slice guardrail tests"
+	@echo "  slice-check-contract-candidate - Verify an exact staged contract transition"
+	@echo "  slice-check-test-candidate - Verify an exact staged red-test candidate"
+	@echo "  slice-check-guardrail-candidate - Verify an exact staged control candidate"
+	@echo "  slice-check-ledger-candidate - Verify an exact staged ledger closure"
+	@echo "  slice-check-candidate-digest - Print the verified worktree candidate digest"
 	@echo "  slice-check-candidate - Verify the exact staged slice"
 	@echo "  test-coverage- Run tests with coverage report"
 	@echo "  clean        - Remove build artifacts"
