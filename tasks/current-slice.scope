@@ -1,13 +1,10 @@
-# Enforce legal slice transitions, verified candidate authority, and closure ledgering.
+# Record the blocked G1 split without claiming implementation or verification.
 version=1
-slice_id=g1-slice-state-enforcement
-state=tests-red
-max_total_files=5
+slice_id=g1-replan-catalog
+state=contract-frozen
+max_total_files=2
 max_production_files=1
-max_changed_lines=800
+max_changed_lines=180
 ignore=tasks/pi-agent-integration-spec.md
-allow=scripts/check-slice-scope.sh
-allow=tests/check-slice-scope_test.sh
-allow=Makefile
-allow=tasks/workflow-guardrails.md
-allow=tasks/slice-commit-ledger.tsv
+allow=tasks/implementation-release-plan-2026-07-13.md
+allow=tasks/todo.md
