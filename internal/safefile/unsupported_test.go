@@ -11,6 +11,13 @@ func TestDescriptorAnchoredOperationsAreTypedUnsupported(t *testing.T) {
 	if _, err := NewRestoreSession("."); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("NewRestoreSession error = %v, want ErrUnsupported", err)
 	}
+	var session *RestoreSession
+	if _, err := session.RestoreFile("file", &ParentChain{}, Revision{}, &DirectorySnapshot{}, "file"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("RestoreFile error = %v, want ErrUnsupported", err)
+	}
+	if err := session.RemoveFile("file", &ParentChain{}, Revision{}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("RemoveFile error = %v, want ErrUnsupported", err)
+	}
 	if _, _, err := ObserveDirectoryStateWithin(".", "directory"); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("ObserveDirectoryStateWithin error = %v, want ErrUnsupported", err)
 	}
