@@ -8,8 +8,10 @@
       found additional security contracts that could not fit honestly under the ceiling.
 - [x] Deliver G1A state, explicit-test, exact-candidate, and control authority.
 - [x] Deliver G1B red-evidence, unique-ledger, and mandatory-closure authority.
-- [ ] Deliver G1C Make targets and workflow adoption through the first normal closure.
-- [ ] Pass RG0 and open parallel Wave 1A (`RK1` plus `BA1`).
+- [x] Deliver G1C Make targets and workflow adoption through the first normal closure.
+- [x] Pass RG0 local plan/state freeze.
+- [ ] Complete G2 authorized worktrees, draft PR, and remote CI baseline.
+- [ ] Open parallel Wave 1A (`RK1` plus `BA1`).
 
 ### Execution review
 
@@ -17,8 +19,8 @@
   it was not accepted, staged, or committed.
 - The original G1 remains truthfully superseded at `tests-red`; no implementation,
   review, verification, ledger, or committed state is claimed for it.
-- G1A, G1B, and G1C are serialized bootstrap slices. Ordinary production slices remain
-  blocked until G1C closes under the complete checker.
+- G1C closed through the first normal ledger row; RG0 local plan/state freeze is complete.
+- No RK1 or BA1 product candidate has started; G2 and Wave 1A remain open.
 - `tasks/pi-agent-integration-spec.md` remains user-owned, untracked, and untouched.
 
 ## Implementation and release plan reset — 2026-07-13

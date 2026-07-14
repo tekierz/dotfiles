@@ -451,11 +451,10 @@ assert_rg0_roadmap_truth() {
   done <<'EOF'
 - [x] Deliver G1C Make targets and workflow adoption through the first normal closure.
 - [x] Pass RG0 local plan/state freeze.
-- [ ] Complete G2 authorized worktrees, draft PR, and remote CI baseline.
-- [ ] Open parallel Wave 1A (`RK1` plus `BA1`).
 - G1C closed through the first normal ledger row; RG0 local plan/state freeze is complete.
-- No RK1 or BA1 product candidate has started; G2 and Wave 1A remain open.
 EOF
+  [[ "$(grep -Ec '^- \[( |x)\] Complete G2 authorized worktrees, draft PR, and remote CI baseline\.$' "$todo")" == "1" ]] || problem="${problem:+$problem; }G2 milestone is missing or duplicated"
+  [[ "$(grep -Ec "^- \[( |x)\] Open parallel Wave 1A \(\`RK1\` plus \`BA1\`\)\.$" "$todo")" == "1" ]] || problem="${problem:+$problem; }Wave 1A milestone is missing or duplicated"
   grep -Fq -- 'Pass RG0 and open parallel Wave 1A' "$todo" && problem="${problem:+$problem; }stale combined RG0/Wave 1A wording remains"
   grep -Fq -- 'blocked until G1C closes' "$todo" && problem="${problem:+$problem; }stale G1C blocking wording remains"
   if [[ -n "$problem" ]]; then
@@ -552,6 +551,11 @@ write_canonical_genesis() {
     $'bootstrap-v1\tg1a-candidate-authority\tdf0bd217ce0f8e36ae5f44e6d09a0a187c161d43\t770bf8d1ec2ebf28fdb9e91362723aa9ce90a6fd\ta62cc74e32fe38821a4524e1bf2d18884d1045eb\t3c6025adadde63fcc5d7289b06ae947e658a5b43\tf0727c52696ef06e4ff21eb10b5bcd8f3ca1f4404a5218963b495bd1670722ed\tcandidate-checker-self-upgrade-bootstrap' \
     > "$file" || return 1
 }
+
+write_canonical_g1b_prefix() {
+  write_canonical_genesis "$1" || return 1
+  printf '%s\n' $'bootstrap-v1\tg1b-ledger-closure\tb30b9c626903d8e98e19e596023abd506c04b437\t8a01b48bda47b96a13887eda1a0f3f3fdb3b4479\t52a97934ceb4ecfb9fe1914856dec8d8f5ea6914\t9ae61f2cad71b00582f63e9a380eea3e3ba142a6\tf9f9b05094a27893c07a7755c8dc88e6ee99031e26b7507942bc2b66fe3735eb\tledger-checker-self-upgrade-bootstrap' >> "$1" || return 1
+}
 g1b_frozen=''
 g1b_tests=''
 g1b_reviewed=''
@@ -572,9 +576,12 @@ new_g1b_fixture() {
 }
 
 new_g1c_fixture() {
-  local state="$1" repo
+  local state="$1" repo expected="$tmp_root/canonical-g1b-prefix"
   repo="$(new_fixture g1c-guardrail-adoption "$state")" || return 1
-  cp "$repo_root/tasks/slice-commit-ledger.tsv" "$repo/tasks/slice-commit-ledger.tsv" || return 1
+  write_canonical_g1b_prefix "$expected" || return 1
+  awk -F '\t' 'NR == 1 {print; next} {print} $2 == "g1b-ledger-closure" {found=1; exit} END {exit !found}' \
+    "$repo_root/tasks/slice-commit-ledger.tsv" > "$repo/tasks/slice-commit-ledger.tsv" || return 1
+  cmp -s "$expected" "$repo/tasks/slice-commit-ledger.tsv" || return 1
   printf '%s\n' 'allow=tasks/slice-commit-ledger.tsv' >> "$repo/tasks/current-slice.scope" || return 1
   git -C "$repo" add tasks/current-slice.scope tasks/slice-commit-ledger.tsv || return 1
   git -C "$repo" commit -q -m 'G1C fixture contract' || return 1
