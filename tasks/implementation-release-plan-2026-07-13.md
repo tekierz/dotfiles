@@ -110,8 +110,11 @@ flowchart TD
   BA1A --> BA1SF1["BA1SF1 Restore-parent authority"]
   BA1SF1 -->|serialized| BA1SF2F["BA1SF2F Exact file restore leaves"]
   BA1SF2F --> BA1SF2D["BA1SF2D Exact directory restore leaves"]
+  BA1SF2D --> BA1SF2M["BA1SF2M Explicit file mode restore"]
   BA1SF2D --> BA1B2["BA1B2 Immutable catalog kernel"]
-  BA1B2 --> BA1C["BA1C Opaque public authority"]
+  BA1C["BA1C Opaque catalog restore"]
+  BA1SF2M --> BA1C
+  BA1B2 --> BA1C
   G1C --> SH["SH sshh contract"]
   RK1P --> RS["RS Sequential streaming"]
   RS --> AP["AP Debian Update All"]
@@ -181,9 +184,11 @@ restore dependency chain named below, and G3D serially updates active control tr
 The stopped G3B control attempt has no ledger row, candidate digest, or execution authority; G3C and G3D replace it without inheriting its candidate history.
 G3C is plan-only and G3D is todo-only; neither candidate may contain or inherit the stopped G3B payload.
 
-The fixed execution catalog contains 48 slices: G2, 22 safety slices, 20 Wave 2 engineering
+The fixed execution catalog contains 49 slices: G2, 23 safety slices, 20 Wave 2 engineering
 slices, and five external slices; the G3A/G3C/G3D governance closures are not catalog slices.
-RK1UO, BA1A, and BA1SF1 are closed branch-locally but not integrated, so 45 catalog slices remain incomplete and 19 safety slices remain.
+RK1UO, BA1A, BA1SF1, BA1SF2F, and BA1SF2D are closed branch-locally but not integrated.
+BA1SF2F closed branch-locally at `6c58f00` and BA1SF2D closed branch-locally at `75efdc0`; neither closure is integrated.
+Therefore, 44 catalog slices remain incomplete and 18 safety slices remain.
 
 ### Runtime and update safety
 
@@ -211,8 +216,9 @@ capacity or discard apt output.
 | BA1SF1 | Bind restore-parent identity and reject replacement before any restore mutation | internal/safefile restore-parent files and tests | BA1A |
 | BA1SF2F | Restore exact captured file bytes and mode, return the exact installed Revision, remove only the exact accepted file leaf, and reject invalid source authority before parent creation | internal/safefile restore-session file and unsupported files/tests | BA1SF1 |
 | BA1SF2D | Restore exact captured recursive directory names, bytes, and modes, return exact installed recursive evidence, remove only the exact accepted directory leaf, and reject invalid source authority before parent creation | internal/safefile restore-session directory and unsupported files/tests | BA1SF2F |
-| BA1B2 | Parse and validate an immutable catalog snapshot completely before applying any restore item | internal/backup/backup.go and catalog tests | BA1SF2D |
-| BA1C | Expose RestoreCatalogEntry through opaque private authority; mutable display fields cannot redirect bytes | internal/backup/catalog.go and catalog tests | BA1B2 |
+| BA1SF2M | Freeze RestoreFileWithMode as one atomic restore of immutable snapshot bytes plus a separate permission-only desired mode to the exact target under the exact validated parent, return the exact installed Revision, and reject an invalid mode before mutation without chmod | internal/safefile/restore_session_file_unix.go, internal/safefile/restore_session_unsupported.go, internal/safefile/restore_session_file_unix_test.go, internal/safefile/unsupported_test.go | BA1SF2D |
+| BA1B2 | Parse and validate an immutable catalog snapshot completely, retaining each item's source, target, kind, existence, and desired mode without applying any restore item | internal/backup/backup.go and catalog tests | BA1SF2D |
+| BA1C | Join and apply BA1B2 catalog items through BA1SF2M/session restore while opaque authority protects source, target, kind, and desired mode from mutable display fields | internal/backup/catalog.go and catalog tests | BA1SF2M, BA1B2 |
 | BC1 | CLI restore consumes the accepted entry | cmd/dotfiles/main.go and restore tests | BA1C |
 | BC2 | TUI Backups retains and consumes the accepted entry | internal/ui/app.go, screen_backups.go, tests | BA1C |
 | BU1 | Uninstall chooses the newest valid catalog by timestamp/tie-break, never raw lexicographic directory order | cmd/dotfiles/main.go, catalog tests | BC1 |
@@ -316,14 +322,14 @@ cross-review and root integration.
 | 1A | RK1UO + BA1A | Native observer and snapshot extraction foundations |
 | 1B | RK1ULK + BA1SF2F | Private lifecycle kernel and exact file restore leaves |
 | 1C | RK1ULA + BA1SF2D | Public streaming adapters and exact directory restore leaves |
-| 1D | RK1P + BA1B2 | Privileged supervisor and immutable catalog kernel |
-| 1E | RS1 + BA1C | Sequential streaming and opaque restore authority |
-| 1F | UR1 + BC1 | Provider domain and CLI restore |
-| 1G | AP1 + BC2 | Debian adapter and TUI restore |
-| 1H | UR2 + BU1 | TUI update routing and uninstall recovery |
-| 1I | CX1 + BR1 | Cancellation propagation and bounded-read policy |
-| 1J | BR2 + SH1 | Config input limits and embedded helper |
-| 1K | BR3 | Backup input limits |
+| 1D | BA1SF2M + BA1B2 | Explicit file mode and immutable catalog kernels |
+| 1E | RK1P + BA1C | Privileged supervisor and opaque restore authority |
+| 1F | RS1 + BC1 | Sequential streaming and CLI restore |
+| 1G | UR1 + BC2 | Provider domain and TUI restore |
+| 1H | AP1 + BU1 | Debian adapter and uninstall recovery |
+| 1I | UR2 + BR1 | TUI update routing and bounded-read policy |
+| 1J | CX1 + SH1 | Cancellation propagation and embedded helper |
+| 1K | BR2 + BR3 | Config and backup input limits |
 | MB1 | Full safety merge barrier | High/Medium runtime and recovery contracts green |
 | 2A | SP1 + CL1 | Payload policy and CLI grammar |
 | 2B | SP2 + PO1 | Pinned repos and registry ownership |
@@ -342,18 +348,21 @@ cross-review and root integration.
 | MB3 | Candidate evidence barrier | Eligible for destructive owner gates |
 
 Wave 1A is complete branch-locally; exactly ten Wave 1 barriers remain (1B-1K).
+Wave 1B has completed its BA1SF2F restore half branch-locally but remains open on RK1ULK.
+Wave 1C has completed its BA1SF2D restore half branch-locally but remains open on RK1ULA.
+Remaining restore fork/join: BA1SF2D -> (BA1SF2M + BA1B2) -> BA1C.
 
 Serialization rules:
 
 - cmd/dotfiles/main.go: RK1P -> BC1 -> BU1 -> CL1 -> PO2 -> NP5.
 - internal/ui/installation.go: UR2 -> CX1 -> SP2 -> NP6.
 - internal/runner lifecycle: RK1UO -> RK1ULK -> RK1ULA -> RK1P -> RS1.
-- internal/safefile restore authority: BA1A -> BA1SF1 -> BA1SF2F -> BA1SF2D.
-- internal/backup restore authority: BA1B2 -> BA1C -> BR3.
+- internal/safefile restore authority: BA1A -> BA1SF1 -> BA1SF2F -> BA1SF2D -> BA1SF2M.
+- restore authority fork/join: BA1SF2D -> (BA1SF2M + BA1B2) -> BA1C -> BR3.
 - release workflow: CI1 -> CI2 -> CI3 -> CI4.
 - README/docs/tools: capability implementation -> DT1.
 
-BA1SF2F and BA1SF2D are serialized because both modify internal/safefile/restore_session_unsupported.go and internal/safefile/unsupported_test.go.
+BA1SF2F, BA1SF2D, and BA1SF2M are serialized because all three modify internal/safefile/restore_session_unsupported.go and internal/safefile/unsupported_test.go.
 
 ## 7. Slice acceptance contracts
 
@@ -376,15 +385,20 @@ Frozen split budgets use `total files / production files / changed lines`:
 | Slice | Budget |
 |-------|--------|
 | RK1UO | 4/3/280 |
-| RK1ULK | 2/1/790 |
+| RK1ULK | 2/1/1150 |
 | RK1ULA | 4/2/690 |
 | RK1P | 8/5/800 |
 | BA1A | 2/1/250 |
 | BA1SF1 | 5/3/760 |
 | BA1SF2F | 4/2/650 |
 | BA1SF2D | 4/2/780 |
+| BA1SF2M | 4/2/420 |
 | BA1B2 | 2/1/800 |
 | BA1C | 2/1/360 |
+
+RK1ULK's 2/1/1150 budget is a before-the-fact hard exception ceiling, not a target or permission to widen its two-file/one-production-file authority.
+Behavior-proven RK1ULK candidates must remain at or below 785 total changed lines.
+At 325 production lines, RK1ULK must stop and re-plan rather than compress behavior or reviewability.
 
 The commit exit gate is:
 
@@ -400,8 +414,8 @@ The commit exit gate is:
 
 ### MB1 — safety substrate
 
-Requires all 22 safety slices: RK1UO, RK1ULK, RK1ULA, RK1P, RS1, AP1, UR1-UR2, CX1, BA1A,
-BA1SF1, BA1SF2F, BA1SF2D, BA1B2, BA1C, BC1-BC2, BU1, BR1-BR3, and SH1:
+Requires all 23 safety slices: RK1UO, RK1ULK, RK1ULA, RK1P, RS1, AP1, UR1, UR2, CX1, BA1A,
+BA1SF1, BA1SF2F, BA1SF2D, BA1SF2M, BA1B2, BA1C, BC1, BC2, BU1, BR1, BR2, BR3, and SH1:
 
 - 1,000-line apt Update All cannot deadlock;
 - update/cancel process trees terminate;
@@ -484,7 +498,7 @@ The ten RG0-RG9 gates remain sequential and candidate-bound.
 
 | Gate | Exit evidence | Promotion |
 |------|---------------|-----------|
-| RG0 Plan/control freeze | G0 canonical bootstrap evidence plus normal-v1 closures for the prior RG0 roadmap reconciliation, G1C, G3A, G3C, and G3D; fixed 48-slice catalog; live 45 incomplete/19 safety accounting; no stale active state | G2 may close; Wave 1 product integration remains gated by G2 |
+| RG0 Plan/control freeze | G0 canonical bootstrap evidence plus normal-v1 closures for the prior RG0 roadmap reconciliation, G1C, G3A, G3C, and G3D; fixed 49-slice catalog; live 44 incomplete/18 safety accounting; no stale active state | G2 may close; Wave 1 product integration remains gated by G2 |
 | RG1 Safety | MB1 plus disposable Debian/mixed-manager evidence | npm/product work may integrate |
 | RG2 Engineering candidate | MB2, remote PR green, exact candidate dossier | Platform/manual QA |
 | RG3 Release construction | MB3 and duplicate reproducible snapshots | Owner destructive tests |
