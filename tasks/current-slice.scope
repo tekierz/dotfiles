@@ -1,14 +1,14 @@
-# Reconcile the runner/restore split and fixed release catalog in the implementation plan.
-# Authority: plan-only dependency graph, slice budgets, wave schedule, accounting, and gates.
-# Control projection is deferred to the serial G3B todo-only guardrail slice.
+# Synchronize the active todo control projection with committed G3A plan authority.
+# Authority: todo-only milestones, live accounting, G2 integration block, and RG0 condition.
+# The serial plan payload is already closed by G3A at 0182fe7.
 version=2
-slice_id=g3a-plan-catalog-resplit
-state=committed
+slice_id=g3b-todo-control-sync
+state=planned
 max_total_files=2
 max_production_files=1
-max_changed_lines=220
+max_changed_lines=160
 ignore=tasks/pi-agent-integration-spec.md
-allow=tasks/implementation-release-plan-2026-07-13.md
-allow=tests/implementation-release-plan_test.sh
+allow=tasks/todo.md
+allow=tests/implementation-release-plan_todo_test.sh
 allow=tasks/slice-commit-ledger.tsv
-test=tests/implementation-release-plan_test.sh
+test=tests/implementation-release-plan_todo_test.sh
