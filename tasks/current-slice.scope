@@ -9,7 +9,7 @@
 # Deferred: public RunStreaming/RunExactStreaming adapters (RK1ULA), privileged sudo (RK1P).
 version=2
 slice_id=rk1ulk-private-lifecycle-kernel
-state=contract-frozen
+state=tests-red
 max_total_files=2
 max_production_files=1
 max_changed_lines=790
