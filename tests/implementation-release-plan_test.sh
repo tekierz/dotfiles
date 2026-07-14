@@ -46,6 +46,22 @@ expect_budget() {
   fi
 }
 
+expect_outcome() {
+  id=$1
+  outcome=$2
+  if ! awk -F '|' -v wanted_id="$id" -v wanted_outcome="$outcome" '
+    function trim(value) {
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      return value
+    }
+    trim($2) == wanted_id && trim($3) == wanted_outcome { matches++ }
+    END { exit matches == 1 ? 0 : 1 }
+  ' "$plan"; then
+    fail "$id must have exactly one catalog row with outcome: $outcome"
+  fi
+}
+
 expect_count() {
   actual=$1
   expected=$2
@@ -57,16 +73,18 @@ expect_count() {
 
 for entry in \
   'G3A:G1C' \
-  'G3B:G3A' \
-  'G2:G3B and user authorization' \
+  'G3C:G3A' \
+  'G3D:G3C' \
+  'G2:G3D and user authorization' \
   'RK1UO:G1C' \
   'RK1ULK:RK1UO' \
   'RK1ULA:RK1ULK' \
   'RK1P:RK1ULA' \
   'BA1A:G1C' \
   'BA1SF1:BA1A' \
-  'BA1SF2:BA1SF1' \
-  'BA1B2:BA1SF2' \
+  'BA1SF2F:BA1SF1' \
+  'BA1SF2D:BA1SF2F' \
+  'BA1B2:BA1SF2D' \
   'BA1C:BA1B2' \
   'RS1:RK1P' \
   'CX1:RK1P' \
@@ -86,11 +104,15 @@ for entry in \
   'RK1P:8/5/800' \
   'BA1A:2/1/250' \
   'BA1SF1:5/3/760' \
-  'BA1SF2:4/2/780' \
+  'BA1SF2F:4/2/650' \
+  'BA1SF2D:4/2/780' \
   'BA1B2:2/1/800' \
   'BA1C:2/1/360'; do
   expect_budget "${entry%%:*}" "${entry#*:}"
 done
+
+expect_outcome BA1SF2F 'Restore exact captured file bytes and mode, return the exact installed Revision, remove only the exact accepted file leaf, and reject invalid source authority before parent creation'
+expect_outcome BA1SF2D 'Restore exact captured recursive directory names, bytes, and modes, return exact installed recursive evidence, remove only the exact accepted directory leaf, and reject invalid source authority before parent creation'
 
 expect_wave() {
   id=$1
@@ -106,8 +128,8 @@ expect_wave() {
 }
 
 expect_wave 1A 'RK1UO + BA1A' 'Native observer and snapshot extraction foundations'
-expect_wave 1B 'RK1ULK + BA1SF1' 'Private lifecycle kernel and restore-parent authority'
-expect_wave 1C 'RK1ULA + BA1SF2' 'Public streaming adapters and exact restore leaves'
+expect_wave 1B 'RK1ULK + BA1SF2F' 'Private lifecycle kernel and exact file restore leaves'
+expect_wave 1C 'RK1ULA + BA1SF2D' 'Public streaming adapters and exact directory restore leaves'
 expect_wave 1D 'RK1P + BA1B2' 'Privileged supervisor and immutable catalog kernel'
 expect_wave 1E 'RS1 + BA1C' 'Sequential streaming and opaque restore authority'
 expect_wave 1F 'UR1 + BC1' 'Provider domain and CLI restore'
@@ -118,13 +140,16 @@ expect_wave 1J 'BR2 + SH1' 'Config input limits and embedded helper'
 expect_wave 1K 'BR3' 'Backup input limits'
 wave_count=$(awk -F '|' '$2 ~ /^[[:space:]]*1[A-Z][[:space:]]*$/ { count++ } END { print count+0 }' "$plan")
 expect_count "$wave_count" 11 'Wave 1 row count'
+remaining_wave_count=$(awk -F '|' '$2 ~ /^[[:space:]]*1[B-K][[:space:]]*$/ { count++ } END { print count+0 }' "$plan")
+expect_count "$remaining_wave_count" 10 'remaining Wave 1 barrier count'
 
 for chain in \
   'G1C --> G3A' \
-  'G3A --> G3B' \
-  'G3B --> G2' \
+  'G3A --> G3C' \
+  'G3C --> G3D' \
+  'G3D --> G2' \
   'internal/runner lifecycle: RK1UO -> RK1ULK -> RK1ULA -> RK1P -> RS1.' \
-  'internal/safefile restore authority: BA1A -> BA1SF1 -> BA1SF2.' \
+  'internal/safefile restore authority: BA1A -> BA1SF1 -> BA1SF2F -> BA1SF2D.' \
   'internal/backup restore authority: BA1B2 -> BA1C -> BR3.' \
   'cmd/dotfiles/main.go: RK1P -> BC1 -> BU1 -> CL1 -> PO2 -> NP5.' \
   'internal/ui/installation.go: UR2 -> CX1 -> SP2 -> NP6.' \
@@ -139,18 +164,25 @@ wave2=$(awk '/^\| SP1 \|/ { on=1 } on && /^### External repositories/ { on=0 } o
 external=$(awk '/^### External repositories/ { on=1 } on && /^## 6[.]/ { on=0 } on && !/^\| ID \|/ && /^\| [A-Z][A-Z0-9]+ \|/ { count++ } END { print count+0 }' "$plan")
 gates=$(awk '/^## 10[.] Release gates/ { on=1 } on && /^## 11[.]/ { on=0 } on && /^\| RG[0-9] / { count++ } END { print count+0 }' "$plan")
 catalog=$((1 + safety + wave2 + external))
-expect_count "$safety" 21 'safety slice count'
+expect_count "$safety" 22 'safety slice count'
 expect_count "$wave2" 20 'Wave 2 engineering slice count'
 expect_count "$external" 5 'external slice count'
-expect_count "$catalog" 47 'fixed catalog count including G2'
+expect_count "$catalog" 48 'fixed catalog count including G2'
 expect_count "$gates" 10 'release gate count'
 
 for truth in \
   'RK1UO, BA1A, and BA1SF1 are closed branch-locally' \
-  '44 catalog slices remain incomplete and 18 safety slices remain' \
+  '45 catalog slices remain incomplete and 19 safety slices remain' \
+  'Wave 1A is complete branch-locally; exactly ten Wave 1 barriers remain (1B-1K).' \
+  'BA1SF2F and BA1SF2D are serialized because both modify internal/safefile/restore_session_unsupported.go and internal/safefile/unsupported_test.go.' \
+  'Requires all 22 safety slices:' \
+  'BA1SF1, BA1SF2F, BA1SF2D, BA1B2, BA1C' \
   '| RG0 Plan/control freeze |' \
+  'normal-v1 closures for the prior RG0 roadmap reconciliation, G1C, G3A, G3C, and G3D; fixed 48-slice catalog; live 45 incomplete/19 safety accounting; no stale active state' \
   "Branch-local Wave 1 product work may proceed while G2 is open, but no closed Wave 1 product candidate may integrate until G2's draft PR and remote CI baseline close." \
-  'The serial G3A/G3B governance fast-forward re-closes RG0 and is not Wave 1 product integration.'; do
+  'The stopped G3B control attempt has no ledger row, candidate digest, or execution authority; G3C and G3D replace it without inheriting its candidate history.' \
+  'G3C is plan-only and G3D is todo-only; neither candidate may contain or inherit the stopped G3B payload.' \
+  'The serial G3C/G3D governance fast-forward re-closes RG0 and is not Wave 1 product integration.'; do
   if ! rg -Fq "$truth" "$plan"; then
     fail "missing exact release truth: $truth"
   fi
@@ -164,7 +196,19 @@ for stale in \
   'RK1 intentionally absorbs' \
   'internal/backup files: BA1 -> BR3.' \
   'RK1UO -> RK1UL -> RK1P' \
-  'Requires RK1,'; do
+  'Requires RK1,' \
+  '| BA1SF2 |' \
+  'BA1SF1 --> BA1SF2' \
+  'BA1SF2 --> BA1B2' \
+  'BA1SF1 -> BA1SF2.' \
+  '| 1C | RK1ULA + BA1SF2 |' \
+  '47 slices' \
+  '44 catalog slices remain incomplete' \
+  '18 safety slices remain' \
+  'Requires all 21 safety slices:' \
+  'G3A --> G3B' \
+  'G3B --> G2' \
+  '| G3B | Synchronize the active control projection'; do
   if rg -Fq "$stale" "$plan"; then
     fail "stale aggregate name remains: $stale"
   fi
