@@ -8,6 +8,12 @@ import (
 )
 
 func TestDescriptorAnchoredOperationsAreTypedUnsupported(t *testing.T) {
+	if _, err := NewRestoreSession("."); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("NewRestoreSession error = %v, want ErrUnsupported", err)
+	}
+	if _, _, err := ObserveDirectoryStateWithin(".", "directory"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("ObserveDirectoryStateWithin error = %v, want ErrUnsupported", err)
+	}
 	if _, err := SnapshotDirectoryWithin(".", "directory"); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("SnapshotDirectoryWithin error = %v, want ErrUnsupported", err)
 	}
