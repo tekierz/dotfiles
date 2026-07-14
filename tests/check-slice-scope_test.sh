@@ -315,6 +315,155 @@ hash_file() {
   fi
 }
 
+expected_worktree_digest() {
+  local repo="$1"
+  shift
+  local index_file manifest_file objects entry scope_mode scope_blob
+
+  entry="$(git -C "$repo" ls-files -s -- tasks/current-slice.scope)" || return 1
+  read -r scope_mode scope_blob _ <<< "$entry"
+  index_file="$(mktemp "$tmp_root/digest-index.XXXXXX")" || return 1
+  manifest_file="$(mktemp "$tmp_root/digest-manifest.XXXXXX")" || return 1
+  objects="$(mktemp -d "$tmp_root/digest-objects.XXXXXX")" || return 1
+  rm -f -- "$index_file" || return 1
+  GIT_INDEX_FILE="$index_file" GIT_OBJECT_DIRECTORY="$objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$repo/.git/objects" \
+    git -C "$repo" read-tree HEAD || return 1
+  GIT_INDEX_FILE="$index_file" GIT_OBJECT_DIRECTORY="$objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$repo/.git/objects" \
+    git -C "$repo" update-index --add --cacheinfo \
+    "$scope_mode" "$scope_blob" tasks/current-slice.scope || return 1
+  GIT_INDEX_FILE="$index_file" GIT_OBJECT_DIRECTORY="$objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$repo/.git/objects" \
+    git -C "$repo" add -A -- "$@" || return 1
+  printf 'scope\0%s\0%s\0' "$scope_mode" "$scope_blob" > "$manifest_file" || return 1
+  GIT_INDEX_FILE="$index_file" GIT_OBJECT_DIRECTORY="$objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$repo/.git/objects" \
+    git -C "$repo" diff --cached --raw --no-renames --no-abbrev -z HEAD -- "$@" \
+    >> "$manifest_file" || return 1
+  hash_file "$manifest_file"
+}
+
+assert_digest_equivalence() {
+  local repo="$1" digest="$2" mode="$3" label="$4"
+  shift 4
+  local before after before_index after_index before_status before_refs before_objects before_locks output repeat status problem=''
+  local trailer="Candidate-SHA256: $digest"
+
+  test_count=$((test_count + 1))
+  git -C "$repo" status --short >/dev/null || return 1
+  before="$(git -C "$repo" ls-files -s)" || return 1
+  before_index="$(hash_file "$repo/.git/index")" || return 1
+  before_status="$(git -C "$repo" -c status.renames=false status --porcelain=v1 --untracked-files=all)" || return 1
+  before_refs="$(git -C "$repo" show-ref)" || return 1
+  before_objects="$(find "$repo/.git/objects" -type f -print | sort)" || return 1
+  before_locks="$(find "$repo/.git" -name '*.lock' -print | sort)" || return 1
+  output="$(cd "$repo" && bash scripts/check-slice-scope.sh --candidate-digest 2>&1)"
+  status=$?
+  repeat="$(cd "$repo" && bash scripts/check-slice-scope.sh --candidate-digest 2>&1)"
+  after="$(git -C "$repo" ls-files -s)" || return 1
+  after_index="$(hash_file "$repo/.git/index")" || return 1
+  (( status == 0 )) && [[ "$output" == "$trailer" ]] || problem="digest output: $output"
+  [[ "$repeat" == "$output" ]] || problem="${problem:+$problem; }digest is nondeterministic: $repeat"
+  [[ "$before" == "$after" ]] || problem="${problem:+$problem; }real index mutated"
+  [[ "$before_index" == "$after_index" ]] || problem="${problem:+$problem; }index bytes mutated"
+  [[ "$before_status" == "$(git -C "$repo" -c status.renames=false status --porcelain=v1 --untracked-files=all)" ]] || problem="${problem:+$problem; }status mutated"
+  [[ "$before_refs" == "$(git -C "$repo" show-ref)" ]] || problem="${problem:+$problem; }refs mutated"
+  [[ "$before_objects" == "$(find "$repo/.git/objects" -type f -print | sort)" ]] || problem="${problem:+$problem; }object database leaked"
+  [[ "$before_locks" == "$(find "$repo/.git" -name '*.lock' -print | sort)" ]] || problem="${problem:+$problem; }lock leaked"
+  git -C "$repo" commit -q -m 'verified scope' -m "$trailer" || return 1
+  git -C "$repo" add "$@" || return 1
+  output="$(cd "$repo" && bash scripts/check-slice-scope.sh "$mode" 2>&1)"
+  status=$?
+  (( status == 0 )) || problem="${problem:+$problem; }candidate equivalence: $output"
+  if [[ -n "$problem" ]]; then
+    printf 'not ok %d - %s\n  %s\n' "$test_count" "$label" "$problem"
+    failures=$((failures + 1))
+    return
+  fi
+  printf 'ok %d - %s\n' "$test_count" "$label"
+}
+
+assert_make_candidate_targets() {
+  local specs target expected output status problem=''
+  specs=$'slice-check\tbash scripts/check-slice-scope.sh\n'
+  specs+=$'slice-check-test\tbash tests/check-slice-scope_test.sh\n'
+  specs+=$'slice-check-contract-candidate\tbash scripts/check-slice-scope.sh --contract-candidate\n'
+  specs+=$'slice-check-test-candidate\tbash scripts/check-slice-scope.sh --test-candidate\n'
+  specs+=$'slice-check-guardrail-candidate\tbash scripts/check-slice-scope.sh --guardrail-candidate\n'
+  specs+=$'slice-check-ledger-candidate\tbash scripts/check-slice-scope.sh --ledger-candidate\n'
+  specs+=$'slice-check-candidate-digest\tbash scripts/check-slice-scope.sh --candidate-digest\n'
+  specs+=$'slice-check-candidate\tbash scripts/check-slice-scope.sh --candidate'
+
+  test_count=$((test_count + 1))
+  while IFS=$'\t' read -r target expected; do
+    output="$(make -s -n -C "$repo_root" "$target" 2>/dev/null)"
+    status=$?
+    (( status == 0 )) && [[ "$output" == "$expected" ]] || problem="${problem:+$problem; }$target: $output"
+    awk -v target="$target" '$1 == ".PHONY:" {for (i=2;i<=NF;i++) if ($i==target) found=1} END {exit !found}' \
+      "$repo_root/Makefile" || problem="${problem:+$problem; }$target is not phony"
+  done <<< "$specs"
+  output="$(make -s -n -C "$repo_root" slice-check-candidate MODE=guardrail-candidate 2>/dev/null)"
+  [[ "$output" == 'bash scripts/check-slice-scope.sh --candidate' ]] || \
+    problem="${problem:+$problem; }MODE override: $output"
+  output="$(make -s -C "$repo_root" help 2>/dev/null)"
+  while read -r target; do
+    [[ "$output" == *"  $target "* ]] || problem="${problem:+$problem; }help omits $target"
+  done < <(printf '%s\n' slice-check slice-check-test slice-check-contract-candidate \
+    slice-check-test-candidate slice-check-guardrail-candidate slice-check-ledger-candidate \
+    slice-check-candidate-digest slice-check-candidate)
+  if [[ -n "$problem" ]]; then
+    printf 'not ok %d - Make maps every candidate mode and marks it phony\n  %s\n' "$test_count" "$problem"
+    failures=$((failures + 1))
+    return
+  fi
+  printf 'ok %d - Make maps every candidate mode and marks it phony\n' "$test_count"
+}
+
+assert_rejection_matrix() {
+  local label="$1" repo mode expected output status problem=''
+  shift
+  test_count=$((test_count + 1))
+  while (( $# > 0 )); do
+    repo="$1"
+    mode="$2"
+    expected="$3"
+    shift 3
+    output="$(cd "$repo" && bash scripts/check-slice-scope.sh "$mode" 2>&1)"
+    status=$?
+    if (( status == 0 )) || [[ "$output" != "$expected" ]]; then
+      problem="${problem:+$problem; }$mode $expected => $output"
+    fi
+  done
+  if [[ -n "$problem" ]]; then
+    printf 'not ok %d - %s\n  %s\n' "$test_count" "$label" "$problem"
+    failures=$((failures + 1))
+    return
+  fi
+  printf 'ok %d - %s\n' "$test_count" "$label"
+}
+
+assert_normal_closure_successor() {
+  local repo="$1" output status problem=''
+
+  test_count=$((test_count + 1))
+  output="$(cd "$repo" && bash scripts/check-slice-scope.sh --ledger-candidate 2>&1)"
+  status=$?
+  (( status == 0 )) || problem="ledger: $output"
+  git -C "$repo" commit -q -m 'normal ledger closure' || return 1
+  stage_g1b_contract "$repo" committed g1c-guardrail-adoption || return 1
+  output="$(cd "$repo" && bash scripts/check-slice-scope.sh --contract-candidate 2>&1)"
+  status=$?
+  (( status == 0 )) || problem="${problem:+$problem; }committed: $output"
+  git -C "$repo" commit -q -m 'committed G1C scope' || return 1
+  stage_contract "$repo" rk1-runner-kernel planned || return 1
+  output="$(cd "$repo" && bash scripts/check-slice-scope.sh --contract-candidate 2>&1)"
+  status=$?
+  (( status == 0 )) || problem="${problem:+$problem; }successor: $output"
+  if [[ -n "$problem" ]]; then
+    printf 'not ok %d - normal ledger closure authorizes G1C successor\n  %s\n' "$test_count" "$problem"
+    failures=$((failures + 1))
+    return
+  fi
+  printf 'ok %d - normal ledger closure authorizes G1C successor\n' "$test_count"
+}
+
 prepare_verified_candidate() {
   local repo="$1"
   local scope_source="$2"
@@ -395,11 +544,75 @@ new_g1b_fixture() {
   printf '%s\n' "$repo"
 }
 
+new_g1c_fixture() {
+  local state="$1" repo
+  repo="$(new_fixture g1c-guardrail-adoption "$state")" || return 1
+  cp "$repo_root/tasks/slice-commit-ledger.tsv" "$repo/tasks/slice-commit-ledger.tsv" || return 1
+  printf '%s\n' 'allow=tasks/slice-commit-ledger.tsv' >> "$repo/tasks/current-slice.scope" || return 1
+  git -C "$repo" add tasks/current-slice.scope tasks/slice-commit-ledger.tsv || return 1
+  git -C "$repo" commit -q -m 'G1C fixture contract' || return 1
+  printf '%s\n' "$repo"
+}
+
+new_planning_fixture() {
+  local duplicate="${1:-}" repo
+  repo="$(new_fixture g1c-guardrail-adoption committed)" || return 1
+  printf '%s\n' "$ledger_header" \
+    $'normal-v1\tg1c-guardrail-adoption\t-\t-\t-\t-\t-\t-' \
+    > "$repo/tasks/slice-commit-ledger.tsv" || return 1
+  if [[ -n "$duplicate" ]]; then
+    printf '%s\t%s\t-\t-\t-\t-\t-\t-\n' normal-v1 "$duplicate" >> "$repo/tasks/slice-commit-ledger.tsv" || return 1
+  fi
+  printf '%s\n' 'allow=tasks/slice-commit-ledger.tsv' >> "$repo/tasks/current-slice.scope" || return 1
+  git -C "$repo" add tasks/current-slice.scope tasks/slice-commit-ledger.tsv || return 1
+  git -C "$repo" commit -q -m 'committed ledger reservation' || return 1
+  printf '%s\n' "$repo"
+}
+
+new_digest_rejection_fixture() {
+  local shape="$1" state=reviewed repo
+  [[ "$shape" != nonreviewed ]] || state=implemented
+  repo="$(new_fixture slice-one "$state")" || return 1
+  case "$shape" in
+    ledger)
+      printf '%s\n' 'allow=tasks/slice-commit-ledger.tsv' >> "$repo/tasks/current-slice.scope" || return 1
+      printf '%s\n' "$ledger_header" > "$repo/tasks/slice-commit-ledger.tsv" || return 1
+      git -C "$repo" add tasks/current-slice.scope tasks/slice-commit-ledger.tsv || return 1
+      git -C "$repo" commit -q -m 'ledger digest authority' || return 1
+      printf '%s\n' '# worktree ledger' >> "$repo/tasks/slice-commit-ledger.tsv" || return 1
+      ;;
+    staged-ignored)
+      printf '%s\n' 'ignore=tasks/pi-agent-integration-spec.md' >> "$repo/tasks/current-slice.scope" || return 1
+      git -C "$repo" add tasks/current-slice.scope || return 1
+      git -C "$repo" commit -q -m 'ignored digest authority' || return 1
+      printf '%s\n' user-owned > "$repo/tasks/pi-agent-integration-spec.md" || return 1
+      git -C "$repo" add -f tasks/pi-agent-integration-spec.md || return 1
+      ;;
+  esac
+  if [[ "$shape" != empty && "$shape" != ledger && "$shape" != staged-ignored ]]; then
+    stage_payload "$repo" || return 1
+    git -C "$repo" reset -q internal/payload.go || return 1
+  fi
+  replace_contract_line "$repo" state= state=verified || return 1
+  [[ "$shape" != frozen ]] || replace_contract_line "$repo" max_changed_lines= max_changed_lines=81 || return 1
+  [[ "$shape" == unstaged-scope ]] || git -C "$repo" add tasks/current-slice.scope || return 1
+  case "$shape" in
+    staged-payload) git -C "$repo" add internal/payload.go || return 1 ;;
+    mixed-xy) git -C "$repo" add internal/payload.go && printf '%s\n' '// worktree shadow' >> "$repo/internal/payload.go" || return 1 ;;
+    mixed-control-product) printf '%s\n' '# control worktree' >> "$repo/Makefile" || return 1 ;;
+    outside) mkdir -p "$repo/docs" && printf '%s\n' outside > "$repo/docs/outside.md" || return 1 ;;
+    symlink) rm -f "$repo/internal/payload.go" && ln -s payload_test.go "$repo/internal/payload.go" || return 1 ;;
+    fifo) rm -f "$repo/internal/payload.go" && mkfifo "$repo/internal/payload.go" || return 1 ;;
+  esac
+  printf '%s\n' "$repo"
+}
+
 stage_g1b_contract() {
   local repo="$1"
   local state="$2"
+  local slice="${3:-g1b-ledger-closure}"
 
-  write_contract "$repo" 'g1b-ledger-closure' "$state" || return 1
+  write_contract "$repo" "$slice" "$state" || return 1
   printf '%s\n' 'allow=tasks/slice-commit-ledger.tsv' >> "$repo/tasks/current-slice.scope" || return 1
   git -C "$repo" add tasks/current-slice.scope || return 1
 }
@@ -420,6 +633,8 @@ prepare_g1b_chain() {
   local test_path="${2:-internal/payload_test.go}"
   local payload_path="${3:-internal/payload.go}"
   local test_action="${4:-modify}"
+  local slice="${5:-g1b-ledger-closure}"
+  local shape="${6:-}"
   local state
 
   g1b_frozen="$(git -C "$repo" rev-parse HEAD)" || return 1
@@ -431,12 +646,31 @@ prepare_g1b_chain() {
   fi
   g1b_tests="$(git -C "$repo" rev-parse HEAD)" || return 1
   for state in tests-red implemented reviewed; do
-    stage_g1b_contract "$repo" "$state" || return 1
+    [[ "$shape" != skipped || "$state" != implemented ]] || continue
+    stage_g1b_contract "$repo" "$state" "$slice" || return 1
+    if [[ "$shape" == contaminated && "$state" == implemented ]]; then
+      printf '%s\n' '# contaminated state' >> "$repo/internal/payload.go" || return 1
+      git -C "$repo" add internal/payload.go || return 1
+    fi
     git -C "$repo" commit -q -m "scope $state" || return 1
     if [[ "$state" == "reviewed" ]]; then
       g1b_reviewed="$(git -C "$repo" rev-parse HEAD)" || return 1
     fi
   done
+  if [[ "$shape" == empty ]]; then
+    replace_contract_line "$repo" state= state=verified || return 1
+    git -C "$repo" add tasks/current-slice.scope || return 1
+    entry="$(git -C "$repo" ls-files -s -- tasks/current-slice.scope)" || return 1
+    read -r scope_mode scope_blob _ <<< "$entry"
+    manifest_file="$(mktemp "$tmp_root/empty-payload.XXXXXX")" || return 1
+    printf 'scope\0%s\0%s\0' "$scope_mode" "$scope_blob" > "$manifest_file" || return 1
+    g1b_digest="$(hash_file "$manifest_file")" || return 1
+    git -C "$repo" commit -q -m 'verified scope' -m "Candidate-SHA256: $g1b_digest" || return 1
+    g1b_verified="$(git -C "$repo" rev-parse HEAD)" || return 1
+    git -C "$repo" commit -q --allow-empty -m 'empty payload' || return 1
+    g1b_payload="$(git -C "$repo" rev-parse HEAD)" || return 1
+    return
+  fi
   mkdir -p "$(dirname "$repo/$payload_path")" || return 1
   printf '%s\n' '# payload candidate' >> "$repo/$payload_path" || return 1
   g1b_digest="$(prepare_verified_candidate "$repo" actual "$payload_path")" || return 1
@@ -463,9 +697,9 @@ append_g1b_row() {
 }
 
 append_current_g1b_row() {
-  append_g1b_row "$1" "${2:-bootstrap-v1}" "${3:-g1b-ledger-closure}" \
+  append_g1b_row "$1" "${2:-normal-v1}" "${3:-g1b-ledger-closure}" \
     "$g1b_frozen" "$g1b_tests" "$g1b_verified" "$g1b_payload" "$g1b_digest" \
-    "${4:-ledger-checker-self-upgrade-bootstrap}"
+    "${4:--}"
 }
 
 new_genesis_guardrail_fixture() {
@@ -839,17 +1073,17 @@ assert_rejected_exactly 'ledger row missing evidence' \
 
 repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
 prepare_g1b_chain "$repo" || exit 1
-append_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_verified" \
-  "$g1b_payload" not-a-digest malformed || exit 1
+append_g1b_row "$repo" normal-v1 g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_verified" \
+  "$g1b_payload" not-a-digest - || exit 1
 assert_rejected_exactly 'ledger malformed digest' \
   'slice-check: ledger candidate_sha256 must be 64 lowercase hexadecimal characters' \
   "$repo" '--ledger-candidate'
 
 repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
 prepare_g1b_chain "$repo" || exit 1
-append_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_verified" \
+append_g1b_row "$repo" normal-v1 g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_verified" \
   "$g1b_payload" '0000000000000000000000000000000000000000000000000000000000000000' \
-  ledger-checker-self-upgrade-bootstrap || exit 1
+  - || exit 1
 assert_rejected_exactly 'ledger digest differs from verified authority' \
   'slice-check: ledger candidate digest does not match verified authority' \
   "$repo" '--ledger-candidate'
@@ -859,32 +1093,32 @@ wrong_frozen="$(git -C "$repo" rev-parse HEAD)" || exit 1
 stage_g1b_contract "$repo" 'contract-frozen' || exit 1
 git -C "$repo" commit -q -m 'scope contract-frozen' || exit 1
 prepare_g1b_chain "$repo" || exit 1
-append_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure "$wrong_frozen" "$g1b_tests" "$g1b_verified" \
-  "$g1b_payload" "$g1b_digest" ledger-checker-self-upgrade-bootstrap || exit 1
+append_g1b_row "$repo" normal-v1 g1b-ledger-closure "$wrong_frozen" "$g1b_tests" "$g1b_verified" \
+  "$g1b_payload" "$g1b_digest" - || exit 1
 assert_rejected_exactly 'ledger frozen evidence has wrong scope state' \
   'slice-check: ledger contract_frozen_commit does not record contract-frozen state' \
   "$repo" '--ledger-candidate'
 
 repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
 prepare_g1b_chain "$repo" || exit 1
-append_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_reviewed" \
-  "$g1b_payload" "$g1b_digest" ledger-checker-self-upgrade-bootstrap || exit 1
+append_g1b_row "$repo" normal-v1 g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_reviewed" \
+  "$g1b_payload" "$g1b_digest" - || exit 1
 assert_rejected_exactly 'ledger verified evidence has wrong scope state' \
   'slice-check: ledger verified_scope_commit does not record verified state' \
   "$repo" '--ledger-candidate'
 
 repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
 prepare_g1b_chain "$repo" || exit 1
-append_current_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure wrong-bootstrap || exit 1
-assert_rejected_exactly 'ledger bootstrap reason is exact' \
-  'slice-check: G1B bootstrap reason must be ledger-checker-self-upgrade-bootstrap' \
+append_current_g1b_row "$repo" normal-v1 g1b-ledger-closure wrong || exit 1
+assert_rejected_exactly 'normal ledger reason is exact' \
+  'slice-check: normal-v1 ledger reason must be -' \
   "$repo" '--ledger-candidate'
 
 repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
 prepare_g1b_chain "$repo" || exit 1
 missing_commit='ffffffffffffffffffffffffffffffffffffffff'
-append_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure "$g1b_frozen" "$missing_commit" "$g1b_verified" \
-  "$g1b_payload" "$g1b_digest" missing || exit 1
+append_g1b_row "$repo" normal-v1 g1b-ledger-closure "$g1b_frozen" "$missing_commit" "$g1b_verified" \
+  "$g1b_payload" "$g1b_digest" - || exit 1
 assert_rejected_exactly 'ledger missing evidence commit' \
   "slice-check: ledger evidence commit is unavailable: $missing_commit" "$repo" '--ledger-candidate'
 
@@ -905,47 +1139,41 @@ assert_rejected_exactly 'ledger payload escapes allowlist' \
   'slice-check: ledger payload commit contains path outside frozen allowlist: docs/outside.md' \
   "$repo" '--ledger-candidate'
 
-repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
-prepare_g1b_chain "$repo" || exit 1
-append_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_verified" \
-  "$g1b_verified" "$g1b_digest" wrong-parent || exit 1
-assert_rejected_exactly 'ledger payload is not parent' \
-  'slice-check: ledger payload_commit must equal ledger candidate parent HEAD' \
-  "$repo" '--ledger-candidate'
+skipped_chain_repo='' contaminated_chain_repo='' empty_chain_repo=''
+for shape in skipped contaminated empty; do
+  repo="$(new_g1c_fixture contract-frozen)" || exit 1
+  prepare_g1b_chain "$repo" internal/payload_test.go internal/payload.go modify g1c-guardrail-adoption "$shape" || exit 1
+  append_g1b_row "$repo" normal-v1 g1c-guardrail-adoption "$g1b_frozen" "$g1b_tests" \
+    "$g1b_verified" "$g1b_payload" "$g1b_digest" - || exit 1
+  case "$shape" in skipped) skipped_chain_repo="$repo" ;; contaminated) contaminated_chain_repo="$repo" ;; empty) empty_chain_repo="$repo" ;; esac
+done
+cp -R "$empty_chain_repo" "$tmp_root/committed-invalid" || exit 1
+git -C "$tmp_root/committed-invalid" commit -q -m 'invalid ledger row' || exit 1
+stage_g1b_contract "$tmp_root/committed-invalid" committed g1c-guardrail-adoption || exit 1
+assert_rejection_matrix 'normal ledger chain rejects skipped, contaminated, and empty evidence' \
+  "$skipped_chain_repo" --ledger-candidate 'slice-check: ledger evidence state sequence is incomplete: implemented' \
+  "$contaminated_chain_repo" --ledger-candidate 'slice-check: ledger implemented commit contains non-scope path: internal/payload.go' \
+  "$empty_chain_repo" --ledger-candidate 'slice-check: ledger payload_commit contains no payload path' \
+  "$tmp_root/committed-invalid" --contract-candidate 'slice-check: ledger payload_commit contains no payload path'
 
 repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
 prepare_g1b_chain "$repo" || exit 1
-append_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_payload" \
-  "$g1b_payload" "$g1b_digest" wrong-order || exit 1
-assert_rejected_exactly 'ledger evidence order' \
-  'slice-check: ledger evidence commits are not in required first-parent order' \
-  "$repo" '--ledger-candidate'
-
-repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
-prepare_g1b_chain "$repo" internal/payload.go internal/payload.go || exit 1
-append_current_g1b_row "$repo" || exit 1
-assert_rejected_exactly 'ledger tests commit is not test-only' \
-  'slice-check: ledger tests_commit contains non-test path: internal/payload.go' \
-  "$repo" '--ledger-candidate'
-
-repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
-prepare_g1b_chain "$repo" || exit 1
-append_current_g1b_row "$repo" normal-v1 || exit 1
-assert_rejected_exactly 'normal v1 ledger row disabled' \
-  'slice-check: normal-v1 ledger rows remain disabled until G1C' "$repo" '--ledger-candidate'
+append_current_g1b_row "$repo" bootstrap-v1 g1b-ledger-closure bootstrap || exit 1
+assert_rejected_exactly 'bootstrap ledger rows are reserved' \
+  'slice-check: bootstrap-v1 is reserved for pre-G1C closure' "$repo" '--ledger-candidate'
 
 repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
 prepare_g1b_chain "$repo" || exit 1
 append_current_g1b_row "$repo" || exit 1
-assert_accepted 'exact bootstrap ledger candidate' "$repo" '--ledger-candidate'
+assert_accepted 'exact normal ledger candidate' "$repo" '--ledger-candidate'
 
-git -C "$repo" commit -q -m 'bootstrap ledger closure' || exit 1
+git -C "$repo" commit -q -m 'normal ledger closure' || exit 1
 stage_g1b_contract "$repo" 'committed' || exit 1
-assert_accepted 'committed accepts exact closing ledger predecessor' "$repo" '--contract-candidate'
+assert_accepted 'committed accepts exact normal closing predecessor' "$repo" '--contract-candidate'
 
 repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
 prepare_g1b_chain "$repo" || exit 1
-append_current_g1b_row "$repo" bootstrap-v1 other-slice wrong-close || exit 1
+append_current_g1b_row "$repo" normal-v1 other-slice - || exit 1
 git -C "$repo" commit -q -m 'wrong ledger closure' || exit 1
 stage_g1b_contract "$repo" 'committed' || exit 1
 assert_rejected_exactly 'committed last row closes other slice' \
@@ -981,8 +1209,102 @@ prepare_g1b_chain "$ledger_delete_repo" internal/payload_test.go internal/payloa
 append_current_g1b_row "$ledger_delete_repo" || exit 1
 assert_test_deletion_rejections "$staged_delete_repo" "$red_delete_repo" "$ledger_delete_repo"
 
-if (( test_count != 61 )); then
-  printf 'test harness error: expected 61 assertions, ran %d\n' "$test_count" >&2
+digest_repo="$(new_fixture slice-one reviewed)" || exit 1
+printf '%s\n' 'allow=internal/new.txt' 'ignore=tasks/pi-agent-integration-spec.md' >> "$digest_repo/tasks/current-slice.scope" || exit 1
+git -C "$digest_repo" add tasks/current-slice.scope || exit 1
+git -C "$digest_repo" commit -q -m 'digest authority' || exit 1
+printf '%s\n' user-owned > "$digest_repo/tasks/pi-agent-integration-spec.md" || exit 1
+stage_payload "$digest_repo" || exit 1
+git -C "$digest_repo" reset -q internal/payload.go || exit 1
+printf '%s\n' untracked > "$digest_repo/internal/new.txt" || exit 1
+replace_contract_line "$digest_repo" state= state=verified || exit 1
+git -C "$digest_repo" add tasks/current-slice.scope || exit 1
+digest="$(expected_worktree_digest "$digest_repo" internal/new.txt internal/payload.go)" || exit 1
+assert_digest_equivalence "$digest_repo" "$digest" --candidate \
+  'candidate digest is exact, index-neutral, and equivalent' internal/payload.go internal/new.txt
+
+staged_repo="$(new_digest_rejection_fixture staged-payload)" || exit 1
+unstaged_scope_repo="$(new_digest_rejection_fixture unstaged-scope)" || exit 1
+empty_repo="$(new_digest_rejection_fixture empty)" || exit 1
+nonreviewed_repo="$(new_digest_rejection_fixture nonreviewed)" || exit 1
+frozen_repo="$(new_digest_rejection_fixture frozen)" || exit 1
+outside_repo="$(new_digest_rejection_fixture outside)" || exit 1
+symlink_repo="$(new_digest_rejection_fixture symlink)" || exit 1
+fifo_repo="$(new_digest_rejection_fixture fifo)" || exit 1
+mixed_xy_repo="$(new_digest_rejection_fixture mixed-xy)" || exit 1
+mixed_control_repo="$(new_digest_rejection_fixture mixed-control-product)" || exit 1
+ledger_digest_repo="$(new_digest_rejection_fixture ledger)" || exit 1
+ignored_digest_repo="$(new_digest_rejection_fixture staged-ignored)" || exit 1
+assert_rejection_matrix 'candidate digest rejects every unsafe shape' \
+  "$staged_repo" --candidate-digest 'slice-check: candidate digest requires payload to remain unstaged: internal/payload.go' \
+  "$unstaged_scope_repo" --candidate-digest 'slice-check: candidate digest requires exactly staged verified scope' \
+  "$empty_repo" --candidate-digest 'slice-check: candidate digest contains no worktree payload' \
+  "$nonreviewed_repo" --candidate-digest 'slice-check: --candidate-digest requires reviewed -> verified scope transition' \
+  "$frozen_repo" --candidate-digest 'slice-check: frozen contract fields changed after reviewed' \
+  "$outside_repo" --candidate-digest 'slice-check: path outside frozen allowlist: docs/outside.md' \
+  "$symlink_repo" --candidate-digest 'slice-check: candidate digest rejects symlink payload: internal/payload.go' \
+  "$fifo_repo" --candidate-digest 'slice-check: candidate digest rejects unsupported payload type: internal/payload.go' \
+  "$mixed_xy_repo" --candidate-digest 'slice-check: mixed staged/unstaged payload is forbidden: internal/payload.go' \
+  "$mixed_control_repo" --candidate-digest 'slice-check: candidate digest may not mix control-plane and production paths' \
+  "$ledger_digest_repo" --candidate-digest 'slice-check: tasks/slice-commit-ledger.tsv requires --ledger-candidate' \
+  "$ignored_digest_repo" --candidate-digest 'slice-check: ignored/user-owned path must never be staged: tasks/pi-agent-integration-spec.md'
+
+assert_make_candidate_targets
+
+guardrail_repo="$(new_fixture g1c-guardrail-adoption reviewed)" || exit 1
+replace_contract_line "$guardrail_repo" test= test=tests/check-slice-scope_test.sh || exit 1
+printf '%s\n' 'allow=scripts/check-slice-scope.sh' 'allow=tasks/todo.md' 'allow=tasks/workflow-guardrails.md' \
+  >> "$guardrail_repo/tasks/current-slice.scope" || exit 1
+printf '%s\n' todo > "$guardrail_repo/tasks/todo.md" || exit 1
+printf '%s\n' workflow > "$guardrail_repo/tasks/workflow-guardrails.md" || exit 1
+git -C "$guardrail_repo" add tasks/current-slice.scope tasks/todo.md tasks/workflow-guardrails.md || exit 1
+git -C "$guardrail_repo" commit -q -m 'five-file guardrail baseline' || exit 1
+for path in Makefile scripts/check-slice-scope.sh tests/check-slice-scope_test.sh tasks/todo.md tasks/workflow-guardrails.md; do
+  printf '%s\n' '# guardrail payload' >> "$guardrail_repo/$path" || exit 1
+done
+replace_contract_line "$guardrail_repo" state= state=verified || exit 1
+git -C "$guardrail_repo" add tasks/current-slice.scope || exit 1
+guardrail_digest="$(expected_worktree_digest "$guardrail_repo" Makefile scripts/check-slice-scope.sh tests/check-slice-scope_test.sh tasks/todo.md tasks/workflow-guardrails.md)" || exit 1
+assert_digest_equivalence "$guardrail_repo" "$guardrail_digest" --guardrail-candidate \
+  'control digest is deterministic and authorizes exact five-file guardrail payload' Makefile scripts/check-slice-scope.sh tests/check-slice-scope_test.sh tasks/todo.md tasks/workflow-guardrails.md
+
+reserved_repo="$(new_fixture slice-one reviewed)" || exit 1
+printf '%s\n' 'allow=tasks/slice-commit-ledger.tsv' >> "$reserved_repo/tasks/current-slice.scope" || exit 1
+printf '%s\n' "$ledger_header" > "$reserved_repo/tasks/slice-commit-ledger.tsv" || exit 1
+git -C "$reserved_repo" add tasks/current-slice.scope tasks/slice-commit-ledger.tsv && git -C "$reserved_repo" commit -q -m 'ledger reservation authority' || exit 1
+cp -R "$reserved_repo" "$tmp_root/test-reservation" || exit 1
+replace_contract_line "$tmp_root/test-reservation" state= state=contract-frozen || exit 1
+git -C "$tmp_root/test-reservation" add tasks/current-slice.scope && git -C "$tmp_root/test-reservation" commit -q -m 'test reservation authority' || exit 1
+printf '%s\n' reserved >> "$reserved_repo/tasks/slice-commit-ledger.tsv" || exit 1
+prepare_verified_candidate "$reserved_repo" actual tasks/slice-commit-ledger.tsv >/dev/null || exit 1
+cp -R "$reserved_repo" "$tmp_root/contract-reservation" || exit 1
+printf '%s\n' reserved >> "$tmp_root/test-reservation/tasks/slice-commit-ledger.tsv" && git -C "$tmp_root/test-reservation" add tasks/slice-commit-ledger.tsv || exit 1
+replace_contract_line "$tmp_root/contract-reservation" state= state=committed && git -C "$tmp_root/contract-reservation" add tasks/current-slice.scope || exit 1
+assert_rejection_matrix 'ledger path is reserved in every non-ledger candidate mode' \
+  "$reserved_repo" --candidate 'slice-check: tasks/slice-commit-ledger.tsv requires --ledger-candidate' \
+  "$reserved_repo" --guardrail-candidate 'slice-check: tasks/slice-commit-ledger.tsv requires --ledger-candidate' \
+  "$tmp_root/test-reservation" --test-candidate 'slice-check: tasks/slice-commit-ledger.tsv requires --ledger-candidate' \
+  "$tmp_root/contract-reservation" --contract-candidate 'slice-check: tasks/slice-commit-ledger.tsv requires --ledger-candidate'
+
+normal_repo="$(new_g1c_fixture contract-frozen)" || exit 1
+prepare_g1b_chain "$normal_repo" internal/payload_test.go internal/payload.go modify g1c-guardrail-adoption || exit 1
+append_g1b_row "$normal_repo" normal-v1 g1c-guardrail-adoption "$g1b_frozen" "$g1b_tests" \
+  "$g1b_verified" "$g1b_payload" "$g1b_digest" - || exit 1
+assert_normal_closure_successor "$normal_repo"
+
+missing_reservation_repo="$(new_fixture g1c-guardrail-adoption committed)" || exit 1
+stage_contract "$missing_reservation_repo" rk1-runner-kernel planned || exit 1
+assert_rejected_exactly 'successor requires committed ledger reservation' \
+  'slice-check: cannot start rk1-runner-kernel without committed ledger closure for g1c-guardrail-adoption' \
+  "$missing_reservation_repo" '--contract-candidate'
+
+duplicate_plan_repo="$(new_planning_fixture rk1-runner-kernel)" || exit 1
+stage_contract "$duplicate_plan_repo" rk1-runner-kernel planned || exit 1
+assert_rejected_exactly 'duplicate ledger slice ID rejected at planning' \
+  'slice-check: slice_id already exists in ledger: rk1-runner-kernel' "$duplicate_plan_repo" '--contract-candidate'
+
+if (( test_count != 67 )); then
+  printf 'test harness error: expected 67 assertions, ran %d\n' "$test_count" >&2
   exit 1
 fi
 
