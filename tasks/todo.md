@@ -1,5 +1,26 @@
 # Release-Readiness Plan
 
+## Active implementation — 2026-07-13
+
+- [x] Commit G0's canonical audit, implementation catalog, and active roadmap reset.
+- [x] Persist the original seven G1 checker-policy failures at commit `4675a1a`.
+- [x] Stop the rejected five-file G1 candidate at 594/800 lines after independent review
+      found additional security contracts that could not fit honestly under the ceiling.
+- [ ] Deliver G1A state, explicit-test, exact-candidate, and control authority.
+- [ ] Deliver G1B red-evidence, unique-ledger, and mandatory-closure authority.
+- [ ] Deliver G1C Make targets and workflow adoption through the first normal closure.
+- [ ] Pass RG0 and open parallel Wave 1A (`RK1` plus `BA1`).
+
+### Execution review
+
+- The rejected 594-line candidate is preserved in a path-limited local stash as reference;
+  it was not accepted, staged, or committed.
+- The original G1 remains truthfully superseded at `tests-red`; no implementation,
+  review, verification, ledger, or committed state is claimed for it.
+- G1A, G1B, and G1C are serialized bootstrap slices. Ordinary production slices remain
+  blocked until G1C closes under the complete checker.
+- `tasks/pi-agent-integration-spec.md` remains user-owned, untracked, and untouched.
+
 ## Implementation and release plan reset — 2026-07-13
 
 - [x] Reconcile the audit findings, open roadmap, and stale active-slice state into one

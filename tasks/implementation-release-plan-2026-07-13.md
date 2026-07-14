@@ -1,6 +1,6 @@
 # Implementation and Release Program — 2026-07-13
 
-Status: **canonical execution plan; implementation not started**
+Status: **execution active; G0 committed; original G1 superseded at tests-red**
 
 Audit input: [release-audit-2026-07-13.md](release-audit-2026-07-13.md)
 
@@ -147,8 +147,13 @@ exact list before each slice.
 | ID | Outcome | Likely paths | Depends on |
 |----|---------|--------------|------------|
 | G0 | Reconcile stale npm scope, mark the old roadmap historical, and install this fixed catalog | tasks/current-slice.scope, tasks/todo.md, this plan | none |
-| G1 | Candidate checker accepts production payload only in verified state; add transition tests and a commit ledger | scripts/check-slice-scope.sh, new script tests, Makefile, tasks/workflow-guardrails.md | G0 |
+| G1 | Superseded parent: seven checker gaps persisted red at 4675a1a; no implementation, review, verification, or payload was accepted | tests/check-slice-scope_test.sh | G0 |
+| G1A | Enforce adjacent states, explicit non-production red-test authority, exact verified candidate digest/trailer, and isolated control candidates | scripts/check-slice-scope.sh, tests/check-slice-scope_test.sh | G1 red checkpoint and replan catalog |
+| G1B | Bind contract-frozen, red-test, verified-scope, payload, ledger, and committed evidence in order with unique slice IDs | scripts/check-slice-scope.sh, tests/check-slice-scope_test.sh, tasks/slice-commit-ledger.tsv | G1A |
+| G1C | Publish executable Make targets and final workflow guidance through the first normal ledger closure | Makefile, tests/check-slice-scope_test.sh, tasks/workflow-guardrails.md | G1B |
 | G2 | Establish two authorized worktrees, draft PR, and remote CI baseline | Git/external state only | G1 and user authorization |
+
+After this split, every existing `Depends on G1` reference means `Depends on G1C`.
 
 ### Runtime and update safety
 
@@ -268,7 +273,7 @@ cross-review and root integration.
 
 | Wave | Parallel pair | Barrier |
 |------|---------------|---------|
-| 0 | G0, then G1 | Canonical plan and state checker green |
+| 0 | G0, original G1 red checkpoint, then G1A, G1B, G1C | Canonical plan and state checker green |
 | 1A | RK1 + BA1 | Runner and restore authority foundations |
 | 1B | RS1 + SH1 | Sequential stream and embedded helper |
 | 1C | AP1 + BC1 | Debian adapter and CLI restore |
@@ -412,7 +417,7 @@ Only after Apply passes:
 
 | Gate | Exit evidence | Promotion |
 |------|---------------|-----------|
-| RG0 Plan freeze | G0/G1 committed; fixed catalog; no stale active state | Implementation may begin |
+| RG0 Plan freeze | G0 and G1C committed; fixed catalog; no stale active state | Implementation may begin |
 | RG1 Safety | MB1 plus disposable Debian/mixed-manager evidence | npm/product work may integrate |
 | RG2 Engineering candidate | MB2, remote PR green, exact candidate dossier | Platform/manual QA |
 | RG3 Release construction | MB3 and duplicate reproducible snapshots | Owner destructive tests |
