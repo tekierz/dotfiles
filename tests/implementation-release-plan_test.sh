@@ -99,7 +99,7 @@ done
 
 for entry in \
   'RK1UO:4/3/280' \
-  'RK1ULK:2/1/790' \
+  'RK1ULK:2/1/1150' \
   'RK1ULA:4/2/690' \
   'RK1P:8/5/800' \
   'BA1A:2/1/250' \
@@ -171,14 +171,19 @@ expect_count "$catalog" 48 'fixed catalog count including G2'
 expect_count "$gates" 10 'release gate count'
 
 for truth in \
-  'RK1UO, BA1A, and BA1SF1 are closed branch-locally' \
-  '45 catalog slices remain incomplete and 19 safety slices remain' \
+  'RK1UO, BA1A, BA1SF1, and BA1SF2F are closed branch-locally' \
+  "BA1SF2F closed branch-locally at \`6c58f00\` without G2 integration." \
+  '44 catalog slices remain incomplete and 18 safety slices remain' \
   'Wave 1A is complete branch-locally; exactly ten Wave 1 barriers remain (1B-1K).' \
+  'Wave 1B has completed its BA1SF2F restore half branch-locally but remains open on RK1ULK.' \
+  "RK1ULK's 2/1/1150 budget is a before-the-fact hard exception ceiling, not a target or permission to widen its two-file/one-production-file authority." \
+  'Behavior-proven RK1ULK candidates must remain at or below 785 total changed lines.' \
+  'At 325 production lines, RK1ULK must stop and re-plan rather than compress behavior or reviewability.' \
   'BA1SF2F and BA1SF2D are serialized because both modify internal/safefile/restore_session_unsupported.go and internal/safefile/unsupported_test.go.' \
   'Requires all 22 safety slices:' \
   'BA1SF1, BA1SF2F, BA1SF2D, BA1B2, BA1C' \
   '| RG0 Plan/control freeze |' \
-  'normal-v1 closures for the prior RG0 roadmap reconciliation, G1C, G3A, G3C, and G3D; fixed 48-slice catalog; live 45 incomplete/19 safety accounting; no stale active state' \
+  'normal-v1 closures for the prior RG0 roadmap reconciliation, G1C, G3A, G3C, and G3D; fixed 48-slice catalog; live 44 incomplete/18 safety accounting; no stale active state' \
   "Branch-local Wave 1 product work may proceed while G2 is open, but no closed Wave 1 product candidate may integrate until G2's draft PR and remote CI baseline close." \
   'The stopped G3B control attempt has no ledger row, candidate digest, or execution authority; G3C and G3D replace it without inheriting its candidate history.' \
   'G3C is plan-only and G3D is todo-only; neither candidate may contain or inherit the stopped G3B payload.' \
@@ -203,8 +208,9 @@ for stale in \
   'BA1SF1 -> BA1SF2.' \
   '| 1C | RK1ULA + BA1SF2 |' \
   '47 slices' \
-  '44 catalog slices remain incomplete' \
-  '18 safety slices remain' \
+  '45 catalog slices remain incomplete' \
+  '19 safety slices remain' \
+  '| RK1ULK | 2/1/790 |' \
   'Requires all 21 safety slices:' \
   'G3A --> G3B' \
   'G3B --> G2' \
@@ -213,6 +219,16 @@ for stale in \
     fail "stale aggregate name remains: $stale"
   fi
 done
+
+if rg -qi '1150[^.\n]*(soft|target)|soft[^.\n]*1150' "$plan"; then
+  fail 'RK1ULK 1150 hard exception is falsely described as soft or as a target'
+fi
+if rg -qi 'BA1SF2F[^.\n]*(is|was|has been) (integrated|merged)' "$plan"; then
+  fail 'BA1SF2F branch-local closure is falsely described as integrated'
+fi
+if rg -qi 'Wave 1B (is|has been) (complete|closed)' "$plan"; then
+  fail 'Wave 1B is falsely closed while RK1ULK remains open'
+fi
 
 if [ "$failures" -ne 0 ]; then
   printf '%s release-plan assertion(s) failed\n' "$failures" >&2
