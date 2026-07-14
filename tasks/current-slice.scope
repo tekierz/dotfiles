@@ -3,7 +3,7 @@
 # The serial plan payload is already closed by G3A at 0182fe7.
 version=2
 slice_id=g3b-todo-control-sync
-state=tests-red
+state=implemented
 max_total_files=2
 max_production_files=1
 max_changed_lines=160
