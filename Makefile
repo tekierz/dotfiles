@@ -1,4 +1,4 @@
-.PHONY: build install test clean run dev release release-check slice-check slice-check-candidate
+.PHONY: build install test clean run dev release release-check slice-check slice-check-test slice-check-test-candidate slice-check-candidate slice-check-guardrail-candidate slice-check-ledger-candidate
 
 # Binary names
 DOTFILES_BIN = bin/dotfiles
@@ -51,9 +51,23 @@ test:
 slice-check:
 	bash scripts/check-slice-scope.sh
 
+# Exercise the guardrail policy itself.
+slice-check-test:
+	bash tests/check-slice-scope_test.sh
+
+# Verify the isolated red-test checkpoint while the slice is contract-frozen.
+slice-check-test-candidate:
+	bash scripts/check-slice-scope.sh --test-candidate
+
 # Verify the exact staged bytes that will be committed, with no worktree shadow.
 slice-check-candidate:
 	bash scripts/check-slice-scope.sh --candidate
+
+slice-check-guardrail-candidate:
+	bash scripts/check-slice-scope.sh --guardrail-candidate
+
+slice-check-ledger-candidate:
+	bash scripts/check-slice-scope.sh --ledger-candidate
 
 # Run tests with coverage
 test-coverage:
@@ -113,7 +127,11 @@ help:
 	@echo "  install      - Install to /usr/local/bin"
 	@echo "  test         - Run tests"
 	@echo "  slice-check  - Verify the active remediation slice scope"
+	@echo "  slice-check-test - Exercise the slice guardrail policy"
+	@echo "  slice-check-test-candidate - Verify staged red tests only"
 	@echo "  slice-check-candidate - Verify the exact staged slice"
+	@echo "  slice-check-guardrail-candidate - Verify staged guardrail changes"
+	@echo "  slice-check-ledger-candidate - Verify one closure-ledger append"
 	@echo "  test-coverage- Run tests with coverage report"
 	@echo "  clean        - Remove build artifacts"
 	@echo "  fmt          - Format code"

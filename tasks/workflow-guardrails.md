@@ -21,6 +21,13 @@ Active work is never marked complete. A task checkbox becomes `[x]` only in the
 commit that delivers its verified implementation. Verification evidence is bound
 to that commit candidate and expires after any production edit.
 
+Contracts use schema v2. Every red-test path is declared by a repeatable `test=`
+entry that exactly matches one unique `allow=` path; filename conventions grant no
+test authority. Paths containing TAB, CR, or LF are invalid. Transitions are adjacent
+and isolated: a slice may change only to the next state, and a new `planned` slice may
+start only after the previous slice is `committed`. Scope, budgets, exceptions,
+allowlists, ignores, and tests freeze when `contract-frozen` is entered.
+
 ## Hard scope ceilings
 
 The default ceiling is six production files, sixteen total files, or 800 changed
@@ -31,15 +38,37 @@ A new package, authority domain, execution surface, or architectural dependency 
 always a separately planned slice. A slice may not evade these limits through tiny
 intermediate commits that do not form independently reviewable semantic units.
 
-The checked contract is `tasks/current-slice.scope`. Contract changes are committed
-alone before production work; the checker rejects self-modification during a slice.
-After staging only that file, root uses
-`bash scripts/check-slice-scope.sh --contract-candidate`. The one-time initial guardrail
-checkpoint instead uses `bash scripts/check-slice-scope.sh --install`, which rejects
-staged product work even when recovering around an existing unstaged slice. Run
+The checked contract is `tasks/current-slice.scope`. Contract transitions are committed
+alone with `bash scripts/check-slice-scope.sh --contract-candidate`; the checker compares
+the staged contract to the committed predecessor. At `contract-frozen`, staged red tests
+use `--test-candidate` and may contain only explicit `test=` paths. Normal payload
+candidates use `--candidate` only at `verified`. Allowlisted checker/control changes use
+`--guardrail-candidate`; closure-ledger appends use `--ledger-candidate`. The one-time
+initial guardrail checkpoint retains `--install` only as historical bootstrap support. Run
 `make slice-check` before and after each implementation handoff and before every
 verification run. Any path outside the allowlist, exceeded budget, malformed contract,
 mixed index/worktree payload, ignored staged path, or unrecognized Git status fails closed.
+
+Before the verified scope commit, root computes the exact candidate digest. That commit
+contains exactly one `Candidate-SHA256` trailer; the digest never appears in the mutable
+scope file. Candidate verification rebuilds a temporary Git index from HEAD, applies Git
+filters and file modes with `git add`, hashes the direct NUL-delimited raw manifest, and
+compares it to the trailer. Hash tool preference is `sha256sum`, `shasum -a 256`, then
+OpenSSL. Staged payload and working tree must match exactly.
+
+Normal closure order is: verified scope commit, payload commit, one append-only row in
+`tasks/slice-commit-ledger.tsv`, then the committed-scope transition. A normal ledger row
+binds the verified contract parent, payload commit, and candidate digest. Rewrites,
+removals, non-parent ancestry, allowlist escape, or digest mismatch fail closed.
+
+Two bootstrap exceptions are closed and non-precedential:
+
+- G1's red test used schema v1 and the old checker; authority was its exact single path
+  plus independent review.
+- G1 upgrades the checker that verifies it. Independent review and behavior from the
+  index-extracted checker are evidence, not a self-authenticating trust root. Its later
+  ledger row uses `self-upgrade-not-self-authenticating`; the first post-G1 slice is the
+  first normal v1 closure row.
 
 ## Agent ownership
 
