@@ -3,9 +3,13 @@
 # Invariants: no-reap exit observation, anchored cleanup before the sole Wait,
 # non-ESRCH kill errors are terminal, bounded readers, stable Wait/Done/Cancel.
 # Deferred: sudo/setuid execution and deliberately escaped descendants (RK1P).
+# Until RK1P, RunStreamingWithSudo must fail closed before any subprocess so it
+# cannot inherit ordinary same-UID lifecycle claims through RunStreaming.
+# Stop on observer setup/native failure without anchored cleanup, Wait-then-kill,
+# any signal after the sole Wait/reap, ignored non-ESRCH, or Done before cleanup.
 version=2
 slice_id=rk1u-ordinary-streaming-lifecycle
-state=planned
+state=contract-frozen
 max_total_files=7
 max_production_files=5
 max_changed_lines=800
@@ -19,3 +23,4 @@ allow=internal/runner/exact_streaming_test.go
 allow=internal/runner/exit_observer_unix_test.go
 allow=tasks/slice-commit-ledger.tsv
 test=internal/runner/exact_streaming_test.go
+test=internal/runner/exit_observer_unix_test.go
