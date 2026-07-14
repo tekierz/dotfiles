@@ -277,6 +277,93 @@ write_g1a_migration_contract() {
     > "$repo/tasks/current-slice.scope" || return 1
 }
 
+ledger_header=$'record_type\tslice_id\tcontract_frozen_commit\ttests_commit\tverified_scope_commit\tpayload_commit\tcandidate_sha256\treason'
+g1b_frozen=''
+g1b_tests=''
+g1b_reviewed=''
+g1b_verified=''
+g1b_payload=''
+g1b_digest=''
+
+new_g1b_fixture() {
+  local state="$1"
+  local repo
+
+  repo="$(new_fixture 'g1b-ledger-closure' "$state")" || return 1
+  printf '%s\n' "$ledger_header" > "$repo/tasks/slice-commit-ledger.tsv" || return 1
+  printf '%s\n' 'allow=tasks/slice-commit-ledger.tsv' >> "$repo/tasks/current-slice.scope" || return 1
+  git -C "$repo" add tasks/current-slice.scope tasks/slice-commit-ledger.tsv || return 1
+  git -C "$repo" commit -q -m 'G1B fixture contract' || return 1
+  printf '%s\n' "$repo"
+}
+
+stage_g1b_contract() {
+  local repo="$1"
+  local state="$2"
+
+  write_contract "$repo" 'g1b-ledger-closure' "$state" || return 1
+  printf '%s\n' 'allow=tasks/slice-commit-ledger.tsv' >> "$repo/tasks/current-slice.scope" || return 1
+  git -C "$repo" add tasks/current-slice.scope || return 1
+}
+
+commit_fixture_change() {
+  local repo="$1"
+  local path="$2"
+  local text="$3"
+
+  mkdir -p "$(dirname "$repo/$path")" || return 1
+  printf '%s\n' "$text" >> "$repo/$path" || return 1
+  git -C "$repo" add "$path" || return 1
+  git -C "$repo" commit -q -m "fixture change $path" || return 1
+}
+
+prepare_g1b_chain() {
+  local repo="$1"
+  local test_path="${2:-internal/payload_test.go}"
+  local payload_path="${3:-internal/payload.go}"
+  local state
+
+  g1b_frozen="$(git -C "$repo" rev-parse HEAD)" || return 1
+  commit_fixture_change "$repo" "$test_path" '# red evidence' || return 1
+  g1b_tests="$(git -C "$repo" rev-parse HEAD)" || return 1
+  for state in tests-red implemented reviewed; do
+    stage_g1b_contract "$repo" "$state" || return 1
+    git -C "$repo" commit -q -m "scope $state" || return 1
+    if [[ "$state" == "reviewed" ]]; then
+      g1b_reviewed="$(git -C "$repo" rev-parse HEAD)" || return 1
+    fi
+  done
+  mkdir -p "$(dirname "$repo/$payload_path")" || return 1
+  printf '%s\n' '# payload candidate' >> "$repo/$payload_path" || return 1
+  g1b_digest="$(prepare_verified_candidate "$repo" actual "$payload_path")" || return 1
+  g1b_verified="$(git -C "$repo" rev-parse HEAD)" || return 1
+  git -C "$repo" commit -q -m 'payload candidate' || return 1
+  g1b_payload="$(git -C "$repo" rev-parse HEAD)" || return 1
+}
+
+append_g1b_row() {
+  local repo="$1"
+  local record_type="$2"
+  local slice="$3"
+  local frozen="$4"
+  local tests_commit="$5"
+  local verified="$6"
+  local payload="$7"
+  local digest="$8"
+  local reason="$9"
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$record_type" "$slice" "$frozen" "$tests_commit" "$verified" "$payload" "$digest" "$reason" \
+    >> "$repo/tasks/slice-commit-ledger.tsv" || return 1
+  git -C "$repo" add tasks/slice-commit-ledger.tsv || return 1
+}
+
+append_current_g1b_row() {
+  append_g1b_row "$1" "${2:-bootstrap}" "${3:-g1b-ledger-closure}" \
+    "$g1b_frozen" "$g1b_tests" "$g1b_verified" "$g1b_payload" "$g1b_digest" \
+    "${4:-ledger-checker-self-upgrade-bootstrap}"
+}
+
 candidate_must_be_verified() {
   local state="$1"
   local repo
@@ -519,8 +606,211 @@ assert_rejected_exactly \
   'slice-check: version 2 contract may not downgrade; found: 1' \
   "$repo" '--contract-candidate'
 
-if (( test_count != 31 )); then
-  printf 'test harness error: expected 31 assertions, ran %d\n' "$test_count" >&2
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+stage_g1b_contract "$repo" 'tests-red' || exit 1
+assert_rejected_exactly 'tests-red without test predecessor' \
+  'slice-check: tests-red transition requires a nonempty immediately prior test commit' \
+  "$repo" '--contract-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+commit_fixture_change "$repo" internal/payload.go '# not a test' || exit 1
+stage_g1b_contract "$repo" 'tests-red' || exit 1
+assert_rejected_exactly 'tests-red predecessor contains production' \
+  'slice-check: tests commit contains non-test path: internal/payload.go' \
+  "$repo" '--contract-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+commit_fixture_change "$repo" internal/payload_test.go '# red evidence' || exit 1
+git -C "$repo" commit -q --allow-empty -m 'intervening commit' || exit 1
+stage_g1b_contract "$repo" 'tests-red' || exit 1
+assert_rejected_exactly 'tests-red predecessor has wrong ancestry' \
+  'slice-check: tests-red transition requires a nonempty immediately prior test commit' \
+  "$repo" '--contract-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+commit_fixture_change "$repo" internal/payload_test.go '# red evidence' || exit 1
+stage_g1b_contract "$repo" 'tests-red' || exit 1
+assert_accepted 'tests-red accepts exact test-only predecessor' "$repo" '--contract-candidate'
+
+repo="$(new_g1b_fixture 'verified')" || exit 1
+stage_g1b_contract "$repo" 'committed' || exit 1
+assert_rejected_exactly 'committed without ledger predecessor' \
+  'slice-check: committed transition requires an immediately prior ledger-only commit' \
+  "$repo" '--contract-candidate'
+
+repo="$(new_g1b_fixture 'verified')" || exit 1
+head_commit="$(git -C "$repo" rev-parse HEAD)" || exit 1
+append_g1b_row "$repo" bootstrap slice-one "$head_commit" "$head_commit" "$head_commit" "$head_commit" \
+  '0000000000000000000000000000000000000000000000000000000000000000' isolation || exit 1
+stage_payload "$repo" || exit 1
+assert_rejected_exactly 'ledger candidate is isolated' \
+  'slice-check: ledger candidate may contain only tasks/slice-commit-ledger.tsv: internal/payload.go' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'verified')" || exit 1
+head_commit="$(git -C "$repo" rev-parse HEAD)" || exit 1
+append_g1b_row "$repo" bootstrap historical-slice "$head_commit" "$head_commit" "$head_commit" "$head_commit" \
+  '0000000000000000000000000000000000000000000000000000000000000000' historical || exit 1
+git -C "$repo" commit -q -m 'historical ledger row' || exit 1
+printf '%s\n' "$ledger_header" > "$repo/tasks/slice-commit-ledger.tsv" || exit 1
+git -C "$repo" add tasks/slice-commit-ledger.tsv || exit 1
+assert_rejected_exactly 'ledger history removal' \
+  'slice-check: ledger history is append-only' "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'verified')" || exit 1
+head_commit="$(git -C "$repo" rev-parse HEAD)" || exit 1
+for slice in slice-one slice-two; do
+  append_g1b_row "$repo" bootstrap "$slice" "$head_commit" "$head_commit" "$head_commit" "$head_commit" \
+    '0000000000000000000000000000000000000000000000000000000000000000' two-rows || exit 1
+done
+assert_rejected_exactly 'ledger appends two rows' \
+  'slice-check: ledger candidate must append exactly one row' "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'verified')" || exit 1
+printf '%s\n' 'record_type slice_id wrong' > "$repo/tasks/slice-commit-ledger.tsv" || exit 1
+git -C "$repo" add tasks/slice-commit-ledger.tsv || exit 1
+git -C "$repo" commit -q -m 'malformed ledger baseline' || exit 1
+head_commit="$(git -C "$repo" rev-parse HEAD)" || exit 1
+append_g1b_row "$repo" bootstrap slice-one "$head_commit" "$head_commit" "$head_commit" "$head_commit" \
+  '0000000000000000000000000000000000000000000000000000000000000000' bad-header || exit 1
+assert_rejected_exactly 'ledger canonical header' \
+  "slice-check: ledger header must be: $ledger_header" "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'verified')" || exit 1
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' bootstrap slice-one a b c d e \
+  >> "$repo/tasks/slice-commit-ledger.tsv" || exit 1
+git -C "$repo" add tasks/slice-commit-ledger.tsv || exit 1
+assert_rejected_exactly 'ledger row missing evidence' \
+  'slice-check: ledger row must contain exactly 8 nonempty tab-separated fields' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_g1b_row "$repo" bootstrap g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_verified" \
+  "$g1b_payload" not-a-digest malformed || exit 1
+assert_rejected_exactly 'ledger malformed digest' \
+  'slice-check: ledger candidate_sha256 must be 64 lowercase hexadecimal characters' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_g1b_row "$repo" bootstrap g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_verified" \
+  "$g1b_payload" '0000000000000000000000000000000000000000000000000000000000000000' \
+  ledger-checker-self-upgrade-bootstrap || exit 1
+assert_rejected_exactly 'ledger digest differs from verified authority' \
+  'slice-check: ledger candidate digest does not match verified authority' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'planned')" || exit 1
+wrong_frozen="$(git -C "$repo" rev-parse HEAD)" || exit 1
+stage_g1b_contract "$repo" 'contract-frozen' || exit 1
+git -C "$repo" commit -q -m 'scope contract-frozen' || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_g1b_row "$repo" bootstrap g1b-ledger-closure "$wrong_frozen" "$g1b_tests" "$g1b_verified" \
+  "$g1b_payload" "$g1b_digest" ledger-checker-self-upgrade-bootstrap || exit 1
+assert_rejected_exactly 'ledger frozen evidence has wrong scope state' \
+  'slice-check: ledger contract_frozen_commit does not record contract-frozen state' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_g1b_row "$repo" bootstrap g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_reviewed" \
+  "$g1b_payload" "$g1b_digest" ledger-checker-self-upgrade-bootstrap || exit 1
+assert_rejected_exactly 'ledger verified evidence has wrong scope state' \
+  'slice-check: ledger verified_scope_commit does not record verified state' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_current_g1b_row "$repo" bootstrap g1b-ledger-closure wrong-bootstrap || exit 1
+assert_rejected_exactly 'ledger bootstrap reason is exact' \
+  'slice-check: G1B bootstrap reason must be ledger-checker-self-upgrade-bootstrap' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+missing_commit='ffffffffffffffffffffffffffffffffffffffff'
+append_g1b_row "$repo" bootstrap g1b-ledger-closure "$g1b_frozen" "$missing_commit" "$g1b_verified" \
+  "$g1b_payload" "$g1b_digest" missing || exit 1
+assert_rejected_exactly 'ledger missing evidence commit' \
+  "slice-check: ledger evidence commit is unavailable: $missing_commit" "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+head_commit="$(git -C "$repo" rev-parse HEAD)" || exit 1
+append_g1b_row "$repo" bootstrap g1b-ledger-closure "$head_commit" "$head_commit" "$head_commit" "$head_commit" \
+  '0000000000000000000000000000000000000000000000000000000000000000' historical || exit 1
+git -C "$repo" commit -q -m 'historical ledger row' || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_current_g1b_row "$repo" || exit 1
+assert_rejected_exactly 'ledger duplicate historical slice' \
+  'slice-check: duplicate ledger slice_id: g1b-ledger-closure' "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" internal/payload_test.go docs/outside.md || exit 1
+append_current_g1b_row "$repo" || exit 1
+assert_rejected_exactly 'ledger payload escapes allowlist' \
+  'slice-check: ledger payload commit contains path outside frozen allowlist: docs/outside.md' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_g1b_row "$repo" bootstrap g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_verified" \
+  "$g1b_verified" "$g1b_digest" wrong-parent || exit 1
+assert_rejected_exactly 'ledger payload is not parent' \
+  'slice-check: ledger payload_commit must equal ledger candidate parent HEAD' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_g1b_row "$repo" bootstrap g1b-ledger-closure "$g1b_frozen" "$g1b_tests" "$g1b_payload" \
+  "$g1b_payload" "$g1b_digest" wrong-order || exit 1
+assert_rejected_exactly 'ledger evidence order' \
+  'slice-check: ledger evidence commits are not in required first-parent order' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" internal/payload.go internal/payload.go || exit 1
+append_current_g1b_row "$repo" || exit 1
+assert_rejected_exactly 'ledger tests commit is not test-only' \
+  'slice-check: ledger tests_commit contains non-test path: internal/payload.go' \
+  "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_current_g1b_row "$repo" normal-v1 || exit 1
+assert_rejected_exactly 'normal v1 ledger row disabled' \
+  'slice-check: normal-v1 ledger rows remain disabled until G1C' "$repo" '--ledger-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_current_g1b_row "$repo" || exit 1
+assert_accepted 'exact bootstrap ledger candidate' "$repo" '--ledger-candidate'
+
+git -C "$repo" commit -q -m 'bootstrap ledger closure' || exit 1
+stage_g1b_contract "$repo" 'committed' || exit 1
+assert_accepted 'committed accepts exact closing ledger predecessor' "$repo" '--contract-candidate'
+
+repo="$(new_g1b_fixture 'contract-frozen')" || exit 1
+prepare_g1b_chain "$repo" || exit 1
+append_current_g1b_row "$repo" bootstrap other-slice wrong-close || exit 1
+git -C "$repo" commit -q -m 'wrong ledger closure' || exit 1
+stage_g1b_contract "$repo" 'committed' || exit 1
+assert_rejected_exactly 'committed last row closes other slice' \
+  'slice-check: last ledger row does not close active slice: other-slice' \
+  "$repo" '--contract-candidate'
+
+repo="$(new_fixture 'g1b-ledger-closure' 'committed')" || exit 1
+stage_contract "$repo" 'g1c-guardrail-adoption' 'planned' || exit 1
+assert_accepted 'G1B phase lock starts G1C' "$repo" '--contract-candidate'
+
+repo="$(new_fixture 'g1b-ledger-closure' 'committed')" || exit 1
+stage_contract "$repo" 'rk1-runner-kernel' 'planned' || exit 1
+assert_rejected_exactly 'G1B phase lock rejects other successor' \
+  'slice-check: G1B bootstrap permits only g1c-guardrail-adoption; found: rk1-runner-kernel' \
+  "$repo" '--contract-candidate'
+
+if (( test_count != 58 )); then
+  printf 'test harness error: expected 58 assertions, ran %d\n' "$test_count" >&2
   exit 1
 fi
 
