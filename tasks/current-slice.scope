@@ -4,7 +4,7 @@
 # Live todo/policy projection is deferred to the serialized G3F control slice.
 version=2
 slice_id=g3e-plan-accounting-mode-replan-v4
-state=verified
+state=committed
 max_total_files=2
 max_production_files=1
 max_changed_lines=180
