@@ -1,7 +1,7 @@
 # Bind red, verified, payload, ledger, and committed checkpoints in order.
 version=2
 slice_id=g1b-ledger-closure
-state=reviewed
+state=verified
 max_total_files=3
 max_production_files=1
 max_changed_lines=800
