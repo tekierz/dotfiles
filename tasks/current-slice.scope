@@ -1,12 +1,21 @@
-# Reconcile post-G1C policy fixtures and roadmap truth.
+# Own same-UID Darwin/Linux streaming process groups through cleanup and reap.
+# Authority: ordinary RunStreaming and RunExactStreaming lifecycle only.
+# Invariants: no-reap exit observation, anchored cleanup before the sole Wait,
+# non-ESRCH kill errors are terminal, bounded readers, stable Wait/Done/Cancel.
+# Deferred: sudo/setuid execution and deliberately escaped descendants (RK1P).
 version=2
-slice_id=rg0-roadmap-reconciliation
-state=committed
-max_total_files=2
-max_production_files=1
-max_changed_lines=80
+slice_id=rk1u-ordinary-streaming-lifecycle
+state=planned
+max_total_files=7
+max_production_files=5
+max_changed_lines=800
 ignore=tasks/pi-agent-integration-spec.md
-allow=tests/check-slice-scope_test.sh
+allow=internal/runner/bash.go
+allow=internal/runner/exact_streaming.go
+allow=internal/runner/streaming_lifecycle.go
+allow=internal/runner/exit_observer_linux.go
+allow=internal/runner/exit_observer_darwin.go
+allow=internal/runner/exact_streaming_test.go
+allow=internal/runner/exit_observer_unix_test.go
 allow=tasks/slice-commit-ledger.tsv
-allow=tasks/todo.md
-test=tests/check-slice-scope_test.sh
+test=internal/runner/exact_streaming_test.go
