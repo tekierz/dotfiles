@@ -1,7 +1,7 @@
 # Enforce adjacent states, explicit red-test authority, and exact verified candidates.
 version=2
 slice_id=g1a-candidate-authority
-state=reviewed
+state=verified
 max_total_files=2
 max_production_files=1
 max_changed_lines=800
