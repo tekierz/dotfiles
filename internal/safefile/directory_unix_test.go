@@ -107,6 +107,125 @@ func TestDirectorySnapshotDigestIsStableAndObservesRecursiveChanges(t *testing.T
 	}
 }
 
+func TestDirectorySnapshotExtractsImmutableFilesAndSubtrees(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "tree"), 0o750)
+	mustWrite(t, filepath.Join(root, "tree", "config"), "original\n", 0o640)
+	mustMkdir(t, filepath.Join(root, "tree", "nested"), 0o710)
+	mustWrite(t, filepath.Join(root, "tree", "nested", "value"), "nested\n", 0o604)
+	mustMkdir(t, filepath.Join(root, "tree", "nested", "empty"), 0o730)
+	snapshot, err := SnapshotDirectoryWithin(root, "tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(root, "tree", "config"), "live edit\n", 0o600)
+	mustWrite(t, filepath.Join(root, "tree", "nested", "value"), "live nested edit\n", 0o600)
+	for _, path := range []string{filepath.Join(root, "tree", "config"), filepath.Join(root, "tree", "nested", "value")} {
+		if err := os.Chmod(path, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(filepath.Join(root, "tree", "nested"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "tree", "nested", "empty")); err != nil {
+		t.Fatal(err)
+	}
+
+	data, mode, err := ReadDirectorySnapshotFile(snapshot, "config")
+	if err != nil || string(data) != "original\n" || mode != 0o640 {
+		t.Fatalf("snapshot file = %q mode=%04o err=%v", data, mode, err)
+	}
+	data[0] = 'X'
+	again, _, err := ReadDirectorySnapshotFile(snapshot, "config")
+	if err != nil || string(again) != "original\n" {
+		t.Fatalf("snapshot file changed through returned bytes: %q err=%v", again, err)
+	}
+	nested, nestedMode, err := ReadDirectorySnapshotFile(snapshot, "nested/value")
+	if err != nil || string(nested) != "nested\n" || nestedMode != 0o604 {
+		t.Fatalf("nested snapshot file = %q mode=%04o err=%v", nested, nestedMode, err)
+	}
+
+	first, err := SubdirectorySnapshot(snapshot, "nested")
+	if err != nil || first.Permissions() != 0o710 {
+		t.Fatalf("first subtree mode = %04o, err=%v", first.Permissions(), err)
+	}
+	wantDigest := first.Digest()
+	first.root.mode = 0o700
+	first.root.entries[0].dir.mode = 0o700
+	first.root.entries[0].name = "poison"
+	first.root.entries[1].mode = 0o600
+	first.root.entries[1].data[0] = 'X'
+	first.root.entries = first.root.entries[:1]
+	second, err := SubdirectorySnapshot(snapshot, "nested")
+	if err != nil || second.Permissions() != 0o710 || second.Digest() != wantDigest || len(second.root.entries) != 2 ||
+		second.root.entries[0].name != "empty" || second.root.entries[1].name != "value" {
+		t.Fatalf("re-extracted subtree was changed through first copy: %+v err=%v", second, err)
+	}
+	if _, err := DirectorySnapshotAuthorityDigest(second); !errors.Is(err, ErrInvalidAuthority) {
+		t.Fatalf("extracted subtree carried namespace authority: %v", err)
+	}
+	if err := RestoreDirectoryWithin(root, "restored", second); err != nil {
+		t.Fatal(err)
+	}
+	assertContent(t, filepath.Join(root, "restored", "value"), "nested\n")
+	assertMode(t, filepath.Join(root, "restored"), 0o710)
+	assertMode(t, filepath.Join(root, "restored", "value"), 0o604)
+	assertMode(t, filepath.Join(root, "restored", "empty"), 0o730)
+}
+
+func TestDirectorySnapshotExtractionRejectsInvalidDescendants(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "tree"), 0o700)
+	mustMkdir(t, filepath.Join(root, "tree", "nested"), 0o700)
+	mustWrite(t, filepath.Join(root, "tree", "config"), "value\n", 0o600)
+	snapshot, err := SnapshotDirectoryWithin(root, "tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformed := []string{"", ".", "./config", "config/", "nested//value", "nested/./value", "../config", "nested/../config", "config\x00bad", filepath.Join(root, "absolute")}
+	for _, rel := range malformed {
+		if _, _, err := ReadDirectorySnapshotFile(snapshot, rel); !errors.Is(err, ErrInvalidPath) {
+			t.Errorf("ReadDirectorySnapshotFile(%q) error = %v, want ErrInvalidPath", rel, err)
+		}
+		if _, err := SubdirectorySnapshot(snapshot, rel); !errors.Is(err, ErrInvalidPath) {
+			t.Errorf("SubdirectorySnapshot(%q) error = %v, want ErrInvalidPath", rel, err)
+		}
+	}
+	if _, _, err := ReadDirectorySnapshotFile(snapshot, "missing"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing file error = %v, want fs.ErrNotExist", err)
+	}
+	if _, err := SubdirectorySnapshot(snapshot, "missing"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing directory error = %v, want fs.ErrNotExist", err)
+	}
+	if _, _, err := ReadDirectorySnapshotFile(snapshot, "nested"); !errors.Is(err, ErrInvalidPath) {
+		t.Errorf("directory-as-file error = %v, want ErrInvalidPath", err)
+	}
+	if _, err := SubdirectorySnapshot(snapshot, "config"); !errors.Is(err, ErrInvalidPath) {
+		t.Errorf("file-as-directory error = %v, want ErrInvalidPath", err)
+	}
+
+	rootOnly, _, err := CaptureDirectoryRootWithin(root, "tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt, err := SnapshotDirectoryWithin(root, "tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt.digest[0] ^= 0xff
+	for name, invalid := range map[string]*DirectorySnapshot{"nil": nil, "untracked": {}, "root-only": rootOnly, "corrupt": corrupt} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := ReadDirectorySnapshotFile(invalid, "config"); !errors.Is(err, ErrInvalidAuthority) {
+				t.Errorf("file extraction error = %v, want ErrInvalidAuthority", err)
+			}
+			if _, err := SubdirectorySnapshot(invalid, "nested"); !errors.Is(err, ErrInvalidAuthority) {
+				t.Errorf("subtree extraction error = %v, want ErrInvalidAuthority", err)
+			}
+		})
+	}
+}
+
 func TestSnapshotDirectoryWithinRefusesNestedSymlinkAndNonRegular(t *testing.T) {
 	for _, test := range []struct {
 		name string
