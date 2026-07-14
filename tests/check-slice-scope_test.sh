@@ -441,28 +441,25 @@ assert_rejection_matrix() {
 
 assert_rg0_roadmap_truth() {
   local todo="$repo_root/tasks/todo.md" ledger="$repo_root/tasks/slice-commit-ledger.tsv"
-  local ledger_truth expected problem=''
+  local ledger_truth problem=''
 
   test_count=$((test_count + 1))
-  ledger_truth="$(awk -F '\t' '$2 == "g1c-guardrail-adoption" {rows++; if ($1 == "normal-v1" && $8 == "-") valid++} END {print rows + 0 ":" valid + 0}' "$ledger")"
-  [[ "$ledger_truth" == "1:1" ]] || problem="G1C ledger truth is $ledger_truth"
-  while IFS= read -r expected; do
-    [[ "$(grep -Fxc -- "$expected" "$todo")" == "1" ]] || problem="${problem:+$problem; }missing or duplicate: $expected"
-  done <<'EOF'
-- [x] Deliver G1C Make targets and workflow adoption through the first normal closure.
-- [x] Pass RG0 local plan/state freeze.
-- G1C closed through the first normal ledger row; RG0 local plan/state freeze is complete.
-EOF
+  ledger_truth="$(awk -F '\t' '$2 ~ /^(g1c-guardrail-adoption|g3a-plan-catalog-resplit|g3c-restore-leaf-resplit)$/ {rows++; if ($1 == "normal-v1" && $8 == "-") valid++} END {print rows + 0 ":" valid + 0}' "$ledger")"
+  [[ "$ledger_truth" == "3:3" ]] || problem="committed governance ledger truth is $ledger_truth"
+  grep -Eq 'G3A.*0182fe7' "$todo" || problem="${problem:+$problem; }closed G3A is missing"
+  grep -Fq -- '- The stopped G3B control attempt has no ledger row, candidate digest, or execution authority.' "$todo" || problem="${problem:+$problem; }stopped G3B truth is missing"
+  grep -Eq 'G3C.*b74c799' "$todo" || problem="${problem:+$problem; }closed G3C is missing"
+  [[ "$(grep -Fxc -- "- [ ] Complete G3D's todo-only control projection through its normal-v1 ledger row and committed scope state." "$todo")" == "1" ]] || problem="${problem:+$problem; }conditional G3D milestone is missing or duplicated"
+  [[ "$(grep -Fc -- 'RG0 remains open until G3D reaches committed through its normal-v1 ledger row; earlier G3D states do not satisfy the gate.' "$todo")" == "1" ]] || problem="${problem:+$problem; }conditional RG0 rule is missing or duplicated"
   [[ "$(grep -Ec '^- \[( |x)\] Complete G2 authorized worktrees, draft PR, and remote CI baseline\.$' "$todo")" == "1" ]] || problem="${problem:+$problem; }G2 milestone is missing or duplicated"
-  [[ "$(grep -Ec "^- \[( |x)\] Open parallel Wave 1A \(\`RK1\` plus \`BA1\`\)\.$" "$todo")" == "1" ]] || problem="${problem:+$problem; }Wave 1A milestone is missing or duplicated"
-  grep -Fq -- 'Pass RG0 and open parallel Wave 1A' "$todo" && problem="${problem:+$problem; }stale combined RG0/Wave 1A wording remains"
-  grep -Fq -- 'blocked until G1C closes' "$todo" && problem="${problem:+$problem; }stale G1C blocking wording remains"
+  grep -Eq 'RG0[^.]*(is complete|is closed)' "$todo" && problem="${problem:+$problem; }premature RG0 closure remains"
+  grep -Fq -- 'Open parallel Wave 1A' "$todo" && problem="${problem:+$problem; }obsolete Wave 1A wording remains"
   if [[ -n "$problem" ]]; then
-    printf 'not ok %d - RG0 roadmap matches committed G1C evidence\n  %s\n' "$test_count" "$problem"
+    printf 'not ok %d - RG0 roadmap matches committed G3C and conditional G3D evidence\n  %s\n' "$test_count" "$problem"
     failures=$((failures + 1))
     return
   fi
-  printf 'ok %d - RG0 roadmap matches committed G1C evidence\n' "$test_count"
+  printf 'ok %d - RG0 roadmap matches committed G3C and conditional G3D evidence\n' "$test_count"
 }
 
 assert_normal_closure_successor() {
