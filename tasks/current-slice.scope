@@ -6,7 +6,7 @@
 # Deferred: catalog kernel (BA1B2) and backup integration (BA1C).
 version=2
 slice_id=ba1sf2-restore-leaf-mutations
-state=planned
+state=contract-frozen
 max_total_files=4
 max_production_files=2
 max_changed_lines=780
