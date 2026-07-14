@@ -117,6 +117,7 @@ func TestDirectorySnapshotExtractsImmutableFilesAndSubtrees(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "tree", "nested", "empty"), 0o730); err != nil {
 		t.Fatal(err)
 	}
+	mustWrite(t, filepath.Join(root, "tree", "nested", "empty", "empty-file"), "", 0o600)
 	snapshot, err := SnapshotDirectoryWithin(root, "tree")
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +132,7 @@ func TestDirectorySnapshotExtractsImmutableFilesAndSubtrees(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "tree", "nested"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(root, "tree", "nested", "empty")); err != nil {
+	if err := os.RemoveAll(filepath.Join(root, "tree", "nested", "empty")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,6 +149,9 @@ func TestDirectorySnapshotExtractsImmutableFilesAndSubtrees(t *testing.T) {
 	if err != nil || string(nested) != "nested\n" || nestedMode != 0o604 {
 		t.Fatalf("nested snapshot file = %q mode=%04o err=%v", nested, nestedMode, err)
 	}
+	if emptyData, emptyMode, err := ReadDirectorySnapshotFile(snapshot, "nested/empty/empty-file"); err != nil || emptyData == nil || len(emptyData) != 0 || emptyMode != 0o600 {
+		t.Fatalf("empty snapshot file = %#v mode=%04o err=%v", emptyData, emptyMode, err)
+	}
 
 	first, err := SubdirectorySnapshot(snapshot, "nested")
 	if err != nil || first.Permissions() != 0o710 {
@@ -156,6 +160,7 @@ func TestDirectorySnapshotExtractsImmutableFilesAndSubtrees(t *testing.T) {
 	wantDigest := first.Digest()
 	first.root.mode = 0o700
 	first.root.entries[0].dir.mode = 0o700
+	first.root.entries[0].dir.entries[0].data = nil
 	first.root.entries[0].name = "poison"
 	first.root.entries[1].mode = 0o600
 	first.root.entries[1].data[0] = 'X'
@@ -165,7 +170,7 @@ func TestDirectorySnapshotExtractsImmutableFilesAndSubtrees(t *testing.T) {
 		second.root.entries[0].name != "empty" || second.root.entries[1].name != "value" {
 		t.Fatalf("re-extracted subtree was changed through first copy: %+v err=%v", second, err)
 	}
-	if _, err := DirectorySnapshotAuthorityDigest(second); !errors.Is(err, ErrInvalidAuthority) {
+	if _, err := DirectorySnapshotAuthorityDigest(second); !errors.Is(err, ErrInvalidAuthority) || SameDirectoryIdentity(second, second) || SameDirectoryRootState(second, second) {
 		t.Fatalf("extracted subtree carried namespace authority: %v", err)
 	}
 	if err := RestoreDirectoryWithin(root, "restored", second); err != nil {
@@ -174,6 +179,8 @@ func TestDirectorySnapshotExtractsImmutableFilesAndSubtrees(t *testing.T) {
 	assertContent(t, filepath.Join(root, "restored", "value"), "nested\n")
 	assertMode(t, filepath.Join(root, "restored"), 0o710)
 	assertMode(t, filepath.Join(root, "restored", "value"), 0o604)
+	assertContent(t, filepath.Join(root, "restored", "empty", "empty-file"), "")
+	assertMode(t, filepath.Join(root, "restored", "empty", "empty-file"), 0o600)
 	assertMode(t, filepath.Join(root, "restored", "empty"), 0o730)
 }
 
