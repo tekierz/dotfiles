@@ -1,6 +1,58 @@
 # Release-Readiness Plan
 
-## Audit remediation program — 2026-07-10
+## Implementation and release plan reset — 2026-07-13
+
+- [x] Reconcile the audit findings, open roadmap, and stale active-slice state into one
+      dependency graph.
+- [x] Define parallel implementation lanes with disjoint writable ownership and merge barriers.
+- [x] Freeze acceptance tests, security invariants, and stop/re-plan conditions per slice.
+- [x] Specify CI, release, Homebrew, sshh, platform, owner-hardware, and deployment gates.
+- [x] Publish one from-scratch execution plan with ordered slices and completion evidence.
+- [x] Replace the active roadmap summary with a concise pointer to the new source of truth.
+
+### Planning review
+
+Canonical plan:
+[implementation-release-plan-2026-07-13.md](implementation-release-plan-2026-07-13.md).
+
+- The plan uses two simultaneous, isolated Terra writer worktrees under one Sol
+  orchestrator, followed by parallel cross-review and root integration.
+- Safety and recovery land before npm; npm uses two separately confirmed phases rather
+  than one mixed authority.
+- PR/main/tag share one complete quality gate; release-tool and product Go versions are
+  explicit and separate.
+- Homebrew, owner Apply, owner Save, canary, and beta are distinct promotion gates.
+- No production implementation or Git operation is authorized by this planning section.
+
+## Comprehensive current-state audit — 2026-07-13
+
+- [x] Establish the exact repository, branch, worktree, dependency, and release baseline.
+- [x] Review architecture, public product surfaces, incomplete roadmap contracts, and docs.
+- [x] Audit security-sensitive execution, filesystem, configuration, backup, and support paths.
+- [x] Run the current automated build, test, race, lint, static, vulnerability, and CLI gates.
+- [x] Inspect CI/release configuration and cross-repository Homebrew/sshh compatibility.
+- [x] Separate verified findings from manual, platform, hardware, and deployment gates not run.
+- [x] Write a severity-ranked audit report with evidence, release verdict, and remediation order.
+
+### Audit review
+
+Full report: [release-audit-2026-07-13.md](release-audit-2026-07-13.md).
+
+- **Verdict:** No-Go for release, Homebrew recommendation, owner-hardware Apply/Save,
+  beta, or broader deployment.
+- **Confirmed high blockers:** Debian Update All deadlock; cross-manager update
+  misrouting; incomplete tag-release gates; stale/unsafe Homebrew distribution; and
+  advertised but deliberately blocked npm integrations.
+- **Automated evidence:** module/tidy/format/build/vet/test/race, exact Go 1.25.6,
+  golangci-lint, Staticcheck, govulncheck, ShellCheck, CLI smoke, GoReleaser snapshot,
+  cross-builds, SBOMs, and checksums pass.
+- **Still required:** remediation plus current remote CI, manual terminal/platform,
+  disposable-system, owner-hardware, Homebrew lifecycle, and staged deployment gates.
+
+## Historical audit remediation program — 2026-07-10 (superseded)
+
+The section below is retained as historical progress evidence. It is not the active
+execution queue. The 2026-07-13 implementation and release program above is canonical.
 
 The 2026-07-09 audit is the source of truth. Remediation is staged so safety and
 observability land before new integrations or broad UI work.
