@@ -1,9 +1,9 @@
-# Reconcile the runner/restore split and fixed release catalog in the implementation plan.
-# Authority: plan-only dependency graph, slice budgets, wave schedule, accounting, and gates.
-# Control projection is deferred to the serial G3B todo-only guardrail slice.
+# Reconcile the stopped combined restore-leaf slice as serialized file and directory leaves.
+# Authority: plan-only dependency graph, budgets, Wave 1 schedule, accounting, and gates.
+# The stale G3B control attempt has no ledger/candidate authority; control sync is deferred to G3D.
 version=2
-slice_id=g3a-plan-catalog-resplit
-state=committed
+slice_id=g3c-restore-leaf-resplit
+state=planned
 max_total_files=2
 max_production_files=1
 max_changed_lines=220
