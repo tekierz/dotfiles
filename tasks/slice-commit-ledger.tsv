@@ -1,0 +1,2 @@
+version	slice_id	contract_commit	payload_commit	candidate_sha256	reason
+bootstrap-v1	g0-plan-state-reset	1aa1c36b3a21d9bc9e31362b21e536e57187e711	ee1b5847ad026dcdfb4871d41064e2b9742cedfd	-	pre-g1-unverified
