@@ -1,12 +1,16 @@
-# Reconcile post-G1C policy fixtures and roadmap truth.
+# Bind restore to selected immutable catalog snapshot authority.
 version=2
-slice_id=rg0-roadmap-reconciliation
-state=committed
-max_total_files=2
-max_production_files=1
-max_changed_lines=80
+slice_id=ba1-restore-authority
+state=planned
+max_total_files=5
+max_production_files=3
+max_changed_lines=550
 ignore=tasks/pi-agent-integration-spec.md
-allow=tests/check-slice-scope_test.sh
+allow=internal/backup/catalog.go
+allow=internal/backup/backup.go
+allow=internal/backup/catalog_test.go
+allow=internal/safefile/safefile.go
+allow=internal/safefile/directory_unix_test.go
 allow=tasks/slice-commit-ledger.tsv
-allow=tasks/todo.md
-test=tests/check-slice-scope_test.sh
+test=internal/backup/catalog_test.go
+test=internal/safefile/directory_unix_test.go
