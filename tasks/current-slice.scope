@@ -1,18 +1,19 @@
-# Observe Darwin/Linux child exit without consuming the exec.Cmd wait status.
-# Authority: native no-reap exit observation only; no streaming adapter or signaling changes.
-# Invariants: blocks until real exit, never reaps, Close releases observer resources,
-# invalid/setup/native failures are explicit, and the sole later cmd.Wait gets exact status.
-# Deferred: process-group lifecycle and bounded readers (RK1UL), privileged sudo (RK1P).
+# Own the private lifecycle of one ordinary streaming child process.
+# Authority: pipes, start, process-group ownership, no-reap observation, first cause,
+# bounded teardown, exact sole wait, external output ownership, and cached completion.
+# Invariants: natural SIGKILL remains an error; cleanup EPERM remains an error; the kernel
+# never steals buffered output; all workers join and every successful start reaps exactly once.
+# Red fixtures must be behavior-proven in an isolated tree before their test-only commit.
+# Dependency: closed RK1UO native exit observer commit 19fabd7.
+# Deferred: public adapters (RK1ULA), privileged sudo (RK1P).
 version=2
-slice_id=rk1uo-native-exit-observer
-state=committed
-max_total_files=4
-max_production_files=3
-max_changed_lines=280
+slice_id=rk1ulk-private-lifecycle-kernel
+state=planned
+max_total_files=2
+max_production_files=1
+max_changed_lines=790
 ignore=tasks/pi-agent-integration-spec.md
-allow=internal/runner/exit_observer.go
-allow=internal/runner/exit_observer_linux.go
-allow=internal/runner/exit_observer_darwin.go
-allow=internal/runner/exit_observer_unix_test.go
+allow=internal/runner/streaming_lifecycle.go
+allow=internal/runner/streaming_lifecycle_test.go
 allow=tasks/slice-commit-ledger.tsv
-test=internal/runner/exit_observer_unix_test.go
+test=internal/runner/streaming_lifecycle_test.go
