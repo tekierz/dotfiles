@@ -9,9 +9,14 @@
 - [x] Deliver G1A state, explicit-test, exact-candidate, and control authority.
 - [x] Deliver G1B red-evidence, unique-ledger, and mandatory-closure authority.
 - [x] Deliver G1C Make targets and workflow adoption through the first normal closure.
-- [x] Pass RG0 local plan/state freeze.
-- [ ] Complete G2 authorized worktrees, draft PR, and remote CI baseline.
-- [ ] Open parallel Wave 1A (`RK1` plus `BA1`).
+- [x] Pass the original RG0 local plan/state freeze.
+- [ ] Commit G3's split roadmap reconciliation and re-close RG0 against the fixed 46-slice
+      catalog.
+- [x] Close branch-local Wave 1A foundations RK1UO and BA1A; integration remains pending
+      G3 and G2.
+- [ ] Continue branch-local Wave 1B (`RK1UL` plus `BA1SF1`) while G2 remains open.
+- [ ] Complete G2's draft PR and remote CI baseline before integrating any closed candidate;
+      both authorized worktrees already exist.
 
 ### Execution review
 
@@ -19,8 +24,14 @@
   it was not accepted, staged, or committed.
 - The original G1 remains truthfully superseded at `tests-red`; no implementation,
   review, verification, ledger, or committed state is claimed for it.
-- G1C closed through the first normal ledger row; RG0 local plan/state freeze is complete.
-- No RK1 or BA1 product candidate has started; G2 and Wave 1A remain open.
+- G1C closed through the first normal ledger row. G3 is the active reconciliation candidate;
+  its commit, ledger closure, and revised RG0 evidence remain pending.
+- RK1UO closed branch-locally at `19fabd7`; BA1A closed branch-locally at `161671b`.
+  RK1UL is contract-frozen and BA1SF1 is tests-red in the two authorized worktrees.
+- The fixed catalog has 46 slices. Subtracting the two closed foundations leaves 44
+  incomplete slices; 18 safety slices remain before MB1.
+- Branch-local Wave 1 work may proceed while G2 is open, but no closed candidate may integrate until G2's draft PR and remote CI baseline close.
+- G2 remains open because no draft PR or remote CI baseline has been established.
 - `tasks/pi-agent-integration-spec.md` remains user-owned, untracked, and untouched.
 
 ## Implementation and release plan reset — 2026-07-13

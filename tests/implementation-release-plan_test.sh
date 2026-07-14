@@ -107,8 +107,17 @@ expect_count "$wave_count" 10 'Wave 1 row count'
 if ! rg -q 'RK1UO[[:space:]]*->[[:space:]]*RK1UL[[:space:]]*->[[:space:]]*RK1P' "$plan"; then
   fail 'runner serialization must order RK1UO -> RK1UL -> RK1P'
 fi
-if ! rg -q 'BA1A[[:space:]]*->[[:space:]]*BA1SF1[[:space:]]*->[[:space:]]*BA1SF2[[:space:]]*->[[:space:]]*BA1B2[[:space:]]*->[[:space:]]*BA1C' "$plan"; then
-  fail 'backup serialization must order BA1A -> BA1SF1 -> BA1SF2 -> BA1B2 -> BA1C'
+if ! rg -Fq 'UR2 --> MB1' "$plan"; then
+  fail 'dependency graph must route UR2 to MB1'
+fi
+if ! rg -Fq 'cmd/dotfiles/main.go: RK1P -> BC1 -> BU1 -> CL1 -> PO2 -> NP5.' "$plan"; then
+  fail 'cmd serialization must include RK1P before BC1'
+fi
+if ! rg -Fq 'internal/safefile restore authority: BA1A -> BA1SF1 -> BA1SF2.' "$plan"; then
+  fail 'safefile serialization must end at BA1SF2'
+fi
+if ! rg -Fq 'internal/backup restore authority: BA1B2 -> BA1C -> BR3.' "$plan"; then
+  fail 'backup serialization must start at BA1B2'
 fi
 
 safety=$(awk '/^### Runtime and update safety/ { on=1 } on && /^\| SP1 \|/ { on=0 } on && !/^\| ID \|/ && /^\| [A-Z][A-Z0-9]+ \|/ { count++ } END { print count+0 }' "$plan")
@@ -130,6 +139,12 @@ if ! rg -q '^\| RG0 Plan freeze \|.*G3 committed' "$plan"; then
 fi
 todo_active=$(sed -n '1,40p' "$todo")
 case $todo_active in *G3*RK1UO*BA1A*) ;; *) fail 'active todo milestones must name G3 and the RK1UO + BA1A opening pair' ;; esac
+g2_rule="Branch-local Wave 1 work may proceed while G2 is open, but no closed candidate may integrate until G2's draft PR and remote CI baseline close."
+for roadmap in "$plan" "$todo"; do
+  if ! rg -Fq "$g2_rule" "$roadmap"; then
+    fail "$roadmap must state the branch-local G2 integration rule"
+  fi
+done
 
 for stale in \
   '| RK1 |' '| BA1 |' '| 1A | RK1 + BA1 |' 'RK1 intentionally absorbs' \
