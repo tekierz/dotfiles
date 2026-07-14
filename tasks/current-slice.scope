@@ -1,13 +1,13 @@
-# Pre-G1 governance bootstrap: committed means the frozen payload landed;
-# tests-red, review, verified evidence, and a normal ledger row do not exist.
+# Enforce legal slice transitions, verified candidate authority, and closure ledgering.
 version=1
-slice_id=g0-plan-state-reset
-state=committed
-max_total_files=3
+slice_id=g1-slice-state-enforcement
+state=planned
+max_total_files=5
 max_production_files=1
-max_changed_lines=1000
-exception=Governance-only audit and fixed catalog total 944 changed lines with no product code.
+max_changed_lines=800
 ignore=tasks/pi-agent-integration-spec.md
-allow=tasks/release-audit-2026-07-13.md
-allow=tasks/implementation-release-plan-2026-07-13.md
-allow=tasks/todo.md
+allow=scripts/check-slice-scope.sh
+allow=tests/check-slice-scope_test.sh
+allow=Makefile
+allow=tasks/workflow-guardrails.md
+allow=tasks/slice-commit-ledger.tsv
