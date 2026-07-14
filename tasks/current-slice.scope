@@ -3,7 +3,7 @@
 # No product code, branch integration, remote state, or release promotion is included.
 version=2
 slice_id=g3-split-roadmap-reconciliation
-state=tests-red
+state=implemented
 max_total_files=3
 max_production_files=1
 max_changed_lines=360
