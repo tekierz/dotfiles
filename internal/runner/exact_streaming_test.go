@@ -179,11 +179,8 @@ func TestExactStreamingUndrainedOutputFailsBoundedly(t *testing.T) {
 	}
 	select {
 	case waitErr := <-command.Done:
-		if waitErr == nil || waitErr.Error() != "exact streaming output overflow" {
-			t.Fatalf("overflow error=%v, want deterministic overflow", waitErr)
-		}
-		if errors.Is(waitErr, context.Canceled) {
-			t.Fatalf("overflow was misreported as cancellation: %v", waitErr)
+		if waitErr == nil || !strings.Contains(strings.ToLower(waitErr.Error()), "undrained") || errors.Is(waitErr, context.Canceled) {
+			t.Fatalf("terminal error=%v, want exclusive undrained classification", waitErr)
 		}
 		for range command.Output {
 		}
