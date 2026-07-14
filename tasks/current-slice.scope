@@ -1,7 +1,7 @@
 # Publish executable guardrails and close the first normal ledger slice.
 version=2
 slice_id=g1c-guardrail-adoption
-state=implemented
+state=reviewed
 max_total_files=5
 max_production_files=1
 max_changed_lines=800
