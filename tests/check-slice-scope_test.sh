@@ -484,8 +484,43 @@ for mutation in test allow budget; do
     "$repo" '--contract-candidate'
 done
 
-if (( test_count != 27 )); then
-  printf 'test harness error: expected 27 assertions, ran %d\n' "$test_count" >&2
+repo="$(new_fixture 'slice-one' 'reviewed')" || exit 1
+replace_contract_line "$repo" 'state=' 'state=verified' || exit 1
+git -C "$repo" add tasks/current-slice.scope || exit 1
+entry="$(git -C "$repo" ls-files -s -- tasks/current-slice.scope)" || exit 1
+read -r scope_mode scope_blob _ <<< "$entry"
+manifest_file="$(mktemp "$tmp_root/empty-manifest.XXXXXX")" || exit 1
+printf 'scope\0%s\0%s\0' "$scope_mode" "$scope_blob" > "$manifest_file" || exit 1
+digest="$(hash_file "$manifest_file")" || exit 1
+git -C "$repo" commit -q -m 'verified empty scope' -m "Candidate-SHA256: $digest" || exit 1
+assert_rejected_exactly \
+  'empty normal candidate' \
+  'slice-check: candidate contains no staged payload' \
+  "$repo" '--candidate'
+
+repo="$(new_fixture 'g1a-candidate-authority' 'committed')" || exit 1
+stage_v1_contract "$repo" 'g1b-ledger-closure' 'planned' || exit 1
+assert_rejected_exactly \
+  'G1B successor requires schema v2' \
+  'slice-check: new slice contracts require version=2; found: 1' \
+  "$repo" '--contract-candidate'
+
+repo="$(new_fixture 'slice-one' 'contract-frozen')" || exit 1
+replace_contract_line "$repo" 'test=' 'test=Makefile' || exit 1
+assert_rejected_exactly \
+  'control-plane Makefile declared as test' \
+  'slice-check: control-plane path may not be declared as a test: Makefile' \
+  "$repo" '--test-candidate'
+
+repo="$(new_fixture 'g1b-ledger-closure' 'planned')" || exit 1
+stage_v1_contract "$repo" 'g1b-ledger-closure' 'contract-frozen' || exit 1
+assert_rejected_exactly \
+  'version 2 contract cannot downgrade' \
+  'slice-check: version 2 contract may not downgrade; found: 1' \
+  "$repo" '--contract-candidate'
+
+if (( test_count != 31 )); then
+  printf 'test harness error: expected 31 assertions, ran %d\n' "$test_count" >&2
   exit 1
 fi
 
