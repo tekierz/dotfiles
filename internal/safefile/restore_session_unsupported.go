@@ -18,6 +18,14 @@ func (s *RestoreSession) RemoveFile(_ string, _ *ParentChain, _ Revision) error 
 	return ErrUnsupported
 }
 
+func (s *RestoreSession) RestoreDirectory(_ string, _ *ParentChain, _, _ *DirectorySnapshot, _ string) (*DirectorySnapshot, error) {
+	return nil, ErrUnsupported
+}
+
+func (s *RestoreSession) RemoveDirectory(_ string, _ *ParentChain, _ *DirectorySnapshot) error {
+	return ErrUnsupported
+}
+
 func (s *RestoreSession) bindRestoreParents(_ string, _ *ParentChain, _ bool) (restoreParentBinding, error) {
 	return restoreParentBinding{}, fmt.Errorf("bind restore parents: %w", ErrUnsupported)
 }
