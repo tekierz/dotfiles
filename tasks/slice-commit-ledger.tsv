@@ -1,0 +1,5 @@
+record_type	slice_id	contract_frozen_commit	tests_commit	verified_scope_commit	payload_commit	candidate_sha256	reason
+bootstrap-v1	g0-plan-state-reset	1aa1c36b3a21d9bc9e31362b21e536e57187e711	-	-	ee1b5847ad026dcdfb4871d41064e2b9742cedfd	-	pre-g1-unverified
+bootstrap-v1	g1-slice-state-enforcement	668f1acfe751970b205af6eed6bc83ad8bf5894f	4675a1a235c35e6cd3a03aa3871088e003c1659b	-	-	-	superseded-at-tests-red
+bootstrap-v1	g1-replan-catalog	1bb4f9b6e56d7c1b09cc0602b4ddda29593f58e2	-	-	493235a9a98f64e38cdae105144fcd71eefe8bce	-	pre-enforcement-replan-catalog
+bootstrap-v1	g1a-candidate-authority	df0bd217ce0f8e36ae5f44e6d09a0a187c161d43	770bf8d1ec2ebf28fdb9e91362723aa9ce90a6fd	a62cc74e32fe38821a4524e1bf2d18884d1045eb	3c6025adadde63fcc5d7289b06ae947e658a5b43	f0727c52696ef06e4ff21eb10b5bcd8f3ca1f4404a5218963b495bd1670722ed	candidate-checker-self-upgrade-bootstrap
