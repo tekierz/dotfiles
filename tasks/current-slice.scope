@@ -1,7 +1,7 @@
 # Bind restore to selected immutable catalog snapshot authority.
 version=2
 slice_id=ba1-restore-authority
-state=planned
+state=contract-frozen
 max_total_files=5
 max_production_files=3
 max_changed_lines=550
