@@ -1,16 +1,15 @@
-# Synchronize active todo and workflow-policy truth with committed G3C plan authority.
-# Authority: todo milestones, live accounting, G2 integration block, and RG0 condition.
-# G3B remains stopped without ledger/candidate authority; G3C closed at b74c799.
+# Reconcile post-G3D branch-local accounting and the reviewed RK1ULK v4 budget.
+# Authority: canonical plan-only closure counts, hard exception ceiling, soft production stop, and gate truth.
+# BA1SF2F closed at 6c58f00 and BA1SF2D at 75efdc0 without G2 integration.
+# Live todo/policy projection is deferred to the serialized G3F control slice.
 version=2
-slice_id=g3d-todo-policy-sync
-state=committed
-max_total_files=3
+slice_id=g3e-plan-accounting-runner-replan-v3
+state=planned
+max_total_files=2
 max_production_files=1
 max_changed_lines=180
 ignore=tasks/pi-agent-integration-spec.md
-allow=tasks/todo.md
-allow=tests/implementation-release-plan_todo_test.sh
-allow=tests/check-slice-scope_test.sh
+allow=tasks/implementation-release-plan-2026-07-13.md
+allow=tests/implementation-release-plan_test.sh
 allow=tasks/slice-commit-ledger.tsv
-test=tests/implementation-release-plan_todo_test.sh
-test=tests/check-slice-scope_test.sh
+test=tests/implementation-release-plan_test.sh
