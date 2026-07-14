@@ -1,20 +1,20 @@
-# Bind restore destinations to one real root and exact accepted parent namespace.
-# Authority: opaque DirectoryState and RestoreSession parent materialization/rollback only.
-# Invariants: exact existing ancestors, session-evidenced 0700 missing tails,
-# sibling evidence reuse, reverse cleanup, parent drift precedence, no leaf mutation.
-# Deferred: file/directory restore/remove leaves (BA1SF2), catalog kernel (BA1B2).
+# Add session-bound file and directory restore/remove leaf mutations.
+# Dependency: closed BA1SF1 restore parent authority at 351fb1c.
+# Authority: leaf operations only through the accepted RestoreSession namespace.
+# Invariants: exact leaf identity/type checks, fail-closed replacement, bounded cleanup,
+# unsupported-platform parity, and no backup catalog mutation.
+# Deferred: catalog kernel (BA1B2) and backup integration (BA1C).
 version=2
-slice_id=ba1sf1-restore-parent-authority
-state=committed
-max_total_files=5
-max_production_files=3
-max_changed_lines=760
+slice_id=ba1sf2-restore-leaf-mutations
+state=planned
+max_total_files=4
+max_production_files=2
+max_changed_lines=780
 ignore=tasks/pi-agent-integration-spec.md
-allow=internal/safefile/restore_session.go
-allow=internal/safefile/restore_session_parent_unix.go
+allow=internal/safefile/restore_session_leaf_unix.go
 allow=internal/safefile/restore_session_unsupported.go
-allow=internal/safefile/restore_session_parent_unix_test.go
+allow=internal/safefile/restore_session_leaf_unix_test.go
 allow=internal/safefile/unsupported_test.go
 allow=tasks/slice-commit-ledger.tsv
-test=internal/safefile/restore_session_parent_unix_test.go
+test=internal/safefile/restore_session_leaf_unix_test.go
 test=internal/safefile/unsupported_test.go
