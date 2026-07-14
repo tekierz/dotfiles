@@ -3,7 +3,7 @@
 # Control projection is deferred to the serial G3B todo-only guardrail slice.
 version=2
 slice_id=g3a-plan-catalog-resplit
-state=tests-red
+state=implemented
 max_total_files=2
 max_production_files=1
 max_changed_lines=220
