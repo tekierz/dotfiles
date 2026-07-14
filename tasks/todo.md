@@ -9,9 +9,11 @@
 - [x] Deliver G1A state, explicit-test, exact-candidate, and control authority.
 - [x] Deliver G1B red-evidence, unique-ledger, and mandatory-closure authority.
 - [x] Deliver G1C Make targets and workflow adoption through the first normal closure.
-- [x] Pass RG0 local plan/state freeze.
+- [x] Close G3A's plan-only catalog reconciliation at `0182fe7`.
+- [ ] Install G3B's todo-only control projection; closure still requires its later normal-v1
+      ledger row and committed scope state.
 - [ ] Complete G2 authorized worktrees, draft PR, and remote CI baseline.
-- [ ] Open parallel Wave 1A (`RK1` plus `BA1`).
+- [ ] Continue branch-local Wave 1 safety work without integrating product candidates.
 
 ### Execution review
 
@@ -19,8 +21,17 @@
   it was not accepted, staged, or committed.
 - The original G1 remains truthfully superseded at `tests-red`; no implementation,
   review, verification, ledger, or committed state is claimed for it.
-- G1C closed through the first normal ledger row; RG0 local plan/state freeze is complete.
-- No RK1 or BA1 product candidate has started; G2 and Wave 1A remain open.
+- G1C closed through the first normal ledger row.
+- G3A closed at `0182fe7` and installed the fixed 47-slice plan catalog.
+- G3B's todo-only projection is the active control candidate; this payload does not claim
+  its closure.
+- RK1UO closed branch-locally at `19fabd7`; BA1A closed branch-locally at `161671b`;
+  BA1SF1 closed branch-locally at `351fb1c`.
+- 44 catalog slices remain incomplete and 18 safety slices remain before MB1.
+- Active runner chain: `RK1ULK -> RK1ULA -> RK1P`; active restore chain:
+  `BA1SF2 -> BA1B2 -> BA1C`.
+- Branch-local Wave 1 product work may proceed while G2 is open, but no closed Wave 1 product candidate may integrate until G2's draft PR and remote CI baseline close.
+- RG0 remains open until G3B reaches committed through its normal-v1 ledger row; earlier G3B states do not satisfy the gate.
 - `tasks/pi-agent-integration-spec.md` remains user-owned, untracked, and untouched.
 
 ## Implementation and release plan reset — 2026-07-13
