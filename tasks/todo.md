@@ -9,9 +9,15 @@
 - [x] Deliver G1A state, explicit-test, exact-candidate, and control authority.
 - [x] Deliver G1B red-evidence, unique-ledger, and mandatory-closure authority.
 - [x] Deliver G1C Make targets and workflow adoption through the first normal closure.
-- [x] Pass RG0 local plan/state freeze.
-- [ ] Complete G2 authorized worktrees, draft PR, and remote CI baseline.
-- [ ] Open parallel Wave 1A (`RK1` plus `BA1`).
+- [x] Pass the original RG0 local plan/state freeze.
+- [ ] Commit G3's runner-lifecycle re-split reconciliation and re-close RG0 against the fixed 47-slice
+      catalog.
+- [x] Close branch-local Wave 1A foundations RK1UO and BA1A; integration remains pending
+      G3 and G2.
+- [ ] Finish branch-local Wave 1B (`RK1ULK` plus `BA1SF1`); BA1SF1 is closed and RK1ULK
+      remains active while G2 is open.
+- [ ] Complete G2's draft PR and remote CI baseline before integrating any closed candidate;
+      both authorized worktrees already exist.
 
 ### Execution review
 
@@ -19,8 +25,17 @@
   it was not accepted, staged, or committed.
 - The original G1 remains truthfully superseded at `tests-red`; no implementation,
   review, verification, ledger, or committed state is claimed for it.
-- G1C closed through the first normal ledger row; RG0 local plan/state freeze is complete.
-- No RK1 or BA1 product candidate has started; G2 and Wave 1A remain open.
+- G1C closed through the first normal ledger row. G3 is the active re-split reconciliation candidate;
+  its commit, ledger closure, and revised RG0 evidence remain pending.
+- RK1UO closed branch-locally at `19fabd7`; BA1A closed branch-locally at `161671b`.
+  The combined RK1UL contract was stopped; its replacement RK1ULK contract is frozen.
+- G3's frozen accounting snapshot has 47 slices. Subtracting the two foundations that were
+  closed at freeze time leaves 45 incomplete slices; 19 safety slices remain in that evidence.
+- BA1SF1 subsequently closed branch-locally at `351fb1c`. The live execution delta is therefore
+  44 incomplete slices and 18 safety slices remaining before MB1, without changing G3's frozen
+  accounting evidence.
+- Branch-local Wave 1 work may proceed while G2 is open, but no closed candidate may integrate until G2's draft PR and remote CI baseline close.
+- G2 remains open because no draft PR or remote CI baseline has been established.
 - `tasks/pi-agent-integration-spec.md` remains user-owned, untracked, and untouched.
 
 ## Implementation and release plan reset — 2026-07-13
