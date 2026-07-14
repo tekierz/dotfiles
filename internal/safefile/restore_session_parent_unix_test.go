@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func observeRestoreParentTest(t *testing.T, root, rel string) *ParentChain {
@@ -99,6 +101,21 @@ func TestRestoreSessionBindsOneRealRoot(t *testing.T) {
 		t.Fatal("session accepted an identical replacement root")
 	}
 	assertRestoreMissingTest(t, filepath.Join(replaceable, "parent"))
+}
+
+func TestNewRestoreSessionAcceptsRealUserHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || !filepath.IsAbs(home) || filepath.Clean(home) != home {
+		t.Skipf("environment has no absolute clean user home: %q %v", home, err)
+	}
+	var stat unix.Stat_t
+	if err := unix.Lstat(home, &stat); err != nil || uint32(stat.Mode)&unix.S_IFMT != unix.S_IFDIR ||
+		!restorableOwner(stat.Uid, stat.Gid, os.Geteuid(), os.Getegid()) {
+		t.Skipf("environment user home is not an existing real user-owned directory: %v", err)
+	}
+	if _, err := NewRestoreSession(home); err != nil {
+		t.Fatalf("NewRestoreSession(%q): %v", home, err)
+	}
 }
 
 func TestRestoreSessionBindsExistingParentsWithoutMutation(t *testing.T) {
@@ -250,12 +267,14 @@ func TestRestoreSessionRejectsUnacceptedParentAppearances(t *testing.T) {
 
 func TestRestoreSessionRejectsAcceptedAncestorSwap(t *testing.T) {
 	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "ancestor"), 0o700)
 	mustMkdir(t, filepath.Join(root, "ancestor", "parent"), 0o700)
 	accepted := observeRestoreParentTest(t, root, "ancestor/parent/leaf")
 	session := newRestoreSessionTest(t, root)
 	if err := os.Rename(filepath.Join(root, "ancestor"), filepath.Join(root, "old-ancestor")); err != nil {
 		t.Fatal(err)
 	}
+	mustMkdir(t, filepath.Join(root, "ancestor"), 0o700)
 	mustMkdir(t, filepath.Join(root, "ancestor", "parent"), 0o700)
 	if _, err := session.bindRestoreParents("ancestor/parent/leaf", accepted, true); err == nil {
 		t.Fatal("identical ancestor replacement was trusted")
