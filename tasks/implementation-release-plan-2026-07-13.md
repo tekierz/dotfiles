@@ -1,6 +1,6 @@
 # Implementation and Release Program — 2026-07-13
 
-Status: **execution active; G0 committed; original G1 superseded at tests-red**
+Status: **execution active; G3A plan catalog reconciliation in progress; three safety foundations closed branch-locally**
 
 Audit input: [release-audit-2026-07-13.md](release-audit-2026-07-13.md)
 
@@ -97,37 +97,55 @@ resolves overlapping writes by hand; the affected slices are re-planned.
 ~~~mermaid
 flowchart TD
   G0["G0 Plan and state reset"] --> G1["G1 Enforce slice-state gate"]
-  G1 --> RK["RK Runner kernel"]
-  G1 --> BA["BA Backup authority"]
-  G1 --> SH["SH sshh contract"]
-  RK --> RS["RS Sequential streaming"]
+  G1 --> G1C["G1C Guardrail adoption"]
+  G1C --> G3A["G3A Plan catalog resplit"]
+  G3A --> G3B["G3B Active roadmap control sync"]
+  G3B --> G2["G2 Worktrees, draft PR, and remote baseline"]
+  G1C --> RK1UO["RK1UO Native exit observer"]
+  RK1UO --> RK1ULK["RK1ULK Private lifecycle kernel"]
+  RK1ULK --> RK1ULA["RK1ULA Public streaming adapters"]
+  RK1ULA --> RK1P["RK1P Privileged supervisor"]
+  G1C --> BA1A["BA1A Snapshot extraction"]
+  BA1A --> BA1SF1["BA1SF1 Restore-parent authority"]
+  BA1SF1 --> BA1SF2["BA1SF2 Exact restore leaves"]
+  BA1SF2 --> BA1B2["BA1B2 Immutable catalog kernel"]
+  BA1B2 --> BA1C["BA1C Opaque public authority"]
+  G1C --> SH["SH sshh contract"]
+  RK1P --> RS["RS Sequential streaming"]
   RS --> AP["AP Debian Update All"]
-  RS --> UR["UR Manager-bound routing"]
-  BA --> BC["BC CLI/TUI restore consumers"]
+  G1C --> UR1["UR1 Provider authority"]
+  UR1 --> UR2["UR2 Manager-bound routing"]
+  RS --> UR2
+  BA1C --> BC["BC CLI/TUI restore consumers"]
   BC --> BU["BU Valid uninstall recovery"]
-  RK --> CX["CX Installer cancellation"]
-  G1 --> BR["BR Bounded readers"]
+  RK1P --> CX["CX Installer cancellation"]
+  G1C --> BR1["BR1 Bounded-read policy"]
+  BR1 --> BR2["BR2 Config input limits"]
+  BR1 --> BR3["BR3 Backup input limits"]
+  BA1C --> BR3
   MB1 --> SP["SP Remote payload pins"]
   MB1 --> NP1["NP1 npm phase domain"]
   NP1 --> NP2["NP2 Public plan projection"]
-  RK --> NP3["NP3 Exact npm executor"]
+  RK1P --> NP3["NP3 Exact npm executor"]
   NP2 --> NP4["NP4 Fresh phased coordinator"]
   NP3 --> NP4
   NP4 --> NP5["NP5 CLI phase contract"]
   NP4 --> NP6["NP6 Wizard phase UX"]
   NP5 --> NP7["NP7 Manage and E2E truth"]
   NP6 --> NP7
-  UR --> PO["PO Registry/update ownership"]
+  UR1 --> PO["PO Registry/update ownership"]
   NP7 --> DT["DT Product/docs truth"]
   PO --> DT
   MB1 --> CI1["CI1 Reusable full quality gate"]
   CI1 --> CI2["CI2 Explicit toolchains"]
   CI2 --> CI3["CI3 Tag provenance and protected publish"]
   AP --> MB1["MB1 Safety barrier"]
+  UR2 --> MB1
   BU --> MB1
   SH --> MB1
   CX --> MB1
-  BR --> MB1
+  BR2 --> MB1
+  BR3 --> MB1
   MB1 --> NP7
   DT --> MB2["MB2 Product candidate barrier"]
   CI3 --> MB2
@@ -151,35 +169,50 @@ exact list before each slice.
 | G1A | Enforce adjacent states, explicit non-production red-test authority, exact verified candidate digest/trailer, and isolated control candidates | scripts/check-slice-scope.sh, tests/check-slice-scope_test.sh | G1 red checkpoint and replan catalog |
 | G1B | Bind contract-frozen, red-test, verified-scope, payload, ledger, and committed evidence in order with unique slice IDs | scripts/check-slice-scope.sh, tests/check-slice-scope_test.sh, tasks/slice-commit-ledger.tsv | G1A |
 | G1C | Publish executable Make targets and final workflow guidance through the first normal ledger closure | Makefile, tests/check-slice-scope_test.sh, tasks/workflow-guardrails.md | G1B |
-| G2 | Establish two authorized worktrees, draft PR, and remote CI baseline | Git/external state only | G1 and user authorization |
+| G3A | Reconcile the rejected runner/restore parents, stopped combined lifecycle, fixed catalog, waves, accounting, and gates in the implementation plan only | this plan and release-plan test | G1C |
+| G3B | Synchronize the active control projection without mixing it into G3A's ordinary candidate digest | tasks/todo.md and its focused control-projection test | G3A |
+| G2 | Establish two authorized worktrees, draft PR, and remote CI baseline | Git/external state only | G3B and user authorization |
 
-After this split, every existing `Depends on G1` reference means `Depends on G1C`.
+Existing aggregate `Depends on G1` references mean `Depends on G1C`; G3A changes only the
+runner and restore dependency chains named below, and G3B serially updates active control truth.
+
+The fixed execution catalog contains 47 slices: G2, 21 safety slices, 20 Wave 2 engineering
+slices, and five external slices; the G3A/G3B governance closures are not catalog slices.
+RK1UO, BA1A, and BA1SF1 are closed branch-locally but not integrated, so 44 catalog slices remain incomplete and 18 safety slices remain.
 
 ### Runtime and update safety
 
 | ID | Outcome | Likely paths | Depends on |
 |----|---------|--------------|------------|
-| RK1 | Shared Unix process-group lifecycle; idempotent Cancel; scanner/long-line errors become terminal; undrained output fails boundedly | internal/runner/bash.go, exact_streaming.go, new process-group helper, runner tests | G1 |
-| RS1 | Typed sequential streaming primitive continuously drains ordered phases and prevents later starts after failure/cancel | new internal/runner/sequence.go and tests | RK1 |
+| RK1UO | Add native no-reap exit observation so the process-group leader remains an identity anchor until cleanup and final Wait | internal/runner native observer files and tests | G1C |
+| RK1ULK | Add one private lifecycle kernel that owns pipe setup, start, no-reap observation, first-cause classification, bounded pipe closure, process-group cleanup, the sole final wait, and one cached completion | internal/runner/streaming_lifecycle.go and focused lifecycle tests | RK1UO |
+| RK1ULA | Make StreamingCmd, RunStreaming, and RunExact thin public adapters over RK1ULK; preserve literal argv/PATH/env, clone exact requests, and fail closed for sudo until RK1P | internal/runner/bash.go, exact_streaming.go, and adapter tests | RK1ULK |
+| RK1P | Add a trusted exact-argv privileged supervisor that terminates and reaps sudo-owned descendant groups | runner supervisor, narrow CLI dispatch, platform files and tests | RK1ULA |
+| RS1 | Typed sequential streaming primitive continuously drains ordered phases and prevents later starts after failure/cancel | new internal/runner/sequence.go and tests | RK1P |
 | AP1 | apt update then upgrade use RS1; both outputs are visible; 1,000-line and cancel cases cannot deadlock | internal/pkg/apt.go and focused tests | RS1 |
 | UR1 | Add execution-provider authority distinct from display provenance; stamp it from the discovering manager | internal/pkg/manager.go, update.go, new route tests | G1 |
 | UR2 | Group selected updates by provider, execute only through the bound manager, recheck through the same manager, preserve selection order | internal/ui/installation.go, streaming.go, screen_update.go, routing tests | UR1, RS1 |
-| CX1 | Pass install context through every config action and TPM/Neovim operation; cancellation kills clone helpers and triggers rollback/journal cancellation | internal/ui/installation.go, internal/tools/tmux.go, neovim.go, tests | RK1 |
+| CX1 | Pass install context through every config action and TPM/Neovim operation; cancellation kills clone helpers and triggers rollback/journal cancellation | internal/ui/installation.go, internal/tools/tmux.go, neovim.go, tests | RK1P |
 
-RK1 intentionally absorbs process-group, overflow, and scanner behavior into one runner-kernel
-contract. AP1 does not raise channel capacity or discard apt output.
+The runner chain deliberately separates native observation, its private lifecycle kernel,
+public ordinary-streaming adapters, and privileged supervision. AP1 does not raise channel
+capacity or discard apt output.
 
 ### Backup and bounded input
 
 | ID | Outcome | Likely paths | Depends on |
 |----|---------|--------------|------------|
-| BA1 | RestoreCatalogEntry consumes the exact opaque catalog snapshot/parent authority; mutable Name/Path cannot redirect bytes | internal/backup/catalog.go, backup.go, tests; safefile only if snapshot extraction is required | G1 |
-| BC1 | CLI restore consumes the accepted entry | cmd/dotfiles/main.go and restore tests | BA1 |
-| BC2 | TUI Backups retains and consumes the accepted entry | internal/ui/app.go, screen_backups.go, tests | BA1 |
+| BA1A | Expose immutable file and subtree extraction from recursive snapshots without mutation | internal/safefile/safefile.go, directory_unix_test.go | G1C |
+| BA1SF1 | Bind restore-parent identity and reject replacement before any restore mutation | internal/safefile restore-parent files and tests | BA1A |
+| BA1SF2 | Restore exact captured file, directory, mode, and removal leaves without reopening mutable sources | internal/safefile restore-leaf files and tests | BA1SF1 |
+| BA1B2 | Parse and validate an immutable catalog snapshot completely before applying any restore item | internal/backup/backup.go and catalog tests | BA1SF2 |
+| BA1C | Expose RestoreCatalogEntry through opaque private authority; mutable display fields cannot redirect bytes | internal/backup/catalog.go and catalog tests | BA1B2 |
+| BC1 | CLI restore consumes the accepted entry | cmd/dotfiles/main.go and restore tests | BA1C |
+| BC2 | TUI Backups retains and consumes the accepted entry | internal/ui/app.go, screen_backups.go, tests | BA1C |
 | BU1 | Uninstall chooses the newest valid catalog by timestamp/tie-break, never raw lexicographic directory order | cmd/dotfiles/main.go, catalog tests | BC1 |
 | BR1 | Define byte/count budgets and add bounded, no-follow structured read primitive | internal/safefile bounded read files/tests, policy doc | G1 |
 | BR2 | Apply limits to global/tool/profile/hotkeys/Claude/native config reads | internal/config files, selected importers, tests | BR1 |
-| BR3 | Apply manifest, entry-count, file-count, per-file, and total backup limits before allocation/mutation | internal/backup and safefile snapshot-budget tests | BR1, BA1 |
+| BR3 | Apply manifest, entry-count, file-count, per-file, and total backup limits before allocation/mutation | internal/backup and safefile snapshot-budget tests | BR1, BA1C |
 
 Suggested initial budgets are 1 MiB per product JSON document, a separately justified
 Claude/native-config limit, and explicit backup manifest/tree budgets. Exact values are
@@ -232,7 +265,7 @@ blocking.
 |----|---------|--------------|------------|
 | NP1 | Phase domain and invariants: requested tools, phase kind/index, remaining intent, exactly one authority class | internal/operation/plan.go, internal/installplan/service.go/session.go, tests | G0 |
 | NP2 | Redacted planpublic v2 projection with prerequisite, npm, blocked, no-change, and replan-required vocabulary | internal/planpublic, cmd plan JSON tests/docs | NP1 |
-| NP3 | Execute pure npm recipe only through accepted NPMExecutionIdentity; exact args/env/cwd, drift, overflow, cancel, and postcondition tests | internal/installapply/recipe.go, internal/pkg/npm_execution_identity.go, tests | RK1, NP1 |
+| NP3 | Execute pure npm recipe only through accepted NPMExecutionIdentity; exact args/env/cwd, drift, overflow, cancel, and postcondition tests | internal/installapply/recipe.go, internal/pkg/npm_execution_identity.go, tests | RK1P, NP1 |
 | NP4 | Fresh phased coordinator: phase 1 journal/apply, exit-3 terminal state, fresh replan, phase-2 hash/identity, no automatic continuation | internal/installapply/service.go, internal/installplan, operation journal tests | NP2, NP3 |
 | NP5 | Headless plan/apply v2 CLI and exact stream/exit grammar | cmd/dotfiles/plan_json.go, apply.go, tests | NP4 |
 | NP6 | Wizard preview/confirm/progress/summary for phase 1 and fresh phase 2; no false full success | internal/ui/install_plan.go, installation.go, progress/summary tests | NP4 |
@@ -273,14 +306,18 @@ cross-review and root integration.
 
 | Wave | Parallel pair | Barrier |
 |------|---------------|---------|
-| 0 | G0, original G1 red checkpoint, then G1A, G1B, G1C | Canonical plan and state checker green |
-| 1A | RK1 + BA1 | Runner and restore authority foundations |
-| 1B | RS1 + SH1 | Sequential stream and embedded helper |
-| 1C | AP1 + BC1 | Debian adapter and CLI restore |
-| 1D | UR1 + BC2 | Provider domain and TUI restore |
-| 1E | UR2 + BU1 | TUI update routing and uninstall recovery |
-| 1F | CX1 + BR1 | Cancellation propagation and bounded-read policy |
-| 1G | BR2 + BR3 | Config and backup input limits |
+| 0 | G0, original G1 red checkpoint, G1A-G1C, then G3A and G3B | Canonical plan/control projections, split catalog, and state checker green |
+| 1A | RK1UO + BA1A | Native observer and snapshot extraction foundations |
+| 1B | RK1ULK + BA1SF1 | Private lifecycle kernel and restore-parent authority |
+| 1C | RK1ULA + BA1SF2 | Public streaming adapters and exact restore leaves |
+| 1D | RK1P + BA1B2 | Privileged supervisor and immutable catalog kernel |
+| 1E | RS1 + BA1C | Sequential streaming and opaque restore authority |
+| 1F | UR1 + BC1 | Provider domain and CLI restore |
+| 1G | AP1 + BC2 | Debian adapter and TUI restore |
+| 1H | UR2 + BU1 | TUI update routing and uninstall recovery |
+| 1I | CX1 + BR1 | Cancellation propagation and bounded-read policy |
+| 1J | BR2 + SH1 | Config input limits and embedded helper |
+| 1K | BR3 | Backup input limits |
 | MB1 | Full safety merge barrier | High/Medium runtime and recovery contracts green |
 | 2A | SP1 + CL1 | Payload policy and CLI grammar |
 | 2B | SP2 + PO1 | Pinned repos and registry ownership |
@@ -300,9 +337,11 @@ cross-review and root integration.
 
 Serialization rules:
 
-- cmd/dotfiles/main.go: BC1 -> BU1 -> CL1 -> PO2 -> NP5.
+- cmd/dotfiles/main.go: RK1P -> BC1 -> BU1 -> CL1 -> PO2 -> NP5.
 - internal/ui/installation.go: UR2 -> CX1 -> SP2 -> NP6.
-- internal/backup files: BA1 -> BR3.
+- internal/runner lifecycle: RK1UO -> RK1ULK -> RK1ULA -> RK1P -> RS1.
+- internal/safefile restore authority: BA1A -> BA1SF1 -> BA1SF2.
+- internal/backup restore authority: BA1B2 -> BA1C -> BR3.
 - release workflow: CI1 -> CI2 -> CI3 -> CI4.
 - README/docs/tools: capability implementation -> DT1.
 
@@ -322,6 +361,20 @@ Every slice must:
 - pass make slice-check before and after handoff and make slice-check-candidate after staging;
 - commit immediately after its candidate gate, without unrelated planning files.
 
+Frozen split budgets use `total files / production files / changed lines`:
+
+| Slice | Budget |
+|-------|--------|
+| RK1UO | 4/3/280 |
+| RK1ULK | 2/1/790 |
+| RK1ULA | 4/2/690 |
+| RK1P | 8/5/800 |
+| BA1A | 2/1/250 |
+| BA1SF1 | 5/3/760 |
+| BA1SF2 | 4/2/780 |
+| BA1B2 | 2/1/800 |
+| BA1C | 2/1/360 |
+
 The commit exit gate is:
 
 - gofmt and git diff --check;
@@ -336,7 +389,8 @@ The commit exit gate is:
 
 ### MB1 — safety substrate
 
-Requires RK1, RS1, AP1, UR1-UR2, CX1, BA1, BC1-BC2, BU1, BR1-BR3, and SH1:
+Requires all 21 safety slices: RK1UO, RK1ULK, RK1ULA, RK1P, RS1, AP1, UR1-UR2, CX1, BA1A,
+BA1SF1, BA1SF2, BA1B2, BA1C, BC1-BC2, BU1, BR1-BR3, and SH1:
 
 - 1,000-line apt Update All cannot deadlock;
 - update/cancel process trees terminate;
@@ -415,9 +469,11 @@ Only after Apply passes:
 
 ## 10. Release gates
 
+The ten RG0-RG9 gates remain sequential and candidate-bound.
+
 | Gate | Exit evidence | Promotion |
 |------|---------------|-----------|
-| RG0 Plan freeze | G0 and G1C committed; fixed catalog; no stale active state | Implementation may begin |
+| RG0 Plan/control freeze | G0 canonical bootstrap evidence plus normal-v1 closures for the prior RG0 roadmap reconciliation, G1C, G3A, and G3B; fixed 47-slice catalog; live 44 incomplete/18 safety accounting; no stale active state | G2 may close; Wave 1 product integration remains gated by G2 |
 | RG1 Safety | MB1 plus disposable Debian/mixed-manager evidence | npm/product work may integrate |
 | RG2 Engineering candidate | MB2, remote PR green, exact candidate dossier | Platform/manual QA |
 | RG3 Release construction | MB3 and duplicate reproducible snapshots | Owner destructive tests |
@@ -432,9 +488,13 @@ Any production change after RG2 invalidates RG2 and all later evidence.
 
 ## 11. Release cut sequence
 
-1. Freeze features and complete G0/G1.
-2. With explicit authorization, create isolated slice worktrees and a draft PR.
-3. Execute Waves 1 and 2 with pairwise implementation/review.
+Branch-local Wave 1 product work may proceed while G2 is open, but no closed Wave 1 product candidate may integrate until G2's draft PR and remote CI baseline close.
+
+The serial G3A/G3B governance fast-forward re-closes RG0 and is not Wave 1 product integration.
+
+1. Freeze features and complete G0/G1/G3A/G3B roadmap governance.
+2. Continue branch-local Wave 1 work while completing G2's draft PR and remote baseline.
+3. After G2 closes, integrate completed Wave 1 candidates and execute the remaining Waves 1 and 2 with pairwise implementation/review.
 4. Pass MB1 and MB2.
 5. Push the exact candidate and require the full remote PR gate.
 6. Merge through protected main; main CI must pass on the merge SHA.
