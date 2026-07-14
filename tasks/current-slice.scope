@@ -1,7 +1,7 @@
 # Expose immutable file and subtree extraction from recursive snapshots.
 version=2
 slice_id=ba1a-snapshot-extraction
-state=contract-frozen
+state=tests-red
 max_total_files=2
 max_production_files=1
 max_changed_lines=250
