@@ -1,12 +1,12 @@
-# Reconcile post-G1C policy fixtures and roadmap truth.
+# Expose immutable file and subtree extraction from recursive snapshots.
 version=2
-slice_id=rg0-roadmap-reconciliation
-state=committed
+slice_id=ba1a-snapshot-extraction
+state=planned
 max_total_files=2
 max_production_files=1
-max_changed_lines=80
+max_changed_lines=250
 ignore=tasks/pi-agent-integration-spec.md
-allow=tests/check-slice-scope_test.sh
+allow=internal/safefile/safefile.go
+allow=internal/safefile/directory_unix_test.go
 allow=tasks/slice-commit-ledger.tsv
-allow=tasks/todo.md
-test=tests/check-slice-scope_test.sh
+test=internal/safefile/directory_unix_test.go
