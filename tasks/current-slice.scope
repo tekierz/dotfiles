@@ -5,10 +5,10 @@
 # Deferred: process-group lifecycle and bounded readers (RK1UL), privileged sudo (RK1P).
 version=2
 slice_id=rk1uo-native-exit-observer
-state=planned
+state=contract-frozen
 max_total_files=4
 max_production_files=3
-max_changed_lines=220
+max_changed_lines=280
 ignore=tasks/pi-agent-integration-spec.md
 allow=internal/runner/exit_observer.go
 allow=internal/runner/exit_observer_linux.go
