@@ -1,14 +1,15 @@
 # Restore only from a fully captured immutable catalog snapshot after strict preflight.
 # Authority: private restore kernel; no CLI, TUI, or public CatalogEntry API changes.
 # Invariants: explicit absolute real home, no ambient HOME, all records/sources captured
-# before mutation, exact file/directory bytes and modes, fatal preflight is zero-mutation.
+# before mutation, exact replacement of file/directory bytes and modes, fatal
+# preflight (including invalid real-home authority) is zero-mutation.
 # Deferred: opaque public CatalogEntry binding (BA1C), CLI restore (BC1), TUI restore (BC2).
 version=2
 slice_id=ba1b-immutable-restore-kernel
-state=planned
+state=contract-frozen
 max_total_files=2
 max_production_files=1
-max_changed_lines=380
+max_changed_lines=750
 ignore=tasks/pi-agent-integration-spec.md
 allow=internal/backup/backup.go
 allow=internal/backup/catalog_test.go
