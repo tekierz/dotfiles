@@ -3,12 +3,15 @@ package runner_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -179,12 +182,7 @@ func TestExactStreamingUndrainedOutputFailsBoundedly(t *testing.T) {
 	}
 	select {
 	case waitErr := <-command.Done:
-		if waitErr == nil || waitErr.Error() != "exact streaming output overflow" {
-			t.Fatalf("overflow error=%v, want deterministic overflow", waitErr)
-		}
-		if errors.Is(waitErr, context.Canceled) {
-			t.Fatalf("overflow was misreported as cancellation: %v", waitErr)
-		}
+		assertStreamingClass(t, waitErr, "undrained")
 		for range command.Output {
 		}
 	case <-time.After(2 * time.Second):
@@ -217,6 +215,254 @@ func TestExactStreamingCancelCompletionRaceIsBounded(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("iteration %d cancel/completion race hung", iteration)
 		}
+	}
+}
+
+func TestStreamingEntryPointsOwnWholeProcessGroup(t *testing.T) {
+	for _, entry := range streamingEntryPoints() {
+		for _, outcome := range []string{"cancel", "deadline", "natural-exit"} {
+			t.Run(entry.name+"/"+outcome, func(t *testing.T) {
+				ctx, expire := context.WithCancelCause(context.Background())
+				mode := "descendant"
+				if outcome == "natural-exit" {
+					mode = "orphan"
+				}
+				command, pid := startStreamingDescendant(t, entry, ctx, mode)
+				switch outcome {
+				case "cancel":
+					command.Cancel()
+				case "deadline":
+					expire(context.DeadlineExceeded)
+				}
+				waitErr := awaitStreamingDone(t, command)
+				if outcome == "cancel" && !errors.Is(waitErr, context.Canceled) {
+					t.Fatalf("cancel error=%v", waitErr)
+				}
+				if outcome == "deadline" && !errors.Is(waitErr, context.DeadlineExceeded) {
+					t.Fatalf("deadline error=%v", waitErr)
+				}
+				if outcome == "natural-exit" && waitErr != nil {
+					t.Fatalf("natural leader exit error=%v", waitErr)
+				}
+				if !waitExactProcessGone(pid, time.Second) {
+					t.Fatalf("owned descendant %d survived %s cleanup", pid, outcome)
+				}
+			})
+		}
+	}
+}
+
+func TestStreamingEntryPointsClassifyReaderFailuresExclusively(t *testing.T) {
+	for _, entry := range streamingEntryPoints() {
+		for _, source := range []string{"stdout", "stderr"} {
+			t.Run(entry.name+"/scan-"+source, func(t *testing.T) {
+				command := startStreamingHelper(t, entry, context.Background(), "long-"+source)
+				drainStreaming(command)
+				assertStreamingClass(t, awaitStreamingDone(t, command), "scan")
+			})
+			t.Run(entry.name+"/undrained-"+source, func(t *testing.T) {
+				command := startStreamingHelper(t, entry, context.Background(), "lines-"+source, "1000")
+				assertStreamingClass(t, awaitStreamingDone(t, command), "undrained")
+			})
+		}
+	}
+}
+
+func TestStreamingEntryPointsWaitDoneCancelAreStableAndConcurrent(t *testing.T) {
+	for _, entry := range streamingEntryPoints() {
+		t.Run(entry.name, func(t *testing.T) {
+			command := startStreamingHelper(t, entry, context.Background(), "delay", "30000")
+			drainStreaming(command)
+			results := make(chan error, 8)
+			for i := 0; i < 8; i++ {
+				go func() { results <- command.Wait() }()
+			}
+			var callers sync.WaitGroup
+			for i := 0; i < 16; i++ {
+				callers.Add(1)
+				go func() {
+					defer callers.Done()
+					for j := 0; j < 8; j++ {
+						command.Cancel()
+					}
+				}()
+			}
+			callers.Wait()
+			doneErr, ok := awaitStreamingValue(t, command.Done)
+			if !ok || !errors.Is(doneErr, context.Canceled) {
+				t.Fatalf("Done result=%v ok=%v, want one canceled result", doneErr, ok)
+			}
+			for i := 0; i < 8; i++ {
+				if err := awaitStreamingError(t, results); !errors.Is(err, context.Canceled) {
+					t.Fatalf("Wait result=%v, want stable canceled result", err)
+				}
+			}
+			if _, ok := awaitStreamingValue(t, command.Done); ok {
+				t.Fatal("Done published more than one terminal result")
+			}
+			command.Cancel()
+		})
+	}
+}
+
+func TestStreamingWithSudoFailsClosedBeforeStartingSubprocess(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "sudo-started")
+	path := filepath.Join(dir, "sudo")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n: > \"$SUDO_MARKER\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("SUDO_MARKER", marker)
+	command, err := runner.RunStreamingWithSudo(context.Background(), "/bin/true")
+	if err == nil || command != nil {
+		t.Fatalf("sudo ordinary-lifecycle fallback returned command=%v error=%v", command, err)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("sudo subprocess started before RK1P: %v", statErr)
+	}
+}
+
+type streamingEntryPoint struct {
+	name  string
+	start func(context.Context, string, ...string) (*runner.StreamingCmd, error)
+}
+
+func streamingEntryPoints() []streamingEntryPoint {
+	return []streamingEntryPoint{
+		{name: "RunStreaming", start: runner.RunStreaming},
+		{name: "RunExactStreaming", start: func(ctx context.Context, path string, args ...string) (*runner.StreamingCmd, error) {
+			return runner.RunExactStreaming(ctx, runner.ExactStreamingRequest{Path: path, Args: args, Env: []string{"PATH=/usr/bin:/bin"}, Dir: "/"})
+		}},
+	}
+}
+
+func startStreamingHelper(t *testing.T, entry streamingEntryPoint, ctx context.Context, mode string, args ...string) *runner.StreamingCmd {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := []string{"-test.run=^TestStreamingLifecycleHelper$", "--", "streaming-lifecycle-helper", mode}
+	arguments = append(arguments, args...)
+	command, err := entry.start(ctx, executable, arguments...)
+	if err != nil {
+		t.Fatalf("start %s helper %s: %v", entry.name, mode, err)
+	}
+	return command
+}
+
+func startStreamingDescendant(t *testing.T, entry streamingEntryPoint, ctx context.Context, mode string) (*runner.StreamingCmd, int) {
+	t.Helper()
+	dir := t.TempDir()
+	pidFile, release := filepath.Join(dir, "pid"), filepath.Join(dir, "release")
+	command := startStreamingHelper(t, entry, ctx, mode, pidFile, release)
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
+	pid := waitExactPID(t, pidFile)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	return command, pid
+}
+
+func TestStreamingLifecycleHelper(t *testing.T) {
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "streaming-lifecycle-helper" {
+			separator = i
+			break
+		}
+	}
+	if separator < 0 {
+		return
+	}
+	args := os.Args[separator+1:]
+	signal.Ignore(syscall.SIGPIPE)
+	switch args[0] {
+	case "long-stdout":
+		_, _ = fmt.Fprintln(os.Stdout, strings.Repeat("x", 1024*1024+1))
+	case "long-stderr":
+		_, _ = fmt.Fprintln(os.Stderr, strings.Repeat("x", 1024*1024+1))
+	case "lines-stdout", "lines-stderr":
+		count, _ := strconv.Atoi(args[1])
+		output := os.Stdout
+		if args[0] == "lines-stderr" {
+			output = os.Stderr
+		}
+		for i := 0; i < count; i++ {
+			_, _ = fmt.Fprintf(output, "line-%d\n", i)
+		}
+	case "descendant", "orphan":
+		executable, _ := os.Executable()
+		child := exec.Command(executable, "-test.run=^TestStreamingLifecycleHelper$", "--", "streaming-lifecycle-helper", "pipe-holder", args[1], args[2])
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			t.Fatal(err)
+		}
+		if args[0] == "orphan" {
+			_ = waitExactPID(t, args[1])
+		} else {
+			_ = child.Wait()
+		}
+	case "pipe-holder":
+		if err := os.WriteFile(args[1], []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			if _, err := os.Stat(args[2]); err == nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	case "delay":
+		delay, _ := strconv.Atoi(args[1])
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+	case "exit":
+		os.Exit(7)
+	default:
+		t.Fatalf("unknown helper mode %q", args[0])
+	}
+}
+
+func drainStreaming(command *runner.StreamingCmd) {
+	go func() {
+		for range command.Output {
+		}
+	}()
+}
+
+func awaitStreamingDone(t *testing.T, command *runner.StreamingCmd) error {
+	t.Helper()
+	err, _ := awaitStreamingValue(t, command.Done)
+	return err
+}
+
+func awaitStreamingError(t *testing.T, result <-chan error) error {
+	t.Helper()
+	err, _ := awaitStreamingValue(t, result)
+	return err
+}
+
+func awaitStreamingValue(t *testing.T, result <-chan error) (error, bool) {
+	t.Helper()
+	select {
+	case err, ok := <-result:
+		return err, ok
+	case <-time.After(3 * time.Second):
+		t.Fatal("streaming terminal result timed out")
+	}
+	return nil, false
+}
+
+func assertStreamingClass(t *testing.T, err error, class string) {
+	t.Helper()
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), class) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("terminal error=%v, want exclusive %s classification", err, class)
+	}
+	opposite := "scan"
+	if class == opposite {
+		opposite = "undrained"
+	}
+	if strings.Contains(strings.ToLower(err.Error()), opposite) {
+		t.Fatalf("terminal error=%v has both %s and %s classifications", err, class, opposite)
 	}
 }
 
