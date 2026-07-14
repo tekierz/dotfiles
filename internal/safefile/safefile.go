@@ -240,6 +240,121 @@ func recursiveDirectorySnapshot(snapshot *DirectorySnapshot) bool {
 	return snapshot != nil && snapshot.tracked && !snapshot.rootOnly
 }
 
+// ReadDirectorySnapshotFile returns one cloned regular file below a complete recursive authority at an already-clean rel path.
+func ReadDirectorySnapshotFile(snapshot *DirectorySnapshot, rel string) ([]byte, fs.FileMode, error) {
+	entry, err := directorySnapshotDescendant(snapshot, rel)
+	if err != nil {
+		return nil, 0, err
+	}
+	if entry.dir != nil {
+		return nil, 0, fmt.Errorf("%w: snapshot descendant %q is a directory", ErrInvalidPath, rel)
+	}
+	return cloneDirectorySnapshotBytes(entry.data), entry.mode.Perm(), nil
+}
+
+// SubdirectorySnapshot returns a deep, immutable data-only copy of one
+// captured subtree. The result retains recursive restore data and its digest,
+// but deliberately carries no live namespace identity authority.
+func SubdirectorySnapshot(snapshot *DirectorySnapshot, rel string) (*DirectorySnapshot, error) {
+	entry, err := directorySnapshotDescendant(snapshot, rel)
+	if err != nil {
+		return nil, err
+	}
+	if entry.dir == nil {
+		return nil, fmt.Errorf("%w: snapshot descendant %q is not a directory", ErrInvalidPath, rel)
+	}
+	result := newDirectorySnapshot(cloneDirectorySnapshotNode(*entry.dir))
+	result.uid, result.gid = snapshot.uid, snapshot.gid
+	return result, nil
+}
+
+func directorySnapshotDescendant(snapshot *DirectorySnapshot, rel string) (*directorySnapshotEntry, error) {
+	if err := validateDirectorySnapshotExtractionSource(snapshot); err != nil {
+		return nil, err
+	}
+	parts, err := cleanDirectorySnapshotRelativePath(rel)
+	if err != nil {
+		return nil, err
+	}
+	node := &snapshot.root
+	for index, name := range parts {
+		var found *directorySnapshotEntry
+		for entryIndex := range node.entries {
+			if node.entries[entryIndex].name == name {
+				found = &node.entries[entryIndex]
+				break
+			}
+		}
+		if found == nil {
+			return nil, fmt.Errorf("%w: snapshot descendant %q", fs.ErrNotExist, rel)
+		}
+		if index == len(parts)-1 {
+			return found, nil
+		}
+		if found.dir == nil {
+			return nil, fmt.Errorf("%w: snapshot descendant %q crosses a regular file", ErrInvalidPath, rel)
+		}
+		node = found.dir
+	}
+	return nil, ErrInvalidPath
+}
+
+func cleanDirectorySnapshotRelativePath(rel string) ([]string, error) {
+	if rel == "" || rel == "." || path.IsAbs(rel) || strings.ContainsRune(rel, '\x00') || path.Clean(rel) != rel {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidPath, rel)
+	}
+	parts := strings.Split(rel, "/")
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return nil, fmt.Errorf("%w: %q", ErrInvalidPath, rel)
+		}
+	}
+	return parts, nil
+}
+
+func validateDirectorySnapshotExtractionSource(snapshot *DirectorySnapshot) error {
+	if !recursiveDirectorySnapshot(snapshot) || !validDirectorySnapshotExtractionNode(&snapshot.root) {
+		return ErrInvalidAuthority
+	}
+	if _, err := DirectorySnapshotAuthorityDigest(snapshot); err != nil {
+		return ErrInvalidAuthority
+	}
+	return nil
+}
+
+func validDirectorySnapshotExtractionNode(node *directorySnapshotNode) bool {
+	if node == nil || node.mode != node.mode.Perm() {
+		return false
+	}
+	previous := ""
+	for index := range node.entries {
+		entry := &node.entries[index]
+		if entry.name == "" || entry.name == "." || entry.name == ".." || strings.ContainsAny(entry.name, "/\x00") ||
+			(previous != "" && entry.name <= previous) || entry.mode != entry.mode.Perm() {
+			return false
+		}
+		previous = entry.name
+		if entry.dir != nil && (len(entry.data) != 0 || entry.mode != entry.dir.mode || !validDirectorySnapshotExtractionNode(entry.dir)) {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneDirectorySnapshotNode(source directorySnapshotNode) directorySnapshotNode {
+	clone := directorySnapshotNode{mode: source.mode, entries: make([]directorySnapshotEntry, len(source.entries))}
+	for index, entry := range source.entries {
+		clone.entries[index] = directorySnapshotEntry{name: entry.name, mode: entry.mode, data: cloneDirectorySnapshotBytes(entry.data)}
+		if entry.dir != nil {
+			child := cloneDirectorySnapshotNode(*entry.dir)
+			clone.entries[index].dir = &child
+		}
+	}
+	return clone
+}
+
+func cloneDirectorySnapshotBytes(data []byte) []byte { return append(data[:0:0], data...) }
+
 // RecursiveFileStats returns the number and total byte size of regular files
 // captured recursively, excluding any named direct children of the snapshot
 // root. Root-only namespace tokens report zero values.
@@ -300,7 +415,7 @@ func (s *DirectorySnapshot) Permissions() fs.FileMode {
 // empty creation snapshot and a final cleanup snapshot.
 func SameDirectoryIdentity(left, right *DirectorySnapshot) bool {
 	return left != nil && right != nil && left.tracked && right.tracked &&
-		left.device == right.device && left.inode == right.inode
+		left.device != 0 && left.inode != 0 && left.device == right.device && left.inode == right.inode
 }
 
 // SameDirectoryRootState reports whether two tracked snapshots bind the same
