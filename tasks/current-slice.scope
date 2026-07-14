@@ -1,7 +1,7 @@
 # Reconcile post-G1C policy fixtures and roadmap truth.
 version=2
 slice_id=rg0-roadmap-reconciliation
-state=planned
+state=contract-frozen
 max_total_files=2
 max_production_files=1
 max_changed_lines=80
