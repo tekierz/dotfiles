@@ -63,7 +63,7 @@ func ValidatePlanRoot(result PlanResult) error {
 	if result.Directory == nil || !result.Parents.Tracked() || result.anchor == "" || result.rel == "" {
 		return fmt.Errorf("%w: plan backup authority is incomplete", safefile.ErrDirectoryChanged)
 	}
-	current, err := safefile.SnapshotDirectoryWithin(result.anchor, result.rel)
+	current, err := safefile.SnapshotDirectoryWithinBudget(result.anchor, result.rel, backupSnapshotBudget)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func (location backupLocation) removeFailedRoot() error {
 	if location.anchor == "" || location.rel == "" || location.rootSnapshot == nil || !location.rootParents.Tracked() {
 		return fmt.Errorf("%w: failed backup root authority is incomplete", safefile.ErrDirectoryChanged)
 	}
-	current, err := safefile.SnapshotDirectoryWithin(location.anchor, location.rel)
+	current, err := safefile.SnapshotDirectoryWithinBudget(location.anchor, location.rel, backupSnapshotBudget)
 	if err != nil {
 		return fmt.Errorf("snapshot failed backup root: %w", err)
 	}
@@ -190,6 +190,9 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 	if len(targets) == 0 {
 		return fail(0, fmt.Errorf("plan backup scope is empty"))
 	}
+	if len(targets) > maxBackupManifestEntries {
+		return fail(0, fmt.Errorf("plan backup scope exceeds %d entries", maxBackupManifestEntries))
+	}
 	if !filepath.IsAbs(home) || !filepath.IsAbs(backupDir) {
 		return fail(0, fmt.Errorf("home and backup directory must be absolute"))
 	}
@@ -211,6 +214,8 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 	manifest := make([]string, 0, len(targets))
 	persisted := make([]planSourceExpectation, 0, len(targets))
 	captured := 0
+	snapshotFiles := 0
+	var payloadBytes int64
 	for _, target := range plannedTargets {
 		rel := target.RelPath
 
@@ -221,7 +226,14 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 		}
 		switch target.Kind {
 		case TargetFile:
-			data, revision, _, err := safefile.ObserveFileWithin(home, rel)
+			if snapshotFiles >= maxBackupSnapshotFiles {
+				return failPrepared(captured, fmt.Errorf("backup snapshot exceeds %d files", maxBackupSnapshotFiles))
+			}
+			limit, limitErr := boundedBackupFileLimit(payloadBytes)
+			if limitErr != nil {
+				return failPrepared(captured, limitErr)
+			}
+			data, revision, _, err := safefile.ObserveFileWithinLimit(home, rel, limit)
 			if err != nil {
 				return failPrepared(captured, fmt.Errorf("read plan backup target %s: %w", rel, err))
 			}
@@ -238,9 +250,17 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 				digest: revision.Digest(),
 				mode:   revision.Permissions(),
 			})
+			payloadBytes += int64(len(data))
+			snapshotFiles++
 			captured++
 		case TargetDirectory:
-			snapshot, _, err := safefile.ObserveDirectoryWithin(home, rel)
+			remaining, limitErr := remainingBackupBytes(payloadBytes)
+			if limitErr != nil {
+				return failPrepared(captured, limitErr)
+			}
+			snapshot, _, err := safefile.ObserveDirectoryWithinBudget(home, rel, safefile.SnapshotBudget{
+				MaxFiles: maxBackupSnapshotFiles - snapshotFiles, MaxFileBytes: maxBackupFileBytes, MaxTotalBytes: remaining,
+			})
 			if errors.Is(err, os.ErrNotExist) {
 				manifest = append(manifest, fmt.Sprintf("%s||no|directory|700", original))
 				continue
@@ -257,10 +277,20 @@ func createPlanTracked(home, backupDir string, targets []Target, prepare func(ho
 				digest: snapshot.Digest(),
 				mode:   snapshot.Permissions(),
 			})
+			files, size := snapshot.RecursiveFileStats()
+			snapshotFiles += files
+			payloadBytes += size
 			captured++
 		}
 	}
 
+	manifestBytes, err := generatedManifestSize(manifest, len(manifestV2Header)+len(planManifestRecords))
+	if err != nil {
+		return failPrepared(captured, err)
+	}
+	if manifestBytes > maxBackupTotalBytes-payloadBytes {
+		return failPrepared(captured, fmt.Errorf("backup payload exceeds %d total bytes", maxBackupTotalBytes))
+	}
 	data := []byte(manifestV2Header + planManifestRecords + strings.Join(manifest, "\n") + "\n")
 	if err := location.writeFile(ManifestName, data, 0o600); err != nil {
 		return failPrepared(captured, fmt.Errorf("commit plan backup manifest: %w", err))
@@ -315,6 +345,9 @@ func Create(home, backupDir string, files []string) (int, error) {
 	if len(files) == 0 {
 		return 0, fmt.Errorf("backup candidate list is empty")
 	}
+	if len(files) > maxBackupManifestEntries {
+		return 0, fmt.Errorf("backup candidate list exceeds %d entries", maxBackupManifestEntries)
+	}
 	if !filepath.IsAbs(home) || !filepath.IsAbs(backupDir) {
 		return 0, fmt.Errorf("home and backup directory must be absolute")
 	}
@@ -332,11 +365,16 @@ func Create(home, backupDir string, files []string) (int, error) {
 
 	var manifest []string
 	count := 0
+	var payloadBytes int64
 	for _, candidate := range candidates {
 		rel := candidate.rel
 		stored := candidate.stored
 
-		data, revision, _, err := safefile.ObserveFileWithin(home, rel)
+		limit, limitErr := boundedBackupFileLimit(payloadBytes)
+		if limitErr != nil {
+			return failPrepared(count, limitErr)
+		}
+		data, revision, _, err := safefile.ObserveFileWithinLimit(home, rel, limit)
 		if err != nil {
 			return failPrepared(count, fmt.Errorf("observe backup candidate %s: %w", rel, err))
 		}
@@ -353,6 +391,7 @@ func Create(home, backupDir string, files []string) (int, error) {
 		// Record the original path and mode so restore can reconstruct both
 		// exactly (the underscore encoding is lossy).
 		manifest = append(manifest, ManifestLine(rel, revision.Permissions()))
+		payloadBytes += int64(len(data))
 		count++
 	}
 
@@ -360,6 +399,13 @@ func Create(home, backupDir string, files []string) (int, error) {
 		return failPrepared(0, fmt.Errorf("no files were backed up (none of %d candidate files were present)", len(files)))
 	}
 
+	manifestBytes, err := generatedManifestSize(manifest, len(manifestV2Header)+len(flatManifestRecords))
+	if err != nil {
+		return failPrepared(count, err)
+	}
+	if manifestBytes > maxBackupTotalBytes-payloadBytes {
+		return failPrepared(count, fmt.Errorf("backup payload exceeds %d total bytes", maxBackupTotalBytes))
+	}
 	data := []byte(manifestV2Header + flatManifestRecords + strings.Join(manifest, "\n") + "\n")
 	if err := location.writeFile(ManifestName, data, 0o600); err != nil {
 		return failPrepared(count, fmt.Errorf("write backup manifest: %w", err))
@@ -591,7 +637,7 @@ func (location backupLocation) finalSnapshot() (*safefile.DirectorySnapshot, err
 	if _, err := location.authority(checkRel); err != nil {
 		return nil, err
 	}
-	final, err := safefile.SnapshotDirectoryWithin(location.anchor, location.rel)
+	final, err := safefile.SnapshotDirectoryWithinBudget(location.anchor, location.rel, backupSnapshotBudget)
 	if err != nil {
 		return nil, err
 	}
@@ -664,7 +710,11 @@ func (location backupLocation) capturePlanFile(rel string, target Target) (planS
 	if err != nil {
 		return planSource{}, err
 	}
-	_, revision, err := safefile.ReadWithinAuthorized(location.anchor, fullRel, parents)
+	limit := maxBackupFileBytes
+	if rel == ManifestName {
+		limit = maxBackupManifestBytes
+	}
+	_, revision, err := safefile.ReadWithinAuthorizedLimit(location.anchor, fullRel, parents, limit)
 	if err != nil {
 		return planSource{}, err
 	}
@@ -677,7 +727,7 @@ func (location backupLocation) capturePlanDirectory(rel string, target Target) (
 	if err != nil {
 		return planSource{}, false, err
 	}
-	snapshot, err := safefile.SnapshotDirectoryWithin(location.anchor, fullRel)
+	snapshot, err := safefile.SnapshotDirectoryWithinBudget(location.anchor, fullRel, backupSnapshotBudget)
 	if errors.Is(err, os.ErrNotExist) {
 		return planSource{target: target, parents: parents}, false, nil
 	}
@@ -703,7 +753,7 @@ func (location backupLocation) writeFile(rel string, data []byte, mode os.FileMo
 	if err != nil {
 		return err
 	}
-	_, revision, err := safefile.ReadWithinAuthorized(location.anchor, fullRel, parents)
+	_, revision, err := safefile.ReadWithinAuthorizedLimit(location.anchor, fullRel, parents, 0)
 	if err != nil {
 		return err
 	}
@@ -723,7 +773,7 @@ func (location backupLocation) writeDirectory(rel string, snapshot *safefile.Dir
 	if err != nil {
 		return err
 	}
-	existing, err := safefile.SnapshotDirectoryWithin(location.anchor, fullRel)
+	existing, err := safefile.SnapshotDirectoryWithinBudget(location.anchor, fullRel, backupSnapshotBudget)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

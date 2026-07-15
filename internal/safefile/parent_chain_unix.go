@@ -276,11 +276,30 @@ func CaptureParentChainWithin(root, rel string) (*ParentChain, error) {
 // parent-chain observation. A namespace change across the descriptor-stable
 // leaf read is rejected.
 func ObserveFileWithin(root, rel string) ([]byte, Revision, *ParentChain, error) {
+	return observeFileWithin(root, rel, nil)
+}
+
+// ObserveFileWithinLimit is ObserveFileWithin with an explicit allocation and
+// byte limit for the leaf read.
+func ObserveFileWithinLimit(root, rel string, limit int64) ([]byte, Revision, *ParentChain, error) {
+	if limit < 0 {
+		return nil, Revision{}, nil, fmt.Errorf("%w: negative limit %d", ErrSizeLimit, limit)
+	}
+	return observeFileWithin(root, rel, &limit)
+}
+
+func observeFileWithin(root, rel string, limit *int64) ([]byte, Revision, *ParentChain, error) {
 	before, err := CaptureParentChainWithin(root, rel)
 	if err != nil {
 		return nil, Revision{}, nil, err
 	}
-	data, revision, err := ReadWithin(root, rel)
+	var data []byte
+	var revision Revision
+	if limit == nil {
+		data, revision, err = ReadWithin(root, rel)
+	} else {
+		data, revision, err = ReadWithinLimit(root, rel, *limit)
+	}
 	if err != nil {
 		return nil, Revision{}, nil, err
 	}
@@ -297,11 +316,27 @@ func ObserveFileWithin(root, rel string) ([]byte, Revision, *ParentChain, error)
 // ObserveDirectoryWithin pairs a recursive directory snapshot (or an absent
 // result) with a stable exact parent-chain observation.
 func ObserveDirectoryWithin(root, rel string) (*DirectorySnapshot, *ParentChain, error) {
+	return observeDirectoryWithin(root, rel, nil)
+}
+
+// ObserveDirectoryWithinBudget is ObserveDirectoryWithin with explicit
+// recursive snapshot limits.
+func ObserveDirectoryWithinBudget(root, rel string, budget SnapshotBudget) (*DirectorySnapshot, *ParentChain, error) {
+	return observeDirectoryWithin(root, rel, &budget)
+}
+
+func observeDirectoryWithin(root, rel string, budget *SnapshotBudget) (*DirectorySnapshot, *ParentChain, error) {
 	before, err := CaptureParentChainWithin(root, rel)
 	if err != nil {
 		return nil, nil, err
 	}
-	snapshot, snapshotErr := SnapshotDirectoryWithin(root, rel)
+	var snapshot *DirectorySnapshot
+	var snapshotErr error
+	if budget == nil {
+		snapshot, snapshotErr = SnapshotDirectoryWithin(root, rel)
+	} else {
+		snapshot, snapshotErr = SnapshotDirectoryWithinBudget(root, rel, *budget)
+	}
 	if snapshotErr != nil && !errors.Is(snapshotErr, os.ErrNotExist) {
 		return nil, nil, snapshotErr
 	}
