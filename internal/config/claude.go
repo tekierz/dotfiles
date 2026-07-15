@@ -15,6 +15,16 @@ import (
 
 var claudeConfigSaveMu sync.Mutex
 
+const (
+	context7MCPPackage           = "@upstash/context7-mcp@3.2.3"
+	taskMasterMCPPackage         = "task-master-ai@0.43.1"
+	githubMCPPackage             = "@modelcontextprotocol/server-github@2025.4.8"
+	supabaseMCPPackage           = "@supabase/mcp-server-supabase@0.8.3"
+	convexMCPPackage             = "convex@1.42.2"
+	puppeteerMCPPackage          = "@modelcontextprotocol/server-puppeteer@2025.5.12"
+	sequentialThinkingMCPPackage = "@modelcontextprotocol/server-sequential-thinking@2026.7.4"
+)
+
 // claudeConfigBeforeCommitHook is package-private test instrumentation for a
 // non-cooperating writer that replaces ~/.claude.json after the merge read.
 var claudeConfigBeforeCommitHook func(path string) error
@@ -40,37 +50,37 @@ func AllMCPServers() map[string]MCPServer {
 		"context7": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@upstash/context7-mcp"},
+			Args:    []string{"-y", context7MCPPackage},
 		},
 		"task-master": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "task-master-ai"},
+			Args:    []string{"-y", taskMasterMCPPackage},
 		},
 		"github": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@modelcontextprotocol/server-github"},
+			Args:    []string{"-y", githubMCPPackage},
 		},
 		"supabase": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@supabase/mcp-server-supabase"},
+			Args:    []string{"-y", supabaseMCPPackage},
 		},
 		"convex": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "convex@latest", "mcp", "start"},
+			Args:    []string{"-y", convexMCPPackage, "mcp", "start"},
 		},
 		"puppeteer": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@modelcontextprotocol/server-puppeteer"},
+			Args:    []string{"-y", puppeteerMCPPackage},
 		},
 		"sequential-thinking": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@modelcontextprotocol/server-sequential-thinking"},
+			Args:    []string{"-y", sequentialThinkingMCPPackage},
 		},
 	}
 }

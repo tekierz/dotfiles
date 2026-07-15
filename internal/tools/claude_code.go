@@ -56,9 +56,7 @@ func NewClaudeCodeTool() *ClaudeCodeTool {
 				pkg.PlatformArch:   {"nodejs", "npm"},
 				pkg.PlatformDebian: {"nodejs", "npm"},
 			},
-			configPaths: []string{
-				filepath.Join(home, ".claude", "settings.json"),
-			},
+			configPaths: []string{filepath.Join(home, ".claude.json")},
 			// UI metadata
 			uiGroup:        UIGroupCLITools,
 			configScreen:   32, // ScreenConfigClaudeCode - has dedicated MCP config screen
