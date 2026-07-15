@@ -110,7 +110,12 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 			authority: &catalogAuthority{anchor: anchor, rel: rel, snapshot: snapshot, parents: parents, restore: restore},
 		})
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Timestamp.After(result[j].Timestamp) })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Timestamp.Equal(result[j].Timestamp) {
+			return result[i].Name > result[j].Name
+		}
+		return result[i].Timestamp.After(result[j].Timestamp)
+	})
 	return result, nil
 }
 
