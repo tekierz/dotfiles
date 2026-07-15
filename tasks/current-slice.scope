@@ -1,23 +1,24 @@
-# Add session-bound exact recursive directory restore and removal leaf mutations.
-# Dependency: closed BA1SF2F file mutations at 6c58f00.
-# Authority: immutable recursive subtree extraction and exact recursive DirectorySnapshot CAS only.
-# Invariants: invalid source and expected authority fail before parent creation; returned installed
-# evidence is exact; rejected drift preserves identity/tree state; committed errors never roll back
-# installed state or delete recovery evidence; removal never creates parents.
-# Reuse: BA1SF1 parent binding and BA1SF2F rollbackRestoreFailure only.
+# Add exact session-bound immutable file restore with an independently accepted permission mode.
+# Dependency: closed BA1SF2D at 75efdc0 (transitively BA1SF2F, BA1SF1, and BA1A).
+# Authority: immutable DirectorySnapshot file bytes, exact destination Revision and ParentChain,
+# one RestoreSession root, and a structurally valid ordinary permission mode.
+# Invariants: source/mode/revision validation precedes parent creation; requested mode is applied
+# to the staged inode before atomic rename; no chmod-after-commit path exists; returned evidence
+# exactly matches committed identity, bytes, digest, and requested mode.
+# Reuse: BA1SF2F private file leaf kernel and rollbackRestoreFailure only.
 # Red fixtures must be behavior-proven in an isolated tree before their test-only commit.
-# Deferred: BA1B2 immutable catalog kernel.
+# Deferred: BA1B2 immutable catalog acceptance and BA1C catalog execution.
 version=2
-slice_id=ba1sf2d-restore-directory-mutations
-state=committed
+slice_id=ba1sf2m
+state=planned
 max_total_files=4
 max_production_files=2
-max_changed_lines=780
+max_changed_lines=420
 ignore=tasks/pi-agent-integration-spec.md
-allow=internal/safefile/restore_session_directory_unix.go
+allow=internal/safefile/restore_session_file_unix.go
 allow=internal/safefile/restore_session_unsupported.go
-allow=internal/safefile/restore_session_directory_unix_test.go
+allow=internal/safefile/restore_session_file_mode_unix_test.go
 allow=internal/safefile/unsupported_test.go
 allow=tasks/slice-commit-ledger.tsv
-test=internal/safefile/restore_session_directory_unix_test.go
+test=internal/safefile/restore_session_file_mode_unix_test.go
 test=internal/safefile/unsupported_test.go
