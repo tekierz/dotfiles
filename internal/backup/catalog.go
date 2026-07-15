@@ -1,6 +1,8 @@
 package backup
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -28,6 +30,23 @@ type catalogAuthority struct {
 	rel      string
 	snapshot *safefile.DirectorySnapshot
 	parents  *safefile.ParentChain
+	restore  *catalogRestoreSnapshot
+}
+
+// catalogRestoreSnapshot is the parse-only catalog authority consumed by the
+// later restore join. Its source and items are private so mutable CatalogEntry
+// display fields cannot redirect a retained source or target.
+type catalogRestoreSnapshot struct {
+	source *safefile.DirectorySnapshot
+	items  []catalogRestoreItem
+}
+
+type catalogRestoreItem struct {
+	source      string
+	target      string
+	kind        TargetKind
+	existed     bool
+	desiredMode os.FileMode
 }
 
 // ListCatalog returns only exact real directories containing a readable valid
@@ -64,16 +83,11 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 		if observeErr != nil || snapshot == nil {
 			continue
 		}
-		manifestRel := filepath.ToSlash(filepath.Join(filepath.FromSlash(rel), ManifestName))
-		manifestParents, authorityErr := safefile.ExtendParentChainWithinDirectory(anchor, manifestRel, rel, parents, snapshot)
-		if authorityErr != nil {
+		manifest, _, readErr := safefile.ReadDirectorySnapshotFile(snapshot, ManifestName)
+		if readErr != nil {
 			continue
 		}
-		manifest, revision, readErr := safefile.ReadWithinAuthorized(anchor, manifestRel, manifestParents)
-		if readErr != nil || !revision.Exists() {
-			continue
-		}
-		manifestEntries, parseErr := parseManifestData(manifest, home)
+		restore, parseErr := parseCatalogRestoreSnapshot(manifest, home, snapshot)
 		if parseErr != nil {
 			continue
 		}
@@ -91,16 +105,127 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 		}
 		result = append(result, CatalogEntry{
 			Name: name, Path: filepath.Join(backupsDir, name), Timestamp: timestamp,
-			FileCount: len(manifestEntries), Size: size,
-			authority: &catalogAuthority{anchor: anchor, rel: rel, snapshot: snapshot, parents: parents},
+			FileCount: len(restore.items), Size: size,
+			authority: &catalogAuthority{anchor: anchor, rel: rel, snapshot: snapshot, parents: parents, restore: restore},
 		})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Timestamp.After(result[j].Timestamp) })
 	return result, nil
 }
 
+func parseCatalogRestoreSnapshot(data []byte, home string, source *safefile.DirectorySnapshot) (*catalogRestoreSnapshot, error) {
+	if source == nil || source.Digest() == ([32]byte{}) {
+		return nil, fmt.Errorf("catalog restore source authority is incomplete")
+	}
+	items := make([]catalogRestoreItem, 0)
+	seen := make(map[string]struct{})
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		item, err := parseCatalogRestoreItem(line, home)
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := seen[item.target]; duplicate {
+			return nil, fmt.Errorf("catalog restore manifest repeats target %q", item.target)
+		}
+		seen[item.target] = struct{}{}
+		items = append(items, item)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return &catalogRestoreSnapshot{source: source, items: items}, nil
+}
+
+func parseCatalogRestoreItem(line, home string) (catalogRestoreItem, error) {
+	if strings.Contains(line, "|") {
+		original, backupPath, existed, itemType, mode, err := parseBashManifestFields(line)
+		if err != nil {
+			return catalogRestoreItem{}, err
+		}
+		if err := validateRawCatalogRestoreTarget(original, true); err != nil {
+			return catalogRestoreItem{}, err
+		}
+		target, ok := relPathFromAbsHome(home, original)
+		if !ok {
+			return catalogRestoreItem{}, fmt.Errorf("catalog restore target %q is outside home", original)
+		}
+		target, err = normalizeCatalogRestoreTarget(home, target)
+		if err != nil {
+			return catalogRestoreItem{}, err
+		}
+		kind := TargetFile
+		if itemType == "directory" {
+			kind = TargetDirectory
+		}
+		item := catalogRestoreItem{target: target, kind: kind, existed: existed == "yes", desiredMode: mode}
+		if item.existed {
+			if backupPath == "" {
+				return catalogRestoreItem{}, fmt.Errorf("catalog restore source is missing for %q", target)
+			}
+			item.source = target
+		} else if backupPath != "" {
+			return catalogRestoreItem{}, fmt.Errorf("absent catalog restore target %q has a source", target)
+		}
+		return item, nil
+	}
+
+	target := line
+	mode := defaultFileMode
+	if tab := strings.LastIndexByte(line, '\t'); tab >= 0 {
+		target = line[:tab]
+		parsed, err := parseOctalMode(line[tab+1:])
+		if err != nil {
+			return catalogRestoreItem{}, fmt.Errorf("invalid explicit mode for %q: %w", target, err)
+		}
+		mode = parsed
+	}
+	normalized, err := normalizeCatalogRestoreTarget(home, target)
+	if err != nil {
+		return catalogRestoreItem{}, err
+	}
+	return catalogRestoreItem{
+		source: EncodeName(normalized), target: normalized, kind: TargetFile,
+		existed: true, desiredMode: mode,
+	}, nil
+}
+
+func normalizeCatalogRestoreTarget(home, target string) (string, error) {
+	if err := validateRawCatalogRestoreTarget(target, false); err != nil {
+		return "", err
+	}
+	normalized := filepath.ToSlash(filepath.Clean(filepath.FromSlash(target)))
+	if !IsRestorePathSafe(home, filepath.FromSlash(normalized)) {
+		return "", fmt.Errorf("invalid catalog restore target %q", target)
+	}
+	return normalized, nil
+}
+
+func validateRawCatalogRestoreTarget(target string, absolute bool) error {
+	if target == "" || filepath.IsAbs(target) != absolute || strings.ContainsAny(target, "|\r\n\t\x00") {
+		return fmt.Errorf("invalid catalog restore target %q", target)
+	}
+	slashTarget := filepath.ToSlash(target)
+	components := strings.Split(slashTarget, "/")
+	for index, component := range components {
+		if component == "." || component == ".." || component == "" && !(absolute && index == 0) {
+			return fmt.Errorf("catalog restore target %q is not canonical", target)
+		}
+	}
+	if filepath.ToSlash(filepath.Clean(filepath.FromSlash(slashTarget))) != slashTarget {
+		return fmt.Errorf("catalog restore target %q is not canonical", target)
+	}
+	return nil
+}
+
 func ValidateCatalogEntry(entry CatalogEntry) error {
-	if entry.authority == nil || entry.authority.snapshot == nil || !entry.authority.parents.Tracked() {
+	if entry.authority == nil || entry.authority.snapshot == nil || !entry.authority.parents.Tracked() ||
+		entry.authority.restore == nil || entry.authority.restore.source != entry.authority.snapshot || entry.authority.restore.items == nil {
 		return fmt.Errorf("%w: backup catalog authority is incomplete", safefile.ErrDirectoryChanged)
 	}
 	current, err := safefile.SnapshotDirectoryWithin(entry.authority.anchor, entry.authority.rel)
