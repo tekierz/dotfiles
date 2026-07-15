@@ -421,9 +421,13 @@ func setupNeovimPresetTracked(cfg NeovimConfig, theme, nvimDir string) (result *
 }
 
 func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string, accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, states ...*operation.StateAuthority) (result *safefile.DirectorySnapshot, returnErr error) {
-	repoURL, ok := neovimConfigRepos[cfg.ConfigPreset]
+	_, ok := neovimConfigRepos[cfg.ConfigPreset]
 	if !ok {
 		return nil, fmt.Errorf("refusing unknown Neovim preset %q", cfg.ConfigPreset)
+	}
+	artifact, err := NeovimRemoteArtifact(cfg.ConfigPreset)
+	if err != nil {
+		return nil, fmt.Errorf("resolve pinned Neovim preset: %w", err)
 	}
 
 	home, err := os.UserHomeDir()
@@ -471,16 +475,13 @@ func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string,
 		return nil, fmt.Errorf("open exact Neovim staging directory: %w", err)
 	}
 	defer func() { returnErr = errors.Join(returnErr, stagingFD.Close()) }()
-	// os/exec has no portable fchdir hook (and macOS cannot cd through a
-	// directory /dev/fd entry), so git receives the randomized private staging
-	// pathname as its cwd. The exact staging descriptor is held across the
-	// command and SnapshotStateStagingDirectory revalidates its original inode
-	// before any bytes can enter the live product namespace.
-	// #nosec G204 -- repoURL is selected from the immutable allowlist above.
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", repoURL, ".")
-	cmd.Dir = tempDir
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to clone %s config: %w: %s", cfg.ConfigPreset, err, strings.TrimSpace(string(output)))
+	// The shared artifact loader fetches only the reviewed full commit and
+	// verifies the staged checkout before metadata removal or live-path commit.
+	commandFactory := func(ctx context.Context, name string, arguments ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, name, arguments...)
+	}
+	if err := clonePinnedGitArtifact(ctx, tempDir, artifact, commandFactory); err != nil {
+		return nil, fmt.Errorf("stage pinned %s config: %w", cfg.ConfigPreset, err)
 	}
 
 	// Remove clone metadata through the same descriptor-anchored directory API

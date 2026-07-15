@@ -172,6 +172,15 @@ func (s *fileTreeScreen) View(width, height int) string {
 				}
 				lines = append(lines, modStyle.Render("        Risk: "+recipe.Risk))
 			}
+			if action.RemoteArtifact != nil {
+				artifact := action.RemoteArtifact.Review()
+				lines = append(lines,
+					pkgStyle.Render(fmt.Sprintf("      artifact: %s · %s", artifact.Source, artifact.URL)),
+					mutedStyle.Render(fmt.Sprintf("        version %s · ref %s", artifact.Version, artifact.ImmutableRef)),
+					mutedStyle.Render(fmt.Sprintf("        verify %s:%s · destination %s", artifact.Verification, artifact.Digest, artifact.Destination)),
+					modStyle.Render("        Risk: "+string(artifact.Risk)),
+				)
+			}
 			if action.Reason != "" {
 				lines = append(lines, blockedStyle.Render("      "+action.Reason))
 			}
