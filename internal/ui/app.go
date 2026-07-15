@@ -286,20 +286,21 @@ type App struct {
 	manageSaveWarning     string
 
 	// Installation state
-	installStep         int
-	installPlannedSteps int // total step-increments the worker will emit (set before worker starts)
-	installOutput       []string
-	installRunning      bool
-	installComplete     bool
-	installOutcome      installationOutcome
-	installSummaryFacts installationSummaryFacts
-	pendingInstallPlan  *installPlan
-	installReviewTools  []string // explicit package-only intent retained across a required fresh phase review
-	installPlanError    error
-	lastOperationID     string
-	installPlanScroll   int
-	installEvents       chan installEventMsg // streamed progress from the install worker goroutine
-	updateStream        chan updateStreamMsg // streamed progress from the update worker goroutine
+	installStep          int
+	installPlannedSteps  int // total step-increments the worker will emit (set before worker starts)
+	installOutput        []string
+	installRunning       bool
+	installComplete      bool
+	installOutcome       installationOutcome
+	installSummaryFacts  installationSummaryFacts
+	pendingInstallPlan   *installPlan
+	installReviewTools   []string // explicit package-only intent retained across a required fresh phase review
+	deepDiveContinuation *deepDiveContinuation
+	installPlanError     error
+	lastOperationID      string
+	installPlanScroll    int
+	installEvents        chan installEventMsg // streamed progress from the install worker goroutine
+	updateStream         chan updateStreamMsg // streamed progress from the update worker goroutine
 	// streamCancel cancels the context driving the currently-running install or
 	// update worker (and the underlying StreamingCmd). It is retained on the App
 	// so navigate-away / Ctrl+C can tear the subprocess + worker goroutines down

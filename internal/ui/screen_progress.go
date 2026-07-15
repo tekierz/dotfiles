@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -90,6 +91,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// Cancel the running install worker + (sudo) package-manager subprocess
 			// before quitting so they are not orphaned when the TUI exits (C15).
 			a.teardownStream()
+			a.deepDiveContinuation = nil
 			return s, tea.Quit
 		case "enter":
 			// Only advance once the installation is complete.
@@ -101,6 +103,11 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// Allow backing out only before the run starts (mirrors the legacy
 			// "[ESC] Back" hint, which is only shown when not running/complete).
 			if !a.installRunning && !a.installComplete {
+				if a.deepDiveContinuation != nil {
+					a.deepDiveContinuation = nil
+					a.invalidatePendingInstallPlan()
+					return s, NavigateTo(ScreenNavPicker)
+				}
 				return s, NavigateTo(ScreenFileTree)
 			}
 			return s, nil
@@ -128,6 +135,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.stageInstallationAttempt(a.pendingInstallPlan)
 			a.lastError = msg.err
 			a.finishInstallationAttempt(installationOutcomeFailed)
+			a.deepDiveContinuation = nil
 			return s, a.showError(msg.err)
 		}
 		return s, a.startInstallation()
@@ -164,10 +172,43 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 	case installDoneMsg:
 		outcome := installationOutcomeSucceeded
+		continuation := a.deepDiveContinuation
+		configurationOnly := a.pendingInstallPlan != nil && a.pendingInstallPlan.configurationOnly
 		if msg.err == nil && msg.result.Status == operation.StatusPhaseComplete && msg.result.Next == installapply.NextReplanRequired {
 			outcome = installationOutcomeReplanRequired
 		} else if msg.err != nil {
 			outcome = installationOutcomeFailed
+		}
+		if msg.err == nil && continuation != nil {
+			switch {
+			case continuation.stage == deepDiveContinuationPackageReview &&
+				outcome == installationOutcomeReplanRequired &&
+				msg.result.PhaseKind == operation.InstallPhasePrerequisite &&
+				msg.result.PhaseIndex == 1 &&
+				len(msg.result.RemainingTools()) != 0 &&
+				slices.Equal(msg.result.RequestedTools(), continuation.requestedTools):
+				// Phase 1 completed. Retain only intent and require a fresh phase 2 review.
+			case continuation.stage == deepDiveContinuationPackageReview &&
+				msg.result.Status == operation.StatusSucceeded &&
+				msg.result.Next == installapply.NextComplete &&
+				msg.result.PhaseKind == operation.InstallPhaseNPM &&
+				msg.result.PhaseIndex == 2 &&
+				len(msg.result.RemainingTools()) == 0 &&
+				slices.Equal(msg.result.RequestedTools(), continuation.requestedTools):
+				continuation.stage = deepDiveContinuationConfigReview
+				outcome = installationOutcomeConfigurationReviewRequired
+			case continuation.stage == deepDiveContinuationConfigReview && configurationOnly:
+				// The existing reviewed config worker completed the final operation.
+				outcome = installationOutcomeSucceeded
+				a.deepDiveContinuation = nil
+			default:
+				msg.err = fmt.Errorf("Deep Dive continuation result did not match the reviewed phase")
+				outcome = installationOutcomeFailed
+				a.deepDiveContinuation = nil
+			}
+		}
+		if msg.err != nil {
+			a.deepDiveContinuation = nil
 		}
 		a.finishInstallationAttemptWithResult(outcome, msg.result)
 		// The install worker has finished; drop the retained cancel handle so a
@@ -202,7 +243,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		// the next navigation triggers a fresh load (C10).
 		tools.GetRegistry().InvalidateCache()
 		a.manageInstalledReady = false
-		if outcome == installationOutcomeReplanRequired {
+		if outcome == installationOutcomeReplanRequired || outcome == installationOutcomeConfigurationReviewRequired {
 			a.invalidatePendingInstallPlan()
 			return s, a.startInstallCacheLoad()
 		}
@@ -241,6 +282,8 @@ func (s *progressScreen) View(width, height int) string {
 				label = "Complete"
 			} else if a.installOutcome == installationOutcomeReplanRequired && a.installSummaryFacts.outcome == installationOutcomeReplanRequired {
 				label = "Prerequisites complete — replan required"
+			} else if a.installOutcome == installationOutcomeConfigurationReviewRequired && a.installSummaryFacts.outcome == installationOutcomeConfigurationReviewRequired {
+				label = "Tools installed — configuration review required"
 			}
 		}
 		return PlaceWithBackground(width, height, truncateVisible(label, width))
@@ -251,10 +294,14 @@ func (s *progressScreen) View(width, height int) string {
 		a.installSummaryFacts.outcome == installationOutcomeSucceeded
 	replanRequired := a.installComplete && a.installOutcome == installationOutcomeReplanRequired &&
 		a.installSummaryFacts.outcome == installationOutcomeReplanRequired
+	configurationReviewRequired := a.installComplete && a.installOutcome == installationOutcomeConfigurationReviewRequired &&
+		a.installSummaryFacts.outcome == installationOutcomeConfigurationReviewRequired
 	if succeeded {
 		title = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true).Render("✓ Installation Complete!")
 	} else if replanRequired {
 		title = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("✓ Prerequisites Complete — Fresh Review Required")
+	} else if configurationReviewRequired {
+		title = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("✓ Tools Installed — Configuration Review Required")
 	} else if a.installComplete {
 		title = lipgloss.NewStyle().Foreground(ColorYellow).Bold(true).Render("! Installation Incomplete")
 	}
@@ -303,7 +350,7 @@ func (s *progressScreen) View(width, height int) string {
 	// flipping the whole list to complete while the install is still running.
 	failed := a.installComplete && a.installOutcome == installationOutcomeFailed
 	currentPhase := 0
-	if succeeded || replanRequired {
+	if succeeded || replanRequired || configurationReviewRequired {
 		currentPhase = len(displaySteps)
 	} else if a.installStep > 0 {
 		// Scale the raw step counter proportionally onto the display list.
@@ -323,7 +370,7 @@ func (s *progressScreen) View(width, height int) string {
 		phaseCount = len(displaySteps)
 	}
 	phaseStart := currentPhase - phaseCount + 1
-	if succeeded || replanRequired {
+	if succeeded || replanRequired || configurationReviewRequired {
 		phaseStart = len(displaySteps) - phaseCount
 	}
 	phaseStart = clampInt(phaseStart, 0, maxInt(0, len(displaySteps)-phaseCount))
@@ -342,7 +389,7 @@ func (s *progressScreen) View(width, height int) string {
 		case failed && i == currentPhase:
 			status = "✗"
 			style = lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
-		case (succeeded || replanRequired) && i < currentPhase:
+		case (succeeded || replanRequired || configurationReviewRequired) && i < currentPhase:
 			status = "✓"
 			style = lipgloss.NewStyle().Foreground(ColorGreen)
 		case i < currentPhase:
@@ -362,7 +409,7 @@ func (s *progressScreen) View(width, height int) string {
 	// Progress fraction derived from the ACTUAL planned phase count, so the bar
 	// reflects real completion rather than the fixed display list length.
 	progressPercent := float64(a.installStep) / float64(totalSteps)
-	if succeeded || replanRequired {
+	if succeeded || replanRequired || configurationReviewRequired {
 		progressPercent = 1.0
 	} else if progressPercent >= 1.0 {
 		// Only a sealed successful attempt may render a full bar. A failed,

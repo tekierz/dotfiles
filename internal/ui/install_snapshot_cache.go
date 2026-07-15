@@ -133,6 +133,10 @@ func (a *App) applyInstallationSnapshotDone(message installationSnapshotDoneMsg)
 	a.installationSnapshotTerminal = true
 	valid := message.Err == nil && message.Snapshot.Digest() != "" && message.Snapshot.Generation() == message.Generation && message.Snapshot.Platform() == string(message.Platform) && message.Snapshot.Manager() == message.Manager
 	if !valid {
+		// A phased Deep Dive may continue only from a fresh, typed health
+		// observation. Losing that evidence discards retained intent rather than
+		// leaving a continuation that could later inherit unrelated authority.
+		a.deepDiveContinuation = nil
 		a.installationSnapshotLoading = false
 		a.installationSnapshotReady = false
 		a.installationSnapshotStale = a.installationSnapshot.Digest() != ""

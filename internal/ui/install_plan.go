@@ -35,14 +35,15 @@ const gitManagedConfigRelForPlan = ".config/dotfiles/git/config"
 // execution, and summary. DeepDiveConfig is already deeply cloned before it is
 // stored here; all slice/map accessors return copies.
 type installPlan struct {
-	document        operation.Plan
-	installHash     string
-	installSnapshot installationSnapshotAuthority
-	installTools    map[string]installToolAuthority
-	installRecipes  map[string]operation.InstallRecipe
-	installPhase    operation.InstallPhase
-	hasInstallPhase bool
-	npmIdentity     pkg.NPMExecutionIdentity
+	document          operation.Plan
+	installHash       string
+	installSnapshot   installationSnapshotAuthority
+	installTools      map[string]installToolAuthority
+	installRecipes    map[string]operation.InstallRecipe
+	installPhase      operation.InstallPhase
+	hasInstallPhase   bool
+	npmIdentity       pkg.NPMExecutionIdentity
+	configurationOnly bool
 	// selectedTools is reserved for the explicitly unreviewed legacy test
 	// harness. Reviewed production plans leave it nil and derive installs from
 	// the hash-bound operation actions.
@@ -61,6 +62,46 @@ type installPlan struct {
 	// planning. Execution must not rediscover a different higher-precedence file
 	// after preview/revalidation.
 	ghosttyConfigTarget string
+}
+
+type deepDiveContinuationStage uint8
+
+const (
+	deepDiveContinuationPackageReview deepDiveContinuationStage = iota + 1
+	deepDiveContinuationConfigReview
+)
+
+// deepDiveContinuation preserves desired user choices only. It deliberately
+// carries no plan, executable identity, filesystem target, revision, state
+// authority, or hash across independently reviewed operations.
+type deepDiveContinuation struct {
+	stage                     deepDiveContinuationStage
+	requestedTools            []string
+	config                    DeepDiveConfig
+	theme                     string
+	navStyle                  string
+	animations                bool
+	allowBtopThemeReplacement bool
+}
+
+func newDeepDiveContinuation(a *App, requested []string) *deepDiveContinuation {
+	if a == nil || a.deepDiveConfig == nil || len(requested) == 0 {
+		return nil
+	}
+	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
+	allowBtopThemeReplacement := a.nativeConfigState.BtopThemeExplicit || cfg.BtopTheme != manageConfigToDeepDive(&a.manageConfigBaseline).BtopTheme || (cfg.BtopTheme == "auto" && a.theme != a.manageConfigBaselineTheme)
+	return &deepDiveContinuation{
+		stage: deepDiveContinuationPackageReview, requestedTools: slices.Clone(requested), config: cfg,
+		theme: a.theme, navStyle: a.navStyle, animations: a.animationsEnabled,
+		allowBtopThemeReplacement: allowBtopThemeReplacement,
+	}
+}
+
+func (continuation *deepDiveContinuation) requestedToolIDs() []string {
+	if continuation == nil {
+		return nil
+	}
+	return slices.Clone(continuation.requestedTools)
 }
 
 type installationSnapshotAuthority struct {
@@ -442,12 +483,104 @@ func (a *App) refreshPendingInstallPlan() {
 	var err error
 	if a.installReviewTools != nil {
 		plan, err = buildInstallPlanForTools(a, runtime, time.Now(), slices.Clone(a.installReviewTools))
+	} else if a.deepDiveContinuation != nil {
+		switch a.deepDiveContinuation.stage {
+		case deepDiveContinuationPackageReview:
+			plan, err = buildPackageOnlyInstallPlan(a, runtime, time.Now(), a.installationSnapshot, a.deepDiveContinuation.requestedToolIDs())
+		case deepDiveContinuationConfigReview:
+			plan, err = buildConfigContinuationPlan(a, runtime, time.Now(), a.deepDiveContinuation)
+		default:
+			err = fmt.Errorf("Deep Dive continuation is invalid")
+		}
 	} else {
-		plan, err = buildInstallPlan(a, runtime, time.Now())
+		requested, phased, intentErr := deepDivePhasedIntent(a, runtime)
+		if intentErr != nil {
+			err = intentErr
+		} else if phased {
+			a.deepDiveContinuation = newDeepDiveContinuation(a, requested)
+			if a.deepDiveContinuation == nil {
+				err = fmt.Errorf("Deep Dive continuation is unavailable")
+			} else {
+				plan, err = buildPackageOnlyInstallPlan(a, runtime, time.Now(), a.installationSnapshot, requested)
+			}
+		} else {
+			plan, err = buildInstallPlan(a, runtime, time.Now())
+		}
+	}
+	if err != nil && a.deepDiveContinuation != nil {
+		a.deepDiveContinuation = nil
 	}
 	a.pendingInstallPlan = plan
 	a.installPlanError = err
 	a.installPlanScroll = 0
+}
+
+func deepDivePhasedIntent(a *App, installRuntime toolInstallRuntime) ([]string, bool, error) {
+	if a == nil || a.deepDiveConfig == nil || !a.installationSnapshotPlanningReady() {
+		return nil, false, errors.New(installationSnapshotUnavailable)
+	}
+	snapshot := a.installationSnapshot
+	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
+	filterDeepDiveSelectionsForSnapshot(&cfg, snapshot)
+	requested := installPlanCandidateTools(cfg, snapshot, pkg.Platform(snapshot.Platform()), nil)
+	for _, id := range requested {
+		observation, observed := snapshot.Tool(id)
+		if !observed {
+			return nil, false, errors.New(installationSnapshotUnavailable)
+		}
+		if observation.Presence() != health.PresenceMissing && observation.Presence() != health.PresencePartial {
+			continue
+		}
+		if observation.Installability() != health.InstallabilitySupported {
+			continue
+		}
+		tool, found := installRuntime.lookupTool(id)
+		if !found {
+			return nil, false, errors.New(installationSnapshotUnavailable)
+		}
+		recipe, err := installRuntime.describeInstall(tool, tools.InstallEnvironment{Platform: pkg.Platform(snapshot.Platform()), Manager: snapshot.Manager()})
+		if err != nil {
+			return nil, false, errors.New(installationSnapshotUnavailable)
+		}
+		for _, step := range recipe.Steps {
+			if step.Kind == operation.InstallStepNPMGlobal {
+				return requested, true, nil
+			}
+		}
+	}
+	return requested, false, nil
+}
+
+func buildConfigContinuationPlan(a *App, installRuntime toolInstallRuntime, now time.Time, continuation *deepDiveContinuation) (*installPlan, error) {
+	if a == nil || continuation == nil || continuation.stage != deepDiveContinuationConfigReview || !a.installationSnapshotPlanningReady() {
+		return nil, errors.New(installationSnapshotUnavailable)
+	}
+	for _, id := range continuation.requestedTools {
+		observation, observed := a.installationSnapshot.Tool(id)
+		if !observed || observation.Presence() != health.PresencePresent {
+			return nil, fmt.Errorf("%s was not detected after the reviewed install phases", id)
+		}
+	}
+	planner := *a
+	cfg := snapshotDeepDiveConfig(&continuation.config)
+	planner.deepDiveConfig = &cfg
+	planner.theme, planner.navStyle, planner.animationsEnabled = continuation.theme, continuation.navStyle, continuation.animations
+	planner.nativeConfigState = observeNativeManageConfig(nil, inspectManagePreferencePresence(), continuation.theme)
+	planner.nativeConfigState.BtopThemeExplicit = continuation.allowBtopThemeReplacement
+	plan, err := buildInstallPlanForTools(&planner, installRuntime, now, nil)
+	if err != nil {
+		return nil, err
+	}
+	if plan == nil || len(plan.actions()) == 0 {
+		return nil, fmt.Errorf("fresh Deep Dive configuration plan is empty")
+	}
+	for _, action := range plan.actions() {
+		if action.Kind == operation.KindInstallTool {
+			return nil, fmt.Errorf("fresh Deep Dive configuration plan retained install authority")
+		}
+	}
+	plan.configurationOnly = true
+	return plan, nil
 }
 
 func (a *App) invalidatePendingInstallPlan() {
@@ -478,25 +611,6 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
 	filterDeepDiveSelectionsForSnapshot(&cfg, snapshot)
 	candidates := installPlanCandidateTools(cfg, snapshot, pkg.Platform(snapshot.Platform()), onlyTools)
-	for _, id := range candidates {
-		observation, observed := snapshot.Tool(id)
-		if !observed || (observation.Presence() != health.PresenceMissing && observation.Presence() != health.PresencePartial) || observation.Installability() != health.InstallabilitySupported {
-			continue
-		}
-		tool, found := installRuntime.lookupTool(id)
-		if !found {
-			continue
-		}
-		recipe, recipeErr := installRuntime.describeInstall(tool, tools.InstallEnvironment{Platform: pkg.Platform(snapshot.Platform()), Manager: snapshot.Manager()})
-		if recipeErr != nil {
-			continue
-		}
-		for _, step := range recipe.Steps {
-			if step.Kind == operation.InstallStepNPMGlobal {
-				return nil, fmt.Errorf("%s requires a separate phased install; install it from Manage, then return for configuration", tool.Name())
-			}
-		}
-	}
 	statePlan, err := operation.CaptureStatePlan()
 	if err != nil {
 		return nil, fmt.Errorf("capture private operation state before planning: %w", err)
