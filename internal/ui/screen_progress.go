@@ -6,6 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/installapply"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
@@ -68,7 +70,7 @@ func (s *progressScreen) Init() tea.Cmd {
 		return nil
 	}
 	a.stageInstallationAttempt(a.pendingInstallPlan)
-	if runner.NeedsSudo() && !runner.CheckSudoCached() {
+	if a.pendingInstallPlan != nil && a.pendingInstallPlan.needsSudo() && runner.NeedsSudo() && !runner.CheckSudoCached() {
 		// Prompt for sudo (exits the alt screen), then start the install.
 		return tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
 			return sudoCachedMsg{err: err}
@@ -111,7 +113,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			return s, nil
 		}
 		a.stageInstallationAttempt(a.pendingInstallPlan)
-		if runner.NeedsSudo() && !runner.CheckSudoCached() {
+		if a.pendingInstallPlan != nil && a.pendingInstallPlan.needsSudo() && runner.NeedsSudo() && !runner.CheckSudoCached() {
 			return s, func() tea.Msg { return sudoRequiredMsg{} }
 		}
 		return s, a.startInstallation()
@@ -155,17 +157,19 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			}
 			a.installEvents = nil
 			// Route into the done handler (mark complete / navigate / error).
-			return s.Update(installDoneMsg{err: msg.err, context: msg.context})
+			return s.Update(installDoneMsg{err: msg.err, context: msg.context, result: msg.result})
 		}
 		// Re-subscribe for the next event to keep the stream flowing.
 		return s, a.listenInstallEventsCmd()
 
 	case installDoneMsg:
 		outcome := installationOutcomeSucceeded
-		if msg.err != nil {
+		if msg.err == nil && msg.result.Status == operation.StatusPhaseComplete && msg.result.Next == installapply.NextReplanRequired {
+			outcome = installationOutcomeReplanRequired
+		} else if msg.err != nil {
 			outcome = installationOutcomeFailed
 		}
-		a.finishInstallationAttempt(outcome)
+		a.finishInstallationAttemptWithResult(outcome, msg.result)
 		// The install worker has finished; drop the retained cancel handle so a
 		// later teardown (Ctrl+C on the summary) is a harmless no-op.
 		a.streamCancel = nil
@@ -198,6 +202,11 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		// the next navigation triggers a fresh load (C10).
 		tools.GetRegistry().InvalidateCache()
 		a.manageInstalledReady = false
+		if outcome == installationOutcomeReplanRequired {
+			a.invalidatePendingInstallPlan()
+			return s, a.startInstallCacheLoad()
+		}
+		a.installReviewTools = nil
 		return s, nil
 	}
 	return s, nil
@@ -230,6 +239,8 @@ func (s *progressScreen) View(width, height int) string {
 			label = "Incomplete"
 			if a.installOutcome == installationOutcomeSucceeded && a.installSummaryFacts.outcome == installationOutcomeSucceeded {
 				label = "Complete"
+			} else if a.installOutcome == installationOutcomeReplanRequired && a.installSummaryFacts.outcome == installationOutcomeReplanRequired {
+				label = "Prerequisites complete — replan required"
 			}
 		}
 		return PlaceWithBackground(width, height, truncateVisible(label, width))
@@ -238,8 +249,12 @@ func (s *progressScreen) View(width, height int) string {
 	title := TitleStyle.Render("Installing...")
 	succeeded := a.installComplete && a.installOutcome == installationOutcomeSucceeded &&
 		a.installSummaryFacts.outcome == installationOutcomeSucceeded
+	replanRequired := a.installComplete && a.installOutcome == installationOutcomeReplanRequired &&
+		a.installSummaryFacts.outcome == installationOutcomeReplanRequired
 	if succeeded {
 		title = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true).Render("✓ Installation Complete!")
+	} else if replanRequired {
+		title = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("✓ Prerequisites Complete — Fresh Review Required")
 	} else if a.installComplete {
 		title = lipgloss.NewStyle().Foreground(ColorYellow).Bold(true).Render("! Installation Incomplete")
 	}
@@ -262,6 +277,18 @@ func (s *progressScreen) View(width, height int) string {
 		{"Configuring fzf"},
 		{"Configuring tools"},
 	}
+	phaseKind := a.installSummaryFacts.phaseKind
+	if phaseKind == "" && a.pendingInstallPlan != nil {
+		if phase, phased := a.pendingInstallPlan.phase(); phased {
+			phaseKind = phase.Kind()
+		}
+	}
+	switch phaseKind {
+	case operation.InstallPhasePrerequisite:
+		displaySteps = []struct{ name string }{{"Installing Node/npm prerequisites"}}
+	case operation.InstallPhaseNPM:
+		displaySteps = []struct{ name string }{{"Installing reviewed npm tools"}}
+	}
 
 	// Total planned steps, set by startInstallation when the install begins.
 	// Falls back to the display list length for the rare case where the screen
@@ -274,9 +301,9 @@ func (s *progressScreen) View(width, height int) string {
 	// Map a.installStep (cumulative step count, one per worker stepLine) onto
 	// displaySteps so the highlighted entry tracks rough progress without ever
 	// flipping the whole list to complete while the install is still running.
-	failed := a.installComplete && !succeeded
+	failed := a.installComplete && a.installOutcome == installationOutcomeFailed
 	currentPhase := 0
-	if succeeded {
+	if succeeded || replanRequired {
 		currentPhase = len(displaySteps)
 	} else if a.installStep > 0 {
 		// Scale the raw step counter proportionally onto the display list.
@@ -296,7 +323,7 @@ func (s *progressScreen) View(width, height int) string {
 		phaseCount = len(displaySteps)
 	}
 	phaseStart := currentPhase - phaseCount + 1
-	if succeeded {
+	if succeeded || replanRequired {
 		phaseStart = len(displaySteps) - phaseCount
 	}
 	phaseStart = clampInt(phaseStart, 0, maxInt(0, len(displaySteps)-phaseCount))
@@ -315,7 +342,7 @@ func (s *progressScreen) View(width, height int) string {
 		case failed && i == currentPhase:
 			status = "✗"
 			style = lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
-		case succeeded && i < currentPhase:
+		case (succeeded || replanRequired) && i < currentPhase:
 			status = "✓"
 			style = lipgloss.NewStyle().Foreground(ColorGreen)
 		case i < currentPhase:
@@ -335,7 +362,7 @@ func (s *progressScreen) View(width, height int) string {
 	// Progress fraction derived from the ACTUAL planned phase count, so the bar
 	// reflects real completion rather than the fixed display list length.
 	progressPercent := float64(a.installStep) / float64(totalSteps)
-	if succeeded {
+	if succeeded || replanRequired {
 		progressPercent = 1.0
 	} else if progressPercent >= 1.0 {
 		// Only a sealed successful attempt may render a full bar. A failed,

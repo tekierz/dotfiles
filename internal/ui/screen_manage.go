@@ -372,6 +372,7 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		a.pendingInstallPlan = plan
+		a.installReviewTools = []string{item.id}
 		a.installPlanError = nil
 		a.installPlanScroll = 0
 		a.manageStatus = strings.ToUpper(action[:1]) + action[1:] + " requested"

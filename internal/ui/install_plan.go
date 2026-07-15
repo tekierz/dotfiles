@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -39,6 +40,9 @@ type installPlan struct {
 	installSnapshot installationSnapshotAuthority
 	installTools    map[string]installToolAuthority
 	installRecipes  map[string]operation.InstallRecipe
+	installPhase    operation.InstallPhase
+	hasInstallPhase bool
+	npmIdentity     pkg.NPMExecutionIdentity
 	// selectedTools is reserved for the explicitly unreviewed legacy test
 	// harness. Reviewed production plans leave it nil and derive installs from
 	// the hash-bound operation actions.
@@ -148,6 +152,18 @@ func (p *installPlan) hash() string {
 		return p.installHash
 	}
 	return p.document.Hash()
+}
+
+func (p *installPlan) phase() (operation.InstallPhase, bool) {
+	if p == nil || !p.hasInstallPhase {
+		return operation.InstallPhase{}, false
+	}
+	return p.installPhase, true
+}
+
+func (p *installPlan) needsSudo() bool {
+	phase, phased := p.phase()
+	return !phased || phase.Authority() == operation.InstallAuthorityManager
 }
 
 func (p *installPlan) installAuthority(toolID string) (health.Presence, string, bool) {
@@ -421,7 +437,14 @@ func (a *App) refreshPendingInstallPlan() {
 	if a == nil || !a.manageInstalledReady || a.installCacheLoading {
 		return
 	}
-	plan, err := buildInstallPlan(a, defaultToolInstallRuntime(), time.Now())
+	runtime := defaultToolInstallRuntime()
+	var plan *installPlan
+	var err error
+	if a.installReviewTools != nil {
+		plan, err = buildInstallPlanForTools(a, runtime, time.Now(), slices.Clone(a.installReviewTools))
+	} else {
+		plan, err = buildInstallPlan(a, runtime, time.Now())
+	}
 	a.pendingInstallPlan = plan
 	a.installPlanError = err
 	a.installPlanScroll = 0
@@ -453,6 +476,26 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 		return nil, fmt.Errorf("cannot build install plan without installer state")
 	}
 	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
+	candidates := installPlanCandidateTools(a, pkg.Platform(snapshot.Platform()), onlyTools)
+	for _, id := range candidates {
+		observation, observed := snapshot.Tool(id)
+		if !observed || (observation.Presence() != health.PresenceMissing && observation.Presence() != health.PresencePartial) || observation.Installability() != health.InstallabilitySupported {
+			continue
+		}
+		tool, found := installRuntime.lookupTool(id)
+		if !found {
+			continue
+		}
+		recipe, recipeErr := installRuntime.describeInstall(tool, tools.InstallEnvironment{Platform: pkg.Platform(snapshot.Platform()), Manager: snapshot.Manager()})
+		if recipeErr != nil {
+			continue
+		}
+		for _, step := range recipe.Steps {
+			if step.Kind == operation.InstallStepNPMGlobal {
+				return nil, fmt.Errorf("%s requires a separate phased install; install it from Manage, then return for configuration", tool.Name())
+			}
+		}
+	}
 	statePlan, err := operation.CaptureStatePlan()
 	if err != nil {
 		return nil, fmt.Errorf("capture private operation state before planning: %w", err)
@@ -469,7 +512,6 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 	if err != nil {
 		return nil, fmt.Errorf("resolve Yazi config paths for install plan: %w", err)
 	}
-	candidates := installPlanCandidateTools(a, pkg.Platform(snapshot.Platform()), onlyTools)
 	platform := pkg.Platform(snapshot.Platform())
 	managerName := snapshot.Manager()
 	installAuthorities := make(map[string]installToolAuthority, len(candidates))
@@ -834,21 +876,41 @@ func buildPackageOnlyInstallPlan(a *App, installRuntime toolInstallRuntime, now 
 	if err != nil {
 		return nil, errors.New(installationSnapshotUnavailable)
 	}
-	result, err := headless.Build(headless.Request{
+	// NP4 re-plans immediately before Apply using the coordinator's canonical
+	// generation. Normalize the already-fresh UI observation to that same
+	// session generation so an unchanged host reproduces the reviewed hash;
+	// any actual observation drift still changes the snapshot digest and blocks.
+	phaseSnapshot, err := health.NewInstallationSnapshot(health.InstallationSnapshotSpec{
+		Generation: 1, Platform: snapshot.Platform(), Manager: snapshot.Manager(), Tools: snapshot.Tools(),
+	})
+	if err != nil {
+		return nil, errors.New(installationSnapshotUnavailable)
+	}
+	request := headless.Request{
 		Intent:   intent,
-		Snapshot: snapshot,
+		Snapshot: phaseSnapshot,
 		Environment: headless.Environment{
 			Platform:           pkg.Platform(snapshot.Platform()),
 			Manager:            snapshot.Manager(),
 			ManagerIdentity:    a.installationSnapshotManagerIdentity,
-			ExpectedGeneration: snapshot.Generation(),
+			ExpectedGeneration: phaseSnapshot.Generation(),
 		},
-	}, headless.Dependencies{
+	}
+	dependencies := headless.Dependencies{
 		LookupTool:       installRuntime.lookupTool,
 		DescribeInstall:  installRuntime.describeInstall,
 		CaptureStatePlan: installRuntime.captureStatePlan,
 		Now:              func() time.Time { return now },
-	})
+	}
+	result, err := headless.BuildPhased(request, dependencies)
+	if errors.Is(err, headless.ErrNPMExecutionAuthorityUnavailable) {
+		npmIdentity, identityErr := observeUINPMExecutionIdentity()
+		if identityErr != nil {
+			return nil, errors.New(installationSnapshotUnavailable)
+		}
+		request.Environment.NPMIdentity = npmIdentity
+		result, err = headless.BuildPhased(request, dependencies)
+	}
 	if err != nil {
 		return nil, errors.New(installationSnapshotUnavailable)
 	}
@@ -881,6 +943,18 @@ func buildPackageOnlyInstallPlan(a *App, installRuntime toolInstallRuntime, now 
 	default:
 		return nil, errors.New(installationSnapshotUnavailable)
 	}
+}
+
+func observeUINPMExecutionIdentity() (pkg.NPMExecutionIdentity, error) {
+	npmPath, err := exec.LookPath("npm")
+	if err != nil {
+		return pkg.NPMExecutionIdentity{}, err
+	}
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		return pkg.NPMExecutionIdentity{}, err
+	}
+	return pkg.ObserveNPMExecutionIdentity(npmPath, nodePath)
 }
 
 func installPlanCandidateTools(a *App, platform pkg.Platform, onlyTools []string) []string {

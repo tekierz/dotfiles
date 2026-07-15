@@ -88,6 +88,7 @@ func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			return s, NavigateTo(ScreenProgress)
 		case "esc":
 			a.invalidatePendingInstallPlan()
+			a.installReviewTools = nil
 			return s, NavigateTo(ScreenNavPicker)
 		}
 	}
@@ -123,6 +124,21 @@ func (s *fileTreeScreen) View(width, height int) string {
 			hash = hash[:12]
 		}
 		lines = append(lines, mutedStyle.Render("  Plan: "+hash))
+		if phase, phased := plan.phase(); phased {
+			switch phase.Kind() {
+			case operation.InstallPhasePrerequisite:
+				lines = append(lines,
+					pkgStyle.Render("  Phase 1 — Node/npm prerequisites"),
+					modStyle.Render("  This phase stops after prerequisites. A fresh review is required for npm."),
+					mutedStyle.Render("  Remaining: "+strings.Join(phase.RemainingTools(), ", ")),
+				)
+			case operation.InstallPhaseNPM:
+				lines = append(lines,
+					pkgStyle.Render("  Phase 2 — npm installation"),
+					modStyle.Render("  Fresh host and npm authority reviewed. This phase completes the tool install."),
+				)
+			}
+		}
 		for _, action := range plan.actions() {
 			var style lipgloss.Style
 			marker := "●"
