@@ -114,7 +114,7 @@ func (s *configCLIToolsScreen) View(width, height int) string {
 			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
-		checkbox := renderCheckboxInlineWithInstallState(enabled, focused, state.installed)
+		checkbox := renderSnapshotInstallCheckbox(enabled, focused, state)
 
 		nameStyle := unfocusedStyle
 		if state.installed {
@@ -259,6 +259,13 @@ func cliToolSnapshotSelectable(a *App, id string) bool {
 	cache := a.installationSnapshotCacheView()
 	fresh, _ := cliToolSnapshotFreshness(cache)
 	return fresh && cliToolSnapshotProjection(cache, id, "").selectable
+}
+
+func renderSnapshotInstallCheckbox(checked, focused bool, state cliToolSnapshotState) string {
+	if !state.installed && !state.selectable {
+		return lipgloss.NewStyle().Foreground(ColorTextMuted).Render("⊘")
+	}
+	return renderCheckboxInlineWithInstallState(checked, focused, state.installed)
 }
 
 func cliToolViewport(focused, height int) (int, int) {

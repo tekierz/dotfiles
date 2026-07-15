@@ -118,19 +118,15 @@ func defaultToolInstallRuntime() toolInstallRuntime {
 	}
 }
 
-// contextToolInstaller is an optional custom-install contract. Tools with
-// subprocess work outside PackageManager should implement it so the TUI can
-// cancel that work and stream bounded output instead of falling back to the
-// legacy synchronous Install method.
+// contextToolInstaller is a legacy optional custom-install contract. Reviewed
+// recipe-backed products implement it only as a fail-closed compatibility seam.
 type contextToolInstaller interface {
 	InstallWithContext(context.Context, pkg.PackageManager, func(string)) error
 }
 
-// platformContextToolInstaller is the fully explicit custom-install contract.
-// It carries the same platform snapshot used by planning into custom tools that
-// also install BaseTool prerequisites. This must be checked before the legacy
-// context interface and before the promoted BaseTool platform method: otherwise
-// Claude Code can either re-detect the host for Node/npm or skip its npm phase.
+// platformContextToolInstaller carries an explicit platform snapshot into legacy
+// custom installers. It is checked before promoted BaseTool methods so a
+// fail-closed recipe-backed tool cannot fall through to prerequisite-only work.
 type platformContextToolInstaller interface {
 	InstallWithContextForPlatform(context.Context, pkg.PackageManager, pkg.Platform, func(string)) error
 }
@@ -171,11 +167,8 @@ func requiresPackageManager(t tools.Tool) bool {
 }
 
 // streamingInstallManager adapts the synchronous PackageManager.Install method
-// expected by tools.Tool.Install to the cancelable streaming operation used by
-// the TUI. Calling the Tool method is important: package metadata is only one
-// part of some installers (Claude Code installs Node through the manager and
-// then installs its CLI through npm). The old dashboard called
-// InstallStreaming directly and silently skipped those custom steps.
+// expected by legacy tools.Tool.Install implementations to the cancelable
+// streaming operation used by the TUI.
 //
 // Embedding PackageManager delegates the rest of the interface unchanged. A
 // custom Tool.Install therefore sees a normal package manager, while ordinary
@@ -1920,11 +1913,15 @@ func (a *App) collectSelectedTools() []string {
 	return a.collectSelectedToolsWithRuntime(defaultToolInstallRuntime())
 }
 
-func (a *App) collectSelectedToolsWithRuntime(installRuntime toolInstallRuntime) []string {
+func (a *App) collectSelectedToolsWithRuntime(_ toolInstallRuntime) []string {
+	if a == nil || !a.installationSnapshotPlanningReady() || !a.installationSnapshotTerminal ||
+		a.installationSnapshot.Digest() == "" || a.installationSnapshot.Generation() != a.installationSnapshotGeneration {
+		return []string{}
+	}
 	var selected []string
 	selectedSet := make(map[string]bool)
 	addMissing := func(id string, enabled bool) {
-		if enabled && !a.manageInstalled[id] && !selectedSet[id] {
+		if enabled && installSelectionAllowed(a.installationSnapshot, id, false) && !selectedSet[id] {
 			selected = append(selected, id)
 			selectedSet[id] = true
 		}
@@ -1933,14 +1930,9 @@ func (a *App) collectSelectedToolsWithRuntime(installRuntime toolInstallRuntime)
 	// Core tools enter package work only where the registry has a supported
 	// package route. Unsupported-but-external tools stay out of install work and
 	// may still be configured by the worker after direct detection.
-	platform := installRuntime.detectPlatform()
+	platform := pkg.Platform(a.installationSnapshot.Platform())
 	for _, id := range alwaysConfiguredToolIDs {
-		t, ok := installRuntime.lookupTool(id)
-		if !ok {
-			continue
-		}
-		supported := installerAvailable(t, platform)
-		addMissing(id, supported)
+		addMissing(id, true)
 	}
 
 	// CLI Tools (lazygit, lazydocker, btop, glow, claude-code)

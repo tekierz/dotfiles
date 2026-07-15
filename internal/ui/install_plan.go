@@ -453,6 +453,7 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 		return nil, fmt.Errorf("cannot build install plan without installer state")
 	}
 	cfg := snapshotDeepDiveConfig(a.deepDiveConfig)
+	filterDeepDiveSelectionsForSnapshot(&cfg, snapshot)
 	statePlan, err := operation.CaptureStatePlan()
 	if err != nil {
 		return nil, fmt.Errorf("capture private operation state before planning: %w", err)
@@ -469,7 +470,7 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 	if err != nil {
 		return nil, fmt.Errorf("resolve Yazi config paths for install plan: %w", err)
 	}
-	candidates := installPlanCandidateTools(a, pkg.Platform(snapshot.Platform()), onlyTools)
+	candidates := installPlanCandidateTools(cfg, snapshot, pkg.Platform(snapshot.Platform()), onlyTools)
 	platform := pkg.Platform(snapshot.Platform())
 	managerName := snapshot.Manager()
 	installAuthorities := make(map[string]installToolAuthority, len(candidates))
@@ -883,7 +884,7 @@ func buildPackageOnlyInstallPlan(a *App, installRuntime toolInstallRuntime, now 
 	}
 }
 
-func installPlanCandidateTools(a *App, platform pkg.Platform, onlyTools []string) []string {
+func installPlanCandidateTools(cfg DeepDiveConfig, snapshot health.InstallationSnapshot, platform pkg.Platform, onlyTools []string) []string {
 	if len(onlyTools) != 0 {
 		result := slices.Clone(onlyTools)
 		sort.Strings(result)
@@ -891,24 +892,24 @@ func installPlanCandidateTools(a *App, platform pkg.Platform, onlyTools []string
 	}
 	seen := make(map[string]struct{})
 	add := func(id string, enabled bool) {
-		if enabled && id != "" {
+		if enabled && id != "" && installSelectionAllowed(snapshot, id, true) {
 			seen[id] = struct{}{}
 		}
 	}
 	for _, id := range alwaysConfiguredToolIDs {
 		add(id, true)
 	}
-	for id, enabled := range a.deepDiveConfig.CLITools {
+	for id, enabled := range cfg.CLITools {
 		add(id, enabled)
 	}
-	for id, enabled := range a.deepDiveConfig.GUIApps {
+	for id, enabled := range cfg.GUIApps {
 		add(id, enabled)
 	}
-	for id, enabled := range a.deepDiveConfig.CLIUtilities {
+	for id, enabled := range cfg.CLIUtilities {
 		add(id, enabled)
 	}
 	if platform == pkg.PlatformMacOS {
-		for id, enabled := range a.deepDiveConfig.MacApps {
+		for id, enabled := range cfg.MacApps {
 			add(id, enabled)
 		}
 	}
@@ -918,6 +919,41 @@ func installPlanCandidateTools(a *App, platform pkg.Platform, onlyTools []string
 	}
 	sort.Strings(result)
 	return result
+}
+
+func filterDeepDiveSelectionsForSnapshot(cfg *DeepDiveConfig, snapshot health.InstallationSnapshot) {
+	if cfg == nil {
+		return
+	}
+	for _, selections := range []map[string]bool{cfg.CLITools, cfg.GUIApps, cfg.CLIUtilities, cfg.MacApps} {
+		for id, enabled := range selections {
+			if enabled && !installSelectionAllowed(snapshot, id, true) {
+				selections[id] = false
+			}
+		}
+	}
+	// Older saved configurations may carry Claude Code in Utilities. Preserve
+	// that compatibility key only when the same typed product truth permits it.
+	if cfg.Utilities["claude-code"] && !installSelectionAllowed(snapshot, "claude-code", true) {
+		cfg.Utilities["claude-code"] = false
+	}
+}
+
+func installSelectionAllowed(snapshot health.InstallationSnapshot, id string, includePresent bool) bool {
+	observation, observed := snapshot.Tool(id)
+	if !observed {
+		return false
+	}
+	switch observation.Presence() {
+	case health.PresencePresent:
+		return includePresent
+	case health.PresenceMissing, health.PresencePartial:
+		return observation.Installability() == health.InstallabilitySupported
+	case health.PresenceUnknown:
+		return false
+	default:
+		return false
+	}
 }
 
 func sortedInstallRecipeAuthorities(authorities map[string]installToolAuthority) []string {
