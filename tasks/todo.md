@@ -11,7 +11,8 @@
 - [x] Deliver G1C Make targets and workflow adoption through the first normal closure.
 - [x] Close G3A's plan-only catalog reconciliation at `0182fe7`.
 - [x] Close G3C's restore-leaf plan resplit at `b74c799`.
-- [ ] Complete G3D's todo-only control projection through its normal-v1 ledger row and committed scope state.
+- [x] Close G3D's todo-only control projection at `ed921d1` through its normal-v1 ledger row and committed scope state.
+- [x] Close G3E's plan accounting and mode replan at `46735ed` through the `g3e-plan-accounting-mode-replan-v4` normal-v1 ledger row.
 - [ ] Complete G2 authorized worktrees, draft PR, and remote CI baseline.
 - [ ] Continue branch-local Wave 1 safety work without integrating product candidates.
 
@@ -22,15 +23,24 @@
 - The original G1 remains truthfully superseded at `tests-red`; no implementation,
   review, verification, ledger, or committed state is claimed for it.
 - G1C closed through the first normal ledger row.
-- G3A closed at `0182fe7`; G3C closed at `b74c799`.
+- G3A closed at `0182fe7`; G3C closed at `b74c799`; G3D closed at `ed921d1`.
+- G3E closed at `46735ed` through exactly one `g3e-plan-accounting-mode-replan-v4` normal-v1 ledger row.
 - The stopped G3B control attempt has no ledger row, candidate digest, or execution authority.
 - RK1UO closed branch-locally at `19fabd7`; BA1A closed branch-locally at `161671b`;
-  BA1SF1 closed branch-locally at `351fb1c`.
-- 45 catalog slices remain incomplete and 19 safety slices remain before MB1.
-- Active runner chain: `RK1ULK -> RK1ULA -> RK1P`; active restore chain:
-  `BA1SF2F -> BA1SF2D -> BA1B2 -> BA1C`.
+  BA1SF1 closed branch-locally at `351fb1c`; BA1SF2F closed branch-locally at `6c58f00`;
+  BA1SF2D closed branch-locally at `75efdc0`.
+- None is integrated through G2.
+- The fixed catalog contains 49 slices including 23 safety slices; 44 catalog slices remain
+  incomplete and 18 safety slices remain before MB1.
+- Remaining runner serialization: `RK1ULK -> RK1ULA -> RK1P -> RS1`.
+- Remaining restore fork/join: `BA1SF2D -> (BA1SF2M + BA1B2) -> BA1C`.
+- Wave 1A is complete branch-locally; ten barriers remain from 1B through 1K.
+- Wave 1B remains open on RK1ULK; its BA1SF2F half has branch-local evidence at `6c58f00`.
+- Wave 1C remains open on RK1ULA; its BA1SF2D half has branch-local evidence at `75efdc0`.
 - Branch-local Wave 1 product work may proceed while G2 is open, but no closed Wave 1 product candidate may integrate until G2's draft PR and remote CI baseline close.
-- RG0 remains open until G3D reaches committed through its normal-v1 ledger row; earlier G3D states do not satisfy the gate.
+- RG0 is closed through the prior normal-v1 RG0 roadmap reconciliation plus the G1C, G3A,
+  G3C, and G3D governance rows; G3E closed the reconciled plan at `46735ed` without
+  integrating any Wave 1 product candidate.
 - `tasks/pi-agent-integration-spec.md` remains user-owned, untracked, and untouched.
 
 ## Implementation and release plan reset — 2026-07-13
