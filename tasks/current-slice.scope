@@ -8,7 +8,7 @@
 # Deferred: G2 authorization/integration and every product slice.
 version=2
 slice_id=g3f-todo-policy-projection
-state=tests-red
+state=implemented
 max_total_files=3
 max_production_files=1
 max_changed_lines=180
