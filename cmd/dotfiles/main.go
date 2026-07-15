@@ -687,18 +687,22 @@ func restoreBackup(name string) (int, int, error) {
 		fmt.Println("Run 'dotfiles backups' to see available backups.")
 		return 0, 0, os.ErrNotExist
 	}
+	return restoreBackupEntry(*selected)
+}
+
+func restoreBackupEntry(selected backup.CatalogEntry) (int, int, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
 		return 0, 0, err
 	}
 
-	fmt.Printf("Restoring backup: %s\n", name)
+	fmt.Printf("Restoring backup: %s\n", selected.Name)
 
 	// The retained CatalogEntry carries private source and manifest authority.
 	// Its public Name/Path/count fields are display-only and never participate
 	// in execution after selection.
-	result, err := backup.RestoreCatalogEntry(*selected, home)
+	result, err := backup.RestoreCatalogEntry(selected, home)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error restoring backup: %v\n", err)
 		return 0, 0, err
@@ -828,7 +832,7 @@ func restoreLatestUninstallBackup(configDir string) error {
 	// every case, so the backups survive even after a successful restore.
 	fmt.Println("Checking for backups...")
 	backupDir := filepath.Join(configDir, "backups")
-	entries, readErr := readUninstallBackupDir(backupDir)
+	_, readErr := readUninstallBackupDir(backupDir)
 	switch {
 	case errors.Is(readErr, os.ErrNotExist):
 		fmt.Println("No backup directory found; nothing was restored.")
@@ -841,13 +845,20 @@ func restoreLatestUninstallBackup(configDir string) error {
 		return problem
 	}
 
-	latestBackup := latestBackupDirectory(entries)
-	if latestBackup == "" {
+	entries, catalogErr := backup.ListCatalog(backupDir)
+	if catalogErr != nil {
+		problem := fmt.Errorf("read backup catalog %s: %w", backupDir, catalogErr)
+		fmt.Fprintf(os.Stderr, "Could not inspect backups: %v\n", problem)
+		fmt.Fprintf(os.Stderr, "Backup state was left untouched at: %s\n\n", backupDir)
+		return problem
+	}
+	if len(entries) == 0 {
 		fmt.Println("No backup session directories found; nothing was restored.")
 		fmt.Println()
 		return nil
 	}
-	count, skipped, restoreErr := restoreBackup(latestBackup)
+	latestBackup := entries[0]
+	count, skipped, restoreErr := restoreBackupEntry(latestBackup)
 	fmt.Println()
 	if restoreErr == nil && skipped == 0 && count > 0 {
 		return nil
@@ -859,17 +870,7 @@ func restoreLatestUninstallBackup(configDir string) error {
 	fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
 	fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")
 	fmt.Fprintln(os.Stderr)
-	return fmt.Errorf("restore backup %s: %w", latestBackup, restoreErr)
-}
-
-func latestBackupDirectory(entries []os.DirEntry) string {
-	var latest string
-	for _, entry := range entries {
-		if entry.IsDir() && (latest == "" || entry.Name() > latest) {
-			latest = entry.Name()
-		}
-	}
-	return latest
+	return fmt.Errorf("restore backup %s: %w", latestBackup.Name, restoreErr)
 }
 
 func printUninstallGuidance(home, configDir string) {
