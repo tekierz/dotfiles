@@ -605,14 +605,6 @@ func writeHumanStatus(writer io.Writer) error {
 func checkUpdates() error {
 	fmt.Println("Checking for updates...")
 
-	mgr := pkg.DetectManager()
-	if mgr == nil {
-		fmt.Println("No package manager detected.")
-		return silentCommandFailure()
-	}
-
-	fmt.Printf("Using %s package manager\n\n", mgr.Name())
-
 	managedPackages := tools.GetRegistry().ManagedPackagesForPlatform(pkg.DetectPlatform())
 	updates, err := pkg.CheckManagedUpdates(managedPackages)
 	partialFailure := false
@@ -631,11 +623,11 @@ func checkUpdates() error {
 		return nil
 	}
 
-	fmt.Printf("Found %d outdated package(s):\n\n", len(updates))
-	fmt.Printf("%-25s %-15s %-15s\n", "PACKAGE", "CURRENT", "LATEST")
-	fmt.Printf("%-25s %-15s %-15s\n", "-------", "-------", "------")
+	fmt.Printf("Found %d outdated package(s) via %s:\n\n", len(updates), updateProviderSummary(updates))
+	fmt.Printf("%-25s %-10s %-15s %-15s\n", "PACKAGE", "PROVIDER", "CURRENT", "LATEST")
+	fmt.Printf("%-25s %-10s %-15s %-15s\n", "-------", "--------", "-------", "------")
 	for _, p := range updates {
-		fmt.Printf("%-25s %-15s %-15s\n", p.Name, p.CurrentVersion, p.LatestVersion)
+		fmt.Printf("%-25s %-10s %-15s %-15s\n", p.Name, updateProviderLabel(p), p.CurrentVersion, p.LatestVersion)
 	}
 	fmt.Println()
 	fmt.Println("Run 'dotfiles update' for interactive update selection.")
@@ -643,6 +635,25 @@ func checkUpdates() error {
 		return silentCommandFailure()
 	}
 	return nil
+}
+
+func updateProviderLabel(update pkg.Package) string {
+	if provider := update.ExecutionProvider(); provider != "" {
+		return string(provider)
+	}
+	return "unbound"
+}
+
+func updateProviderSummary(updates []pkg.Package) string {
+	providers := pkg.ExecutionProviders(updates)
+	labels := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		labels = append(labels, string(provider))
+	}
+	if len(labels) == 0 {
+		return "unbound provider"
+	}
+	return strings.Join(labels, ", ")
 }
 
 // listBackups prints available backups
