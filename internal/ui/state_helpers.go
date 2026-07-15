@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/health"
 )
 
 // tabNavigationTarget maps a number key ("1".."9") to the corresponding
@@ -87,16 +88,30 @@ func (a *App) getDeepDiveItemStatus(item DeepDiveMenuItem) string {
 		return "pending"
 	}
 
+	cache := a.installationSnapshotCacheView()
+	fresh, _ := cliToolSnapshotFreshness(cache)
+	if !fresh {
+		return "pending"
+	}
 	installedCount := 0
+	partial := false
 	for _, id := range toolIDs {
-		if a.manageInstalled[id] {
+		observation, observed := cache.Snapshot.Tool(id)
+		if !observed {
+			continue
+		}
+		switch observation.Presence() {
+		case health.PresencePresent:
 			installedCount++
+		case health.PresencePartial:
+			partial = true
+		case health.PresenceMissing, health.PresenceUnknown:
 		}
 	}
 
 	if installedCount == len(toolIDs) {
 		return "installed" // All installed (blue)
-	} else if installedCount > 0 {
+	} else if installedCount > 0 || partial {
 		return "partial" // Partially installed (yellow)
 	}
 	return "pending" // None installed (grey)

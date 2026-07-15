@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -44,8 +45,13 @@ func NewConfigClaudeCodeScreen(ctx *ScreenContext) *configClaudeCodeScreen {
 // ID returns the screen identifier.
 func (s *configClaudeCodeScreen) ID() Screen { return ScreenConfigClaudeCode }
 
-// Init returns any initial commands (none on entry).
-func (s *configClaudeCodeScreen) Init() tea.Cmd { return nil }
+// Init starts the typed installation snapshot used by product selection.
+func (s *configClaudeCodeScreen) Init() tea.Cmd {
+	if a := s.App(); a != nil {
+		return a.startInstallCacheLoad()
+	}
+	return nil
+}
 
 // back resets the focused field and returns to the deep-dive menu. In standalone
 // mode Enter instead freezes a reviewed config-save plan and opens confirmation;
@@ -66,10 +72,14 @@ func (s *configClaudeCodeScreen) back() tea.Cmd {
 func (s *configClaudeCodeScreen) toggle(a *App) {
 	switch {
 	case a.configFieldIndex == -1:
-		a.deepDiveConfig.CLITools["claude-code"] = !a.deepDiveConfig.CLITools["claude-code"]
+		if cliToolSnapshotSelectable(a, "claude-code") {
+			a.deepDiveConfig.CLITools["claude-code"] = !a.deepDiveConfig.CLITools["claude-code"]
+		}
 	case a.configFieldIndex >= 0 && a.configFieldIndex < len(claudeCodeMCPItems):
-		mcp := claudeCodeMCPItems[a.configFieldIndex].id
-		a.deepDiveConfig.ClaudeCodeMCPs[mcp] = !a.deepDiveConfig.ClaudeCodeMCPs[mcp]
+		if claudeCodeConfigurationSelectable(a) {
+			mcp := claudeCodeMCPItems[a.configFieldIndex].id
+			a.deepDiveConfig.ClaudeCodeMCPs[mcp] = !a.deepDiveConfig.ClaudeCodeMCPs[mcp]
+		}
 	}
 }
 
@@ -145,6 +155,10 @@ func (s *configClaudeCodeScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 // View renders the Claude Code MCP configuration screen.
 func (s *configClaudeCodeScreen) View(width, height int) string {
 	a := s.App()
+	cache := a.installationSnapshotCacheView()
+	if cache.Loading {
+		return cliToolLoadingView(a, width, height)
+	}
 	title := renderConfigTitle("󰚩", "Claude Code", "AI-powered coding assistant with MCP servers")
 
 	cfg := a.deepDiveConfig
@@ -153,12 +167,16 @@ func (s *configClaudeCodeScreen) View(width, height int) string {
 	// Install toggle (focus index -1).
 	rec.field(-1)
 	rec.write(renderFieldLabel("Install Claude Code", a.configFieldIndex == -1))
-	enabled := cfg.CLITools["claude-code"]
-	installed := a.manageInstalled["claude-code"]
-	rec.write(renderCheckboxInlineWithInstallState(enabled, a.configFieldIndex == -1, installed))
-	if installed {
-		rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)"))
+	fresh, cacheStatus := cliToolSnapshotFreshness(cache)
+	state := cliToolSnapshotProjection(cache, "claude-code", "")
+	if !fresh {
+		state = cliToolSnapshotState{label: strings.ToLower(cacheStatus)}
 	}
+	selectable := fresh && state.selectable
+	configurationSelectable := fresh && (state.installed || state.selectable)
+	enabled := selectable && cfg.CLITools["claude-code"]
+	rec.write(renderSnapshotInstallCheckbox(enabled, a.configFieldIndex == -1, state))
+	rec.write(lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (" + state.label + ")"))
 	rec.write("\n\n")
 
 	// MCP Servers header (non-field content: no extent recorded for it).
@@ -169,21 +187,25 @@ func (s *configClaudeCodeScreen) View(width, height int) string {
 	for i, mcp := range claudeCodeMCPItems {
 		rec.field(i)
 		focused := a.configFieldIndex == i
-		mcpEnabled := cfg.ClaudeCodeMCPs[mcp.id]
+		mcpEnabled := configurationSelectable && cfg.ClaudeCodeMCPs[mcp.id]
 
 		cursor := "  "
-		if focused {
+		if focused && configurationSelectable {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
+		} else if focused {
+			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
 		checkbox := "[ ]"
-		if mcpEnabled {
+		if !configurationSelectable {
+			checkbox = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("⊘")
+		} else if mcpEnabled {
 			checkbox = lipgloss.NewStyle().Foreground(ColorGreen).Render("[✓]")
 		}
 
 		nameStyle := lipgloss.NewStyle().Foreground(ColorText)
 		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if focused {
+		if focused && configurationSelectable {
 			nameStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
@@ -216,4 +238,14 @@ func (s *configClaudeCodeScreen) View(width, height int) string {
 		lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Center, title, "", box, "", help),
 	)
+}
+
+func claudeCodeConfigurationSelectable(a *App) bool {
+	if a == nil {
+		return false
+	}
+	cache := a.installationSnapshotCacheView()
+	fresh, _ := cliToolSnapshotFreshness(cache)
+	state := cliToolSnapshotProjection(cache, "claude-code", "")
+	return fresh && (state.installed || state.selectable)
 }

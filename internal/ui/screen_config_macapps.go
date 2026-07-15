@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -39,8 +40,7 @@ func NewConfigMacAppsScreen(ctx *ScreenContext) *configMacAppsScreen {
 	s.index = func(a *App) int { return a.macAppIndex }
 	s.setIndex = func(a *App, v int) { a.macAppIndex = v }
 	s.toggle = func(a *App, id string) {
-		// Don't allow toggling if already installed.
-		if !a.manageInstalled[id] {
+		if cliToolSnapshotSelectable(a, id) {
 			a.deepDiveConfig.MacApps[id] = !a.deepDiveConfig.MacApps[id]
 		}
 	}
@@ -56,7 +56,8 @@ func (s *configMacAppsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // View renders the macOS apps selection screen.
 func (s *configMacAppsScreen) View(width, height int) string {
 	a := s.App()
-	if a.installCacheLoading {
+	cache := a.installationSnapshotCacheView()
+	if cache.Loading {
 		return installStatusLoadingView(a, width, height)
 	}
 
@@ -64,42 +65,41 @@ func (s *configMacAppsScreen) View(width, height int) string {
 
 	cfg := a.deepDiveConfig
 	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(65))
+	fresh, cacheStatus := cliToolSnapshotFreshness(cache)
 
 	for i, app := range macAppItems {
 		rec.field(i)
 		focused := a.macAppIndex == i
-		enabled := cfg.MacApps[app.id]
-		installed := a.manageInstalled[app.id]
+		state := cliToolSnapshotProjection(cache, app.id, app.desc)
+		if !fresh {
+			state = cliToolSnapshotState{label: strings.ToLower(cacheStatus)}
+		}
+		selectable := fresh && state.selectable
+		enabled := selectable && cfg.MacApps[app.id]
 
 		cursor := "  "
-		if focused && !installed {
+		if focused && selectable {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
-		} else if focused && installed {
+		} else if focused {
 			cursor = lipgloss.NewStyle().Foreground(ColorYellow).Render("▸ ")
 		}
 
-		checkbox := renderCheckboxInlineWithInstallState(enabled, focused, installed)
+		checkbox := renderSnapshotInstallCheckbox(enabled, focused, state)
 
 		nameStyle := unfocusedStyle
 		descStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-		if installed {
+		if state.installed {
 			nameStyle = lipgloss.NewStyle().Foreground(ColorYellow)
-			descStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
-		} else if focused {
+		} else if focused && selectable {
 			nameStyle = focusedStyle
 			descStyle = lipgloss.NewStyle().Foreground(ColorText)
 		}
 
-		suffix := ""
-		if installed {
-			suffix = lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true).Render(" (installed)")
-		}
-
-		rec.write(fmt.Sprintf("%s%s %s%s %s\n",
+		rec.write(fmt.Sprintf("%s%s %s • %s — %s\n",
 			cursor,
 			checkbox,
 			nameStyle.Render(fmt.Sprintf("%-16s", app.name)),
-			suffix,
+			lipgloss.NewStyle().Foreground(ColorTextMuted).Render(state.label),
 			descStyle.Render(app.desc),
 		))
 	}

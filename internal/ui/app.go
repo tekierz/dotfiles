@@ -1356,11 +1356,13 @@ func buildScreenToolIDs() map[Screen][]string {
 	}
 
 	for _, t := range tools.GetRegistry().All() {
-		// Tools with dedicated screens (UIGroupNone with a configScreen set).
+		// Tools with dedicated screens. Claude Code also remains in the CLI Tools
+		// group as a non-navigable context row, so ConfigScreen is authoritative
+		// even when UIGroup is not None.
 		// Use the authoritative toolConfigScreens map (keyed by tool ID) rather
 		// than converting the raw int, so the Screen constant is named
 		// symbolically and stays correct if the iota is reordered.
-		if t.UIGroup() == tools.UIGroupNone && t.ConfigScreen() != 0 {
+		if t.ConfigScreen() != 0 {
 			if screen, ok := toolConfigScreens[t.ID()]; ok {
 				result[screen] = append(result[screen], t.ID())
 			}

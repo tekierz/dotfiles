@@ -10,7 +10,6 @@ import (
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
-	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
@@ -84,52 +83,23 @@ func (t *ClaudeCodeTool) PackageMetadataIsAuthoritative() bool {
 	return false
 }
 
-// Install installs Node (which provides npm) via the system package manager and
-// then installs the Claude Code CLI globally with npm. The base package map only
-// pulls in Node; the `claude` binary that IsInstalled looks for comes from the
-// npm package, so installing Node alone is not enough.
+// Install deliberately rejects the legacy unreviewed installation route.
+// Claude Code installation requires the accepted two-phase recipe coordinator.
 func (t *ClaudeCodeTool) Install(mgr pkg.PackageManager) error {
-	return t.InstallWithContextForPlatform(context.Background(), mgr, pkg.DetectPlatform(), nil)
+	return recipeBackedInstallError(t.ID())
 }
 
-// InstallWithContext performs the custom npm phase with the caller's context
-// and streams its output. This prevents Ctrl+C from leaving an orphaned npm
-// install and avoids buffering unbounded CombinedOutput in memory.
-func (t *ClaudeCodeTool) InstallWithContext(ctx context.Context, mgr pkg.PackageManager, emitLine func(string)) error {
-	return t.InstallWithContextForPlatform(ctx, mgr, pkg.DetectPlatform(), emitLine)
+// InstallWithContext remains as a fail-closed compatibility boundary for old
+// dispatchers. It grants no package-manager or npm mutation authority.
+func (t *ClaudeCodeTool) InstallWithContext(context.Context, pkg.PackageManager, func(string)) error {
+	return recipeBackedInstallError(t.ID())
 }
 
-// InstallWithContextForPlatform installs both the package-manager prerequisite
-// and the custom npm product against the caller's platform snapshot. The TUI
-// uses this form so a Pi plan cannot drift to the host platform while executing
-// Node/npm, while the legacy Install methods above retain their existing API.
-func (t *ClaudeCodeTool) InstallWithContextForPlatform(ctx context.Context, mgr pkg.PackageManager, platform pkg.Platform, emitLine func(string)) error {
-	// Ensure Node/npm is present first.
-	if err := t.InstallForPlatform(mgr, platform); err != nil {
-		return fmt.Errorf("failed to install Node.js (required for Claude Code): %w", err)
-	}
-
-	npmPath, err := exec.LookPath("npm")
-	if err != nil {
-		return fmt.Errorf("npm not found after installing Node.js; cannot install Claude Code CLI: %w", err)
-	}
-
-	cmd, err := runner.RunStreaming(ctx, npmPath, "install", "-g", "@anthropic-ai/claude-code")
-	if err != nil {
-		return fmt.Errorf("failed to start npm install -g @anthropic-ai/claude-code: %w", err)
-	}
-	for line := range cmd.Output {
-		if emitLine != nil {
-			emitLine(line)
-		}
-	}
-	if err := cmd.Wait(); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		return fmt.Errorf("npm install -g @anthropic-ai/claude-code failed: %w", err)
-	}
-	return nil
+// InstallWithContextForPlatform also fails closed. The platform-aware method is
+// retained so legacy type assertions cannot fall through to BaseTool and install
+// Node while falsely reporting Claude Code as complete.
+func (t *ClaudeCodeTool) InstallWithContextForPlatform(context.Context, pkg.PackageManager, pkg.Platform, func(string)) error {
+	return recipeBackedInstallError(t.ID())
 }
 
 // ApplyConfigWithMCPs applies MCP server configuration with specific MCP selections
