@@ -2,7 +2,10 @@
 
 package safefile
 
-import "fmt"
+import (
+	"fmt"
+	"io/fs"
+)
 
 func ObserveDirectoryStateWithin(_ string, _ string) (DirectoryState, *ParentChain, error) {
 	return DirectoryState{}, nil, ErrUnsupported
@@ -11,6 +14,10 @@ func ObserveDirectoryStateWithin(_ string, _ string) (DirectoryState, *ParentCha
 func NewRestoreSession(_ string) (*RestoreSession, error) { return nil, ErrUnsupported }
 
 func (s *RestoreSession) RestoreFile(_ string, _ *ParentChain, _ Revision, _ *DirectorySnapshot, _ string) (Revision, error) {
+	return Revision{}, ErrUnsupported
+}
+
+func (s *RestoreSession) RestoreFileWithMode(_ string, _ *ParentChain, _ Revision, _ *DirectorySnapshot, _ string, _ fs.FileMode) (Revision, error) {
 	return Revision{}, ErrUnsupported
 }
 
