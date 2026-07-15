@@ -584,7 +584,8 @@ func checkUpdates() {
 
 	fmt.Printf("Using %s package manager\n\n", mgr.Name())
 
-	updates, err := pkg.CheckDotfilesUpdates()
+	managedPackages := tools.GetRegistry().ManagedPackagesForPlatform(pkg.DetectPlatform())
+	updates, err := pkg.CheckManagedUpdates(managedPackages)
 	if err != nil {
 		// Partial results (one of several managers failed) still print.
 		if len(updates) == 0 {
