@@ -55,6 +55,7 @@ func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "ctrl+c", "q":
+			a.deepDiveContinuation = nil
 			return s, tea.Quit
 		case "up", "k":
 			if a.installPlanScroll > 0 {
@@ -89,6 +90,7 @@ func (s *fileTreeScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		case "esc":
 			a.invalidatePendingInstallPlan()
 			a.installReviewTools = nil
+			a.deepDiveContinuation = nil
 			return s, NavigateTo(ScreenNavPicker)
 		}
 	}
@@ -124,6 +126,12 @@ func (s *fileTreeScreen) View(width, height int) string {
 			hash = hash[:12]
 		}
 		lines = append(lines, mutedStyle.Render("  Plan: "+hash))
+		if plan.configurationOnly {
+			lines = append(lines,
+				pkgStyle.Render("  Final Deep Dive configuration review"),
+				modStyle.Render("  Package authority is absent. ENTER applies only the files below."),
+			)
+		}
 		if phase, phased := plan.phase(); phased {
 			switch phase.Kind() {
 			case operation.InstallPhasePrerequisite:
@@ -137,6 +145,9 @@ func (s *fileTreeScreen) View(width, height int) string {
 					pkgStyle.Render("  Phase 2 — npm installation"),
 					modStyle.Render("  Fresh host and npm authority reviewed. This phase completes the tool install."),
 				)
+			}
+			if a.deepDiveContinuation != nil {
+				lines = append(lines, mutedStyle.Render("  Deep Dive choices are retained as intent only; configuration requires a separate final review."))
 			}
 		}
 		for _, action := range plan.actions() {

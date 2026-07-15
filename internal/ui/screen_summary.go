@@ -37,14 +37,26 @@ func (s *SummaryScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "enter":
-			if app := s.App(); app != nil && app.installComplete && app.installOutcome == installationOutcomeReplanRequired && app.installSummaryFacts.outcome == installationOutcomeReplanRequired {
-				requested := app.installSummaryFacts.requestedToolIDs()
-				app.prepareInstallationReview()
-				app.installReviewTools = requested
-				return s, tea.Batch(NavigateTo(ScreenFileTree), app.startInstallCacheLoad())
+			if app := s.App(); app != nil && app.installComplete {
+				switch {
+				case app.installOutcome == installationOutcomeReplanRequired && app.installSummaryFacts.outcome == installationOutcomeReplanRequired:
+					requested := app.installSummaryFacts.requestedToolIDs()
+					app.prepareInstallationReview()
+					if app.deepDiveContinuation == nil {
+						// Existing Manage continuation remains package-only.
+						app.installReviewTools = requested
+					}
+					return s, tea.Batch(NavigateTo(ScreenFileTree), app.startInstallCacheLoad())
+				case app.installOutcome == installationOutcomeConfigurationReviewRequired && app.installSummaryFacts.outcome == installationOutcomeConfigurationReviewRequired && app.deepDiveContinuation != nil:
+					app.prepareInstallationReview()
+					return s, tea.Batch(NavigateTo(ScreenFileTree), app.startInstallCacheLoad())
+				}
 			}
 			return s, tea.Quit
 		case "esc", "q":
+			if app := s.App(); app != nil {
+				app.deepDiveContinuation = nil
+			}
 			return s, tea.Quit
 		}
 	}
@@ -69,6 +81,7 @@ func (s *SummaryScreen) View(width, height int) string {
 	}
 	succeeded := complete && outcome == installationOutcomeSucceeded && facts.outcome == installationOutcomeSucceeded
 	replanRequired := complete && outcome == installationOutcomeReplanRequired && facts.outcome == installationOutcomeReplanRequired
+	configurationReviewRequired := complete && outcome == installationOutcomeConfigurationReviewRequired && facts.outcome == installationOutcomeConfigurationReviewRequired
 
 	titleText := "! Installation Incomplete"
 	titleColor := ColorYellow
@@ -77,6 +90,9 @@ func (s *SummaryScreen) View(width, height int) string {
 		titleColor = ColorGreen
 	} else if replanRequired {
 		titleText = "✓ Prerequisites Installed — Fresh Review Required"
+		titleColor = ColorCyan
+	} else if configurationReviewRequired {
+		titleText = "✓ Tools Installed — Configuration Review Required"
 		titleColor = ColorCyan
 	}
 	title := lipgloss.NewStyle().Foreground(titleColor).Bold(true).Render(titleText)
@@ -104,6 +120,8 @@ func (s *SummaryScreen) View(width, height int) string {
 			remaining = "selected npm tools"
 		}
 		lines = append(lines, "", fmt.Sprintf("Phase %d complete. Remaining: %s", facts.phaseIndex, remaining), "No npm phase was started automatically.")
+	} else if configurationReviewRequired {
+		lines = append(lines, "", "Package installation is complete.", "No configuration was written automatically.")
 	} else if height < 18 {
 		if succeeded {
 			lines = append(lines, "", "Next: "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles status"))
@@ -123,7 +141,7 @@ func (s *SummaryScreen) View(width, height int) string {
 			"1. Run "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles status")+" to verify health",
 			"2. Open "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles manage")+" for settings",
 		)
-	} else if height >= 18 && !replanRequired {
+	} else if height >= 18 && !replanRequired && !configurationReviewRequired {
 		lines = append(lines,
 			"",
 			"Completion was not verified.",
@@ -152,6 +170,8 @@ func (s *SummaryScreen) View(width, height int) string {
 	helpText := "[ENTER] Exit"
 	if replanRequired {
 		helpText = "[ENTER] Build Fresh Phase 2 Preview    [Q] Exit"
+	} else if configurationReviewRequired {
+		helpText = "[ENTER] Build Fresh Configuration Preview    [Q] Exit"
 	}
 	help := helpStyle.Render(helpText)
 

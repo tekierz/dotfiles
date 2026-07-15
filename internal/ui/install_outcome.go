@@ -17,6 +17,7 @@ const (
 	installationOutcomeRunning
 	installationOutcomeSucceeded
 	installationOutcomeReplanRequired
+	installationOutcomeConfigurationReviewRequired
 	installationOutcomeFailed
 )
 
@@ -30,6 +31,8 @@ func (o installationOutcome) String() string {
 		return "succeeded"
 	case installationOutcomeReplanRequired:
 		return "replan_required"
+	case installationOutcomeConfigurationReviewRequired:
+		return "configuration_review_required"
 	case installationOutcomeFailed:
 		return "failed"
 	default:
