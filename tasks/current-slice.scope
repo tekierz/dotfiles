@@ -1,23 +1,19 @@
-# Add session-bound exact recursive directory restore and removal leaf mutations.
-# Dependency: closed BA1SF2F file mutations at 6c58f00.
-# Authority: immutable recursive subtree extraction and exact recursive DirectorySnapshot CAS only.
-# Invariants: invalid source and expected authority fail before parent creation; returned installed
-# evidence is exact; rejected drift preserves identity/tree state; committed errors never roll back
-# installed state or delete recovery evidence; removal never creates parents.
-# Reuse: BA1SF1 parent binding and BA1SF2F rollbackRestoreFailure only.
-# Red fixtures must be behavior-proven in an isolated tree before their test-only commit.
-# Deferred: BA1B2 immutable catalog kernel.
+# Parse and validate one immutable restore catalog snapshot without applying any item.
+# Authority: complete manifest syntax, source identifiers, targets, kinds, existence, desired
+# modes, deterministic ordering, duplicate rejection, and immutable directory snapshot binding.
+# Invariants: parsing performs no restore mutation and retains source, target, kind, existence,
+# and desired mode for the later opaque BA1C apply join.
+# Dependency: closed BA1SF2D at 75efdc0.
+# Deferred: source feasibility at apply time, BA1SF2M execution, BA1C opaque public authority,
+# and BR3 byte/count limits.
 version=2
-slice_id=ba1sf2d-restore-directory-mutations
-state=committed
-max_total_files=4
-max_production_files=2
-max_changed_lines=780
+slice_id=ba1b2-immutable-catalog-kernel
+state=planned
+max_total_files=2
+max_production_files=1
+max_changed_lines=800
 ignore=tasks/pi-agent-integration-spec.md
-allow=internal/safefile/restore_session_directory_unix.go
-allow=internal/safefile/restore_session_unsupported.go
-allow=internal/safefile/restore_session_directory_unix_test.go
-allow=internal/safefile/unsupported_test.go
+allow=internal/backup/catalog.go
+allow=internal/backup/catalog_restore_test.go
 allow=tasks/slice-commit-ledger.tsv
-test=internal/safefile/restore_session_directory_unix_test.go
-test=internal/safefile/unsupported_test.go
+test=internal/backup/catalog_restore_test.go
