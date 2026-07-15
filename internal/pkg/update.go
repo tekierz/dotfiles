@@ -164,6 +164,26 @@ func CheckManagedUpdates(managedPackages []string) ([]Package, error) {
 	return FilterManagedUpdates(allUpdates, managedPackages), err
 }
 
+// ManagerForExecutionProvider resolves retained discovery authority to the
+// exact available manager class that is allowed to execute an update. Display
+// provenance such as "aur" is intentionally never used for routing.
+func ManagerForExecutionProvider(provider ExecutionProvider) PackageManager {
+	if provider == "" {
+		return nil
+	}
+	var selected PackageManager
+	for _, manager := range allManagers() {
+		if ExecutionProviderForManager(manager) != provider {
+			continue
+		}
+		if selected != nil {
+			return nil
+		}
+		selected = manager
+	}
+	return selected
+}
+
 // FilterManagedUpdates is the pure managed-package filter shared by CLI and
 // TUI update checks. It preserves discovery order and provider authority.
 func FilterManagedUpdates(updates []Package, managedPackages []string) []Package {

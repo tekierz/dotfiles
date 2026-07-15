@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -165,7 +166,12 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			var packagesToUpdate []pkg.Package
 			if len(a.updateSelected) > 0 {
 				// Update selected packages
+				indices := make([]int, 0, len(a.updateSelected))
 				for idx := range a.updateSelected {
+					indices = append(indices, idx)
+				}
+				sort.Ints(indices)
+				for _, idx := range indices {
 					if idx < len(a.updateResults) {
 						packagesToUpdate = append(packagesToUpdate, a.updateResults[idx])
 					}
@@ -179,7 +185,7 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
 				// pacman/paru run -Syu: targeted updates ride a full system
 				// upgrade (partial upgrades break Arch). Say so.
-				if mgr := pkg.DetectManager(); mgr != nil && (mgr.Name() == "pacman" || mgr.Name() == "paru") {
+				if updateIncludesSystemUpgrade(packagesToUpdate) {
 					a.updateStatus = fmt.Sprintf("Updating %d package(s) + full system upgrade (-Syu)...", len(packagesToUpdate))
 				}
 				return checkSudoAndUpdateCmd(packagesToUpdate, false)
@@ -196,7 +202,7 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			packagesToUpdate := make([]pkg.Package, len(a.updateResults))
 			copy(packagesToUpdate, a.updateResults)
 			a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
-			if mgr := pkg.DetectManager(); mgr != nil && (mgr.Name() == "pacman" || mgr.Name() == "paru") {
+			if updateIncludesSystemUpgrade(packagesToUpdate) {
 				a.updateStatus = fmt.Sprintf("Updating %d package(s) + full system upgrade (-Syu)...", len(packagesToUpdate))
 			}
 			return checkSudoAndUpdateCmd(packagesToUpdate, false)
@@ -236,6 +242,16 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return NavigateTo(ScreenMainMenu)
 	}
 	return nil
+}
+
+func updateIncludesSystemUpgrade(packages []pkg.Package) bool {
+	for _, update := range packages {
+		provider := update.ExecutionProvider()
+		if provider == pkg.ExecutionProviderPacman || provider == pkg.ExecutionProviderParu {
+			return true
+		}
+	}
+	return false
 }
 
 // handleMouse handles tab-bar clicks on the update screen (routes through the
