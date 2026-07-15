@@ -24,10 +24,11 @@ var ErrInvalidPlan = errors.New("invalid operation plan")
 type Kind string
 
 const (
-	KindInstallTool Kind = "install_tool"
-	KindWriteConfig Kind = "write_config"
-	KindInstallFile Kind = "install_file"
-	KindUpdateState Kind = "update_state"
+	KindInstallTool     Kind = "install_tool"
+	KindWriteConfig     Kind = "write_config"
+	KindInstallFile     Kind = "install_file"
+	KindInstallArtifact Kind = "install_artifact"
+	KindUpdateState     Kind = "update_state"
 )
 
 type Disposition string
@@ -46,6 +47,7 @@ const (
 	OwnershipManagedFile     Ownership = "managed_file"
 	OwnershipManagedFragment Ownership = "managed_fragment"
 	OwnershipManagedSet      Ownership = "managed_set"
+	OwnershipManagedArtifact Ownership = "managed_artifact"
 	OwnershipUser            Ownership = "user"
 )
 
@@ -178,6 +180,7 @@ type Action struct {
 	Observations    []Observation        `json:"observations,omitempty"`
 	InstallRecipe   *InstallRecipe       `json:"install_recipe,omitempty"`
 	InstallDetected *bool                `json:"install_detected,omitempty"`
+	RemoteArtifact  *RemoteArtifact      `json:"remote_artifact,omitempty"`
 }
 
 type planDocument struct {
@@ -412,7 +415,22 @@ func validateDocument(doc planDocument) error {
 		} else if action.InstallRecipe != nil || action.InstallDetected != nil {
 			return fmt.Errorf("%w: %s non-install action carries install authority", ErrInvalidPlan, prefix)
 		}
-		if action.Disposition == DispositionApply && (action.Kind == KindWriteConfig || action.Kind == KindInstallFile || action.Kind == KindUpdateState) {
+		if action.Kind == KindInstallArtifact {
+			if action.RemoteArtifact == nil || !action.RemoteArtifact.valid() {
+				return fmt.Errorf("%w: %s requires immutable remote artifact authority", ErrInvalidPlan, prefix)
+			}
+			review := action.RemoteArtifact.Review()
+			if review.ActionID != action.ID || review.Destination != action.Target || action.DesiredDigest != review.AuthorityDigest ||
+				action.Ownership != OwnershipManagedArtifact || action.Reversibility != ReversibilityBackup {
+				return fmt.Errorf("%w: %s remote artifact authority does not match its action", ErrInvalidPlan, prefix)
+			}
+			if action.Disposition == DispositionApply && action.Observation.Exists && action.BackupTarget != action.Target {
+				return fmt.Errorf("%w: %s existing artifact lacks an exact backup target", ErrInvalidPlan, prefix)
+			}
+		} else if action.RemoteArtifact != nil {
+			return fmt.Errorf("%w: %s non-artifact action carries remote authority", ErrInvalidPlan, prefix)
+		}
+		if action.Disposition == DispositionApply && (action.Kind == KindWriteConfig || action.Kind == KindInstallFile || action.Kind == KindInstallArtifact || action.Kind == KindUpdateState) {
 			if len(action.Observations) == 0 {
 				return fmt.Errorf("%w: %s requires per-target observations", ErrInvalidPlan, prefix)
 			}
@@ -586,7 +604,7 @@ func validRelativeTarget(target string) bool {
 }
 
 func validKind(value Kind) bool {
-	return value == KindInstallTool || value == KindWriteConfig || value == KindInstallFile || value == KindUpdateState
+	return value == KindInstallTool || value == KindWriteConfig || value == KindInstallFile || value == KindInstallArtifact || value == KindUpdateState
 }
 
 func validDisposition(value Disposition) bool {
@@ -595,7 +613,7 @@ func validDisposition(value Disposition) bool {
 
 func validOwnership(value Ownership) bool {
 	return value == OwnershipUnknown || value == OwnershipPackageManager || value == OwnershipManagedFile ||
-		value == OwnershipManagedFragment || value == OwnershipManagedSet || value == OwnershipUser
+		value == OwnershipManagedFragment || value == OwnershipManagedSet || value == OwnershipManagedArtifact || value == OwnershipUser
 }
 
 func validReversibility(value Reversibility) bool {
@@ -630,6 +648,10 @@ func cloneActions(actions []Action) []Action {
 		if actions[index].InstallDetected != nil {
 			detected := *actions[index].InstallDetected
 			cloned[index].InstallDetected = &detected
+		}
+		if actions[index].RemoteArtifact != nil {
+			artifact := *actions[index].RemoteArtifact
+			cloned[index].RemoteArtifact = &artifact
 		}
 	}
 	return cloned
