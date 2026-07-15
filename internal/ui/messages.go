@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/backup"
+	"github.com/tekierz/dotfiles/internal/installapply"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
 )
@@ -27,6 +28,7 @@ type installOutputMsg struct {
 type installDoneMsg struct {
 	err     error
 	context string // last few lines of output for error context
+	result  installapply.Result
 }
 
 // installStartMsg triggers installation start

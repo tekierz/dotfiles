@@ -1,5 +1,12 @@
 package ui
 
+import (
+	"strings"
+
+	"github.com/tekierz/dotfiles/internal/installapply"
+	"github.com/tekierz/dotfiles/internal/operation"
+)
+
 // installationOutcome is the closed lifecycle for one reviewed installation
 // attempt. Its zero value is deliberately pending so an unset or stale value
 // can never be interpreted as success.
@@ -9,6 +16,7 @@ const (
 	installationOutcomePending installationOutcome = iota
 	installationOutcomeRunning
 	installationOutcomeSucceeded
+	installationOutcomeReplanRequired
 	installationOutcomeFailed
 )
 
@@ -20,6 +28,8 @@ func (o installationOutcome) String() string {
 		return "running"
 	case installationOutcomeSucceeded:
 		return "succeeded"
+	case installationOutcomeReplanRequired:
+		return "replan_required"
 	case installationOutcomeFailed:
 		return "failed"
 	default:
@@ -37,6 +47,27 @@ type installationSummaryFacts struct {
 	actionCount         int
 	rollbackTargetCount int
 	operationID         string
+	phaseKind           operation.InstallPhaseKind
+	phaseIndex          int
+	requestedTools      string
+	remainingTools      string
+}
+
+func encodeInstallationTools(values []string) string { return strings.Join(values, "\x00") }
+
+func decodeInstallationTools(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, "\x00")
+}
+
+func (facts installationSummaryFacts) requestedToolIDs() []string {
+	return decodeInstallationTools(facts.requestedTools)
+}
+
+func (facts installationSummaryFacts) remainingToolIDs() []string {
+	return decodeInstallationTools(facts.remainingTools)
 }
 
 func installationFactsForPlan(plan *installPlan) installationSummaryFacts {
@@ -47,6 +78,12 @@ func installationFactsForPlan(plan *installPlan) installationSummaryFacts {
 	facts.planHash = plan.hash()
 	facts.actionCount = len(plan.actions())
 	facts.rollbackTargetCount = len(plan.backupTargets())
+	if phase, ok := plan.phase(); ok {
+		facts.phaseKind = phase.Kind()
+		facts.phaseIndex = phase.Index()
+		facts.requestedTools = encodeInstallationTools(phase.RequestedTools())
+		facts.remainingTools = encodeInstallationTools(phase.RemainingTools())
+	}
 	return facts
 }
 
@@ -91,6 +128,10 @@ func (a *App) beginInstallationAttempt(plan *installPlan) {
 // so it falls back to the currently reviewed plan only when no plan facts were
 // captured at start.
 func (a *App) finishInstallationAttempt(outcome installationOutcome) {
+	a.finishInstallationAttemptWithResult(outcome, installapply.Result{})
+}
+
+func (a *App) finishInstallationAttemptWithResult(outcome installationOutcome, result installapply.Result) {
 	if a == nil {
 		return
 	}
@@ -102,6 +143,14 @@ func (a *App) finishInstallationAttempt(outcome installationOutcome) {
 		facts = installationFactsForPlan(a.pendingInstallPlan)
 	}
 	facts.outcome = outcome
-	facts.operationID = a.lastOperationID
+	if result.OperationID != "" {
+		facts.operationID = result.OperationID
+		facts.phaseKind = result.PhaseKind
+		facts.phaseIndex = result.PhaseIndex
+		facts.requestedTools = encodeInstallationTools(result.RequestedTools())
+		facts.remainingTools = encodeInstallationTools(result.RemainingTools())
+	} else {
+		facts.operationID = a.lastOperationID
+	}
 	a.installSummaryFacts = facts
 }

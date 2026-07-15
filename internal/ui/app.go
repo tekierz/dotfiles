@@ -294,6 +294,7 @@ type App struct {
 	installOutcome      installationOutcome
 	installSummaryFacts installationSummaryFacts
 	pendingInstallPlan  *installPlan
+	installReviewTools  []string // explicit package-only intent retained across a required fresh phase review
 	installPlanError    error
 	lastOperationID     string
 	installPlanScroll   int

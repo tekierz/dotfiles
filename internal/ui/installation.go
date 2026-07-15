@@ -17,6 +17,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/installapply"
+	headless "github.com/tekierz/dotfiles/internal/installplan"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
@@ -37,6 +38,7 @@ type installEventMsg struct {
 	err         error  // final error (only meaningful when done)
 	context     string // last few output lines for error context (only when done)
 	operationID string // durable journal record for this execution (when enabled)
+	result      installapply.Result
 }
 
 var errInstallStreamClosed = errors.New("installation event stream closed without a terminal result")
@@ -307,13 +309,67 @@ func (a *App) startInstallation() tea.Cmd {
 	// goroutine that refreshes the timestamp periodically. It is a no-op on macOS
 	// (Homebrew, no sudo) and is stopped on BOTH normal completion (installDoneMsg)
 	// and cancel/teardown (teardownStream), so it never leaks past the install.
-	if runner.NeedsSudo() && runner.CheckSudoCached() {
+	if plan.needsSudo() && runner.NeedsSudo() && runner.CheckSudoCached() {
 		a.sudoKeepAliveStop = startSudoKeepAlive(refreshSudo)
 	}
 
-	go runInstallPlanWorker(ctx, events, plan, defaultToolInstallRuntime())
+	runtime := defaultToolInstallRuntime()
+	if _, phased := plan.phase(); phased {
+		go runPhasedInstallPlanWorker(ctx, events, plan, runtime)
+	} else {
+		go runInstallPlanWorker(ctx, events, plan, runtime)
+	}
 
 	return a.listenInstallEventsCmd()
+}
+
+func runPhasedInstallPlanWorker(ctx context.Context, events chan installEventMsg, plan *installPlan, runtime toolInstallRuntime) {
+	defer close(events)
+	phase, phased := plan.phase()
+	if !phased {
+		events <- installEventMsg{done: true, err: fmt.Errorf("phased installation authority is unavailable")}
+		return
+	}
+	emit := func(line string) { emitInstallEvent(ctx, events, line, false) }
+	emitInstallEvent(ctx, events, fmt.Sprintf("Applying phase %d (%s) • plan %s", phase.Index(), phase.Kind(), plan.hash()[:12]), true)
+	registry := func() []tools.Tool {
+		ids := runtime.registeredToolIDs()
+		result := make([]tools.Tool, 0, len(ids))
+		for _, id := range ids {
+			if tool, ok := runtime.lookupTool(id); ok {
+				result = append(result, tool)
+			}
+		}
+		return result
+	}
+	planFresh := func(freshCtx context.Context, rawTools []string) (headless.FreshSession, error) {
+		return headless.PlanFresh(freshCtx, rawTools, headless.FreshDependencies{
+			Registry: registry, DetectPlatform: runtime.detectPlatform, DetectManager: runtime.detectManager,
+			Collect: tools.ObserveInstallationHealth, DescribeInstall: runtime.describeInstall,
+			CaptureStatePlan: runtime.captureStatePlan, Now: plan.document.CreatedAt,
+		})
+	}
+	dependencies := installapply.SystemDependencies(planFresh)
+	dependencies.ExecuteRecipe = func(applyCtx context.Context, recipe operation.InstallRecipe, manager pkg.PackageManager, identity pkg.ExecutableIdentity, _ func(string)) error {
+		return installapply.ExecuteRecipe(applyCtx, recipe, manager, identity, emit)
+	}
+	dependencies.ExecuteRecipeWithAuthority = func(applyCtx context.Context, recipe operation.InstallRecipe, manager pkg.PackageManager, authority installapply.RecipeExecutionAuthority, _ func(string)) error {
+		return installapply.ExecuteRecipeWithAuthority(applyCtx, recipe, manager, authority, emit)
+	}
+	result, err := installapply.Apply(ctx, installapply.Request{RawTools: phase.RequestedTools(), ExpectedHash: plan.hash()}, dependencies)
+	if errors.Is(err, installapply.ErrReplanRequired) && result.Status == operation.StatusPhaseComplete && result.Next == installapply.NextReplanRequired {
+		err = nil
+	}
+	terminal := installEventMsg{done: true, err: err, operationID: result.OperationID, result: result}
+	select {
+	case events <- terminal:
+	default:
+		select {
+		case <-events:
+		default:
+		}
+		events <- terminal
+	}
 }
 
 // listenInstallEventsCmd reads the next event from the install channel and

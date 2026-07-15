@@ -37,6 +37,12 @@ func (s *SummaryScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "enter":
+			if app := s.App(); app != nil && app.installComplete && app.installOutcome == installationOutcomeReplanRequired && app.installSummaryFacts.outcome == installationOutcomeReplanRequired {
+				requested := app.installSummaryFacts.requestedToolIDs()
+				app.prepareInstallationReview()
+				app.installReviewTools = requested
+				return s, tea.Batch(NavigateTo(ScreenFileTree), app.startInstallCacheLoad())
+			}
 			return s, tea.Quit
 		case "esc", "q":
 			return s, tea.Quit
@@ -62,12 +68,16 @@ func (s *SummaryScreen) View(width, height int) string {
 		complete = app.installComplete
 	}
 	succeeded := complete && outcome == installationOutcomeSucceeded && facts.outcome == installationOutcomeSucceeded
+	replanRequired := complete && outcome == installationOutcomeReplanRequired && facts.outcome == installationOutcomeReplanRequired
 
 	titleText := "! Installation Incomplete"
 	titleColor := ColorYellow
 	if succeeded {
 		titleText = "✓ Installation Complete!"
 		titleColor = ColorGreen
+	} else if replanRequired {
+		titleText = "✓ Prerequisites Installed — Fresh Review Required"
+		titleColor = ColorCyan
 	}
 	title := lipgloss.NewStyle().Foreground(titleColor).Bold(true).Render(titleText)
 
@@ -88,7 +98,13 @@ func (s *SummaryScreen) View(width, height int) string {
 		fmt.Sprintf("Operation:  %s", lipgloss.NewStyle().Foreground(ColorCyan).Render(operationID)),
 		fmt.Sprintf("Rollback scope: %d verified target(s)", facts.rollbackTargetCount),
 	}
-	if height < 18 {
+	if replanRequired {
+		remaining := strings.Join(facts.remainingToolIDs(), ", ")
+		if remaining == "" {
+			remaining = "selected npm tools"
+		}
+		lines = append(lines, "", fmt.Sprintf("Phase %d complete. Remaining: %s", facts.phaseIndex, remaining), "No npm phase was started automatically.")
+	} else if height < 18 {
 		if succeeded {
 			lines = append(lines, "", "Next: "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles status"))
 		} else {
@@ -107,7 +123,7 @@ func (s *SummaryScreen) View(width, height int) string {
 			"1. Run "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles status")+" to verify health",
 			"2. Open "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles manage")+" for settings",
 		)
-	} else if height >= 18 {
+	} else if height >= 18 && !replanRequired {
 		lines = append(lines,
 			"",
 			"Completion was not verified.",
@@ -133,7 +149,11 @@ func (s *SummaryScreen) View(width, height int) string {
 
 	helpStyle := lipgloss.NewStyle().
 		Foreground(ColorTextMuted)
-	help := helpStyle.Render("[ENTER] Exit")
+	helpText := "[ENTER] Exit"
+	if replanRequired {
+		helpText = "[ENTER] Build Fresh Phase 2 Preview    [Q] Exit"
+	}
+	help := helpStyle.Render(helpText)
 
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

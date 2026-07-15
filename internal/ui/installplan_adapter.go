@@ -7,6 +7,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/health"
 	headless "github.com/tekierz/dotfiles/internal/installplan"
 	"github.com/tekierz/dotfiles/internal/operation"
+	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/planpublic"
 )
 
@@ -33,13 +34,43 @@ func adoptHeadlessInstallPlan(app *App, accepted headless.AcceptedPlan) (*instal
 	}
 	neutralAuthorities := accepted.ToolAuthorities()
 	neutralRecipes := accepted.Recipes()
+	phase, phased := accepted.InstallPhase()
 	managerIdentity, identityBound := accepted.ManagerExecutableIdentity()
+	npmIdentity, npmIdentityBound := accepted.NPMExecutionIdentity()
 	identityRequired := installRecipesRequireManagerIdentity(neutralRecipes)
 	if identityBound != identityRequired || (identityBound && !validUIManagerExecutableIdentity(managerIdentity)) {
 		return nil, fmt.Errorf("headless manager executable authority is invalid")
 	}
+	if npmIdentityBound && (npmIdentity.SchemaVersion() != pkg.CurrentNPMExecutionIdentitySchemaVersion || !validAdapterDigest(npmIdentity.Digest())) {
+		return nil, fmt.Errorf("headless npm execution authority is invalid")
+	}
+	if phased {
+		switch phase.Kind() {
+		case operation.InstallPhasePrerequisite:
+			if phase.Index() != 1 || phase.Authority() != operation.InstallAuthorityManager || len(phase.RemainingTools()) == 0 || !identityBound || npmIdentityBound {
+				return nil, fmt.Errorf("headless prerequisite phase authority is invalid")
+			}
+		case operation.InstallPhaseNPM:
+			if phase.Index() != 2 || phase.Authority() != operation.InstallAuthorityNPM || len(phase.RemainingTools()) != 0 || identityBound || !npmIdentityBound {
+				return nil, fmt.Errorf("headless npm phase authority is invalid")
+			}
+		default:
+			return nil, fmt.Errorf("headless install phase is invalid")
+		}
+		if !slices.Equal(phase.RequestedTools(), intent.Tools) {
+			return nil, fmt.Errorf("headless install phase intent is invalid")
+		}
+	} else if npmIdentityBound {
+		return nil, fmt.Errorf("unphased headless plan carries npm authority")
+	}
 	if len(neutralAuthorities) != len(intent.Tools) {
 		return nil, fmt.Errorf("headless tool authority does not cover explicit intent")
+	}
+	deferred := make(map[string]struct{})
+	if phased && phase.Kind() == operation.InstallPhasePrerequisite {
+		for _, id := range phase.RemainingTools() {
+			deferred[id] = struct{}{}
+		}
 	}
 
 	installAuthorities := make(map[string]installToolAuthority, len(neutralAuthorities))
@@ -54,6 +85,10 @@ func adoptHeadlessInstallPlan(app *App, accepted headless.AcceptedPlan) (*instal
 				return nil, fmt.Errorf("present headless tool %s has mutation authority", id)
 			}
 		case health.PresenceMissing, health.PresencePartial:
+			if _, isDeferred := deferred[id]; isDeferred && authority.Intent == "deferred" && authority.RecipeDigest == "" {
+				installAuthorities[id] = installToolAuthority{presence: authority.Presence, intent: authority.Intent}
+				continue
+			}
 			wantIntent := "install"
 			if authority.Presence == health.PresencePartial {
 				wantIntent = "repair"
@@ -90,6 +125,7 @@ func adoptHeadlessInstallPlan(app *App, accepted headless.AcceptedPlan) (*instal
 		document: document, installHash: accepted.Hash(),
 		installSnapshot: installationSnapshotAuthority{schema: snapshot.SchemaVersion, generation: snapshot.Generation, platform: snapshot.Platform, manager: snapshot.Manager, digest: snapshot.Digest, managerIdentity: managerIdentity},
 		installTools:    installAuthorities, installRecipes: cloneInstallRecipes(neutralRecipes),
+		installPhase: phase, hasInstallPhase: phased, npmIdentity: npmIdentity,
 		selectedTools: nil, configTools: nil, config: DeepDiveConfig{},
 		theme: app.theme, navStyle: app.navStyle, animations: app.animationsEnabled,
 		authority: make(map[string]map[string]acceptedTarget), parentDirs: nil,
