@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -160,16 +161,21 @@ var backupsCmd = &cobra.Command{
 var restoreCmd = &cobra.Command{
 	Use:   "restore [backup-name]",
 	Short: "Restore from a backup",
-	Run: func(cmd *cobra.Command, args []string) {
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			// TUI mode: select backup
 			launchTUI(ui.ScreenBackups)
-		} else {
-			// CLI mode: restore specific backup
-			if _, _, err := restoreBackup(args[0]); err != nil {
-				os.Exit(1)
-			}
+			return nil
 		}
+
+		// CLI mode: restore specific backup. Return through Cobra so the shared
+		// command runner owns the process exit instead of terminating from the
+		// command callback.
+		if _, _, err := restoreBackup(args[0]); err != nil {
+			return &commandExitError{code: 1, silent: true}
+		}
+		return nil
 	},
 }
 
@@ -662,8 +668,8 @@ func restoreBackup(name string) (int, int, error) {
 		return 0, 0, fmt.Errorf("invalid backup name: %q", name)
 	}
 
-	backupDir := filepath.Join(config.ConfigDir(), "backups", name)
-	catalog, err := backup.ListCatalog(filepath.Dir(backupDir))
+	backupsDir := filepath.Join(config.ConfigDir(), "backups")
+	catalog, err := backup.ListCatalog(backupsDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error accessing backup: %v\n", err)
 		return 0, 0, err
@@ -680,10 +686,6 @@ func restoreBackup(name string) (int, int, error) {
 		fmt.Println("Run 'dotfiles backups' to see available backups.")
 		return 0, 0, os.ErrNotExist
 	}
-	if err := backup.ValidateCatalogEntry(*selected); err != nil {
-		return 0, 0, err
-	}
-
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
@@ -692,33 +694,52 @@ func restoreBackup(name string) (int, int, error) {
 
 	fmt.Printf("Restoring backup: %s\n", name)
 
-	result, err := backup.Restore(backupDir, home)
+	// The retained CatalogEntry carries private source and manifest authority.
+	// Its public Name/Path/count fields are display-only and never participate
+	// in execution after selection.
+	result, err := backup.RestoreCatalogEntry(*selected, home)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading backup: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error restoring backup: %v\n", err)
 		return 0, 0, err
 	}
 
-	for _, relPath := range result.Restored {
+	for _, relPath := range sortedRestorePaths(result.Restored) {
 		fmt.Printf("  Restored: %s\n", relPath)
 	}
-	for _, relPath := range result.Removed {
+	for _, relPath := range sortedRestorePaths(result.Removed) {
 		fmt.Printf("  Removed: %s\n", relPath)
 	}
-	for item, reason := range result.Skipped {
+	for _, item := range sortedRestoreMapKeys(result.Skipped) {
+		reason := result.Skipped[item]
 		fmt.Fprintf(os.Stderr, "  Warning: Skipping %s - %s\n", item, reason)
 	}
-	for item, warning := range result.Warnings {
+	for _, item := range sortedRestoreMapKeys(result.Warnings) {
+		warning := result.Warnings[item]
 		fmt.Fprintf(os.Stderr, "  Warning: Restored %s - %s\n", item, warning)
 	}
 
-	fmt.Printf("\nRestored %d files from backup.\n", result.Count())
-	if len(result.Removed) > 0 {
-		fmt.Printf("Removed %d files/directories created after the backup.\n", len(result.Removed))
-	}
+	fmt.Printf("\nRestore summary: %d restored, %d removed, %d skipped, %d warnings.\n",
+		result.Count(), len(result.Removed), len(result.Skipped), len(result.Warnings))
 	if outcomeErr := restoreOutcomeError(result); outcomeErr != nil {
+		fmt.Fprintf(os.Stderr, "Restore incomplete: %v\n", outcomeErr)
 		return result.Count(), len(result.Skipped), outcomeErr
 	}
 	return result.Count(), 0, nil
+}
+
+func sortedRestorePaths(paths []string) []string {
+	ordered := append([]string(nil), paths...)
+	sort.Strings(ordered)
+	return ordered
+}
+
+func sortedRestoreMapKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func restoreOutcomeError(result backup.RestoreResult) error {

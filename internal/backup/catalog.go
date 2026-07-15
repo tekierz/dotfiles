@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
@@ -248,11 +249,14 @@ func ValidateCatalogEntry(entry CatalogEntry) error {
 // that could not be applied without discarding successful work.
 func RestoreCatalogEntry(entry CatalogEntry, home string) (RestoreResult, error) {
 	result := RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}
+	operation.Trace(operation.TraceRestore, operation.TraceRunning, operation.TraceCounts{})
 	if err := ValidateCatalogEntry(entry); err != nil {
+		traceCatalogRestoreResult(result, err)
 		return result, err
 	}
 	session, err := safefile.NewRestoreSession(home)
 	if err != nil {
+		traceCatalogRestoreResult(result, err)
 		return result, err
 	}
 
@@ -260,7 +264,28 @@ func RestoreCatalogEntry(entry CatalogEntry, home string) (RestoreResult, error)
 	for _, item := range restore.items {
 		restoreCatalogItem(&result, session, home, restore.source, item)
 	}
+	traceCatalogRestoreResult(result, nil)
 	return result, nil
+}
+
+func traceCatalogRestoreResult(result RestoreResult, fatal error) {
+	outcome := operation.TraceSucceeded
+	if fatal != nil {
+		outcome = operation.TraceFailed
+	} else if len(result.Skipped) != 0 || len(result.Warnings) != 0 {
+		outcome = operation.TracePartial
+	}
+	failed := 0
+	if fatal != nil {
+		failed = 1
+	}
+	operation.Trace(operation.TraceRestore, outcome, operation.TraceCounts{
+		Attempted: result.Count() + len(result.Removed) + len(result.Skipped),
+		Succeeded: result.Count() + len(result.Removed),
+		Failed:    failed,
+		Skipped:   len(result.Skipped),
+		Warnings:  len(result.Warnings),
+	})
 }
 
 func restoreCatalogItem(result *RestoreResult, session *safefile.RestoreSession, home string, source *safefile.DirectorySnapshot, item catalogRestoreItem) {
