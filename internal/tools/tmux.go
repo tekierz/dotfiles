@@ -199,15 +199,18 @@ func installTPMAtSnapshotTracked(accepted *safefile.DirectorySnapshot, parents *
 		return MutationEvidence{}, fmt.Errorf("open exact TPM staging directory: %w", err)
 	}
 	defer func() { returnErr = errors.Join(returnErr, stagingFD.Close()) }()
-	// os/exec cannot portably fchdir the child. Keep the exact staging descriptor
-	// open across git, use the randomized private path as cwd, and revalidate the
-	// original staging inode before its bytes can enter the live namespace.
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1",
-		"https://github.com/tmux-plugins/tpm", ".")
-	cmd.Dir = staging
-
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return MutationEvidence{}, fmt.Errorf("failed to clone TPM: %w: %s", err, strings.TrimSpace(string(output)))
+	artifact, err := TPMRemoteArtifact()
+	if err != nil {
+		return MutationEvidence{}, fmt.Errorf("resolve pinned TPM artifact: %w", err)
+	}
+	// Keep the exact staging descriptor open across acquisition. The shared
+	// artifact loader fetches only the reviewed commit and verifies HEAD before
+	// any bytes can enter the live namespace.
+	commandFactory := func(ctx context.Context, name string, arguments ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, name, arguments...)
+	}
+	if err := clonePinnedGitArtifact(ctx, staging, artifact, commandFactory); err != nil {
+		return MutationEvidence{}, fmt.Errorf("stage pinned TPM artifact: %w", err)
 	}
 	snapshot, err := operation.SnapshotStateStagingDirectory(staging, createdStaging)
 	if err != nil {

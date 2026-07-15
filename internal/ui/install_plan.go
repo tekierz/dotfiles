@@ -184,6 +184,18 @@ func (p *installPlan) actions() []operation.Action {
 	return p.document.Actions()
 }
 
+func (p *installPlan) remoteArtifact(actionID string) (operation.RemoteArtifact, bool) {
+	if p == nil {
+		return operation.RemoteArtifact{}, false
+	}
+	for _, action := range p.document.Actions() {
+		if action.ID == actionID && action.RemoteArtifact != nil && action.RemoteArtifact.AuthorityDigest() != "" {
+			return *action.RemoteArtifact, true
+		}
+	}
+	return operation.RemoteArtifact{}, false
+}
+
 func (p *installPlan) backupTargets() []string {
 	if p == nil {
 		return nil
@@ -626,6 +638,22 @@ func buildInstallPlanForTools(a *App, installRuntime toolInstallRuntime, now tim
 		}{spec.toolID, a.theme, cfg}))
 		if err != nil {
 			return nil, err
+		}
+		switch spec.toolID {
+		case "tmux":
+			if cfg.TmuxTPMEnabled {
+				artifact, artifactErr := tools.TPMRemoteArtifact()
+				if artifactErr != nil {
+					return nil, fmt.Errorf("bind pinned TPM artifact: %w", artifactErr)
+				}
+				action.RemoteArtifact = &artifact
+			}
+		case "neovim":
+			artifact, artifactErr := tools.NeovimRemoteArtifact(cfg.NeovimConfig)
+			if artifactErr != nil {
+				return nil, fmt.Errorf("bind pinned Neovim artifact: %w", artifactErr)
+			}
+			action.RemoteArtifact = &artifact
 		}
 		if spec.toolID == "ghostty" && len(spec.targets) == 1 {
 			ghosttyConfigTarget = spec.targets[0]

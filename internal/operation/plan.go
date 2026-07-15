@@ -428,7 +428,9 @@ func validateDocument(doc planDocument) error {
 				return fmt.Errorf("%w: %s existing artifact lacks an exact backup target", ErrInvalidPlan, prefix)
 			}
 		} else if action.RemoteArtifact != nil {
-			return fmt.Errorf("%w: %s non-artifact action carries remote authority", ErrInvalidPlan, prefix)
+			if action.Kind != KindWriteConfig || action.Reversibility != ReversibilityBackup || !remoteArtifactMatchesCompositeAction(action) {
+				return fmt.Errorf("%w: %s non-artifact action carries unmatched remote authority", ErrInvalidPlan, prefix)
+			}
 		}
 		if action.Disposition == DispositionApply && (action.Kind == KindWriteConfig || action.Kind == KindInstallFile || action.Kind == KindInstallArtifact || action.Kind == KindUpdateState) {
 			if len(action.Observations) == 0 {
@@ -475,6 +477,32 @@ func validateDocument(doc planDocument) error {
 		}
 	}
 	return nil
+}
+
+func remoteArtifactMatchesCompositeAction(action Action) bool {
+	if action.RemoteArtifact == nil || !action.RemoteArtifact.valid() {
+		return false
+	}
+	review := action.RemoteArtifact.Review()
+	if review.ActionID != action.ID {
+		return false
+	}
+	observed := false
+	for _, observation := range action.Observations {
+		if observation.Source == review.Destination {
+			observed = true
+			break
+		}
+	}
+	if !observed {
+		return false
+	}
+	for _, target := range append([]string{action.BackupTarget}, action.BackupTargets...) {
+		if target == review.Destination {
+			return true
+		}
+	}
+	return false
 }
 
 func validDigest(value string) bool {

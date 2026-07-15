@@ -1150,6 +1150,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			}
 			var tpmAuthority acceptedTarget
 			if tmuxCfg.TPMEnabled {
+				plannedArtifact, planned := plan.remoteArtifact("config:tmux")
+				currentArtifact, artifactErr := tools.TPMRemoteArtifact()
+				if artifactErr != nil || !planned || plannedArtifact.AuthorityDigest() != currentArtifact.AuthorityDigest() {
+					return nil, fmt.Errorf("reviewed TPM artifact authority changed")
+				}
 				tpmAuthority, err = executionTarget("config:tmux", ".tmux/plugins/tpm")
 				if err != nil {
 					return nil, err
@@ -1243,6 +1248,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	}
 	toolConfigPhase("neovim", "\n▶ Configuring Neovim...", func() ([]tools.MutationEvidence, error) {
 		if persistJournal {
+			plannedArtifact, planned := plan.remoteArtifact("config:neovim")
+			currentArtifact, artifactErr := tools.NeovimRemoteArtifact(neovimCfg.ConfigPreset)
+			if artifactErr != nil || !planned || plannedArtifact.AuthorityDigest() != currentArtifact.AuthorityDigest() {
+				return nil, fmt.Errorf("reviewed Neovim artifact authority changed")
+			}
 			accepted, err := executionTarget("config:neovim", ".config/nvim")
 			if err != nil {
 				return nil, err
