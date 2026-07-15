@@ -59,12 +59,39 @@ func CheckAllUpdates() ([]Package, error) {
 	}
 	allPackages = deduped
 
-	// Sort by name for consistent display
+	// Sort by name, execution provider, then display provenance so same-named
+	// packages from multiple managers have a deterministic surface order.
 	sort.Slice(allPackages, func(i, j int) bool {
-		return allPackages[i].Name < allPackages[j].Name
+		if allPackages[i].Name != allPackages[j].Name {
+			return allPackages[i].Name < allPackages[j].Name
+		}
+		if allPackages[i].ExecutionProvider() != allPackages[j].ExecutionProvider() {
+			return allPackages[i].ExecutionProvider() < allPackages[j].ExecutionProvider()
+		}
+		return allPackages[i].InstalledBy < allPackages[j].InstalledBy
 	})
 
 	return allPackages, errors.Join(managerErrs...)
+}
+
+// ExecutionProviders returns the accepted providers represented by packages in
+// deterministic order. Display provenance is intentionally not consulted.
+func ExecutionProviders(packages []Package) []ExecutionProvider {
+	seen := make(map[ExecutionProvider]struct{})
+	providers := make([]ExecutionProvider, 0)
+	for _, packageInfo := range packages {
+		provider := packageInfo.ExecutionProvider()
+		if provider == "" {
+			continue
+		}
+		if _, ok := seen[provider]; ok {
+			continue
+		}
+		seen[provider] = struct{}{}
+		providers = append(providers, provider)
+	}
+	sort.Slice(providers, func(i, j int) bool { return providers[i] < providers[j] })
+	return providers
 }
 
 // DotfilesPackages is retained for source compatibility with integrations that

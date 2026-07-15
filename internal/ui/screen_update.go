@@ -318,15 +318,6 @@ func (s *updateScreen) View(width, height int) string {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Top, content)
 	}
 
-	// Check if no package manager detected (results will be nil with no error)
-	mgr := pkg.DetectManager()
-	if mgr == nil {
-		body := lipgloss.NewStyle().Foreground(ColorRed).Render("No package manager detected")
-		help := HelpStyle.Render("1-4 switch tabs • esc menu • q quit")
-		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, "", help)
-		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Top, content)
-	}
-
 	updates := a.updateResults
 
 	if len(updates) == 0 {
@@ -346,7 +337,7 @@ func (s *updateScreen) View(width, height int) string {
 
 	// Build subtitle with selection count
 	selectedCount := len(a.updateSelected)
-	subtitleText := fmt.Sprintf("Found %d outdated package(s)", len(updates))
+	subtitleText := fmt.Sprintf("Found %d outdated package(s) via %s", len(updates), updateProviderSummaryText(updates))
 	if selectedCount > 0 {
 		subtitleText += fmt.Sprintf(" • %d selected", selectedCount)
 	}
@@ -368,8 +359,8 @@ func (s *updateScreen) View(width, height int) string {
 	// Package list
 	var pkgLines []string
 	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
-	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")), innerTextW))
-	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
+	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-21s %-8s %-12s %-12s", "PACKAGE", "PROVIDER", "CURRENT", "LATEST")), innerTextW))
+	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-21s %-8s %-12s %-12s", strings.Repeat("─", 21), strings.Repeat("─", 8), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
 
 	for i, p := range updates {
 		cursor := "  "
@@ -389,10 +380,11 @@ func (s *updateScreen) View(width, height int) string {
 			style = style.Bold(true)
 		}
 
-		line := fmt.Sprintf("%s%s %-25s %s → %s",
+		line := fmt.Sprintf("%s%s %-21s %-8s %s → %s",
 			cursor,
 			checkStyle.Render(checkbox),
 			style.Render(p.Name),
+			lipgloss.NewStyle().Foreground(ColorCyan).Render(updateProviderLabel(p)),
 			versionStyle.Render(p.CurrentVersion),
 			newStyle.Render(p.LatestVersion))
 		pkgLines = append(pkgLines, truncateVisible(line, innerTextW))
@@ -426,6 +418,25 @@ func (s *updateScreen) View(width, height int) string {
 	return lipgloss.Place(width, height,
 		lipgloss.Center, lipgloss.Top,
 		content)
+}
+
+func updateProviderLabel(update pkg.Package) string {
+	if provider := update.ExecutionProvider(); provider != "" {
+		return string(provider)
+	}
+	return "unbound"
+}
+
+func updateProviderSummaryText(updates []pkg.Package) string {
+	providers := pkg.ExecutionProviders(updates)
+	labels := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		labels = append(labels, string(provider))
+	}
+	if len(labels) == 0 {
+		return "unbound provider"
+	}
+	return strings.Join(labels, ", ")
 }
 
 // viewWithLogs renders the update screen with the streaming log panel.
