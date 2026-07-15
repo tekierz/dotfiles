@@ -33,6 +33,47 @@ type Package struct {
 	Outdated       bool   `json:"outdated"`
 	InstalledBy    string `json:"installed_by"` // brew, pacman, apt, manual
 	Description    string `json:"description,omitempty"`
+	provider       ExecutionProvider
+}
+
+// ExecutionProvider identifies the package manager instance that discovered an
+// update and therefore owns its eventual execution route. It is deliberately
+// separate from Package.InstalledBy, which remains display provenance (for
+// example, Paru may report a package as coming from "aur" or "pacman").
+type ExecutionProvider string
+
+const (
+	ExecutionProviderBrew   ExecutionProvider = "brew"
+	ExecutionProviderPacman ExecutionProvider = "pacman"
+	ExecutionProviderParu   ExecutionProvider = "paru"
+	ExecutionProviderAPT    ExecutionProvider = "apt"
+)
+
+// ExecutionProvider returns the immutable execution authority stamped by the
+// update discovery coordinator. A zero value means no execution authority was
+// accepted and must fail closed at an execution boundary.
+func (p Package) ExecutionProvider() ExecutionProvider {
+	return p.provider
+}
+
+// ExecutionProviderForManager projects a supported manager onto its execution
+// domain. Unknown manager names intentionally have no authority.
+func ExecutionProviderForManager(manager PackageManager) ExecutionProvider {
+	if manager == nil {
+		return ""
+	}
+	switch manager.Name() {
+	case string(ExecutionProviderBrew):
+		return ExecutionProviderBrew
+	case string(ExecutionProviderPacman):
+		return ExecutionProviderPacman
+	case string(ExecutionProviderParu):
+		return ExecutionProviderParu
+	case string(ExecutionProviderAPT):
+		return ExecutionProviderAPT
+	default:
+		return ""
+	}
 }
 
 // PackageManager defines the interface for package management operations

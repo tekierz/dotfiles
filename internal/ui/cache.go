@@ -13,7 +13,8 @@ import (
 // checkUpdatesCmd starts an async update check
 func checkUpdatesCmd() tea.Cmd {
 	return func() tea.Msg {
-		updates, err := pkg.CheckDotfilesUpdates()
+		managedPackages := tools.GetRegistry().ManagedPackagesForPlatform(pkg.DetectPlatform())
+		updates, err := pkg.CheckManagedUpdates(managedPackages)
 		return updateCheckDoneMsg{updates: updates, err: err}
 	}
 }

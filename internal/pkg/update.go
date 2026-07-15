@@ -26,16 +26,24 @@ func CheckAllUpdates() ([]Package, error) {
 	}
 
 	for _, mgr := range managers {
+		provider := ExecutionProviderForManager(mgr)
+		if provider == "" {
+			managerErrs = append(managerErrs, fmt.Errorf("%s: unsupported update provider", mgr.Name()))
+			continue
+		}
 		packages, err := mgr.CheckOutdated()
 		if err != nil {
 			// Keep checking other managers, but surface this failure to callers.
 			managerErrs = append(managerErrs, fmt.Errorf("%s: %w", mgr.Name(), err))
 			continue
 		}
-		allPackages = append(allPackages, packages...)
+		for _, discovered := range packages {
+			discovered.provider = provider
+			allPackages = append(allPackages, discovered)
+		}
 	}
 
-	// Deduplicate exact duplicates only, keyed on Name+InstalledBy. This removes
+	// Deduplicate exact duplicates only, keyed on Name+InstalledBy+Provider. This removes
 	// the paru/pacman double-listing artifact without erasing a package's source
 	// manager: two records with the same name but different InstalledBy (e.g. a
 	// "pacman" vs an "aur" entry) are legitimately distinct and must both survive
@@ -43,7 +51,7 @@ func CheckAllUpdates() ([]Package, error) {
 	seen := make(map[string]bool)
 	var deduped []Package
 	for _, p := range allPackages {
-		key := p.Name + "\x00" + p.InstalledBy
+		key := p.Name + "\x00" + p.InstalledBy + "\x00" + string(p.ExecutionProvider())
 		if !seen[key] {
 			seen[key] = true
 			deduped = append(deduped, p)
@@ -59,10 +67,9 @@ func CheckAllUpdates() ([]Package, error) {
 	return allPackages, errors.Join(managerErrs...)
 }
 
-// DotfilesPackages is the canonical dotfiles package allow-list using macOS/Arch
-// names. On Debian/Pi several packages use different names (e.g. fd -> fd-find);
-// use DotfilesDebianPackages for that platform and CheckDotfilesUpdates for
-// platform-aware filtering.
+// DotfilesPackages is retained for source compatibility with integrations that
+// used the former static updater inventory. Runtime product checks use the tool
+// registry's managed platform projection instead.
 var DotfilesPackages = []string{
 	// Core shell
 	"zsh",
@@ -99,9 +106,8 @@ var DotfilesPackages = []string{
 	"dotfiles",
 }
 
-// DotfilesDebianPackages is the Debian/Pi variant of the allow-list, using the
-// stock Debian package names. Packages unavailable in stock repos are omitted
-// so the filter does not match phantom updates (glow, lazygit, lazydocker).
+// DotfilesDebianPackages is the retained Debian/Pi compatibility inventory.
+// Runtime product checks derive Debian names from the tool registry.
 var DotfilesDebianPackages = []string{
 	// Core shell
 	"zsh",
@@ -134,12 +140,10 @@ var DotfilesDebianPackages = []string{
 	// tlrc, duf, dust omitted: not in stock Debian repos
 }
 
-// CheckDotfilesUpdates checks for updates only for dotfiles-managed packages.
-// On Debian/Pi, Debian-specific package names (e.g., fd-find instead of fd)
-// are used for filtering so renamed packages are not silently dropped.
+// CheckDotfilesUpdates preserves the former public static-inventory behavior.
+// Product callers should pass the runtime registry projection to
+// CheckManagedUpdates.
 func CheckDotfilesUpdates() ([]Package, error) {
-	allUpdates, err := CheckAllUpdates()
-
 	// Pick the allow-list appropriate for the current platform so that
 	// Debian-renamed packages (fd-find etc.) are recognised correctly.
 	var allowList []string
@@ -150,17 +154,30 @@ func CheckDotfilesUpdates() ([]Package, error) {
 		allowList = DotfilesDebianPackages
 	}
 
-	dotfilesSet := make(map[string]bool, len(allowList))
-	for _, pkg := range allowList {
-		dotfilesSet[pkg] = true
-	}
+	return CheckManagedUpdates(allowList)
+}
 
-	var filtered []Package
-	for _, pkg := range allUpdates {
-		if dotfilesSet[pkg.Name] {
-			filtered = append(filtered, pkg)
+// CheckManagedUpdates checks all available providers and returns only packages
+// owned by the supplied runtime product projection.
+func CheckManagedUpdates(managedPackages []string) ([]Package, error) {
+	allUpdates, err := CheckAllUpdates()
+	return FilterManagedUpdates(allUpdates, managedPackages), err
+}
+
+// FilterManagedUpdates is the pure managed-package filter shared by CLI and
+// TUI update checks. It preserves discovery order and provider authority.
+func FilterManagedUpdates(updates []Package, managedPackages []string) []Package {
+	managed := make(map[string]struct{}, len(managedPackages))
+	for _, name := range managedPackages {
+		if name != "" {
+			managed[name] = struct{}{}
 		}
 	}
-
-	return filtered, err
+	filtered := make([]Package, 0, len(updates))
+	for _, update := range updates {
+		if _, ok := managed[update.Name]; ok {
+			filtered = append(filtered, update)
+		}
+	}
+	return filtered
 }
