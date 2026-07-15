@@ -56,6 +56,19 @@ type directoryEntryState struct {
 // making concurrent namespace/content changes observable before a snapshot is
 // returned.
 func SnapshotDirectoryWithin(root, rel string) (*DirectorySnapshot, error) {
+	return snapshotDirectoryWithin(root, rel, nil)
+}
+
+// SnapshotDirectoryWithinBudget is SnapshotDirectoryWithin with explicit
+// recursive allocation limits enforced before file reads.
+func SnapshotDirectoryWithinBudget(root, rel string, budget SnapshotBudget) (*DirectorySnapshot, error) {
+	if budget.MaxFiles < 0 || budget.MaxFileBytes < 0 || budget.MaxTotalBytes < 0 {
+		return nil, fmt.Errorf("%w: invalid snapshot budget", ErrSnapshotLimit)
+	}
+	return snapshotDirectoryWithin(root, rel, &budget)
+}
+
+func snapshotDirectoryWithin(root, rel string, budget *SnapshotBudget) (*DirectorySnapshot, error) {
 	directories, target, err := splitRelativePath(rel)
 	if err != nil {
 		return nil, err
@@ -71,7 +84,7 @@ func SnapshotDirectoryWithin(root, rel string) (*DirectorySnapshot, error) {
 	}
 	defer func() { _ = unix.Close(parentFD) }()
 
-	snapshot, _, err := snapshotDirectoryEntryAt(parentFD, target)
+	snapshot, _, err := snapshotDirectoryEntryAtBudget(parentFD, target, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +140,17 @@ func VerifyDirectoryWithinSnapshot(root, rel string, expected *DirectorySnapshot
 }
 
 func snapshotDirectoryEntryAt(parentFD int, target string) (*DirectorySnapshot, fileIdentity, error) {
+	return snapshotDirectoryEntryAtBudget(parentFD, target, nil)
+}
+
+type snapshotBudgetState struct {
+	budget  SnapshotBudget
+	files   int
+	entries int
+	bytes   int64
+}
+
+func snapshotDirectoryEntryAtBudget(parentFD int, target string, budget *SnapshotBudget) (*DirectorySnapshot, fileIdentity, error) {
 	state, err := statDirectoryEntryAt(parentFD, target)
 	if err != nil {
 		return nil, fileIdentity{}, fmt.Errorf("inspect directory target %q: %w", target, err)
@@ -161,11 +185,16 @@ func snapshotDirectoryEntryAt(parentFD int, target string) (*DirectorySnapshot, 
 		}
 	}
 
-	first, err := captureDirectoryNode(directoryFD)
+	var firstBudget, secondBudget *snapshotBudgetState
+	if budget != nil {
+		firstBudget = &snapshotBudgetState{budget: *budget}
+		secondBudget = &snapshotBudgetState{budget: *budget}
+	}
+	first, err := captureDirectoryNode(directoryFD, firstBudget)
 	if err != nil {
 		return nil, fileIdentity{}, err
 	}
-	second, err := captureDirectoryNode(directoryFD)
+	second, err := captureDirectoryNode(directoryFD, secondBudget)
 	if err != nil {
 		return nil, fileIdentity{}, err
 	}
@@ -191,7 +220,7 @@ func snapshotDirectoryEntryAt(parentFD int, target string) (*DirectorySnapshot, 
 	return snapshot, state.identity, nil
 }
 
-func captureDirectoryNode(directoryFD int) (directorySnapshotNode, error) {
+func captureDirectoryNode(directoryFD int, budget *snapshotBudgetState) (directorySnapshotNode, error) {
 	var ownerStat unix.Stat_t
 	if err := unix.Fstat(directoryFD, &ownerStat); err != nil {
 		return directorySnapshotNode{}, fmt.Errorf("inspect directory snapshot owner: %w", err)
@@ -206,18 +235,31 @@ func captureDirectoryNode(directoryFD int) (directorySnapshotNode, error) {
 	if fileTypeBefore != unix.S_IFDIR {
 		return directorySnapshotNode{}, fmt.Errorf("%w: snapshot descriptor is not a directory", ErrNonRegular)
 	}
-	states, err := listDirectoryStates(directoryFD)
+	entryLimit := -1
+	if budget != nil {
+		entryLimit = budget.budget.MaxFiles - budget.entries
+		if entryLimit < 0 {
+			return directorySnapshotNode{}, fmt.Errorf("%w: more than %d entries", ErrSnapshotLimit, budget.budget.MaxFiles)
+		}
+	}
+	states, err := listDirectoryStates(directoryFD, entryLimit)
 	if err != nil {
 		return directorySnapshotNode{}, err
 	}
 
 	node := directorySnapshotNode{mode: modeBefore, entries: make([]directorySnapshotEntry, 0, len(states))}
 	for _, state := range states {
+		if budget != nil {
+			budget.entries++
+			if budget.entries > budget.budget.MaxFiles {
+				return directorySnapshotNode{}, fmt.Errorf("%w: more than %d entries", ErrSnapshotLimit, budget.budget.MaxFiles)
+			}
+		}
 		switch state.fileType {
 		case unix.S_IFLNK:
 			return directorySnapshotNode{}, fmt.Errorf("%w: directory snapshot entry %q", ErrSymlink, state.name)
 		case unix.S_IFREG:
-			data, mode, err := captureRegularFileAt(directoryFD, state)
+			data, mode, err := captureRegularFileAt(directoryFD, state, budget)
 			if err != nil {
 				return directorySnapshotNode{}, err
 			}
@@ -235,7 +277,7 @@ func captureDirectoryNode(directoryFD int) (directorySnapshotNode, error) {
 				}
 				return directorySnapshotNode{}, fmt.Errorf("%w: snapshot directory %q changed before recursion", ErrDirectoryChanged, state.name)
 			}
-			child, err := captureDirectoryNode(childFD)
+			child, err := captureDirectoryNode(childFD, budget)
 			closeErr := unix.Close(childFD)
 			if err != nil {
 				return directorySnapshotNode{}, err
@@ -249,7 +291,11 @@ func captureDirectoryNode(directoryFD int) (directorySnapshotNode, error) {
 		}
 	}
 
-	statesAfter, err := listDirectoryStates(directoryFD)
+	afterLimit := -1
+	if budget != nil {
+		afterLimit = len(states)
+	}
+	statesAfter, err := listDirectoryStates(directoryFD, afterLimit)
 	if err != nil {
 		return directorySnapshotNode{}, err
 	}
@@ -268,7 +314,7 @@ func captureDirectoryNode(directoryFD int) (directorySnapshotNode, error) {
 	return node, nil
 }
 
-func captureRegularFileAt(parentFD int, expected directoryEntryState) ([]byte, fs.FileMode, error) {
+func captureRegularFileAt(parentFD int, expected directoryEntryState, budget *snapshotBudgetState) ([]byte, fs.FileMode, error) {
 	fd, err := unix.Openat(parentFD, expected.name, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, 0, classifyLeafOpenError(parentFD, expected.name, err)
@@ -292,13 +338,31 @@ func captureRegularFileAt(parentFD int, expected directoryEntryState) ([]byte, f
 		_ = file.Close()
 		return nil, 0, fmt.Errorf("%w: snapshot file %q changed before read", ErrDirectoryChanged, expected.name)
 	}
+	if budget != nil {
+		if budget.files >= budget.budget.MaxFiles {
+			_ = file.Close()
+			return nil, 0, fmt.Errorf("%w: more than %d files", ErrSnapshotLimit, budget.budget.MaxFiles)
+		}
+		if before.size > budget.budget.MaxFileBytes {
+			_ = file.Close()
+			return nil, 0, fmt.Errorf("%w: file exceeds %d bytes", ErrSnapshotLimit, budget.budget.MaxFileBytes)
+		}
+		if before.size < 0 || before.size > budget.budget.MaxTotalBytes-budget.bytes {
+			_ = file.Close()
+			return nil, 0, fmt.Errorf("%w: total exceeds %d bytes", ErrSnapshotLimit, budget.budget.MaxTotalBytes)
+		}
+	}
 	if hook := directoryTestHooks.afterSnapshotFileOpen; hook != nil {
 		if err := hook(parentFD, fd, expected.name); err != nil {
 			_ = file.Close()
 			return nil, 0, fmt.Errorf("after opening snapshot file %q: %w", expected.name, err)
 		}
 	}
-	data, err := io.ReadAll(file)
+	reader := io.Reader(file)
+	if budget != nil {
+		reader = io.LimitReader(file, before.size+1)
+	}
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		_ = file.Close()
 		return nil, 0, fmt.Errorf("read snapshot file %q: %w", expected.name, err)
@@ -312,13 +376,17 @@ func captureRegularFileAt(parentFD int, expected directoryEntryState) ([]byte, f
 		_ = file.Close()
 		return nil, 0, fmt.Errorf("%w: snapshot file %q changed during read", ErrDirectoryChanged, expected.name)
 	}
+	if budget != nil {
+		budget.files++
+		budget.bytes += int64(len(data))
+	}
 	if err := file.Close(); err != nil {
 		return nil, 0, fmt.Errorf("close snapshot file %q: %w", expected.name, err)
 	}
 	return data, fs.FileMode(after.mode).Perm(), nil
 }
 
-func listDirectoryStates(directoryFD int) ([]directoryEntryState, error) {
+func listDirectoryStates(directoryFD int, limit int) ([]directoryEntryState, error) {
 	scanFD, err := unix.Openat(directoryFD, ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open directory snapshot scan: %w", err)
@@ -328,13 +396,20 @@ func listDirectoryStates(directoryFD int) ([]directoryEntryState, error) {
 		_ = unix.Close(scanFD)
 		return nil, fmt.Errorf("wrap directory snapshot scan descriptor")
 	}
-	entries, err := file.ReadDir(-1)
+	readLimit := -1
+	if limit >= 0 {
+		readLimit = limit + 1
+	}
+	entries, err := file.ReadDir(readLimit)
 	closeErr := file.Close()
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("read directory snapshot entries: %w", err)
 	}
 	if closeErr != nil {
 		return nil, fmt.Errorf("close directory snapshot scan: %w", closeErr)
+	}
+	if limit >= 0 && len(entries) > limit {
+		return nil, fmt.Errorf("%w: directory contains more than %d remaining entries", ErrSnapshotLimit, limit)
 	}
 	states := make([]directoryEntryState, 0, len(entries))
 	for _, entry := range entries {
@@ -898,11 +973,11 @@ func validateDirectorySnapshotNode(node *directorySnapshotNode) error {
 }
 
 func verifyStagedDirectorySnapshot(directoryFD int, expected *directorySnapshotNode) error {
-	first, err := captureDirectoryNode(directoryFD)
+	first, err := captureDirectoryNode(directoryFD, nil)
 	if err != nil {
 		return err
 	}
-	second, err := captureDirectoryNode(directoryFD)
+	second, err := captureDirectoryNode(directoryFD, nil)
 	if err != nil {
 		return err
 	}
@@ -976,7 +1051,7 @@ func makeStagedDirectoryRemovable(directoryFD int) error {
 	if err := unix.Fchmod(directoryFD, directoryMode); err != nil {
 		return fmt.Errorf("reset staged directory mode: %w", err)
 	}
-	states, err := listDirectoryStates(directoryFD)
+	states, err := listDirectoryStates(directoryFD, -1)
 	if err != nil {
 		return err
 	}
@@ -1178,7 +1253,7 @@ func removeDirectoryEntryAt(parentFD int, name string, expected fileIdentity) er
 }
 
 func removeDirectoryContents(directoryFD int) error {
-	states, err := listDirectoryStates(directoryFD)
+	states, err := listDirectoryStates(directoryFD, -1)
 	if err != nil {
 		return err
 	}

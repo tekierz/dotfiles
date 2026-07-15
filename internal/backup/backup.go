@@ -4,7 +4,6 @@
 package backup
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -63,7 +62,7 @@ func ManifestLine(relPath string, mode os.FileMode) string {
 // home-relative paths for existed=yes entries. A missing manifest returns
 // (nil, nil) so callers can decide how to handle pre-manifest backups.
 func ReadManifest(backupDir string) ([]Entry, error) {
-	data, revision, err := readBackupDescendant(backupDir, ManifestName)
+	data, revision, err := readBackupDescendantLimit(backupDir, ManifestName, maxBackupManifestBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -76,22 +75,21 @@ func ReadManifest(backupDir string) ([]Entry, error) {
 
 func parseManifestData(data []byte, home string) ([]Entry, error) {
 	var entries []Entry
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSuffix(scanner.Text(), "\r")
+	err := scanBackupManifest(data, func(raw string) error {
+		line := strings.TrimSuffix(raw, "\r")
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
+			return nil
 		}
 		if strings.Contains(line, "|") {
 			entry, ok, err := readBashManifestEntry(line, home)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if ok {
 				entries = append(entries, entry)
 			}
-			continue
+			return nil
 		}
 		// Format: "relpath" (legacy) or "relpath\tmode" (current).
 		relPath := line
@@ -100,13 +98,14 @@ func parseManifestData(data []byte, home string) ([]Entry, error) {
 			relPath = line[:tab]
 			parsed, perr := parseOctalMode(line[tab+1:])
 			if perr != nil {
-				return nil, fmt.Errorf("invalid explicit mode for %q: %w", relPath, perr)
+				return fmt.Errorf("invalid explicit mode for manifest entry: %w", perr)
 			}
 			mode = parsed
 		}
 		entries = append(entries, Entry{RelPath: relPath, Mode: mode})
-	}
-	if err := scanner.Err(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return entries, nil
@@ -120,11 +119,15 @@ func parseManifestData(data []byte, home string) ([]Entry, error) {
 // symlink. Restore callers always pass an absolute <root>/<selected> layout;
 // degenerate paths without both components are rejected.
 func readBackupDescendant(backupDir, rel string) ([]byte, safefile.Revision, error) {
+	return readBackupDescendantLimit(backupDir, rel, maxBackupFileBytes)
+}
+
+func readBackupDescendantLimit(backupDir, rel string, limit int64) ([]byte, safefile.Revision, error) {
 	anchor, anchoredRel, err := backupDescendantAnchor(backupDir, rel)
 	if err != nil {
 		return nil, safefile.Revision{}, err
 	}
-	return safefile.ReadWithin(anchor, anchoredRel)
+	return safefile.ReadWithinLimit(anchor, anchoredRel, limit)
 }
 
 func backupDescendantAnchor(backupDir, rel string) (string, string, error) {
@@ -259,13 +262,13 @@ func CaptureExpectedState(home string, target Target) (ExpectedState, error) {
 	rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.RelPath)))
 	switch target.Kind {
 	case TargetFile:
-		_, revision, parents, err := safefile.ObserveFileWithin(home, rel)
+		_, revision, parents, err := safefile.ObserveFileWithinLimit(home, rel, maxBackupFileBytes)
 		if err != nil {
 			return ExpectedState{}, err
 		}
 		return ExpectedState{Attempted: true, Captured: true, Kind: TargetFile, Exists: revision.Exists(), FileRevision: revision, Parents: parents}, nil
 	case TargetDirectory:
-		snapshot, parents, err := safefile.ObserveDirectoryWithin(home, rel)
+		snapshot, parents, err := safefile.ObserveDirectoryWithinBudget(home, rel, backupSnapshotBudget)
 		if errors.Is(err, os.ErrNotExist) {
 			return ExpectedState{Attempted: true, Captured: true, Kind: TargetDirectory, Parents: parents}, nil
 		}
@@ -362,21 +365,45 @@ func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) 
 	if plan.sources == nil || plan.targets == nil {
 		return nil, fmt.Errorf("%w: plan backup source authority is unavailable", safefile.ErrDirectoryChanged)
 	}
+	if len(plan.targets) > maxBackupManifestEntries || len(expected) > maxBackupManifestEntries {
+		return nil, fmt.Errorf("plan restore exceeds %d entries", maxBackupManifestEntries)
+	}
 	manifest, ok := plan.sources[ManifestName]
 	if !ok || !manifest.file.Tracked() || !manifest.file.Exists() || !manifest.parents.Tracked() {
 		return nil, fmt.Errorf("%w: plan manifest authority is unavailable", safefile.ErrRevisionChanged)
 	}
 	manifestRel := filepath.ToSlash(filepath.Join(filepath.FromSlash(plan.rel), ManifestName))
-	_, currentManifest, err := safefile.ReadWithinAuthorized(plan.anchor, manifestRel, manifest.parents)
+	_, currentManifest, err := safefile.ReadWithinAuthorizedLimit(plan.anchor, manifestRel, manifest.parents, maxBackupManifestBytes)
 	if err != nil || currentManifest != manifest.file {
 		return nil, fmt.Errorf("plan manifest changed before rollback: %w", errors.Join(safefile.ErrRevisionChanged, err))
 	}
 
+	files := 0
+	var total int64
+	for _, state := range expected {
+		if len(state.OriginalData) != 0 {
+			if int64(len(state.OriginalData)) > maxBackupFileBytes || int64(len(state.OriginalData)) > maxBackupTotalBytes-total {
+				return nil, fmt.Errorf("accepted original file exceeds restore budget")
+			}
+			files++
+			total += int64(len(state.OriginalData))
+		}
+		if state.OriginalDirectory != nil {
+			count, size := state.OriginalDirectory.RecursiveFileStats()
+			if count > maxBackupSnapshotFiles-files || size > maxBackupTotalBytes-total {
+				return nil, fmt.Errorf("accepted original directory exceeds restore budget")
+			}
+			files += count
+			total += size
+		}
+	}
 	result := make(map[string]ExpectedState, len(expected))
 	for rel, state := range expected {
 		state.OriginalData = append([]byte(nil), state.OriginalData...)
 		result[filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))] = state
 	}
+	loadedFiles := 0
+	var loadedBytes int64
 	for _, target := range plan.targets {
 		rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.RelPath)))
 		state := result[rel]
@@ -399,7 +426,14 @@ func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) 
 		fullRel := filepath.ToSlash(filepath.Join(filepath.FromSlash(plan.rel), filepath.FromSlash(rel)))
 		switch target.Kind {
 		case TargetFile:
-			data, revision, readErr := safefile.ReadWithinAuthorized(plan.anchor, fullRel, source.parents)
+			if loadedFiles >= maxBackupSnapshotFiles {
+				return nil, fmt.Errorf("plan restore exceeds %d files", maxBackupSnapshotFiles)
+			}
+			limit, limitErr := boundedBackupFileLimit(loadedBytes)
+			if limitErr != nil {
+				return nil, limitErr
+			}
+			data, revision, readErr := safefile.ReadWithinAuthorizedLimit(plan.anchor, fullRel, source.parents, limit)
 			if readErr != nil || revision != source.file || !revision.Exists() {
 				return nil, fmt.Errorf("plan backup file %s changed before rollback: %w", rel, errors.Join(safefile.ErrRevisionChanged, readErr))
 			}
@@ -411,6 +445,8 @@ func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) 
 			state.OriginalData = append([]byte(nil), data...)
 			state.OriginalMode = revision.Permissions()
 			state.OriginalDirectory = nil
+			loadedFiles++
+			loadedBytes += int64(len(data))
 		case TargetDirectory:
 			if source.directory == nil {
 				return nil, fmt.Errorf("%w: plan backup directory %s has no snapshot", safefile.ErrDirectoryChanged, rel)
@@ -419,7 +455,13 @@ func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) 
 			if bindErr != nil {
 				return nil, bindErr
 			}
-			snapshot, snapshotErr := safefile.SnapshotDirectoryWithin(plan.anchor, fullRel)
+			remaining, limitErr := remainingBackupBytes(loadedBytes)
+			if limitErr != nil {
+				return nil, limitErr
+			}
+			snapshot, snapshotErr := safefile.SnapshotDirectoryWithinBudget(plan.anchor, fullRel, safefile.SnapshotBudget{
+				MaxFiles: maxBackupSnapshotFiles - loadedFiles, MaxFileBytes: maxBackupFileBytes, MaxTotalBytes: remaining,
+			})
 			after, afterErr := safefile.BindParentChainWithin(plan.anchor, fullRel, source.parents, nil)
 			if snapshotErr != nil || afterErr != nil || !safefile.SameParentChain(before, after) ||
 				!safefile.SameDirectoryRootState(snapshot, source.directory) || snapshot.Digest() != source.directory.Digest() {
@@ -434,6 +476,9 @@ func loadExactPlanOriginals(plan PlanResult, expected map[string]ExpectedState) 
 			state.OriginalDirectory = snapshot
 			state.OriginalData = nil
 			state.OriginalMode = 0
+			count, size := snapshot.RecursiveFileStats()
+			loadedFiles += count
+			loadedBytes += size
 		default:
 			return nil, fmt.Errorf("invalid plan source target kind %q", target.Kind)
 		}
@@ -446,6 +491,7 @@ func defaultRestoreOperations() restoreOperations {
 	return restoreOperations{
 		replaceFile:              safefile.ReplaceWithin,
 		snapshotDirectory:        safefile.SnapshotDirectoryWithin,
+		snapshotDirectoryBudget:  safefile.SnapshotDirectoryWithinBudget,
 		restoreDirectory:         safefile.RestoreDirectoryWithin,
 		removeFile:               safefile.RemoveWithin,
 		removeDirectory:          safefile.RemoveDirectoryWithin,
@@ -473,6 +519,7 @@ type restoreReplaceFunc func(root, rel string, data []byte, mode os.FileMode) er
 type restoreOperations struct {
 	replaceFile                restoreReplaceFunc
 	snapshotDirectory          func(root, rel string) (*safefile.DirectorySnapshot, error)
+	snapshotDirectoryBudget    func(root, rel string, budget safefile.SnapshotBudget) (*safefile.DirectorySnapshot, error)
 	restoreDirectory           func(root, rel string, snapshot *safefile.DirectorySnapshot) error
 	removeFile                 func(root, rel string) error
 	removeDirectory            func(root, rel string) error
@@ -490,11 +537,12 @@ type restoreOperations struct {
 
 func restoreWithReplace(backupDir, home string, replace restoreReplaceFunc) (RestoreResult, error) {
 	return restoreWithOperations(backupDir, home, restoreOperations{
-		replaceFile:       replace,
-		snapshotDirectory: safefile.SnapshotDirectoryWithin,
-		restoreDirectory:  safefile.RestoreDirectoryWithin,
-		removeFile:        safefile.RemoveWithin,
-		removeDirectory:   safefile.RemoveDirectoryWithin,
+		replaceFile:             replace,
+		snapshotDirectory:       safefile.SnapshotDirectoryWithin,
+		snapshotDirectoryBudget: safefile.SnapshotDirectoryWithinBudget,
+		restoreDirectory:        safefile.RestoreDirectoryWithin,
+		removeFile:              safefile.RemoveWithin,
+		removeDirectory:         safefile.RemoveDirectoryWithin,
 	})
 }
 
@@ -534,6 +582,11 @@ func restoreWithExpectedItems(backupDir, home string, operations restoreOperatio
 			}
 			return left < right
 		})
+	}
+	var err error
+	items, err = preloadRestorePayloads(backupDir, items, operations, expected)
+	if err != nil {
+		return result, err
 	}
 
 	for _, it := range items {
@@ -615,24 +668,10 @@ func restoreWithExpectedItems(backupDir, home string, operations restoreOperatio
 				result.Skipped[it.key()] = "backup source is outside the selected backup directory"
 				continue
 			}
-			var snapshot *safefile.DirectorySnapshot
-			if conditional && postState.OriginalCaptured {
-				snapshot = postState.OriginalDirectory
-				if snapshot == nil {
-					result.Skipped[it.key()] = "immutable original directory snapshot is unavailable"
-					continue
-				}
-			} else {
-				anchor, sourceRel, err := backupDescendantAnchor(backupDir, it.srcRel)
-				if err != nil {
-					result.Skipped[it.key()] = fmt.Sprintf("resolve backup directory: %v", err)
-					continue
-				}
-				snapshot, err = operations.snapshotDirectory(anchor, sourceRel)
-				if err != nil {
-					result.Skipped[it.key()] = fmt.Sprintf("snapshot backup directory: %v", err)
-					continue
-				}
+			snapshot := it.snapshot
+			if snapshot == nil {
+				result.Skipped[it.key()] = "bounded directory payload is unavailable"
+				continue
 			}
 			var restoreErr error
 			if conditional {
@@ -658,23 +697,10 @@ func restoreWithExpectedItems(backupDir, home string, operations restoreOperatio
 			result.Skipped[it.key()] = "backup source is outside the selected backup directory"
 			continue
 		}
-		var data []byte
+		data := it.data
 		mode := it.mode.Perm()
 		if conditional && postState.OriginalCaptured {
-			data = append([]byte(nil), postState.OriginalData...)
 			mode = postState.OriginalMode.Perm()
-		} else {
-			var revision safefile.Revision
-			var err error
-			data, revision, err = readBackupDescendant(backupDir, it.srcRel)
-			if err != nil {
-				result.Skipped[it.key()] = fmt.Sprintf("read backup file: %v", err)
-				continue
-			}
-			if !revision.Exists() {
-				result.Skipped[it.key()] = "read backup file: source does not exist"
-				continue
-			}
 		}
 
 		// Restore ordinary files through the same descriptor-anchored atomic
@@ -703,6 +729,96 @@ func restoreWithExpectedItems(backupDir, home string, operations restoreOperatio
 	}
 
 	return result, nil
+}
+
+func preloadRestorePayloads(backupDir string, items []restoreItem, operations restoreOperations, expected map[string]ExpectedState) ([]restoreItem, error) {
+	if len(items) > maxBackupManifestEntries {
+		return nil, fmt.Errorf("backup restore exceeds %d entries", maxBackupManifestEntries)
+	}
+	loaded := append([]restoreItem(nil), items...)
+	files := 0
+	var total int64
+	for index := range loaded {
+		item := &loaded[index]
+		if item.skipReason != "" || !item.existed {
+			continue
+		}
+		if files >= maxBackupSnapshotFiles {
+			return nil, fmt.Errorf("backup restore exceeds %d files", maxBackupSnapshotFiles)
+		}
+		state := ExpectedState{}
+		conditionalOriginal := false
+		if expected != nil {
+			rel := filepath.ToSlash(filepath.Clean(filepath.FromSlash(item.relPath)))
+			state = expected[rel]
+			conditionalOriginal = state.OriginalCaptured
+		}
+		remaining, err := remainingBackupBytes(total)
+		if err != nil {
+			return nil, err
+		}
+		if item.isDir {
+			if conditionalOriginal {
+				item.snapshot = state.OriginalDirectory
+			} else {
+				anchor, sourceRel, anchorErr := backupDescendantAnchor(backupDir, item.srcRel)
+				if anchorErr != nil {
+					return nil, fmt.Errorf("resolve bounded backup directory: %w", anchorErr)
+				}
+				budget := safefile.SnapshotBudget{MaxFiles: maxBackupSnapshotFiles - files, MaxFileBytes: maxBackupFileBytes, MaxTotalBytes: remaining}
+				if operations.snapshotDirectoryBudget != nil {
+					item.snapshot, err = operations.snapshotDirectoryBudget(anchor, sourceRel, budget)
+				} else {
+					item.snapshot, err = operations.snapshotDirectory(anchor, sourceRel)
+				}
+			}
+			if err != nil {
+				if errors.Is(err, safefile.ErrSnapshotLimit) || errors.Is(err, safefile.ErrSizeLimit) {
+					return nil, fmt.Errorf("snapshot bounded backup directory: %w", err)
+				}
+				item.skipReason = fmt.Sprintf("snapshot backup directory: %v", err)
+				continue
+			}
+			if item.snapshot == nil {
+				item.skipReason = "snapshot backup directory: source does not exist"
+				continue
+			}
+			count, size := item.snapshot.RecursiveFileStats()
+			if count > maxBackupSnapshotFiles-files || size > remaining {
+				return nil, fmt.Errorf("backup directory exceeds restore budget")
+			}
+			files += count
+			total += size
+			continue
+		}
+		limit, err := boundedBackupFileLimit(total)
+		if err != nil {
+			return nil, err
+		}
+		if conditionalOriginal {
+			if int64(len(state.OriginalData)) > limit {
+				return nil, fmt.Errorf("backup file exceeds restore budget")
+			}
+			item.data = state.OriginalData
+		} else {
+			var revision safefile.Revision
+			item.data, revision, err = readBackupDescendantLimit(backupDir, item.srcRel, limit)
+			if err != nil {
+				if errors.Is(err, safefile.ErrSizeLimit) {
+					return nil, fmt.Errorf("read bounded backup file: %w", err)
+				}
+				item.skipReason = fmt.Sprintf("read backup file: %v", err)
+				continue
+			}
+			if !revision.Exists() {
+				item.skipReason = "read backup file: source does not exist"
+				continue
+			}
+		}
+		files++
+		total += int64(len(item.data))
+	}
+	return loaded, nil
 }
 
 func validateConditionalManifest(items []restoreItem, expected map[string]ExpectedState) error {
@@ -751,7 +867,7 @@ func removeExpectedTarget(home, rel string, expected ExpectedState, operations r
 	if !expected.Exists {
 		switch expected.Kind {
 		case TargetFile:
-			_, current, err := safefile.ReadWithinAuthorized(home, rel, expected.Parents)
+			_, current, err := safefile.ReadWithinAuthorizedLimit(home, rel, expected.Parents, maxBackupFileBytes)
 			if err != nil {
 				return err
 			}
@@ -764,7 +880,7 @@ func removeExpectedTarget(home, rel string, expected ExpectedState, operations r
 			if err != nil {
 				return err
 			}
-			_, err = safefile.SnapshotDirectoryWithin(home, rel)
+			_, err = safefile.SnapshotDirectoryWithinBudget(home, rel, backupSnapshotBudget)
 			if errors.Is(err, os.ErrNotExist) {
 				return nil
 			}
@@ -792,6 +908,8 @@ type restoreItem struct {
 	existed    bool
 	isDir      bool
 	skipReason string
+	data       []byte
+	snapshot   *safefile.DirectorySnapshot
 }
 
 func (it restoreItem) key() string {
@@ -805,7 +923,7 @@ func (it restoreItem) key() string {
 }
 
 func restoreItems(backupDir, home string) ([]restoreItem, error) {
-	data, revision, err := readBackupDescendant(backupDir, ManifestName)
+	data, revision, err := readBackupDescendantLimit(backupDir, ManifestName, maxBackupManifestBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -814,12 +932,11 @@ func restoreItems(backupDir, home string) ([]restoreItem, error) {
 	}
 
 	var items []restoreItem
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSuffix(scanner.Text(), "\r")
+	err = scanBackupManifest(data, func(raw string) error {
+		line := strings.TrimSuffix(raw, "\r")
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
+			return nil
 		}
 
 		if strings.Contains(line, "|") {
@@ -829,12 +946,12 @@ func restoreItems(backupDir, home string) ([]restoreItem, error) {
 					relPath:    line,
 					skipReason: fmt.Sprintf("invalid manifest line: %v", err),
 				})
-				continue
+				return nil
 			}
 			if ok {
 				items = append(items, item)
 			}
-			continue
+			return nil
 		}
 
 		relPath := line
@@ -847,7 +964,7 @@ func restoreItems(backupDir, home string) ([]restoreItem, error) {
 					relPath:    relPath,
 					skipReason: fmt.Sprintf("invalid explicit mode: %v", perr),
 				})
-				continue
+				return nil
 			}
 			mode = parsed
 		}
@@ -858,8 +975,9 @@ func restoreItems(backupDir, home string) ([]restoreItem, error) {
 			mode:    mode,
 			existed: true,
 		})
-	}
-	if err := scanner.Err(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return items, nil

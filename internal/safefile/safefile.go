@@ -43,6 +43,9 @@ var (
 	// ErrSizeLimit reports that a stable regular file exceeds the caller's
 	// explicit ReadWithinLimit byte budget.
 	ErrSizeLimit = errors.New("file exceeds read size limit")
+	// ErrSnapshotLimit reports that a recursive directory capture exceeded an
+	// explicit file-count, per-file, or aggregate byte budget.
+	ErrSnapshotLimit = errors.New("directory snapshot exceeds budget")
 	// ErrHardlink reports a lock path with more than one directory entry. Such a
 	// file is refused before chmod or flock can affect another name.
 	ErrHardlink = errors.New("hardlinked lock file refused")
@@ -83,6 +86,15 @@ type DirectorySnapshot struct {
 	gid      uint32
 	root     directorySnapshotNode
 	digest   [32]byte
+}
+
+// SnapshotBudget bounds recursive snapshot allocation. All members must be
+// positive. MaxFiles also caps directory entries so a directory-only tree
+// cannot bypass the allocation bound.
+type SnapshotBudget struct {
+	MaxFiles      int
+	MaxFileBytes  int64
+	MaxTotalBytes int64
 }
 
 // ParentChain is an immutable, opaque, non-recursive identity capture from a
@@ -242,12 +254,24 @@ func recursiveDirectorySnapshot(snapshot *DirectorySnapshot) bool {
 
 // ReadDirectorySnapshotFile returns one cloned regular file below a complete recursive authority at an already-clean rel path.
 func ReadDirectorySnapshotFile(snapshot *DirectorySnapshot, rel string) ([]byte, fs.FileMode, error) {
+	return ReadDirectorySnapshotFileLimit(snapshot, rel, int64(^uint64(0)>>1))
+}
+
+// ReadDirectorySnapshotFileLimit clones one accepted snapshot file only when
+// its already-captured size is within limit.
+func ReadDirectorySnapshotFileLimit(snapshot *DirectorySnapshot, rel string, limit int64) ([]byte, fs.FileMode, error) {
+	if limit < 0 {
+		return nil, 0, fmt.Errorf("%w: negative limit %d", ErrSizeLimit, limit)
+	}
 	entry, err := directorySnapshotDescendant(snapshot, rel)
 	if err != nil {
 		return nil, 0, err
 	}
 	if entry.dir != nil {
 		return nil, 0, fmt.Errorf("%w: snapshot descendant %q is a directory", ErrInvalidPath, rel)
+	}
+	if int64(len(entry.data)) > limit {
+		return nil, 0, fmt.Errorf("%w: snapshot descendant exceeds %d bytes", ErrSizeLimit, limit)
 	}
 	return cloneDirectorySnapshotBytes(entry.data), entry.mode.Perm(), nil
 }

@@ -14,6 +14,10 @@ func SnapshotDirectoryWithin(_ string, _ string) (*DirectorySnapshot, error) {
 	return nil, ErrUnsupported
 }
 
+func SnapshotDirectoryWithinBudget(_ string, _ string, _ SnapshotBudget) (*DirectorySnapshot, error) {
+	return nil, ErrUnsupported
+}
+
 func CaptureParentChainWithin(_ string, _ string) (*ParentChain, error) { return nil, ErrUnsupported }
 
 func BindParentChainWithin(_ string, _ string, _ *ParentChain, _ map[string]*DirectorySnapshot) (*ParentChain, error) {
@@ -39,7 +43,15 @@ func ObserveFileWithin(_ string, _ string) ([]byte, Revision, *ParentChain, erro
 	return nil, Revision{}, nil, ErrUnsupported
 }
 
+func ObserveFileWithinLimit(_ string, _ string, _ int64) ([]byte, Revision, *ParentChain, error) {
+	return nil, Revision{}, nil, ErrUnsupported
+}
+
 func ObserveDirectoryWithin(_ string, _ string) (*DirectorySnapshot, *ParentChain, error) {
+	return nil, nil, ErrUnsupported
+}
+
+func ObserveDirectoryWithinBudget(_ string, _ string, _ SnapshotBudget) (*DirectorySnapshot, *ParentChain, error) {
 	return nil, nil, ErrUnsupported
 }
 

@@ -1,10 +1,9 @@
 package backup
 
 import (
-	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -65,12 +64,23 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(backupsDir)
+	directory, err := os.Open(backupsDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	entries, readErr := directory.ReadDir(maxBackupManifestEntries + 1)
+	closeErr := directory.Close()
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) && !errors.Is(readErr, io.EOF) {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if len(entries) > maxBackupManifestEntries {
+		return nil, fmt.Errorf("backup catalog exceeds %d entries", maxBackupManifestEntries)
 	}
 	home, _ := os.UserHomeDir()
 	result := make([]CatalogEntry, 0, len(entries))
@@ -80,11 +90,11 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 			continue
 		}
 		rel := filepath.ToSlash(filepath.Join(filepath.FromSlash(rootRel), name))
-		snapshot, parents, observeErr := safefile.ObserveDirectoryWithin(anchor, rel)
+		snapshot, parents, observeErr := safefile.ObserveDirectoryWithinBudget(anchor, rel, backupSnapshotBudget)
 		if observeErr != nil || snapshot == nil {
 			continue
 		}
-		manifest, _, readErr := safefile.ReadDirectorySnapshotFile(snapshot, ManifestName)
+		manifest, _, readErr := safefile.ReadDirectorySnapshotFileLimit(snapshot, ManifestName, maxBackupManifestBytes)
 		if readErr != nil {
 			continue
 		}
@@ -95,7 +105,7 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 		if bind, bindErr := safefile.BindParentChainWithin(anchor, rel, parents, nil); bindErr != nil || !safefile.SameParentChain(bind, parents) {
 			continue
 		}
-		current, snapshotErr := safefile.SnapshotDirectoryWithin(anchor, rel)
+		current, snapshotErr := safefile.SnapshotDirectoryWithinBudget(anchor, rel, backupSnapshotBudget)
 		if snapshotErr != nil || !safefile.SameDirectoryRootState(current, snapshot) || current.Digest() != snapshot.Digest() {
 			continue
 		}
@@ -125,24 +135,24 @@ func parseCatalogRestoreSnapshot(data []byte, home string, source *safefile.Dire
 	}
 	items := make([]catalogRestoreItem, 0)
 	seen := make(map[string]struct{})
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSuffix(scanner.Text(), "\r")
+	err := scanBackupManifest(data, func(raw string) error {
+		line := strings.TrimSuffix(raw, "\r")
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
+			return nil
 		}
 		item, err := parseCatalogRestoreItem(line, home)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if _, duplicate := seen[item.target]; duplicate {
-			return nil, fmt.Errorf("catalog restore manifest repeats target %q", item.target)
+			return fmt.Errorf("catalog restore manifest repeats a target")
 		}
 		seen[item.target] = struct{}{}
 		items = append(items, item)
-	}
-	if err := scanner.Err(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return &catalogRestoreSnapshot{source: source, items: items}, nil
@@ -234,7 +244,7 @@ func ValidateCatalogEntry(entry CatalogEntry) error {
 		entry.authority.restore == nil || entry.authority.restore.source != entry.authority.snapshot || entry.authority.restore.items == nil {
 		return fmt.Errorf("%w: backup catalog authority is incomplete", safefile.ErrDirectoryChanged)
 	}
-	current, err := safefile.SnapshotDirectoryWithin(entry.authority.anchor, entry.authority.rel)
+	current, err := safefile.SnapshotDirectoryWithinBudget(entry.authority.anchor, entry.authority.rel, backupSnapshotBudget)
 	if err != nil || !safefile.SameDirectoryRootState(current, entry.authority.snapshot) || current.Digest() != entry.authority.snapshot.Digest() {
 		return fmt.Errorf("selected backup changed after listing: %w", errors.Join(safefile.ErrDirectoryChanged, err))
 	}
@@ -301,13 +311,13 @@ func restoreCatalogItem(result *RestoreResult, session *safefile.RestoreSession,
 
 	switch item.kind {
 	case TargetFile:
-		_, expected, parents, err := safefile.ObserveFileWithin(home, item.target)
+		_, expected, parents, err := safefile.ObserveFileWithinLimit(home, item.target, maxBackupFileBytes)
 		if err == nil {
 			_, err = session.RestoreFileWithMode(item.target, parents, expected, source, item.source, item.desiredMode)
 		}
 		recordCatalogRestore(result, item.target, "write", "restore committed with a durability/verification warning", err)
 	case TargetDirectory:
-		expected, parents, err := safefile.ObserveDirectoryWithin(home, item.target)
+		expected, parents, err := safefile.ObserveDirectoryWithinBudget(home, item.target, backupSnapshotBudget)
 		if errors.Is(err, os.ErrNotExist) {
 			err = nil
 		}
@@ -324,13 +334,13 @@ func removeCatalogTarget(result *RestoreResult, session *safefile.RestoreSession
 	var err error
 	switch item.kind {
 	case TargetFile:
-		_, expected, parents, observeErr := safefile.ObserveFileWithin(home, item.target)
+		_, expected, parents, observeErr := safefile.ObserveFileWithinLimit(home, item.target, maxBackupFileBytes)
 		err = observeErr
 		if err == nil && expected.Exists() {
 			err = session.RemoveFile(item.target, parents, expected)
 		}
 	case TargetDirectory:
-		expected, parents, observeErr := safefile.ObserveDirectoryWithin(home, item.target)
+		expected, parents, observeErr := safefile.ObserveDirectoryWithinBudget(home, item.target, backupSnapshotBudget)
 		err = observeErr
 		if errors.Is(err, os.ErrNotExist) {
 			err = nil
