@@ -15,6 +15,7 @@ import (
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 	"github.com/tekierz/dotfiles/internal/ui"
 )
@@ -332,6 +333,9 @@ func init() {
 
 func main() {
 	if err := validateEffectiveUser(effectiveUserID()); err != nil {
+		if handled, code := runner.DispatchPrivilegedSupervisor(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
+			os.Exit(code)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -363,6 +363,9 @@ func (a *AptManager) InstallStreaming(ctx context.Context, packages ...string) (
 	if a.executablePath() == "" {
 		return nil, errPackageManagerUnavailable
 	}
+	if identity, ok := a.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+		return nil, errPackageManagerUnavailable
+	}
 
 	args := []string{"install", "-y"}
 	args = append(args, packages...)
@@ -377,19 +380,18 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 	if a.executablePath() == "" {
 		return nil, errPackageManagerUnavailable
 	}
+	if identity, ok := a.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+		return nil, errPackageManagerUnavailable
+	}
 
-	// Refresh the package index before the targeted upgrade so it can't 404 on a
-	// stale index (every other apt write path does an `apt update` first). sudo -n
-	// keeps this best-effort refresh from ever blocking on an invisible password
-	// prompt, and deriving it from ctx lets teardown cancel it. Output and errors
-	// are intentionally discarded to the null device: this MUST be invoked off the
-	// Bubble Tea UI goroutine (streamingUpdateCmd builds it inside its worker) so
-	// the refresh never blocks the event loop, and while the TUI owns the terminal
-	// writing to os.Stderr would splatter the alt-screen. Any genuine failure
-	// surfaces through the streamed install below, which owns the upgrade and may
-	// still prompt for sudo.
-	// #nosec G204 -- executablePath is a constructor-captured, validated absolute executable identity; all other arguments are fixed registry literals.
-	_ = exec.CommandContext(ctx, "sudo", "-n", a.executablePath(), "update").Run()
+	// Best-effort index refresh uses the same privileged supervisor as the
+	// upgrade. Drain its bounded output while it runs so a verbose refresh cannot
+	// stall before the package install begins; AP1 will expose both ordered phases.
+	if refresh, refreshErr := runner.RunStreamingWithSudo(ctx, a.executablePath(), "update"); refreshErr == nil {
+		for range refresh.Output {
+		}
+		_ = refresh.Wait()
+	}
 
 	args := []string{"install", "-y"}
 	args = append(args, packages...)
@@ -400,6 +402,9 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 // This runs apt update && apt upgrade -y sequentially without shell injection risk
 func (a *AptManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
 	if a.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	if identity, ok := a.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
 		return nil, errPackageManagerUnavailable
 	}
 	// Run update first using safe exec.Command (no shell interpolation)

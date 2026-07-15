@@ -1,0 +1,75 @@
+//go:build linux
+
+package runner
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+func enablePrivilegedDescendantReaping() error {
+	return unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
+}
+
+func reapPrivilegedDescendants() error {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		pid, err := syscall.Wait4(-1, nil, syscall.WNOHANG, nil)
+		switch {
+		case errors.Is(err, syscall.EINTR):
+			continue
+		case errors.Is(err, syscall.ECHILD):
+			return nil
+		case err != nil:
+			return err
+		case pid > 0:
+			continue
+		case time.Now().After(deadline):
+			return errPrivilegedSupervisorCleanup
+		}
+		if err := killPrivilegedAdoptedDescendants(); err != nil {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func killPrivilegedAdoptedDescendants() error {
+	childrenFiles, err := filepath.Glob("/proc/self/task/*/children")
+	if err != nil {
+		return err
+	}
+	if len(childrenFiles) == 0 {
+		return errPrivilegedSupervisorCleanup
+	}
+	for _, childrenPath := range childrenFiles {
+		data, readErr := os.ReadFile(childrenPath)
+		if readErr != nil {
+			return readErr
+		}
+		for _, field := range strings.Fields(string(data)) {
+			pid, parseErr := strconv.Atoi(field)
+			if parseErr != nil || pid <= 0 {
+				return errPrivilegedSupervisorCleanup
+			}
+			for {
+				err = syscall.Kill(pid, syscall.SIGKILL)
+				if errors.Is(err, syscall.EINTR) {
+					continue
+				}
+				if err != nil && !errors.Is(err, syscall.ESRCH) {
+					return err
+				}
+				break
+			}
+		}
+	}
+	return nil
+}

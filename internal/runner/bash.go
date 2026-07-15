@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -117,9 +119,71 @@ func RunStreaming(ctx context.Context, name string, args ...string) (*StreamingC
 	}, nil
 }
 
-// RunStreamingWithSudo executes a command with sudo and streams output
-// The sudo credentials should be cached before calling this function
+// RunStreamingWithSudo executes one accepted package-manager command through
+// the privileged supervisor and streams output. The sudo credentials must be
+// cached before calling this function; sudo is always invoked non-interactively.
 func RunStreamingWithSudo(ctx context.Context, name string, args ...string) (*StreamingCmd, error) {
-	sudoArgs := append([]string{name}, args...)
-	return RunStreaming(ctx, "sudo", sudoArgs...)
+	if ctx == nil {
+		return nil, errInvalidPrivilegedRequest
+	}
+	if err := context.Cause(ctx); err != nil {
+		return nil, err
+	}
+	target, err := validatePrivilegedTarget(name)
+	if err != nil {
+		return nil, errInvalidPrivilegedRequest
+	}
+	sudo, err := findTrustedPrivilegedExecutable("sudo")
+	if err != nil {
+		return nil, errPrivilegedSupervisorUnavailable
+	}
+	supervisor, err := currentPrivilegedSupervisorExecutable()
+	if err != nil {
+		return nil, errPrivilegedSupervisorUnavailable
+	}
+	if !validPrivilegedArguments(args) || !validPrivilegedCommand(target, args) {
+		return nil, errInvalidPrivilegedRequest
+	}
+
+	sudoArgs := []string{"-n", "--", supervisor, privilegedSupervisorDispatchArg, target}
+	sudoArgs = append(sudoArgs, append([]string(nil), args...)...)
+	// #nosec G204 -- sudo, supervisor, and target are exact validated absolute
+	// paths; arguments remain literal argv entries and never enter a shell.
+	command := exec.Command(sudo, sudoArgs...)
+	command.Env = privilegedLauncherEnvironment()
+	command.Dir = "/"
+	control, err := command.StdinPipe()
+	if err != nil {
+		return nil, errPrivilegedSupervisorUnavailable
+	}
+
+	var closeOnce sync.Once
+	closeControl := func() {
+		closeOnce.Do(func() { _ = control.Close() })
+	}
+	deps := defaultStreamingLifecycleDeps()
+	// The unprivileged parent cannot signal the sudo-owned process group. Closing
+	// the inherited control pipe asks the root supervisor to kill and reap its
+	// own exact descendant group instead.
+	deps.signalGroup = func(int, syscall.Signal) error {
+		closeControl()
+		return nil
+	}
+	deps.signalLeader = func(int, syscall.Signal) error {
+		closeControl()
+		return nil
+	}
+	lifecycle, err := startStreamingLifecycleWithDeps(ctx, command, deps)
+	if err != nil {
+		closeControl()
+		return nil, fmt.Errorf("start privileged command: %w", err)
+	}
+	cancel := func() {
+		closeControl()
+		lifecycle.Cancel()
+	}
+	return &StreamingCmd{
+		Cmd: command, Output: lifecycle.Output(), Done: lifecycle.Done(),
+		cancel: cancel, wait: lifecycle.Wait,
+	}, nil
 }

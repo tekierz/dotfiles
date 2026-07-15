@@ -528,6 +528,9 @@ func (p *PacmanManager) InstallStreaming(ctx context.Context, packages ...string
 		args = append(args, packages...)
 		return runner.RunStreaming(ctx, p.executablePath(), args...)
 	}
+	if identity, ok := p.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+		return nil, errPackageManagerUnavailable
+	}
 
 	// pacman needs sudo
 	args := []string{"-S", "--noconfirm", "--needed"}
@@ -549,6 +552,9 @@ func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string)
 		args := pacmanUpdateArgs([]string{"--skipreview", "--noprovides"}, packages)
 		return runner.RunStreaming(ctx, p.executablePath(), args...)
 	}
+	if identity, ok := p.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+		return nil, errPackageManagerUnavailable
+	}
 
 	// pacman needs sudo
 	args := pacmanUpdateArgs(nil, packages)
@@ -563,6 +569,9 @@ func (p *PacmanManager) UpdateAllStreaming(ctx context.Context) (*runner.Streami
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally
 		return runner.RunStreaming(ctx, p.executablePath(), "-Syu", "--noconfirm", "--skipreview", "--noprovides")
+	}
+	if identity, ok := p.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+		return nil, errPackageManagerUnavailable
 	}
 	return runner.RunStreamingWithSudo(ctx, p.executablePath(), "-Syu", "--noconfirm")
 }
