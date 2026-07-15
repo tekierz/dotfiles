@@ -380,22 +380,17 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 	if a.executablePath() == "" {
 		return nil, errPackageManagerUnavailable
 	}
-	if identity, ok := a.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+	identity, ok := a.ExecutableIdentity()
+	if !ok || identity.Revalidate() != nil {
 		return nil, errPackageManagerUnavailable
-	}
-
-	// Best-effort index refresh uses the same privileged supervisor as the
-	// upgrade. Drain its bounded output while it runs so a verbose refresh cannot
-	// stall before the package install begins; AP1 will expose both ordered phases.
-	if refresh, refreshErr := runner.RunStreamingWithSudo(ctx, a.executablePath(), "update"); refreshErr == nil {
-		for range refresh.Output {
-		}
-		_ = refresh.Wait()
 	}
 
 	args := []string{"install", "-y"}
 	args = append(args, packages...)
-	return runner.RunStreamingWithSudo(ctx, a.executablePath(), args...)
+	return runner.RunSequentialStreaming(ctx,
+		aptStreamingPhase("apt update", identity, "update"),
+		aptStreamingPhase("apt targeted upgrade", identity, args...),
+	)
 }
 
 // UpdateAllStreaming updates all packages with real-time output streaming
@@ -404,18 +399,25 @@ func (a *AptManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingC
 	if a.executablePath() == "" {
 		return nil, errPackageManagerUnavailable
 	}
-	if identity, ok := a.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+	identity, ok := a.ExecutableIdentity()
+	if !ok || identity.Revalidate() != nil {
 		return nil, errPackageManagerUnavailable
 	}
-	// Run update first using safe exec.Command (no shell interpolation)
-	updateCmd, err := runner.RunStreamingWithSudo(ctx, a.executablePath(), "update")
-	if err != nil {
-		return nil, fmt.Errorf("apt update failed: %w", err)
+	return runner.RunSequentialStreaming(ctx,
+		aptStreamingPhase("apt update", identity, "update"),
+		aptStreamingPhase("apt upgrade", identity, "upgrade", "-y"),
+	)
+}
+
+func aptStreamingPhase(name string, identity ExecutableIdentity, args ...string) runner.SequentialStreamingPhase {
+	argv := append([]string(nil), args...)
+	return runner.SequentialStreamingPhase{
+		Name: name,
+		Start: func(ctx context.Context) (*runner.StreamingCmd, error) {
+			if identity.Revalidate() != nil {
+				return nil, errPackageManagerUnavailable
+			}
+			return runner.RunStreamingWithSudo(ctx, identity.invocationPath, argv...)
+		},
 	}
-	// Wait for update to complete before running upgrade
-	if err := updateCmd.Wait(); err != nil {
-		return nil, fmt.Errorf("apt update failed: %w", err)
-	}
-	// Then run upgrade using safe exec.Command
-	return runner.RunStreamingWithSudo(ctx, a.executablePath(), "upgrade", "-y")
 }
