@@ -57,6 +57,50 @@ const (
 	ReversibilityManual     Reversibility = "manual"
 )
 
+// InstallPhaseKind identifies one independently reviewed installation phase.
+// Phased installation never combines prerequisite and npm mutation authority.
+type InstallPhaseKind string
+
+const (
+	InstallPhasePrerequisite InstallPhaseKind = "prerequisite"
+	InstallPhaseNPM          InstallPhaseKind = "npm"
+)
+
+// InstallAuthorityClass is the sole mutation authority admitted by a phased
+// install plan. It is deliberately narrower than an arbitrary provider name.
+type InstallAuthorityClass string
+
+const (
+	InstallAuthorityManager InstallAuthorityClass = "package_manager"
+	InstallAuthorityNPM     InstallAuthorityClass = "npm"
+)
+
+// InstallPhaseSpec is the caller-owned input used to construct immutable phase
+// authority. RequestedTools is the original explicit intent; RemainingTools is
+// the intent that must be freshly planned after this phase completes.
+type InstallPhaseSpec struct {
+	Kind           InstallPhaseKind
+	Index          int
+	RequestedTools []string
+	RemainingTools []string
+	Authority      InstallAuthorityClass
+}
+
+// InstallPhase is an immutable projection of phase authority.
+type InstallPhase struct {
+	kind           InstallPhaseKind
+	index          int
+	requestedTools []string
+	remainingTools []string
+	authority      InstallAuthorityClass
+}
+
+func (phase InstallPhase) Kind() InstallPhaseKind           { return phase.kind }
+func (phase InstallPhase) Index() int                       { return phase.index }
+func (phase InstallPhase) Authority() InstallAuthorityClass { return phase.authority }
+func (phase InstallPhase) RequestedTools() []string         { return slices.Clone(phase.requestedTools) }
+func (phase InstallPhase) RemainingTools() []string         { return slices.Clone(phase.remainingTools) }
+
 const CurrentInstallRecipeSchemaVersion = 1
 
 type InstallStepKind string
@@ -137,9 +181,18 @@ type Action struct {
 }
 
 type planDocument struct {
-	SchemaVersion int       `json:"schema_version"`
-	CreatedAt     time.Time `json:"created_at"`
-	Actions       []Action  `json:"actions"`
+	SchemaVersion int                   `json:"schema_version"`
+	CreatedAt     time.Time             `json:"created_at"`
+	Actions       []Action              `json:"actions"`
+	Phase         *installPhaseDocument `json:"phase,omitempty"`
+}
+
+type installPhaseDocument struct {
+	Kind           InstallPhaseKind      `json:"kind"`
+	Index          int                   `json:"index"`
+	RequestedTools []string              `json:"requested_tools"`
+	RemainingTools []string              `json:"remaining_tools"`
+	Authority      InstallAuthorityClass `json:"authority"`
 }
 
 // Plan keeps actions private so callers cannot mutate the preview after it has
@@ -151,6 +204,20 @@ type Plan struct {
 }
 
 func NewPlan(createdAt time.Time, actions []Action) (Plan, error) {
+	return newPlan(createdAt, actions, nil)
+}
+
+// NewInstallPhasePlan constructs a plan carrying one exact mutation-authority
+// class. Callers must create a fresh plan for every subsequent phase.
+func NewInstallPhasePlan(createdAt time.Time, actions []Action, phase InstallPhaseSpec) (Plan, error) {
+	document, err := newInstallPhaseDocument(phase)
+	if err != nil {
+		return Plan{}, err
+	}
+	return newPlan(createdAt, actions, document)
+}
+
+func newPlan(createdAt time.Time, actions []Action, phase *installPhaseDocument) (Plan, error) {
 	if createdAt.IsZero() {
 		return Plan{}, fmt.Errorf("%w: created_at is required", ErrInvalidPlan)
 	}
@@ -158,6 +225,7 @@ func NewPlan(createdAt time.Time, actions []Action) (Plan, error) {
 		SchemaVersion: CurrentPlanSchemaVersion,
 		CreatedAt:     createdAt.UTC(),
 		Actions:       cloneActions(actions),
+		Phase:         cloneInstallPhaseDocument(phase),
 	}
 	if err := validateDocument(doc); err != nil {
 		return Plan{}, err
@@ -166,9 +234,10 @@ func NewPlan(createdAt time.Time, actions []Action) (Plan, error) {
 	// same actions and host observations deterministically addressable across a
 	// preview refresh; operation IDs carry execution-time uniqueness.
 	canonical, err := json.Marshal(struct {
-		SchemaVersion int      `json:"schema_version"`
-		Actions       []Action `json:"actions"`
-	}{SchemaVersion: doc.SchemaVersion, Actions: doc.Actions})
+		SchemaVersion int                   `json:"schema_version"`
+		Actions       []Action              `json:"actions"`
+		Phase         *installPhaseDocument `json:"phase,omitempty"`
+	}{SchemaVersion: doc.SchemaVersion, Actions: doc.Actions, Phase: doc.Phase})
 	if err != nil {
 		return Plan{}, fmt.Errorf("marshal canonical plan: %w", err)
 	}
@@ -176,9 +245,83 @@ func NewPlan(createdAt time.Time, actions []Action) (Plan, error) {
 	return Plan{document: doc, hash: hex.EncodeToString(digest[:])}, nil
 }
 
+func newInstallPhaseDocument(spec InstallPhaseSpec) (*installPhaseDocument, error) {
+	requested := slices.Clone(spec.RequestedTools)
+	remaining := slices.Clone(spec.RemainingTools)
+	if !validPhaseTools(requested, false) || !validPhaseTools(remaining, true) {
+		return nil, fmt.Errorf("%w: invalid install phase intent", ErrInvalidPlan)
+	}
+	requestedSet := make(map[string]struct{}, len(requested))
+	for _, id := range requested {
+		requestedSet[id] = struct{}{}
+	}
+	for _, id := range remaining {
+		if _, ok := requestedSet[id]; !ok {
+			return nil, fmt.Errorf("%w: remaining phase intent is not requested", ErrInvalidPlan)
+		}
+	}
+	switch spec.Kind {
+	case InstallPhasePrerequisite:
+		if spec.Index != 1 || spec.Authority != InstallAuthorityManager || len(remaining) == 0 {
+			return nil, fmt.Errorf("%w: invalid prerequisite phase", ErrInvalidPlan)
+		}
+	case InstallPhaseNPM:
+		if spec.Index != 2 || spec.Authority != InstallAuthorityNPM || len(remaining) != 0 {
+			return nil, fmt.Errorf("%w: invalid npm phase", ErrInvalidPlan)
+		}
+	default:
+		return nil, fmt.Errorf("%w: invalid install phase kind", ErrInvalidPlan)
+	}
+	return &installPhaseDocument{Kind: spec.Kind, Index: spec.Index, RequestedTools: requested, RemainingTools: remaining, Authority: spec.Authority}, nil
+}
+
+func validPhaseTools(ids []string, emptyAllowed bool) bool {
+	if (!emptyAllowed && len(ids) == 0) || !sort.StringsAreSorted(ids) {
+		return false
+	}
+	for index, id := range ids {
+		if id == "" || len(id) > 64 || hasUnsafeDisplayControl(id) || strings.ContainsAny(id, " /\\") || (index > 0 && ids[index-1] == id) {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneInstallPhaseDocument(phase *installPhaseDocument) *installPhaseDocument {
+	if phase == nil {
+		return nil
+	}
+	cloned := *phase
+	cloned.RequestedTools = slices.Clone(phase.RequestedTools)
+	cloned.RemainingTools = slices.Clone(phase.RemainingTools)
+	return &cloned
+}
+
 func validateDocument(doc planDocument) error {
 	if doc.SchemaVersion != CurrentPlanSchemaVersion {
 		return fmt.Errorf("%w: unsupported schema version %d", ErrInvalidPlan, doc.SchemaVersion)
+	}
+	if doc.Phase != nil {
+		if _, err := newInstallPhaseDocument(InstallPhaseSpec{
+			Kind: doc.Phase.Kind, Index: doc.Phase.Index, RequestedTools: doc.Phase.RequestedTools,
+			RemainingTools: doc.Phase.RemainingTools, Authority: doc.Phase.Authority,
+		}); err != nil {
+			return err
+		}
+		if len(doc.Actions) == 0 {
+			return fmt.Errorf("%w: install phase requires actions", ErrInvalidPlan)
+		}
+		for _, action := range doc.Actions {
+			if action.Disposition != DispositionApply || action.Kind != KindInstallTool || action.InstallRecipe == nil {
+				return fmt.Errorf("%w: install phase contains non-install authority", ErrInvalidPlan)
+			}
+			for _, step := range action.InstallRecipe.Steps {
+				isNPM := step.Kind == InstallStepNPMGlobal
+				if (doc.Phase.Authority == InstallAuthorityNPM) != isNPM {
+					return fmt.Errorf("%w: phase mixes mutation authority classes", ErrInvalidPlan)
+				}
+			}
+		}
 	}
 	seen := make(map[string]struct{}, len(doc.Actions))
 	for index, action := range doc.Actions {
@@ -463,6 +606,16 @@ func (p Plan) SchemaVersion() int   { return p.document.SchemaVersion }
 func (p Plan) CreatedAt() time.Time { return p.document.CreatedAt }
 func (p Plan) Hash() string         { return p.hash }
 func (p Plan) Actions() []Action    { return cloneActions(p.document.Actions) }
+
+// InstallPhase returns defensive phase metadata when this is a phased install
+// plan. Existing non-phased plans return false and retain their prior shape.
+func (p Plan) InstallPhase() (InstallPhase, bool) {
+	if p.document.Phase == nil {
+		return InstallPhase{}, false
+	}
+	phase := p.document.Phase
+	return InstallPhase{kind: phase.Kind, index: phase.Index, requestedTools: slices.Clone(phase.RequestedTools), remainingTools: slices.Clone(phase.RemainingTools), authority: phase.Authority}, true
+}
 
 func cloneActions(actions []Action) []Action {
 	cloned := slices.Clone(actions)

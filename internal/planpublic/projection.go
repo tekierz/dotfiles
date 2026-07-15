@@ -12,12 +12,14 @@ import (
 )
 
 const (
-	planSchemaVersion = 1
-	planKind          = "dotfiles.plan"
-	maxPublicActions  = 256
-	maxRecipeItems    = 128
-	applyHashRequired = "hash_required"
-	applyNotAvailable = "not_available"
+	legacyPlanSchemaVersion = 1
+	phasedPlanSchemaVersion = 2
+	installSchemaVersion    = 1
+	planKind                = "dotfiles.plan"
+	maxPublicActions        = 256
+	maxRecipeItems          = 128
+	applyHashRequired       = "hash_required"
+	applyNotAvailable       = "not_available"
 )
 
 var ErrInvalidDocument = errors.New("invalid public plan document")
@@ -29,7 +31,19 @@ const (
 	StatusNoChanges      Status = "no_changes"
 	StatusBlocked        Status = "blocked"
 	StatusIntentRequired Status = "intent_required"
+	StatusReplanRequired Status = "replan_required"
 )
+
+// PhaseSpec is the public, non-executable description of one independently
+// confirmed install phase. RemainingIntent is empty only for the final npm
+// phase; Next is either complete or replan_required.
+type PhaseSpec struct {
+	Kind            string `json:"kind"`
+	Index           int    `json:"index"`
+	Authority       string `json:"authority"`
+	RemainingIntent Intent `json:"remaining_intent"`
+	Next            string `json:"next"`
+}
 
 type Snapshot struct {
 	SchemaVersion int    `json:"schema_version"`
@@ -105,21 +119,24 @@ type DocumentSpec struct {
 	Capabilities Capabilities
 	Summary      Summary
 	Actions      []ActionSpec
+	Phase        *PhaseSpec
 }
 
 // Document is a defensive, already-redacted public projection. It contains no
 // executable planning authority.
 type Document struct {
-	status       Status
-	planHash     string
-	platform     string
-	manager      string
-	intent       Intent
-	snapshot     *Snapshot
-	capabilities Capabilities
-	summary      Summary
-	actions      []ActionSpec
-	publicDigest string
+	schemaVersion int
+	status        Status
+	planHash      string
+	platform      string
+	manager       string
+	intent        Intent
+	snapshot      *Snapshot
+	capabilities  Capabilities
+	summary       Summary
+	actions       []ActionSpec
+	phase         *PhaseSpec
+	publicDigest  string
 }
 
 type publicAuthority struct {
@@ -154,6 +171,7 @@ type publicDocument struct {
 	Capabilities  Capabilities    `json:"capabilities"`
 	Summary       Summary         `json:"summary"`
 	Actions       []publicAction  `json:"actions"`
+	Phase         *PhaseSpec      `json:"phase,omitempty"`
 }
 
 func NewDocument(spec DocumentSpec) (Document, error) {
@@ -165,15 +183,17 @@ func NewDocument(spec DocumentSpec) (Document, error) {
 	}
 
 	doc := Document{
-		status:       spec.Status,
-		planHash:     spec.PlanHash,
-		platform:     spec.Platform,
-		manager:      spec.Manager,
-		intent:       cloneIntent(spec.Intent),
-		snapshot:     cloneSnapshot(spec.Snapshot),
-		capabilities: spec.Capabilities,
-		summary:      spec.Summary,
-		actions:      clonePublicActions(spec.Actions),
+		schemaVersion: documentSchemaVersion(spec.Phase),
+		status:        spec.Status,
+		planHash:      spec.PlanHash,
+		platform:      spec.Platform,
+		manager:       spec.Manager,
+		intent:        cloneIntent(spec.Intent),
+		snapshot:      cloneSnapshot(spec.Snapshot),
+		capabilities:  spec.Capabilities,
+		summary:       spec.Summary,
+		actions:       clonePublicActions(spec.Actions),
+		phase:         clonePhase(spec.Phase),
 	}
 	if doc.intent.Tools == nil {
 		doc.intent.Tools = []string{}
@@ -189,6 +209,10 @@ func NewDocument(spec DocumentSpec) (Document, error) {
 func (d Document) Actions() []ActionSpec {
 	return cloneActions(d.actions)
 }
+
+// Phase returns a defensive public phase description when this is a v2 phased
+// plan. A nil phase identifies the existing v1 non-npm projection.
+func (d Document) Phase() *PhaseSpec { return clonePhase(d.phase) }
 
 // Status returns the validated public outcome represented by the document.
 // The zero value returns the invalid empty status.
@@ -218,10 +242,10 @@ func (d Document) publicDocument(digest string) publicDocument {
 		}
 	}
 	return publicDocument{
-		SchemaVersion: planSchemaVersion, Kind: planKind, Status: d.status,
+		SchemaVersion: d.schemaVersion, Kind: planKind, Status: d.status,
 		Platform: d.platform, Manager: d.manager, Intent: cloneIntent(d.intent),
 		Snapshot: cloneSnapshot(d.snapshot), Authority: publicAuthority{PlanHash: d.planHash, PublicDigest: digest},
-		Capabilities: d.capabilities, Summary: d.summary, Actions: actions,
+		Capabilities: d.capabilities, Summary: d.summary, Actions: actions, Phase: clonePhase(d.phase),
 	}
 }
 
@@ -251,7 +275,7 @@ func digestPublicDocument(document publicDocument) (string, error) {
 
 func validStatus(status Status) bool {
 	switch status {
-	case StatusReady, StatusNoChanges, StatusBlocked, StatusIntentRequired:
+	case StatusReady, StatusNoChanges, StatusBlocked, StatusIntentRequired, StatusReplanRequired:
 		return true
 	default:
 		return false
@@ -282,6 +306,8 @@ func validStatusShape(spec DocumentSpec) bool {
 		return spec.Platform == "" && spec.Manager == "" && spec.Snapshot == nil && len(spec.Actions) == 0 && spec.Summary == (Summary{}) && spec.Capabilities == (Capabilities{})
 	case StatusReady, StatusNoChanges, StatusBlocked:
 		return validStructuralAtom(spec.Platform) && validStructuralAtom(spec.Manager) && spec.Snapshot != nil
+	case StatusReplanRequired:
+		return validStructuralAtom(spec.Platform) && validStructuralAtom(spec.Manager) && spec.Snapshot != nil && len(spec.Actions) == 0 && spec.Summary == (Summary{})
 	default:
 		return false
 	}
@@ -291,7 +317,7 @@ func validSnapshot(snapshot *Snapshot) bool {
 	if snapshot == nil {
 		return true
 	}
-	return snapshot.SchemaVersion == planSchemaVersion && validSHA256(snapshot.PublicDigest)
+	return snapshot.SchemaVersion == installSchemaVersion && validSHA256(snapshot.PublicDigest)
 }
 
 func validCapabilities(status Status, capabilities Capabilities) bool {
@@ -344,9 +370,15 @@ func validActions(spec DocumentSpec) bool {
 	if spec.Status == StatusNoChanges && (spec.Summary.Apply != 0 || spec.Summary.Blocked != 0) {
 		return false
 	}
+	if !validPhase(spec.Status, spec.Intent, spec.Phase) {
+		return false
+	}
 	seen := make(map[string]struct{}, len(spec.Actions))
 	for _, action := range spec.Actions {
 		if !validAction(action, spec.Platform, spec.Manager) {
+			return false
+		}
+		if action.Disposition == "apply" && spec.Phase != nil && !installMatchesPhase(action.Install, spec.Phase.Authority) {
 			return false
 		}
 		if _, duplicate := seen[action.ActionID]; duplicate {
@@ -358,6 +390,57 @@ func validActions(spec DocumentSpec) bool {
 		}
 	}
 	return true
+}
+
+func installMatchesPhase(install *InstallSpec, authority string) bool {
+	if install == nil {
+		return false
+	}
+	for _, step := range install.Steps {
+		isNPM := step.Kind == "npm_global"
+		if (authority == "npm") != isNPM {
+			return false
+		}
+	}
+	return authority == "npm" || authority == "package_manager"
+}
+
+func documentSchemaVersion(phase *PhaseSpec) int {
+	if phase != nil {
+		return phasedPlanSchemaVersion
+	}
+	return legacyPlanSchemaVersion
+}
+
+func validPhase(status Status, requested Intent, phase *PhaseSpec) bool {
+	if phase == nil {
+		return status != StatusReplanRequired
+	}
+	if status == StatusIntentRequired || phase.Index < 1 || phase.Index > 2 {
+		return false
+	}
+	remaining := phase.RemainingIntent
+	if remaining.Source != "explicit_tools" || remaining.Tools == nil {
+		return false
+	}
+	if len(remaining.Tools) == 0 {
+		if remaining.Digest != "" {
+			return false
+		}
+	} else {
+		normalized, err := NormalizeExplicitTools(remaining.Tools, requested.Tools)
+		if err != nil || normalized.Digest != remaining.Digest || !slices.Equal(normalized.Tools, remaining.Tools) {
+			return false
+		}
+	}
+	switch phase.Kind {
+	case "prerequisite":
+		return phase.Index == 1 && phase.Authority == "package_manager" && len(remaining.Tools) > 0 && phase.Next == "replan_required"
+	case "npm":
+		return phase.Index == 2 && phase.Authority == "npm" && len(remaining.Tools) == 0 && phase.Next == "complete" && status != StatusReplanRequired
+	default:
+		return false
+	}
 }
 
 func validAction(action ActionSpec, platform, manager string) bool {
@@ -397,13 +480,14 @@ func validReason(disposition, code, reason string) bool {
 		"environment_mismatch": "installation environment changed",
 		"recipe_drift":         "installation recipe changed",
 		"ownership_conflict":   "configuration ownership conflict",
+		"phase_boundary":       "installation requires a fresh phase coordinator",
 	}
 	want, ok := messages[code]
 	return ok && reason == want
 }
 
 func validInstall(install *InstallSpec, platform, manager string) bool {
-	if install.SchemaVersion != planSchemaVersion || install.Platform != platform || install.Manager != manager || !validSHA256(install.RecipeDigest) || len(install.Steps) == 0 || len(install.Steps) > 16 {
+	if install.SchemaVersion != installSchemaVersion || install.Platform != platform || install.Manager != manager || !validSHA256(install.RecipeDigest) || len(install.Steps) == 0 || len(install.Steps) > 16 {
 		return false
 	}
 	if !validAuthentication(install.Authentication) || !validRisk(install.Risk) {
@@ -599,6 +683,15 @@ func cloneSnapshot(snapshot *Snapshot) *Snapshot {
 	}
 	copy := *snapshot
 	return &copy
+}
+
+func clonePhase(phase *PhaseSpec) *PhaseSpec {
+	if phase == nil {
+		return nil
+	}
+	cloned := *phase
+	cloned.RemainingIntent = cloneIntent(phase.RemainingIntent)
+	return &cloned
 }
 
 func cloneActions(actions []ActionSpec) []ActionSpec {
