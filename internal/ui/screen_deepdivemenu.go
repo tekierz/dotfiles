@@ -115,7 +115,7 @@ func (s *deepDiveMenuScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 	if m.Button == tea.MouseButtonWheelDown {
-		if a.deepDiveMenuIndex < len(items)-1 {
+		if a.deepDiveMenuIndex < len(items) {
 			a.deepDiveMenuIndex++
 		}
 		return nil
@@ -162,15 +162,21 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 		)
 	}
 
+	compact := width < 70 || height < 20
+
 	// Title with decorative border.
+	title := "◈ DEEP DIVE CONFIGURATION ◈"
+	if compact {
+		title = "DEEP DIVE"
+	}
 	titleBox := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(ColorMagenta).
-		Padding(0, 2).
+		Padding(0, 1).
 		Render(lipgloss.NewStyle().
 			Foreground(ColorMagenta).
 			Bold(true).
-			Render("◈ DEEP DIVE CONFIGURATION ◈"))
+			Render(title))
 
 	subtitle := lipgloss.NewStyle().
 		Foreground(ColorTextMuted).
@@ -178,7 +184,13 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 		Render("Customize each tool before installation")
 
 	items := GetFilteredDeepDiveMenuItems()
-	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(64))
+	maxIdx := len(items)
+	if a.deepDiveMenuIndex < 0 {
+		a.deepDiveMenuIndex = 0
+	}
+	if a.deepDiveMenuIndex > maxIdx {
+		a.deepDiveMenuIndex = maxIdx
+	}
 
 	// Category header style.
 	categoryStyle := lipgloss.NewStyle().
@@ -186,20 +198,22 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 		Bold(true).
 		MarginTop(1)
 
+	type menuRow struct {
+		index int
+		text  string
+	}
+	rows := make([]menuRow, 0, len(items)+1)
 	for i, item := range items {
+		row := ""
 		// Render category header if this item starts a new category. These rows
 		// are written without a field() mark so they are excluded from every
 		// item's extent (the click handler must not select on a header row).
-		if item.Category != "" {
+		if item.Category != "" && !compact {
 			if i > 0 {
-				rec.write("\n")
+				row += "\n"
 			}
-			rec.write(categoryStyle.Render("  "+item.Category) + "\n")
+			row += categoryStyle.Render("  "+item.Category) + "\n"
 		}
-
-		// Mark the start of this item's own row (after any category header) so the
-		// recorded offset points at the clickable row, not the header.
-		rec.field(i)
 
 		isSelected := i == a.deepDiveMenuIndex
 
@@ -231,13 +245,19 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 			cursor = lipgloss.NewStyle().Foreground(ColorCyan).Render("▸ ")
 		}
 
-		rec.write(fmt.Sprintf("%s%s %s %s  %s\n",
-			cursor,
-			statusDot,
-			iconStyle.Render(item.Icon),
-			nameStyle.Render(fmt.Sprintf("%-14s", item.Name)),
-			descStyle.Render(item.Description),
-		))
+		if compact {
+			name := lipgloss.NewStyle().MaxWidth(max(8, width-14)).Render(item.Name)
+			row += fmt.Sprintf("%s%s %s\n", cursor, statusDot, nameStyle.Render(name))
+		} else {
+			row += fmt.Sprintf("%s%s %s %s  %s\n",
+				cursor,
+				statusDot,
+				iconStyle.Render(item.Icon),
+				nameStyle.Render(fmt.Sprintf("%-14s", item.Name)),
+				descStyle.Render(item.Description),
+			)
+		}
+		rows = append(rows, menuRow{index: i, text: row})
 	}
 
 	// Continue option.
@@ -249,11 +269,66 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 		continueCursor = lipgloss.NewStyle().Foreground(ColorGreen).Render("▸ ")
 		continueStyle = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
 	}
-	// The blank separator before Continue is non-field content; mark the Continue
-	// row itself so a click on it selects the continue index.
-	rec.write("\n")
-	rec.field(continueIdx)
-	rec.write(fmt.Sprintf("%s%s\n", continueCursor, continueStyle.Render("▶ Continue to Installation")))
+	continueLabel := "▶ Continue to Installation"
+	if compact {
+		continueLabel = "Continue"
+	}
+	rows = append(rows, menuRow{index: continueIdx, text: fmt.Sprintf("%s%s\n", continueCursor, continueStyle.Render(continueLabel))})
+
+	// Keep the selected row visible. The budget reserves the title, subtitle,
+	// legend, help, separators, and box frame; scrolling changes only the rows
+	// inside the box, so narrow terminals never lose navigation or Continue.
+	rowBudget := height - 14
+	if rowBudget < 1 {
+		rowBudget = 1
+	}
+	start, end := a.deepDiveMenuIndex, a.deepDiveMenuIndex+1
+	used := lipgloss.Height(rows[a.deepDiveMenuIndex].text)
+	markerCost := func(lo, hi int) int {
+		cost := 0
+		if lo > 0 {
+			cost++
+		}
+		if hi < len(rows) {
+			cost++
+		}
+		return cost
+	}
+	for {
+		grew := false
+		if end < len(rows) {
+			next := lipgloss.Height(rows[end].text)
+			if used+next+markerCost(start, end+1) <= rowBudget {
+				used += next
+				end++
+				grew = true
+			}
+		}
+		if start > 0 {
+			prev := lipgloss.Height(rows[start-1].text)
+			if used+prev+markerCost(start-1, end) <= rowBudget {
+				used += prev
+				start--
+				grew = true
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+
+	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(64))
+	moreStyle := lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true)
+	if start > 0 {
+		rec.write(moreStyle.Render("  ↑ more") + "\n")
+	}
+	for _, row := range rows[start:end] {
+		rec.field(row.index)
+		rec.write(row.text)
+	}
+	if end < len(rows) {
+		rec.write(moreStyle.Render("  ↓ more") + "\n")
+	}
 
 	// Wrap menu in a box.
 	menuBox := configBoxStyle.Width(rec.boxWidth).Render(rec.String())
@@ -263,10 +338,17 @@ func (s *deepDiveMenuScreen) View(width, height int) string {
 	installedDot := lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("●")
 	partialDot := lipgloss.NewStyle().Foreground(ColorYellow).Render("●")
 	pendingDot := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("○")
-	legend := legendStyle.Render(fmt.Sprintf("%s installed  %s partial  %s not installed",
-		installedDot, partialDot, pendingDot))
+	legendText := fmt.Sprintf("%s installed  %s partial  %s not installed", installedDot, partialDot, pendingDot)
+	if compact {
+		legendText = fmt.Sprintf("%s installed  %s missing", installedDot, pendingDot)
+	}
+	legend := legendStyle.Render(legendText)
 
-	help := HelpStyle.Render("↑↓/jk navigate • enter select • esc back")
+	helpText := "↑↓/jk navigate • enter select • esc back"
+	if compact {
+		helpText = "↑↓ navigate • enter • esc"
+	}
+	help := HelpStyle.Render(helpText)
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Center,
