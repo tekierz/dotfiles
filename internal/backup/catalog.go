@@ -239,6 +239,107 @@ func ValidateCatalogEntry(entry CatalogEntry) error {
 	return nil
 }
 
+// RestoreCatalogEntry restores only the immutable source, target, kind, and
+// mode accepted by ListCatalog. Public CatalogEntry fields are presentation
+// metadata and are deliberately not consulted for restore authority.
+//
+// A catalog or restore-root authority failure is fatal. Individual target
+// failures remain partial-restore results so callers can report every item
+// that could not be applied without discarding successful work.
+func RestoreCatalogEntry(entry CatalogEntry, home string) (RestoreResult, error) {
+	result := RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}
+	if err := ValidateCatalogEntry(entry); err != nil {
+		return result, err
+	}
+	session, err := safefile.NewRestoreSession(home)
+	if err != nil {
+		return result, err
+	}
+
+	restore := entry.authority.restore
+	for _, item := range restore.items {
+		restoreCatalogItem(&result, session, home, restore.source, item)
+	}
+	return result, nil
+}
+
+func restoreCatalogItem(result *RestoreResult, session *safefile.RestoreSession, home string, source *safefile.DirectorySnapshot, item catalogRestoreItem) {
+	if !item.existed {
+		removeCatalogTarget(result, session, home, item)
+		return
+	}
+
+	switch item.kind {
+	case TargetFile:
+		_, expected, parents, err := safefile.ObserveFileWithin(home, item.target)
+		if err == nil {
+			_, err = session.RestoreFileWithMode(item.target, parents, expected, source, item.source, item.desiredMode)
+		}
+		recordCatalogRestore(result, item.target, "write", "restore committed with a durability/verification warning", err)
+	case TargetDirectory:
+		expected, parents, err := safefile.ObserveDirectoryWithin(home, item.target)
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+		if err == nil {
+			_, err = session.RestoreDirectory(item.target, parents, expected, source, item.source)
+		}
+		recordCatalogRestore(result, item.target, "restore directory", "directory restore committed with a durability/cleanup warning", err)
+	default:
+		result.Skipped[item.target] = fmt.Sprintf("invalid accepted target kind %q", item.kind)
+	}
+}
+
+func removeCatalogTarget(result *RestoreResult, session *safefile.RestoreSession, home string, item catalogRestoreItem) {
+	var err error
+	switch item.kind {
+	case TargetFile:
+		_, expected, parents, observeErr := safefile.ObserveFileWithin(home, item.target)
+		err = observeErr
+		if err == nil && expected.Exists() {
+			err = session.RemoveFile(item.target, parents, expected)
+		}
+	case TargetDirectory:
+		expected, parents, observeErr := safefile.ObserveDirectoryWithin(home, item.target)
+		err = observeErr
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+		if err == nil && expected != nil {
+			err = session.RemoveDirectory(item.target, parents, expected)
+		}
+	default:
+		result.Skipped[item.target] = fmt.Sprintf("invalid accepted target kind %q", item.kind)
+		return
+	}
+
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		result.Removed = append(result.Removed, item.target)
+		return
+	}
+	var committed *safefile.CommittedError
+	if errors.As(err, &committed) {
+		result.Removed = append(result.Removed, item.target)
+		result.Warnings[item.target] = fmt.Sprintf("removal committed with a durability/cleanup warning: %v", err)
+		return
+	}
+	result.Skipped[item.target] = fmt.Sprintf("remove: %v", err)
+}
+
+func recordCatalogRestore(result *RestoreResult, target, operation, committedWarning string, err error) {
+	if err == nil {
+		result.Restored = append(result.Restored, target)
+		return
+	}
+	var committed *safefile.CommittedError
+	if errors.As(err, &committed) {
+		result.Restored = append(result.Restored, target)
+		result.Warnings[target] = fmt.Sprintf("%s: %v", committedWarning, err)
+		return
+	}
+	result.Skipped[target] = fmt.Sprintf("%s: %v", operation, err)
+}
+
 func RemoveCatalogEntry(entry CatalogEntry) error {
 	if err := ValidateCatalogEntry(entry); err != nil {
 		return err
