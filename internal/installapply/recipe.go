@@ -23,8 +23,17 @@ import (
 var ErrManagerIdentityChanged = errors.New("reviewed package manager identity changed")
 
 // ErrNPMExecutionAuthorityRequired is the fixed, path-free failure returned
-// while npm execution remains disabled pending accepted-chain integration.
+// when a recipe reaches this boundary without its accepted npm identity or
+// still mixes manager and npm authority classes.
 var ErrNPMExecutionAuthorityRequired = errors.New("reviewed npm execution authority is required")
+
+// RecipeExecutionAuthority carries only opaque identities retained by an
+// accepted plan. NP4 can pass the npm member after its fresh phase checks;
+// existing manager-only callers retain their current boundary.
+type RecipeExecutionAuthority struct {
+	Manager pkg.ExecutableIdentity
+	NPM     pkg.NPMExecutionIdentity
+}
 
 type streamingInstallManager struct {
 	pkg.PackageManager
@@ -46,11 +55,17 @@ func (manager *streamingInstallManager) Install(packages ...string) error {
 	return waitStreaming(manager.ctx, command)
 }
 
-// ExecuteRecipe runs a reviewed recipe in exact step order. The complete
-// recipe and all manager/cask requirements are checked before mutation. Npm
-// execution is disabled until the reviewed accepted-chain authority is wired
-// into this boundary.
+// ExecuteRecipe runs a reviewed manager recipe in exact step order. The
+// compatibility boundary carries manager authority only; NP4 uses
+// ExecuteRecipeWithAuthority for a separately reviewed npm phase.
 func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager pkg.PackageManager, acceptedIdentity pkg.ExecutableIdentity, emitLine func(string)) error {
+	return ExecuteRecipeWithAuthority(ctx, recipe, manager, RecipeExecutionAuthority{Manager: acceptedIdentity}, emitLine)
+}
+
+// ExecuteRecipeWithAuthority executes one already-separated recipe authority
+// class. Mixed manager/npm recipes remain blocked until NP4 coordinates a
+// fresh phase; a pure npm recipe may execute only with its accepted identity.
+func ExecuteRecipeWithAuthority(ctx context.Context, recipe operation.InstallRecipe, manager pkg.PackageManager, authority RecipeExecutionAuthority, emitLine func(string)) error {
 	if ctx == nil {
 		return fmt.Errorf("reviewed install context is unavailable")
 	}
@@ -60,10 +75,23 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 	if _, err := operation.InstallRecipeDigest(recipe); err != nil {
 		return fmt.Errorf("reviewed install recipe is invalid: %w", err)
 	}
+	hasNPM, hasManager := false, false
 	for _, step := range recipe.Steps {
-		if step.Kind == operation.InstallStepNPMGlobal {
+		switch step.Kind {
+		case operation.InstallStepNPMGlobal:
+			hasNPM = true
+		case operation.InstallStepPackageManager, operation.InstallStepHomebrewCask:
+			hasManager = true
+		}
+	}
+	if hasNPM {
+		if hasManager || authority.Manager != (pkg.ExecutableIdentity{}) || authority.NPM.SchemaVersion() != pkg.CurrentNPMExecutionIdentitySchemaVersion || authority.NPM.Digest() == "" {
 			return ErrNPMExecutionAuthorityRequired
 		}
+		return ExecuteAcceptedNPMRecipe(ctx, recipe, authority.NPM, emitLine)
+	}
+	if authority.NPM != (pkg.NPMExecutionIdentity{}) {
+		return ErrNPMExecutionAuthorityRequired
 	}
 	for _, step := range recipe.Steps {
 		switch step.Kind {
@@ -71,11 +99,9 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 			if packageManagerNil(manager) || manager.Name() != step.Provider {
 				return fmt.Errorf("reviewed package manager %q is unavailable", step.Provider)
 			}
-			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, false); err != nil {
+			if err := validateAcceptedManagerIdentity(manager, authority.Manager, false); err != nil {
 				return err
 			}
-		case operation.InstallStepNPMGlobal:
-			return ErrNPMExecutionAuthorityRequired
 		case operation.InstallStepHomebrewCask:
 			if step.Provider != "brew" || packageManagerNil(manager) || manager.Name() != "brew" {
 				return fmt.Errorf("reviewed Homebrew cask installer is unavailable")
@@ -83,7 +109,7 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 			if _, ok := manager.(pkg.HomebrewCaskManager); !ok {
 				return fmt.Errorf("reviewed Homebrew cask installer is unavailable")
 			}
-			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, false); err != nil {
+			if err := validateAcceptedManagerIdentity(manager, authority.Manager, false); err != nil {
 				return err
 			}
 		default:
@@ -96,17 +122,15 @@ func ExecuteRecipe(ctx context.Context, recipe operation.InstallRecipe, manager 
 		}
 		switch step.Kind {
 		case operation.InstallStepPackageManager:
-			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, true); err != nil {
+			if err := validateAcceptedManagerIdentity(manager, authority.Manager, true); err != nil {
 				return err
 			}
 			adapted := &streamingInstallManager{PackageManager: manager, ctx: ctx, emitLine: emitLine}
 			if err := adapted.Install(step.Packages...); err != nil {
 				return err
 			}
-		case operation.InstallStepNPMGlobal:
-			return ErrNPMExecutionAuthorityRequired
 		case operation.InstallStepHomebrewCask:
-			if err := validateAcceptedManagerIdentity(manager, acceptedIdentity, true); err != nil {
+			if err := validateAcceptedManagerIdentity(manager, authority.Manager, true); err != nil {
 				return err
 			}
 			command, err := manager.(pkg.HomebrewCaskManager).InstallCasksStreaming(ctx, step.Casks...)
