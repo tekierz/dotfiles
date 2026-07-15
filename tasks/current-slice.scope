@@ -8,7 +8,7 @@
 # and BR3 byte/count limits.
 version=2
 slice_id=ba1b2-immutable-catalog-kernel
-state=verified
+state=committed
 max_total_files=2
 max_production_files=1
 max_changed_lines=800
