@@ -10,7 +10,7 @@
 # Deferred: BA1B2 immutable catalog acceptance and BA1C catalog execution.
 version=2
 slice_id=ba1sf2m
-state=verified
+state=committed
 max_total_files=4
 max_production_files=2
 max_changed_lines=420
