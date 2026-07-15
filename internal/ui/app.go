@@ -364,6 +364,8 @@ type App struct {
 	backupsLoading      bool
 	backupConfirmMode   bool
 	backupConfirmType   string // "restore" or "delete"
+	backupConfirmName   string
+	backupConfirmEntry  backup.CatalogEntry
 	backupStatus        string // Status message for backup operations
 	backupStatusWarning bool   // successful operation completed with caveats
 	backupRunning       bool   // Currently running a backup operation
@@ -659,19 +661,18 @@ func formatBytes(bytes int64) string {
 // restoreBackupCmd restores files from a backup. The path mapping, traversal
 // guard, and mode preservation are shared with the CLI via the
 // internal/backup package so the two paths cannot diverge.
-func restoreBackupCmd(b BackupEntry) tea.Cmd {
+func restoreBackupCmd(name string, entry backup.CatalogEntry) tea.Cmd {
 	return func() tea.Msg {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return backupRestoreDoneMsg{name: b.Name, err: err}
+			traceRestoreResult(backup.RestoreResult{}, err)
+			return backupRestoreDoneMsg{name: name, err: err}
 		}
 
-		if err := backup.ValidateCatalogEntry(b.Catalog); err != nil {
-			return backupRestoreDoneMsg{name: b.Name, err: err}
-		}
-		result, err := backup.Restore(b.Path, home)
+		result, err := backup.RestoreCatalogEntry(entry, home)
+		traceRestoreResult(result, err)
 		if err != nil {
-			return backupRestoreDoneMsg{name: b.Name, err: err}
+			return backupRestoreDoneMsg{name: name, err: err}
 		}
 
 		// Surface skipped files (path-traversal rejection, write-through-symlink
@@ -694,7 +695,7 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 		sort.Strings(details)
 
 		return backupRestoreDoneMsg{
-			name:     b.Name,
+			name:     name,
 			count:    result.Count(),
 			removed:  len(result.Removed),
 			skipped:  len(result.Skipped),
@@ -705,11 +706,31 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 	}
 }
 
+func traceRestoreResult(result backup.RestoreResult, err error) {
+	outcome := operation.TraceSucceeded
+	if err != nil {
+		outcome = operation.TraceFailed
+	} else if len(result.Skipped) > 0 || len(result.Warnings) > 0 {
+		outcome = operation.TracePartial
+	}
+	failed := 0
+	if err != nil {
+		failed = 1
+	}
+	operation.Trace(operation.TraceRestore, outcome, operation.TraceCounts{
+		Attempted: result.Count() + len(result.Removed) + len(result.Skipped),
+		Succeeded: result.Count() + len(result.Removed),
+		Failed:    failed,
+		Skipped:   len(result.Skipped),
+		Warnings:  len(result.Warnings),
+	})
+}
+
 // deleteBackupCmd deletes a backup directory
-func deleteBackupCmd(b BackupEntry) tea.Cmd {
+func deleteBackupCmd(name string, entry backup.CatalogEntry) tea.Cmd {
 	return func() tea.Msg {
-		err := backup.RemoveCatalogEntry(b.Catalog)
-		return backupDeleteDoneMsg{name: b.Name, err: err}
+		err := backup.RemoveCatalogEntry(entry)
+		return backupDeleteDoneMsg{name: name, err: err}
 	}
 }
 
