@@ -3,8 +3,6 @@ package ui
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/tekierz/dotfiles/internal/config"
@@ -143,29 +141,25 @@ type managePreferencePresence struct {
 }
 
 func inspectManagePreferencePresence() managePreferencePresence {
-	configDir := config.ConfigDir()
-	if configDir == "" {
+	if config.ConfigDir() == "" {
 		return managePreferencePresence{exists: true, err: config.ErrNoConfigDir}
 	}
-	path := filepath.Join(configDir, "tools", "manage.json")
-	// #nosec G304 -- callers provide a resolved tool config candidate below HOME/XDG.
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return managePreferencePresence{fields: map[string]bool{}}
-	}
+	raw, exists, err := config.LoadToolConfigWithPresence("manage", func() *map[string]json.RawMessage {
+		fields := make(map[string]json.RawMessage)
+		return &fields
+	})
 	if err != nil {
 		return managePreferencePresence{exists: true, fields: map[string]bool{}, err: err}
 	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return managePreferencePresence{exists: true, fields: map[string]bool{}, err: err}
+	if !exists {
+		return managePreferencePresence{fields: map[string]bool{}}
 	}
-	fields := make(map[string]bool, len(raw))
-	for key := range raw {
+	fields := make(map[string]bool, len(*raw))
+	for key := range *raw {
 		fields[key] = true
 	}
 	var schemaVersion int
-	if encoded, ok := raw["NativeImportSchemaVersion"]; ok {
+	if encoded, ok := (*raw)["NativeImportSchemaVersion"]; ok {
 		if err := json.Unmarshal(encoded, &schemaVersion); err != nil {
 			return managePreferencePresence{exists: true, fields: fields, err: errors.New("native import schema version must be an integer")}
 		}
@@ -174,10 +168,10 @@ func inspectManagePreferencePresence() managePreferencePresence {
 		}
 	}
 	var legacyTheme, legacyPaging string
-	if encoded, ok := raw["LazyGitTheme"]; ok {
+	if encoded, ok := (*raw)["LazyGitTheme"]; ok {
 		_ = json.Unmarshal(encoded, &legacyTheme)
 	}
-	if encoded, ok := raw["LazyGitPaging"]; ok {
+	if encoded, ok := (*raw)["LazyGitPaging"]; ok {
 		_ = json.Unmarshal(encoded, &legacyPaging)
 	}
 	switch schemaVersion {

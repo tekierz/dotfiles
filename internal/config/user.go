@@ -81,14 +81,17 @@ func LoadUserProfile(name string) (*UserProfile, error) {
 	if err := ValidateUsername(name); err != nil {
 		return nil, err
 	}
+	if ConfigDir() == "" {
+		return nil, ErrNoConfigDir
+	}
 
 	path := filepath.Join(UsersDir(), name+".json")
-	data, err := os.ReadFile(path)
+	data, revision, err := readProductConfigJSON(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("user %q does not exist", name)
-		}
 		return nil, fmt.Errorf("failed to read user profile: %w", err)
+	}
+	if !revision.Exists() {
+		return nil, fmt.Errorf("user %q does not exist", name)
 	}
 
 	var profile UserProfile

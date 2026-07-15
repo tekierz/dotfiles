@@ -61,6 +61,12 @@ func (e *GlobalConfigCommittedError) Committed() bool { return true }
 // interpreted with older semantics.
 const CurrentGlobalConfigSchemaVersion = 1
 
+// maxProductConfigJSONBytes bounds every product-owned JSON document read into
+// memory. These files contain preferences and small maps, not arbitrary user
+// content; 1 MiB leaves ample migration headroom while preventing an unbounded
+// allocation before JSON validation runs.
+const maxProductConfigJSONBytes int64 = 1 << 20
+
 // writeFileAtomic writes data below a trusted filesystem anchor. Safefile owns
 // descriptor-relative traversal, no-follow enforcement, staging, rename, and
 // directory durability; callers never resolve untrusted descendants by path.
@@ -335,23 +341,32 @@ func ToolsDir() string {
 	return filepath.Join(ConfigDir(), "tools")
 }
 
-// LoadToolConfig loads a tool config from JSON file, returning defaults if not found
+// LoadToolConfig loads a tool config from JSON file, returning defaults if not found.
 func LoadToolConfig[T any](toolName string, defaultFn func() *T) (*T, error) {
+	cfg, _, err := LoadToolConfigWithPresence(toolName, defaultFn)
+	return cfg, err
+}
+
+// LoadToolConfigWithPresence loads one bounded product-owned tool-state JSON
+// document and also reports whether the file existed. The presence bit lets
+// migration callers distinguish a missing file from an existing empty object
+// without performing a second pathname-based observation.
+func LoadToolConfigWithPresence[T any](toolName string, defaultFn func() *T) (*T, bool, error) {
 	if ConfigDir() == "" {
-		return nil, ErrNoConfigDir
+		return nil, false, ErrNoConfigDir
 	}
 	if err := validateToolConfigName(toolName); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	path := filepath.Join(ToolsDir(), toolName+".json")
 
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		// Return defaults if file doesn't exist
-		return defaultFn(), nil
-	}
+	data, revision, err := readProductConfigJSON(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+		return nil, false, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+	if !revision.Exists() {
+		// Return defaults if file doesn't exist
+		return defaultFn(), false, nil
 	}
 
 	// Start from the intended defaults so keys absent from an older/partial JSON
@@ -359,10 +374,10 @@ func LoadToolConfig[T any](toolName string, defaultFn func() *T) (*T, error) {
 	// json.Unmarshal only overwrites keys that are actually present in the file.
 	cfg := defaultFn()
 	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
+		return nil, true, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
 
-	return cfg, nil
+	return cfg, true, nil
 }
 
 // SaveToolConfig saves a tool config to JSON file
@@ -437,7 +452,7 @@ func SaveToolConfigAtPathBoundAuthorityTracked[T any](path string, cfg *T, accep
 			}
 		}
 	}()
-	_, current, err := safefile.ReadWithinAuthorized(root, rel, parents)
+	_, current, err := safefile.ReadWithinAuthorizedLimit(root, rel, parents, maxProductConfigJSONBytes)
 	if err != nil {
 		return safefile.Revision{}, fmt.Errorf("read accepted tool-state config: %w", err)
 	}
@@ -479,7 +494,15 @@ func validateToolConfigName(name string) error {
 // bytes and file identity belong to the same source even if another process
 // replaces the pathname concurrently.
 func readGlobalConfigRevision(root, rel string) ([]byte, safefile.Revision, error) {
-	return safefile.ReadWithin(root, rel)
+	return safefile.ReadWithinLimit(root, rel, maxProductConfigJSONBytes)
+}
+
+func readProductConfigJSON(path string) ([]byte, safefile.Revision, error) {
+	root, rel, err := anchoredFilePath(path)
+	if err != nil {
+		return nil, safefile.Revision{}, err
+	}
+	return safefile.ReadWithinLimit(root, rel, maxProductConfigJSONBytes)
 }
 
 // decodeJSONObject rejects duplicate keys instead of accepting encoding/json's
