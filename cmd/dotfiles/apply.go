@@ -27,6 +27,7 @@ const (
 	applyCancelledMessage    = "installation apply cancelled"
 	applyFailedMessage       = "installation apply failed"
 	applyOutputFailedMessage = "installation applied but result output failed"
+	applyReplanRequiredLine  = "installation phase complete; replan required; run dotfiles plan --json again\n"
 )
 
 type applyCommandRuntime struct {
@@ -104,6 +105,14 @@ func newApplyCommand(runtime applyCommandRuntime) *cobra.Command {
 				switch {
 				case errors.Is(err, context.Canceled):
 					return applyCommandExit(130, applyCancelledMessage)
+				case errors.Is(err, installapply.ErrReplanRequired):
+					if !validApplyReplanRequired(result, hash, tools) {
+						return applyCommandExit(1, applyFailedMessage)
+					}
+					if err := writeApplyResult(command.OutOrStdout(), []byte(applyReplanRequiredLine)); err != nil {
+						return applyCommandExit(1, applyOutputFailedMessage)
+					}
+					return applySilentCommandExit(3)
 				case errors.Is(err, installapply.ErrInvalidApplyRequest):
 					return applyCommandExit(2, applySyntaxMessage)
 				case errors.Is(err, installapply.ErrPlanHashMismatch):
@@ -114,7 +123,7 @@ func newApplyCommand(runtime applyCommandRuntime) *cobra.Command {
 					return applyCommandExit(1, applyFailedMessage)
 				}
 			}
-			if !validApplySuccess(result, hash) {
+			if !validApplySuccess(result, hash, tools) {
 				return applyCommandExit(1, applyFailedMessage)
 			}
 			line := fmt.Sprintf("installation applied: operation=%s plan_hash=%s succeeded=%d failed=0\n", result.OperationID, result.PlanHash, result.Succeeded)
@@ -140,6 +149,10 @@ func applyNoArgs(_ *cobra.Command, args []string) error {
 
 func applyCommandExit(code int, message string) error {
 	return &commandExitError{code: code, message: message}
+}
+
+func applySilentCommandExit(code int) error {
+	return &commandExitError{code: code, silent: true}
 }
 
 func canonicalApplyTools(raw []string) ([]string, error) {
@@ -168,8 +181,44 @@ func validApplyCommandHash(value string) bool {
 	return err == nil && len(decoded) == 32 && hex.EncodeToString(decoded) == value
 }
 
-func validApplySuccess(result installapply.Result, expectedHash string) bool {
-	return result.Status == operation.StatusSucceeded && result.PlanHash == expectedHash && result.Succeeded > 0 && result.Failed == 0 && validPublicOperationID(result.OperationID)
+func validApplySuccess(result installapply.Result, expectedHash string, requestedTools []string) bool {
+	if result.Status != operation.StatusSucceeded || result.Next != installapply.NextComplete || result.PlanHash != expectedHash ||
+		result.Succeeded <= 0 || result.Failed != 0 || !validPublicOperationID(result.OperationID) || len(result.RemainingTools()) != 0 {
+		return false
+	}
+	phaseRequested := result.RequestedTools()
+	switch result.PhaseKind {
+	case "":
+		return result.PhaseIndex == 0 && len(phaseRequested) == 0
+	case operation.InstallPhaseNPM:
+		return result.PhaseIndex == 2 && slices.Equal(phaseRequested, requestedTools)
+	default:
+		return false
+	}
+}
+
+func validApplyReplanRequired(result installapply.Result, expectedHash string, requestedTools []string) bool {
+	remaining := result.RemainingTools()
+	return result.Status == operation.StatusPhaseComplete && result.Next == installapply.NextReplanRequired && result.PlanHash == expectedHash &&
+		result.Succeeded >= 0 && result.Failed == 0 && validPublicOperationID(result.OperationID) &&
+		result.PhaseKind == operation.InstallPhasePrerequisite && result.PhaseIndex == 1 && slices.Equal(result.RequestedTools(), requestedTools) &&
+		validApplyRemainingTools(remaining, requestedTools)
+}
+
+func validApplyRemainingTools(remaining, requested []string) bool {
+	if len(remaining) == 0 || !sort.StringsAreSorted(remaining) {
+		return false
+	}
+	for index, id := range remaining {
+		if index > 0 && remaining[index-1] == id {
+			return false
+		}
+		position, found := slices.BinarySearch(requested, id)
+		if !found || position >= len(requested) {
+			return false
+		}
+	}
+	return true
 }
 
 func validPublicOperationID(value string) bool {

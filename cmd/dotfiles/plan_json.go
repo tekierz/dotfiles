@@ -130,6 +130,8 @@ func newPlanCommand(runtime planJSONRuntime) *cobra.Command {
 				return nil
 			case planpublic.StatusBlocked, planpublic.StatusIntentRequired:
 				return &commandExitError{code: 2, silent: true}
+			case planpublic.StatusReplanRequired:
+				return &commandExitError{code: 3, silent: true}
 			default:
 				return errPlanCollection
 			}
