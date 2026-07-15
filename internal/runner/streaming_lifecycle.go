@@ -20,7 +20,7 @@ var (
 )
 
 const (
-	streamingOutputCapacity = 64
+	streamingOutputCapacity = 128
 	streamingPipeGrace      = 50 * time.Millisecond
 	streamingTokenLimit     = 1024 * 1024
 )
@@ -53,6 +53,11 @@ type streamingLifecycle struct {
 	cancel   context.CancelCauseFunc
 	result   error
 }
+
+type completedStreamingExitObserver struct{}
+
+func (completedStreamingExitObserver) Wait() error  { return nil }
+func (completedStreamingExitObserver) Close() error { return nil }
 
 func (lifecycle *streamingLifecycle) Output() <-chan string { return lifecycle.output }
 func (lifecycle *streamingLifecycle) Done() <-chan error    { return lifecycle.done }
@@ -89,6 +94,9 @@ func startStreamingLifecycleWithDeps(ctx context.Context, command *exec.Cmd, dep
 		return nil, err
 	}
 	observer, err := deps.newExitObserver(command.Process.Pid)
+	if errors.Is(err, syscall.ESRCH) {
+		observer, err = completedStreamingExitObserver{}, nil
+	}
 	if err != nil {
 		delivered, cleanupErr := terminateStreamingProcess(command.Process.Pid, deps)
 		_ = stdout.Close()
