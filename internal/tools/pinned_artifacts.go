@@ -92,19 +92,31 @@ func clonePinnedGitArtifact(ctx context.Context, staging string, artifact operat
 		{"checkout", "--quiet", "--detach", review.ImmutableRef},
 	}
 	for _, arguments := range commands {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		command := commandFactory(ctx, "git", arguments...)
 		command.Dir = staging
 		command.Env = environment
 		output := &pinnedGitDiagnostic{}
 		command.Stdout, command.Stderr = output, output
 		if err := command.Run(); err != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return contextErr
+			}
 			return fmt.Errorf("stage pinned git artifact: %w: %s", err, strings.TrimSpace(output.String()))
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	verify := commandFactory(ctx, "git", "rev-parse", "--verify", "HEAD^{commit}")
 	verify.Dir = staging
 	verify.Env = environment
 	output, err := verify.Output()
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
 	if err != nil || strings.TrimSpace(string(output)) != review.ImmutableRef {
 		return fmt.Errorf("verify pinned git artifact: %w", errors.Join(err, operation.ErrInvalidRemoteArtifact))
 	}

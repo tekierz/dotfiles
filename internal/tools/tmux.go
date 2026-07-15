@@ -158,10 +158,20 @@ func InstallTPM() error {
 }
 
 func installTPMTracked() (result MutationEvidence, returnErr error) {
-	return installTPMAtSnapshotTracked(nil, nil)
+	return installTPMTrackedWithContext(context.Background())
 }
 
-func installTPMAtSnapshotTracked(accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, states ...*operation.StateAuthority) (result MutationEvidence, returnErr error) {
+func installTPMTrackedWithContext(ctx context.Context) (result MutationEvidence, returnErr error) {
+	return installTPMAtSnapshotTrackedWithContext(ctx, nil, nil)
+}
+
+func installTPMAtSnapshotTrackedWithContext(ctx context.Context, accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, states ...*operation.StateAuthority) (result MutationEvidence, returnErr error) {
+	if ctx == nil {
+		return MutationEvidence{}, errors.New("TPM operation context is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return MutationEvidence{}, err
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("determine HOME for TPM: %w", err)
@@ -192,7 +202,7 @@ func installTPMAtSnapshotTracked(accepted *safefile.DirectorySnapshot, parents *
 
 	// Clone outside the live plugin path. A failed clone is deleted without ever
 	// becoming a planned mutation target.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	cloneCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	stagingFD, err := operation.OpenStateStagingDirectory(staging, createdStaging)
 	if err != nil {
@@ -209,14 +219,20 @@ func installTPMAtSnapshotTracked(accepted *safefile.DirectorySnapshot, parents *
 	commandFactory := func(ctx context.Context, name string, arguments ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, name, arguments...)
 	}
-	if err := clonePinnedGitArtifact(ctx, staging, artifact, commandFactory); err != nil {
+	if err := clonePinnedGitArtifact(cloneCtx, staging, artifact, commandFactory); err != nil {
 		return MutationEvidence{}, fmt.Errorf("stage pinned TPM artifact: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return MutationEvidence{}, err
 	}
 	snapshot, err := operation.SnapshotStateStagingDirectory(staging, createdStaging)
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("snapshot cloned TPM: %w", err)
 	}
 	cleanupExpected = snapshot
+	if err := ctx.Err(); err != nil {
+		return MutationEvidence{}, err
+	}
 	var live *safefile.DirectorySnapshot
 	if accepted != nil {
 		if parents != nil {
@@ -541,6 +557,18 @@ func SetupTPM(cfg TmuxConfig, theme string) error {
 }
 
 func SetupTPMTracked(cfg TmuxConfig, theme string) ([]MutationEvidence, error) {
+	return SetupTPMTrackedWithContext(context.Background(), cfg, theme)
+}
+
+// SetupTPMTrackedWithContext keeps remote acquisition and every later mutation
+// boundary under the caller's operation lifetime.
+func SetupTPMTrackedWithContext(ctx context.Context, cfg TmuxConfig, theme string) ([]MutationEvidence, error) {
+	if ctx == nil {
+		return nil, errors.New("TPM operation context is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Write config first
 	configEvidence, err := WriteTmuxConfigTracked(cfg, theme)
 	if err != nil {
@@ -551,10 +579,13 @@ func SetupTPMTracked(cfg TmuxConfig, theme string) ([]MutationEvidence, error) {
 	if !cfg.TPMEnabled {
 		return committed, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, partialMutationError(err, committed)
+	}
 
 	// Install TPM transactionally. Existing targets are refused at the snapshot
 	// commit boundary instead of being trusted because they appeared mid-plan.
-	tpmEvidence, err := installTPMTracked()
+	tpmEvidence, err := installTPMTrackedWithContext(ctx)
 	if err != nil {
 		if tpmEvidence.Directory != nil || tpmEvidence.Revision.Tracked() {
 			committed = append(committed, tpmEvidence)
@@ -571,6 +602,18 @@ func SetupTPMTracked(cfg TmuxConfig, theme string) ([]MutationEvidence, error) {
 // SetupTPMAtAuthorityTracked applies only exact plan-accepted tmux and TPM
 // namespace authority with one already-bound operational state.
 func SetupTPMAtAuthorityTracked(cfg TmuxConfig, theme string, tmuxAccepted safefile.Revision, tmuxParents *safefile.ParentChain, tpmAccepted *safefile.DirectorySnapshot, tpmParents *safefile.ParentChain, state *operation.StateAuthority) ([]MutationEvidence, error) {
+	return SetupTPMAtAuthorityTrackedWithContext(context.Background(), cfg, theme, tmuxAccepted, tmuxParents, tpmAccepted, tpmParents, state)
+}
+
+// SetupTPMAtAuthorityTrackedWithContext is the reviewed install entry point.
+// Compatibility callers retain the context-free wrapper above.
+func SetupTPMAtAuthorityTrackedWithContext(ctx context.Context, cfg TmuxConfig, theme string, tmuxAccepted safefile.Revision, tmuxParents *safefile.ParentChain, tpmAccepted *safefile.DirectorySnapshot, tpmParents *safefile.ParentChain, state *operation.StateAuthority) ([]MutationEvidence, error) {
+	if ctx == nil {
+		return nil, errors.New("TPM operation context is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("determine HOME for TPM: %w", err)
@@ -598,7 +641,10 @@ func SetupTPMAtAuthorityTracked(cfg TmuxConfig, theme string, tmuxAccepted safef
 	if !cfg.TPMEnabled {
 		return []MutationEvidence{configEvidence}, nil
 	}
-	tpmEvidence, err := installTPMAtSnapshotTracked(tpmAccepted, tpmParents, state)
+	if err := ctx.Err(); err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	tpmEvidence, err := installTPMAtSnapshotTrackedWithContext(ctx, tpmAccepted, tpmParents, state)
 	if err != nil {
 		if tpmEvidence.Directory != nil || tpmEvidence.Revision.Tracked() {
 			committed = append(committed, tpmEvidence)
