@@ -75,7 +75,8 @@ func RefreshSudo() error {
 	return cmd.Run()
 }
 
-// StreamingCmd wraps an exec.Cmd with real-time output streaming
+// StreamingCmd exposes one real-time output stream. Cmd is nil for composite
+// facades such as an ordered streaming sequence.
 type StreamingCmd struct {
 	Cmd    *exec.Cmd
 	Output <-chan string
