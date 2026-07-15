@@ -710,7 +710,7 @@ func validateSupportOperationsData(value supportOperationsData) error {
 }
 
 func validateSupportOperationRecord(record supportOperationRecord, ordinal int) error {
-	if record.Ordinal != ordinal || (record.Status != operation.StatusRunning && record.Status != operation.StatusSucceeded && record.Status != operation.StatusFailed && record.Status != operation.StatusCancelled) ||
+	if record.Ordinal != ordinal || (record.Status != operation.StatusRunning && record.Status != operation.StatusSucceeded && record.Status != operation.StatusPhaseComplete && record.Status != operation.StatusFailed && record.Status != operation.StatusCancelled) ||
 		record.Actions.Pending < 0 || record.Actions.Succeeded < 0 || record.Actions.Failed < 0 || record.Actions.Skipped < 0 || !supportCountsDoNotOverflow(record.Actions) {
 		return errSupportProjection
 	}

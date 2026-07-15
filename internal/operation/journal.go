@@ -23,10 +23,11 @@ var ErrInvalidRecord = errors.New("invalid operation journal record")
 type Status string
 
 const (
-	StatusRunning   Status = "running"
-	StatusSucceeded Status = "succeeded"
-	StatusFailed    Status = "failed"
-	StatusCancelled Status = "cancelled"
+	StatusRunning       Status = "running"
+	StatusSucceeded     Status = "succeeded"
+	StatusPhaseComplete Status = "phase_complete"
+	StatusFailed        Status = "failed"
+	StatusCancelled     Status = "cancelled"
 )
 
 type ActionStatus string
@@ -129,7 +130,7 @@ func newOperationID(now time.Time) (string, error) {
 }
 
 func (r *Record) Finish(status Status, finishedAt time.Time, results []ActionResult, warnings []string) error {
-	if status != StatusSucceeded && status != StatusFailed && status != StatusCancelled {
+	if status != StatusSucceeded && status != StatusPhaseComplete && status != StatusFailed && status != StatusCancelled {
 		return fmt.Errorf("%w: invalid terminal status %q", ErrInvalidRecord, status)
 	}
 	if finishedAt.IsZero() || finishedAt.Before(r.StartedAt) {
@@ -180,7 +181,7 @@ func validateRecord(record Record) error {
 		strings.ContainsAny(record.OperationID, "/\\\x00\r\n\t ") || len(record.PlanHash) != 64 || planHashErr != nil || record.StartedAt.IsZero() {
 		return fmt.Errorf("%w: missing or malformed record identity", ErrInvalidRecord)
 	}
-	if record.Status != StatusRunning && record.Status != StatusSucceeded && record.Status != StatusFailed && record.Status != StatusCancelled {
+	if record.Status != StatusRunning && record.Status != StatusSucceeded && record.Status != StatusPhaseComplete && record.Status != StatusFailed && record.Status != StatusCancelled {
 		return fmt.Errorf("%w: invalid status %q", ErrInvalidRecord, record.Status)
 	}
 	if record.Status == StatusRunning && record.FinishedAt != nil {
@@ -352,7 +353,7 @@ func traceJournalRecord(record Record) {
 	}
 	outcome := TraceRunning
 	switch record.Status {
-	case StatusSucceeded:
+	case StatusSucceeded, StatusPhaseComplete:
 		outcome = TraceSucceeded
 	case StatusFailed:
 		outcome = TraceFailed

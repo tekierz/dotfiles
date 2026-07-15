@@ -23,6 +23,7 @@ var (
 	ErrPlanNotReady        = errors.New("fresh plan is not ready")
 	ErrPlanHashMismatch    = errors.New("fresh plan hash does not match")
 	ErrApplyFailed         = errors.New("installation apply failed")
+	ErrReplanRequired      = errors.New("fresh install phase completed; replan required")
 )
 
 const packageOnlyWarning = "package-only operation has no filesystem mutations; no filesystem rollback point was created"
@@ -32,12 +33,36 @@ type Request struct {
 	ExpectedHash string
 }
 
+type Next string
+
+const (
+	NextComplete       Next = "complete"
+	NextReplanRequired Next = "replan_required"
+)
+
 type Result struct {
-	OperationID string
-	PlanHash    string
-	Status      operation.Status
-	Succeeded   int
-	Failed      int
+	OperationID    string
+	PlanHash       string
+	Status         operation.Status
+	Succeeded      int
+	Failed         int
+	Next           Next
+	PhaseKind      operation.InstallPhaseKind
+	PhaseIndex     int
+	requestedTools string
+	remainingTools string
+}
+
+func (result Result) RequestedTools() []string { return decodeResultTools(result.requestedTools) }
+func (result Result) RemainingTools() []string { return decodeResultTools(result.remainingTools) }
+
+func encodeResultTools(values []string) string { return strings.Join(values, "\x00") }
+
+func decodeResultTools(value string) []string {
+	if value == "" {
+		return []string{}
+	}
+	return strings.Split(value, "\x00")
 }
 
 type JournalWriter interface {
@@ -45,15 +70,16 @@ type JournalWriter interface {
 }
 
 type Dependencies struct {
-	PlanFresh      func(context.Context, []string) (installplan.FreshSession, error)
-	UserHomeDir    func() (string, error)
-	BootstrapState func(*operation.StatePlan) (*operation.StateAuthority, error)
-	AcquireLock    func(*operation.StateAuthority, string, string) (func() error, error)
-	OpenJournal    func(*operation.StateAuthority) (JournalWriter, error)
-	StartRecord    func(operation.Plan, time.Time) (operation.Record, error)
-	Now            func() time.Time
-	ExecuteRecipe  func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error
-	DetectRecipe   func(operation.InstallRecipe, pkg.PackageManager) (bool, error)
+	PlanFresh                  func(context.Context, []string) (installplan.FreshSession, error)
+	UserHomeDir                func() (string, error)
+	BootstrapState             func(*operation.StatePlan) (*operation.StateAuthority, error)
+	AcquireLock                func(*operation.StateAuthority, string, string) (func() error, error)
+	OpenJournal                func(*operation.StateAuthority) (JournalWriter, error)
+	StartRecord                func(operation.Plan, time.Time) (operation.Record, error)
+	Now                        func() time.Time
+	ExecuteRecipe              func(context.Context, operation.InstallRecipe, pkg.PackageManager, pkg.ExecutableIdentity, func(string)) error
+	ExecuteRecipeWithAuthority func(context.Context, operation.InstallRecipe, pkg.PackageManager, RecipeExecutionAuthority, func(string)) error
+	DetectRecipe               func(operation.InstallRecipe, pkg.PackageManager) (bool, error)
 }
 
 func SystemDependencies(planFresh func(context.Context, []string) (installplan.FreshSession, error)) Dependencies {
@@ -66,7 +92,7 @@ func SystemDependencies(planFresh func(context.Context, []string) (installplan.F
 			return journal, err
 		},
 		StartRecord: operation.StartRecord, Now: time.Now,
-		ExecuteRecipe: ExecuteRecipe, DetectRecipe: DetectRecipe,
+		ExecuteRecipe: ExecuteRecipe, ExecuteRecipeWithAuthority: ExecuteRecipeWithAuthority, DetectRecipe: DetectRecipe,
 	}
 }
 
@@ -99,6 +125,11 @@ func Apply(ctx context.Context, request Request, dependencies Dependencies) (Res
 	actions, recipes, detectorAuthority, managerIdentity, err := validatePackageOnlyAuthority(accepted, manager)
 	if err != nil {
 		return Result{}, errors.Join(ErrApplyFailed, err)
+	}
+	phase, phased := accepted.InstallPhase()
+	npmIdentity, hasNPMIdentity := accepted.NPMExecutionIdentity()
+	if err := validateApplyPhaseAuthority(accepted, phase, phased, managerIdentity, npmIdentity, hasNPMIdentity, dependencies); err != nil {
+		return Result{}, errors.Join(ErrPlanNotReady, err)
 	}
 	// Detector drift must block before state bootstrap, locking, journaling, or
 	// product mutation. Compare against the exact boolean observed in the plan.
@@ -181,7 +212,13 @@ func Apply(ctx context.Context, request Request, dependencies Dependencies) (Res
 			break
 		}
 		executeErr := revalidateManagerExecution(recipe, manager, managerIdentity)
-		if executeErr == nil {
+		if executeErr == nil && phased && phase.Kind() == operation.InstallPhaseNPM {
+			if npmIdentity.Revalidate() != nil {
+				executeErr = ErrNPMExecutionAuthorityChanged
+			} else {
+				executeErr = dependencies.ExecuteRecipeWithAuthority(ctx, operation.CloneInstallRecipe(recipe), manager, RecipeExecutionAuthority{NPM: npmIdentity}, nil)
+			}
+		} else if executeErr == nil {
 			executeErr = dependencies.ExecuteRecipe(ctx, operation.CloneInstallRecipe(recipe), manager, managerIdentity, nil)
 		}
 		if executeErr == nil {
@@ -225,6 +262,8 @@ func Apply(ctx context.Context, request Request, dependencies Dependencies) (Res
 		status = operation.StatusCancelled
 	} else if len(failures) != 0 {
 		status = operation.StatusFailed
+	} else if phased && phase.Kind() == operation.InstallPhasePrerequisite {
+		status = operation.StatusPhaseComplete
 	}
 	finishedAt := dependencies.Now()
 	if err := record.Finish(status, finishedAt, results, []string{packageOnlyWarning}); err != nil {
@@ -246,11 +285,48 @@ func Apply(ctx context.Context, request Request, dependencies Dependencies) (Res
 			// terminal success/failure totals.
 		}
 	}
-	result := Result{OperationID: record.OperationID, PlanHash: accepted.Hash(), Status: status, Succeeded: succeeded, Failed: failed}
+	result := Result{OperationID: record.OperationID, PlanHash: accepted.Hash(), Status: status, Succeeded: succeeded, Failed: failed, Next: NextComplete}
+	if phased {
+		result.PhaseKind, result.PhaseIndex = phase.Kind(), phase.Index()
+		result.requestedTools, result.remainingTools = encodeResultTools(phase.RequestedTools()), encodeResultTools(phase.RemainingTools())
+	}
+	if status == operation.StatusPhaseComplete && len(failures) == 0 {
+		result.Next = NextReplanRequired
+		return result, ErrReplanRequired
+	}
 	if status != operation.StatusSucceeded || len(failures) != 0 {
 		return result, errors.Join(append([]error{ErrApplyFailed}, failures...)...)
 	}
 	return result, nil
+}
+
+func validateApplyPhaseAuthority(accepted installplan.AcceptedPlan, phase operation.InstallPhase, phased bool, managerIdentity pkg.ExecutableIdentity, npmIdentity pkg.NPMExecutionIdentity, hasNPMIdentity bool, dependencies Dependencies) error {
+	if !phased {
+		if hasNPMIdentity {
+			return fmt.Errorf("unphased install carries npm authority")
+		}
+		return nil
+	}
+	requested, remaining := phase.RequestedTools(), phase.RemainingTools()
+	if !slices.Equal(requested, accepted.Intent().Tools) || len(requested) == 0 {
+		return fmt.Errorf("install phase intent is inconsistent")
+	}
+	switch phase.Kind() {
+	case operation.InstallPhasePrerequisite:
+		if phase.Index() != 1 || phase.Authority() != operation.InstallAuthorityManager || len(remaining) == 0 || hasNPMIdentity || managerIdentity == (pkg.ExecutableIdentity{}) {
+			return fmt.Errorf("prerequisite install phase authority is inconsistent")
+		}
+	case operation.InstallPhaseNPM:
+		if phase.Index() != 2 || phase.Authority() != operation.InstallAuthorityNPM || len(remaining) != 0 || !hasNPMIdentity || managerIdentity != (pkg.ExecutableIdentity{}) || dependencies.ExecuteRecipeWithAuthority == nil {
+			return fmt.Errorf("npm install phase authority is inconsistent")
+		}
+		if npmIdentity.Revalidate() != nil {
+			return ErrNPMExecutionAuthorityChanged
+		}
+	default:
+		return fmt.Errorf("install phase kind is invalid")
+	}
+	return nil
 }
 
 func validApplyHash(value string) bool {
@@ -296,6 +372,13 @@ func validatePackageOnlyAuthority(accepted installplan.AcceptedPlan, manager pkg
 	}
 	intent := accepted.Intent()
 	authorities := accepted.ToolAuthorities()
+	phase, phased := accepted.InstallPhase()
+	deferred := map[string]struct{}{}
+	if phased && phase.Kind() == operation.InstallPhasePrerequisite {
+		for _, toolID := range phase.RemainingTools() {
+			deferred[toolID] = struct{}{}
+		}
+	}
 	if len(actions) == 0 || len(recipes) != len(actions) || len(authorities) != len(intent.Tools) {
 		return nil, nil, nil, pkg.ExecutableIdentity{}, fmt.Errorf("accepted package action coverage is incomplete")
 	}
@@ -327,6 +410,11 @@ func validatePackageOnlyAuthority(accepted installplan.AcceptedPlan, manager pkg
 		authority, ok := authorities[toolID]
 		_, hasAction := seen[toolID]
 		_, hasRecipe := recipes[toolID]
+		_, mayDefer := deferred[toolID]
+		if ok && mayDefer && authority.Intent == "deferred" && authority.RecipeDigest == "" && !hasAction && !hasRecipe &&
+			(authority.Presence == health.PresenceMissing || authority.Presence == health.PresencePartial) {
+			continue
+		}
 		switch authority.Presence {
 		case health.PresencePresent:
 			if !ok || authority.Intent != "none" || authority.RecipeDigest != "" || hasAction || hasRecipe {
