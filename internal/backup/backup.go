@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
@@ -294,7 +295,24 @@ func (r RestoreResult) Count() int { return len(r.Restored) }
 // any restore (e.g. unreadable backup dir / unknown home). Per-file failures
 // are recorded in Skipped and do not abort the whole restore.
 func Restore(backupDir, home string) (RestoreResult, error) {
-	return restoreWithOperations(backupDir, home, defaultRestoreOperations())
+	result, err := restoreWithOperations(backupDir, home, defaultRestoreOperations())
+	outcome := operation.TraceSucceeded
+	switch {
+	case err != nil:
+		outcome = operation.TraceFailed
+	case len(result.Skipped) != 0 || len(result.Warnings) != 0:
+		outcome = operation.TracePartial
+	}
+	failed := 0
+	if err != nil {
+		failed = 1
+	}
+	operation.Trace(operation.TraceRestore, outcome, operation.TraceCounts{
+		Attempted: result.Count() + len(result.Removed) + len(result.Skipped),
+		Succeeded: result.Count() + len(result.Removed),
+		Failed:    failed, Skipped: len(result.Skipped), Warnings: len(result.Warnings),
+	})
+	return result, err
 }
 
 // RestoreExpected restores only targets whose live state still exactly matches

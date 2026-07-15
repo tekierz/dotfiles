@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
@@ -56,6 +57,7 @@ func (a *App) handleUpdateStartMsg(msg updateStartMsg) tea.Cmd {
 	a.clearInstallLogs()
 	a.updateRunning = true
 	a.installLogAutoScroll = true // Follow output live while the update runs.
+	operation.Trace(operation.TraceUpdate, operation.TraceRunning, operation.TraceCounts{Attempted: len(msg.packages)})
 	if msg.all {
 		return a.streamingUpdateAllCmd()
 	}
@@ -96,6 +98,7 @@ func (a *App) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
 	a.updateRunning = false
 	a.installLogAutoScroll = false // Allow user to scroll through logs.
 	if err != nil {
+		operation.Trace(operation.TraceUpdate, operation.TraceFailed, operation.TraceCounts{Attempted: len(results), Failed: 1})
 		a.updateStatus = fmt.Sprintf("Update failed: %v", err)
 		return nil
 	}
@@ -108,6 +111,16 @@ func (a *App) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
 			failures++
 		}
 	}
+	outcome := operation.TraceSucceeded
+	if failures != 0 {
+		outcome = operation.TracePartial
+		if successes == 0 {
+			outcome = operation.TraceFailed
+		}
+	}
+	operation.Trace(operation.TraceUpdate, outcome, operation.TraceCounts{
+		Attempted: len(results), Succeeded: successes, Failed: failures,
+	})
 	switch {
 	case failures > 0:
 		a.updateStatus = fmt.Sprintf("Updated %d, failed %d", successes, failures)

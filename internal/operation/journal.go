@@ -333,7 +333,34 @@ func (j Journal) Write(record Record) (returnErr error) {
 	if _, err := safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(j.root, recordRel, revision, parents, data, 0o600); err != nil {
 		return fmt.Errorf("write operation record: %w", err)
 	}
+	traceJournalRecord(record)
 	return nil
+}
+
+func traceJournalRecord(record Record) {
+	counts := TraceCounts{Attempted: len(record.Actions), Warnings: len(record.Warnings)}
+	for _, action := range record.Actions {
+		switch action.Status {
+		case ActionSucceeded:
+			counts.Succeeded++
+		case ActionFailed:
+			counts.Failed++
+		case ActionSkipped:
+			counts.Skipped++
+		case ActionPending:
+		}
+	}
+	outcome := TraceRunning
+	switch record.Status {
+	case StatusSucceeded:
+		outcome = TraceSucceeded
+	case StatusFailed:
+		outcome = TraceFailed
+	case StatusCancelled:
+		outcome = TraceCancelled
+	case StatusRunning:
+	}
+	Trace(TraceInstall, outcome, counts)
 }
 
 func (j Journal) Read(operationID string) (Record, error) {
