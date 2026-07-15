@@ -263,6 +263,7 @@ func build(request Request, dependencies Dependencies, phased bool) (Result, err
 	}
 
 	phase := classifyNPMExecutionPhase(validatedRecipes)
+	phaseOneRemaining := planpublic.Intent{}
 	if phase == npmExecutionPhaseMixed {
 		if !phased {
 			return Result{}, errors.Join(ErrInvalidRequest, ErrNPMPhaseBoundaryRequired)
@@ -271,9 +272,43 @@ func build(request Request, dependencies Dependencies, phased bool) (Result, err
 		if remainingErr != nil {
 			return Result{}, errors.Join(ErrInvalidRequest, ErrNPMPhaseBoundaryRequired)
 		}
-		return blockedPhaseResult(intent, request.Snapshot, "phase_boundary", planpublic.PhaseSpec{
-			Kind: "prerequisite", Index: 1, Authority: "package_manager", RemainingIntent: remaining, Next: "replan_required",
-		})
+		// Materialize only the prerequisite authority. Pure npm recipes cannot
+		// share this manager phase; callers must request them in a fresh phase.
+		for id, recipe := range validatedRecipes {
+			if !recipeHasNPM(recipe) {
+				continue
+			}
+			prerequisite, ok := npmPrerequisitePhaseRecipe(recipe)
+			if !ok {
+				// A pure npm member remains bound to the original intent but is
+				// deliberately absent from this phase's executable authority.
+				delete(validatedRecipes, id)
+				delete(detectorObservations, id)
+				delete(publicInstalls, id)
+				authority := toolAuthorities[id]
+				authority.Intent, authority.RecipeDigest = "deferred", ""
+				toolAuthorities[id] = authority
+				continue
+			}
+			digest, digestErr := operation.InstallRecipeDigest(prerequisite)
+			observation, observed := request.Snapshot.Tool(id)
+			detected, known := ObservedInstallDetector(observation, prerequisite.Detector)
+			publicInstall, publicErr := projectInstallRecipe(prerequisite, digest)
+			if digestErr != nil || !observed || !known || publicErr != nil {
+				return Result{}, ErrInvalidRequest
+			}
+			validatedRecipes[id] = operation.CloneInstallRecipe(prerequisite)
+			detectorObservations[id] = detected
+			publicInstalls[id] = publicInstall
+			authority := toolAuthorities[id]
+			authority.RecipeDigest = digest
+			toolAuthorities[id] = authority
+		}
+		phase = classifyNPMExecutionPhase(validatedRecipes)
+		if phase != npmExecutionPhaseNone {
+			return Result{}, errors.Join(ErrInvalidRequest, ErrNPMPhaseBoundaryRequired)
+		}
+		phaseOneRemaining = remaining
 	}
 	managerIdentity := pkg.ExecutableIdentity{}
 	npmIdentity := pkg.NPMExecutionIdentity{}
@@ -308,6 +343,11 @@ func build(request Request, dependencies Dependencies, phased bool) (Result, err
 			publicActions = append(publicActions, publicDecisionAction(id, "skip", "present", publicObservation(observation, true)))
 			continue
 		}
+		if authority.Intent == "deferred" {
+			observation, _ := request.Snapshot.Tool(id)
+			publicActions = append(publicActions, publicDecisionAction(id, "skip", "phase_boundary", publicObservation(observation, true)))
+			continue
+		}
 		recipe := operation.CloneInstallRecipe(validatedRecipes[id])
 		detected := detectorObservations[id]
 		privateActions = append(privateActions, operation.Action{
@@ -323,7 +363,12 @@ func build(request Request, dependencies Dependencies, phased bool) (Result, err
 		})
 	}
 	var document operation.Plan
-	if phased && phase == npmExecutionPhasePure {
+	if phased && len(phaseOneRemaining.Tools) != 0 {
+		document, err = operation.NewInstallPhasePlan(now, privateActions, operation.InstallPhaseSpec{
+			Kind: operation.InstallPhasePrerequisite, Index: 1, RequestedTools: intent.Tools,
+			RemainingTools: phaseOneRemaining.Tools, Authority: operation.InstallAuthorityManager,
+		})
+	} else if phased && phase == npmExecutionPhasePure {
 		document, err = operation.NewInstallPhasePlan(now, privateActions, operation.InstallPhaseSpec{
 			Kind: operation.InstallPhaseNPM, Index: 2, RequestedTools: intent.Tools,
 			RemainingTools: []string{}, Authority: operation.InstallAuthorityNPM,
@@ -352,7 +397,12 @@ func build(request Request, dependencies Dependencies, phased bool) (Result, err
 		Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(planpublic.StatusReady),
 		Summary: planpublic.Summary{Apply: len(privateActions), Skip: len(intent.Tools) - len(privateActions)}, Actions: publicActions,
 	}
-	if phased && phase == npmExecutionPhasePure {
+	if phased && len(phaseOneRemaining.Tools) != 0 {
+		publicSpec.Phase = &planpublic.PhaseSpec{
+			Kind: "prerequisite", Index: 1, Authority: "package_manager",
+			RemainingIntent: cloneIntent(phaseOneRemaining), Next: "replan_required",
+		}
+	} else if phased && phase == npmExecutionPhasePure {
 		publicSpec.Phase = &planpublic.PhaseSpec{
 			Kind: "npm", Index: 2, Authority: "npm",
 			RemainingIntent: planpublic.Intent{Source: "explicit_tools", Tools: []string{}}, Next: "complete",
@@ -470,29 +520,9 @@ func classifyNPMExecutionPhase(recipes map[string]operation.InstallRecipe) npmEx
 }
 
 func selectFreshNPMPhaseRecipe(observation health.InstallationObservation, recipe operation.InstallRecipe) operation.InstallRecipe {
-	hasNPM, prerequisitePackages := false, []string{}
-	for _, step := range recipe.Steps {
-		switch step.Kind {
-		case operation.InstallStepNPMGlobal:
-			hasNPM = true
-		case operation.InstallStepPackageManager:
-			prerequisitePackages = append(prerequisitePackages, step.Packages...)
-		case operation.InstallStepHomebrewCask:
-			return recipe
-		}
-	}
-	if !hasNPM || len(prerequisitePackages) == 0 {
+	prerequisite, ok := npmPrerequisitePhaseRecipe(recipe)
+	if !ok {
 		return recipe
-	}
-	prerequisite := operation.CloneInstallRecipe(recipe)
-	prerequisite.Authentication = ""
-	prerequisite.Risk = "installs packages from the configured system package manager"
-	prerequisite.Detector = operation.InstallDetector{Kind: operation.InstallDetectorPackageReceipt, Values: slices.Clone(prerequisitePackages)}
-	prerequisite.Steps = prerequisite.Steps[:0]
-	for _, step := range recipe.Steps {
-		if step.Kind == operation.InstallStepPackageManager {
-			prerequisite.Steps = append(prerequisite.Steps, step)
-		}
 	}
 	detected, known := ObservedInstallDetector(observation, prerequisite.Detector)
 	if !known || !detected {
@@ -506,6 +536,44 @@ func selectFreshNPMPhaseRecipe(observation health.InstallationObservation, recip
 		}
 	}
 	return npm
+}
+
+func recipeHasNPM(recipe operation.InstallRecipe) bool {
+	for _, step := range recipe.Steps {
+		if step.Kind == operation.InstallStepNPMGlobal {
+			return true
+		}
+	}
+	return false
+}
+
+func npmPrerequisitePhaseRecipe(recipe operation.InstallRecipe) (operation.InstallRecipe, bool) {
+	prerequisitePackages := []string{}
+	hasNPM := false
+	for _, step := range recipe.Steps {
+		switch step.Kind {
+		case operation.InstallStepNPMGlobal:
+			hasNPM = true
+		case operation.InstallStepPackageManager:
+			prerequisitePackages = append(prerequisitePackages, step.Packages...)
+		case operation.InstallStepHomebrewCask:
+			return operation.InstallRecipe{}, false
+		}
+	}
+	if !hasNPM || len(prerequisitePackages) == 0 {
+		return operation.InstallRecipe{}, false
+	}
+	prerequisite := operation.CloneInstallRecipe(recipe)
+	prerequisite.Authentication = ""
+	prerequisite.Risk = "installs packages from the configured system package manager"
+	prerequisite.Detector = operation.InstallDetector{Kind: operation.InstallDetectorPackageReceipt, Values: slices.Clone(prerequisitePackages)}
+	prerequisite.Steps = prerequisite.Steps[:0]
+	for _, step := range recipe.Steps {
+		if step.Kind == operation.InstallStepPackageManager {
+			prerequisite.Steps = append(prerequisite.Steps, step)
+		}
+	}
+	return prerequisite, true
 }
 
 func recipesRequireManagerIdentity(recipes map[string]operation.InstallRecipe) bool {
