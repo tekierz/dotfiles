@@ -441,25 +441,38 @@ assert_rejection_matrix() {
 
 assert_rg0_roadmap_truth() {
   local todo="$repo_root/tasks/todo.md" ledger="$repo_root/tasks/slice-commit-ledger.tsv"
-  local ledger_truth problem=''
+  local ledger_truth g3e_rows active_projection_blob problem=''
+  local expected_ledger_truth=$'normal-v1\tg1c-guardrail-adoption\t-\nnormal-v1\trg0-roadmap-reconciliation\t-\nnormal-v1\tg3a-plan-catalog-resplit\t-\nnormal-v1\tg3c-restore-leaf-resplit\t-\nnormal-v1\tg3d-todo-policy-sync\t-\nnormal-v1\tg3e-plan-accounting-mode-replan-v4\t-'
+  local g3e_row=$'normal-v1\tg3e-plan-accounting-mode-replan-v4\tcdd8b2f63379fd594374955b4719b5a3f5c109c8\tcf8e373ac49a2bf02f4bd2e1049f043730e9dc17\t29656e2902f55c89240af0ff7f0f945280b869c1\ta9354e7987fe9fdbe29f0263355599a18cede950\ta05c7aa264cf8034f364d3273e77aa0f602ec34b7ab3405b0a9a8b036e1e591f\t-'
 
   test_count=$((test_count + 1))
-  ledger_truth="$(awk -F '\t' '$2 ~ /^(g1c-guardrail-adoption|g3a-plan-catalog-resplit|g3c-restore-leaf-resplit)$/ {rows++; if ($1 == "normal-v1" && $8 == "-") valid++} END {print rows + 0 ":" valid + 0}' "$ledger")"
-  [[ "$ledger_truth" == "3:3" ]] || problem="committed governance ledger truth is $ledger_truth"
+  ledger_truth="$(awk -F '\t' '$2 ~ /^(g1c-guardrail-adoption|rg0-roadmap-reconciliation|g3a-plan-catalog-resplit|g3c-restore-leaf-resplit|g3d-todo-policy-sync|g3e-plan-accounting-mode-replan-v4)$/ { print $1 "\t" $2 "\t" $8 }' "$ledger")"
+  [[ "$ledger_truth" == "$expected_ledger_truth" ]] || problem="committed governance ledger tuple projection differs"
+  active_projection_blob="$(awk '/^## Implementation and release plan reset — 2026-07-13$/ { exit } { print }' "$todo" | git hash-object --stdin)"
+  [[ "$active_projection_blob" == "fcb43832f97ae9a5660a660b66d3e022ed21aa95" ]] || problem="${problem:+$problem; }active todo projection blob differs"
+  g3e_rows="$(awk -v wanted="$g3e_row" '$0 == wanted { rows++ } END { print rows + 0 }' "$ledger")"
+  [[ "$g3e_rows" == "1" ]] || problem="${problem:+$problem; }exact G3E ledger row count is $g3e_rows"
   grep -Eq 'G3A.*0182fe7' "$todo" || problem="${problem:+$problem; }closed G3A is missing"
   grep -Fq -- '- The stopped G3B control attempt has no ledger row, candidate digest, or execution authority.' "$todo" || problem="${problem:+$problem; }stopped G3B truth is missing"
   grep -Eq 'G3C.*b74c799' "$todo" || problem="${problem:+$problem; }closed G3C is missing"
-  [[ "$(grep -Fxc -- "- [ ] Complete G3D's todo-only control projection through its normal-v1 ledger row and committed scope state." "$todo")" == "1" ]] || problem="${problem:+$problem; }conditional G3D milestone is missing or duplicated"
-  [[ "$(grep -Fc -- 'RG0 remains open until G3D reaches committed through its normal-v1 ledger row; earlier G3D states do not satisfy the gate.' "$todo")" == "1" ]] || problem="${problem:+$problem; }conditional RG0 rule is missing or duplicated"
-  [[ "$(grep -Ec '^- \[( |x)\] Complete G2 authorized worktrees, draft PR, and remote CI baseline\.$' "$todo")" == "1" ]] || problem="${problem:+$problem; }G2 milestone is missing or duplicated"
-  grep -Eq 'RG0[^.]*(is complete|is closed)' "$todo" && problem="${problem:+$problem; }premature RG0 closure remains"
+  [[ "$(grep -Fxc -- "- [x] Close G3D's todo-only control projection at \`ed921d1\` through its normal-v1 ledger row and committed scope state." "$todo")" == "1" ]] || problem="${problem:+$problem; }closed G3D milestone is missing or duplicated"
+  [[ "$(grep -Fxc -- "- [x] Close G3E's plan accounting and mode replan at \`46735ed\` through the \`g3e-plan-accounting-mode-replan-v4\` normal-v1 ledger row." "$todo")" == "1" ]] || problem="${problem:+$problem; }closed G3E milestone is missing or duplicated"
+  grep -Fq -- 'The fixed catalog contains 49 slices including 23 safety slices; 44 catalog slices remain' "$todo" || problem="${problem:+$problem; }fixed/live accounting is missing"
+  grep -Fq -- 'None is integrated through G2.' "$todo" || problem="${problem:+$problem; }branch-local nonintegration is missing"
+  grep -Fq -- "Remaining runner serialization: \`RK1ULK -> RK1ULA -> RK1P -> RS1\`." "$todo" || problem="${problem:+$problem; }remaining runner serialization is missing"
+  grep -Fq -- "Remaining restore fork/join: \`BA1SF2D -> (BA1SF2M + BA1B2) -> BA1C\`." "$todo" || problem="${problem:+$problem; }remaining restore fork/join is missing"
+  grep -Fq -- 'RG0 is closed through the prior normal-v1 RG0 roadmap reconciliation plus the G1C, G3A,' "$todo" || problem="${problem:+$problem; }closed RG0 rule is missing prior roadmap authority"
+  [[ "$(grep -Fxc -- '- [ ] Complete G2 authorized worktrees, draft PR, and remote CI baseline.' "$todo")" == "1" ]] || problem="${problem:+$problem; }literal unchecked G2 milestone is missing or duplicated"
+  grep -Eq '^- \[x\] Complete G2 authorized worktrees, draft PR, and remote CI baseline[.]$' "$todo" && problem="${problem:+$problem; }G2 is falsely marked complete"
+  grep -Fq -- 'earlier G3D states do not satisfy the gate' "$todo" && problem="${problem:+$problem; }stale conditional RG0 state remains"
+  grep -Eq '45 (catalog )?slices remain incomplete|19 safety slices remain|43 (catalog )?slices remain incomplete|17 safety slices remain|BA1SF2F -> BA1SF2D -> BA1B2 -> BA1C' "$todo" && problem="${problem:+$problem; }stale accounting or restore state remains"
   grep -Fq -- 'Open parallel Wave 1A' "$todo" && problem="${problem:+$problem; }obsolete Wave 1A wording remains"
   if [[ -n "$problem" ]]; then
-    printf 'not ok %d - RG0 roadmap matches committed G3C and conditional G3D evidence\n  %s\n' "$test_count" "$problem"
+    printf 'not ok %d - RG0 roadmap matches closed G3D/G3E and live plan evidence\n  %s\n' "$test_count" "$problem"
     failures=$((failures + 1))
     return
   fi
-  printf 'ok %d - RG0 roadmap matches committed G3C and conditional G3D evidence\n' "$test_count"
+  printf 'ok %d - RG0 roadmap matches closed G3D/G3E and live plan evidence\n' "$test_count"
 }
 
 assert_normal_closure_successor() {
