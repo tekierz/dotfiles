@@ -1994,18 +1994,6 @@ func (a *App) listenUpdateStreamCmd() tea.Cmd {
 // teardownStream()'s a.streamCancel() call is sufficient (same contract as
 // streamingInstallToolCmd). The returned Cmd listens for the first event.
 func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
-	mgr := pkg.DetectManager()
-	if mgr == nil {
-		return func() tea.Msg {
-			return updateStreamMsg{done: true, err: fmt.Errorf("no package manager detected")}
-		}
-	}
-
-	var pkgNames []string
-	for _, p := range packages {
-		pkgNames = append(pkgNames, p.Name)
-	}
-
 	// Cancelable context stored on App so navigate-away / Ctrl+C / teardownStream()
 	// cancels it, which (via exec.CommandContext inside RunStreaming) stops the
 	// subprocess and unblocks the worker's bounded-channel sends instead of leaking
@@ -2020,77 +2008,83 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 
 	go func() {
 		defer close(stream)
-
-		// Build the streaming command off the UI goroutine: UpdateStreaming may run
-		// blocking pre-work (apt index refresh) that must not stall the event loop.
-		cmd, err := mgr.UpdateStreaming(ctx, pkgNames...)
-		if err != nil {
-			select {
-			case stream <- updateStreamMsg{done: true, err: err}:
-			case <-ctx.Done():
+		results := make([]pkg.UpdateResult, len(packages))
+		var runErrs []error
+		for _, group := range groupUpdatesByProvider(packages) {
+			manager := pkg.ManagerForExecutionProvider(group.provider)
+			if manager == nil {
+				err := fmt.Errorf("update provider %q is unavailable or ambiguous", group.provider)
+				runErrs = append(runErrs, err)
+				for index, update := range group.packages {
+					results[group.indices[index]] = pkg.UpdateResult{Package: update, Error: err}
+				}
+				continue
 			}
-			return
-		}
-		if cmd == nil {
-			// Nothing to upgrade (no-op): clean completion.
-			select {
-			case stream <- updateStreamMsg{done: true}:
-			case <-ctx.Done():
+
+			names := make([]string, 0, len(group.packages))
+			for _, update := range group.packages {
+				names = append(names, update.Name)
 			}
-			return
-		}
-
-		for line := range cmd.Output {
-			select {
-			case stream <- updateStreamMsg{line: line}:
-			case <-ctx.Done():
-				return
+			cmd, err := manager.UpdateStreaming(ctx, names...)
+			if err == nil && cmd != nil {
+				for line := range cmd.Output {
+					select {
+					case stream <- updateStreamMsg{line: line}:
+					case <-ctx.Done():
+						return
+					}
+				}
+				err = cmd.Wait()
 			}
-		}
-		err = cmd.Wait()
 
-		// A batch `brew/apt/pacman upgrade a b c` that exits non-zero has NOT
-		// necessarily failed every package: the manager upgrades the packages it
-		// can and fails the rest. Marking the whole batch failed (Success = err==nil
-		// for every package) mis-reported the ones that actually upgraded AND made
-		// finishUpdate short-circuit to a blanket "Update failed". So on a batch
-		// error (when not cancelled) re-check which of our packages are STILL
-		// outdated: a package no longer outdated did upgrade.
-		var stillOutdated map[string]bool
-		recheckOK := false
-		if err != nil && ctx.Err() == nil {
-			stillOutdated, recheckOK = recheckOutdatedNames(mgr, packages)
-		}
-
-		results := make([]pkg.UpdateResult, 0, len(packages))
-		for _, p := range packages {
-			switch {
-			case err == nil:
-				results = append(results, pkg.UpdateResult{Package: p, Success: true})
-			case recheckOK && !stillOutdated[p.Name]:
-				results = append(results, pkg.UpdateResult{Package: p, Success: true})
-			default:
-				results = append(results, pkg.UpdateResult{Package: p, Success: false, Error: err})
+			var stillOutdated map[string]bool
+			recheckOK := false
+			if err != nil && ctx.Err() == nil {
+				stillOutdated, recheckOK = recheckOutdatedNames(manager, group.packages)
 			}
-		}
-
-		// When per-package results are authoritative (the recheck succeeded), drop
-		// the top-level error so finishUpdate counts the results ("Updated N,
-		// failed M") instead of short-circuiting on a batch error. If the recheck
-		// failed we could not verify, so keep the conservative all-failed report
-		// with the original error.
-		doneErr := err
-		if err != nil && recheckOK {
-			doneErr = nil
+			if err != nil && !recheckOK {
+				runErrs = append(runErrs, fmt.Errorf("%s update: %w", group.provider, err))
+			}
+			for index, update := range group.packages {
+				success := err == nil || (recheckOK && !stillOutdated[update.Name])
+				result := pkg.UpdateResult{Package: update, Success: success}
+				if !success {
+					result.Error = err
+				}
+				results[group.indices[index]] = result
+			}
 		}
 
 		select {
-		case stream <- updateStreamMsg{done: true, results: results, err: doneErr}:
+		case stream <- updateStreamMsg{done: true, results: results, err: errors.Join(runErrs...)}:
 		case <-ctx.Done():
 		}
 	}()
 
 	return a.listenUpdateStreamCmd()
+}
+
+type providerUpdateGroup struct {
+	provider pkg.ExecutionProvider
+	packages []pkg.Package
+	indices  []int
+}
+
+func groupUpdatesByProvider(packages []pkg.Package) []providerUpdateGroup {
+	groups := make([]providerUpdateGroup, 0)
+	indices := make(map[pkg.ExecutionProvider]int)
+	for packageIndex, update := range packages {
+		provider := update.ExecutionProvider()
+		index, ok := indices[provider]
+		if !ok {
+			index = len(groups)
+			indices[provider] = index
+			groups = append(groups, providerUpdateGroup{provider: provider})
+		}
+		groups[index].packages = append(groups[index].packages, update)
+		groups[index].indices = append(groups[index].indices, packageIndex)
+	}
+	return groups
 }
 
 // reliableOutdated returns the outdated set to use as a post-upgrade failure

@@ -586,13 +586,25 @@ func (a *App) Init() tea.Cmd {
 // checkSudoAndUpdateCmd checks if sudo is needed and either prompts or starts update
 func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
 	return func() tea.Msg {
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return updateRunDoneMsg{err: fmt.Errorf("no package manager detected")}
+		needsSudo := false
+		seen := make(map[pkg.ExecutionProvider]bool)
+		for _, update := range packages {
+			provider := update.ExecutionProvider()
+			if provider == "" {
+				return updateRunDoneMsg{err: fmt.Errorf("package %q has no accepted update provider", update.Name)}
+			}
+			if seen[provider] {
+				continue
+			}
+			seen[provider] = true
+			manager := pkg.ManagerForExecutionProvider(provider)
+			if manager == nil {
+				return updateRunDoneMsg{err: fmt.Errorf("update provider %q is unavailable or ambiguous", provider)}
+			}
+			needsSudo = needsSudo || manager.NeedsSudo()
 		}
 
-		// Check if sudo is needed and not cached
-		if mgr.NeedsSudo() && !runner.CheckSudoCached() {
+		if needsSudo && !runner.CheckSudoCached() {
 			return updateSudoRequiredMsg{packages: packages, all: all}
 		}
 
