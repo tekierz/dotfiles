@@ -99,6 +99,12 @@ func (plan AcceptedPlan) Intent() planpublic.Intent {
 	return cloneIntent(plan.intent)
 }
 
+// InstallPhase exposes immutable phased-install metadata. Existing non-npm
+// accepted plans have no phase and retain their prior execution contract.
+func (plan AcceptedPlan) InstallPhase() (operation.InstallPhase, bool) {
+	return plan.document.InstallPhase()
+}
+
 func (plan AcceptedPlan) ToolAuthority(id string) (ToolAuthority, bool) {
 	authority, ok := plan.tools[id]
 	return authority, ok
@@ -132,6 +138,16 @@ func (result Result) Accepted() (AcceptedPlan, bool) {
 }
 
 func Build(request Request, dependencies Dependencies) (Result, error) {
+	return build(request, dependencies, false)
+}
+
+// BuildPhased enables the product-facing v2 phase projection. Build remains
+// the compatibility boundary for existing non-coordinated callers.
+func BuildPhased(request Request, dependencies Dependencies) (Result, error) {
+	return build(request, dependencies, true)
+}
+
+func build(request Request, dependencies Dependencies, phased bool) (Result, error) {
 	intent, intentRequired, err := validateIntent(request.Intent)
 	if err != nil {
 		return Result{}, err
@@ -221,6 +237,13 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 		if err != nil || recipe.ToolID != id || recipe.Platform != string(request.Environment.Platform) || recipe.Manager != request.Environment.Manager || digest != observation.InstallRecipeDigest() {
 			return blockedResult(intent, request.Snapshot, "recipe_drift")
 		}
+		if phased {
+			recipe = selectFreshNPMPhaseRecipe(observation, recipe)
+			digest, err = operation.InstallRecipeDigest(recipe)
+			if err != nil {
+				return Result{}, ErrInvalidRequest
+			}
+		}
 		detected, known := ObservedInstallDetector(observation, recipe.Detector)
 		if !known {
 			return blockedResult(intent, request.Snapshot, "unknown")
@@ -241,7 +264,16 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 
 	phase := classifyNPMExecutionPhase(validatedRecipes)
 	if phase == npmExecutionPhaseMixed {
-		return Result{}, errors.Join(ErrInvalidRequest, ErrNPMPhaseBoundaryRequired)
+		if !phased {
+			return Result{}, errors.Join(ErrInvalidRequest, ErrNPMPhaseBoundaryRequired)
+		}
+		remaining, remainingErr := npmRemainingIntent(intent, validatedRecipes)
+		if remainingErr != nil {
+			return Result{}, errors.Join(ErrInvalidRequest, ErrNPMPhaseBoundaryRequired)
+		}
+		return blockedPhaseResult(intent, request.Snapshot, "phase_boundary", planpublic.PhaseSpec{
+			Kind: "prerequisite", Index: 1, Authority: "package_manager", RemainingIntent: remaining, Next: "replan_required",
+		})
 	}
 	managerIdentity := pkg.ExecutableIdentity{}
 	npmIdentity := pkg.NPMExecutionIdentity{}
@@ -290,7 +322,15 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 			Observation: publicObservationForTool(request.Snapshot, id), Install: clonePublicInstall(publicInstalls[id]),
 		})
 	}
-	document, err := operation.NewPlan(now, privateActions)
+	var document operation.Plan
+	if phased && phase == npmExecutionPhasePure {
+		document, err = operation.NewInstallPhasePlan(now, privateActions, operation.InstallPhaseSpec{
+			Kind: operation.InstallPhaseNPM, Index: 2, RequestedTools: intent.Tools,
+			RemainingTools: []string{}, Authority: operation.InstallAuthorityNPM,
+		})
+	} else {
+		document, err = operation.NewPlan(now, privateActions)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -307,11 +347,18 @@ func Build(request Request, dependencies Dependencies) (Result, error) {
 	if err != nil {
 		return Result{}, ErrInvalidRequest
 	}
-	publicDocument, err := planpublic.NewDocument(planpublic.DocumentSpec{
+	publicSpec := planpublic.DocumentSpec{
 		Status: planpublic.StatusReady, PlanHash: accepted.hash, Platform: request.Snapshot.Platform(), Manager: request.Snapshot.Manager(), Intent: intent,
 		Snapshot: publicSnapshot(request.Snapshot, intent.Tools), Capabilities: plannedCapabilities(planpublic.StatusReady),
 		Summary: planpublic.Summary{Apply: len(privateActions), Skip: len(intent.Tools) - len(privateActions)}, Actions: publicActions,
-	})
+	}
+	if phased && phase == npmExecutionPhasePure {
+		publicSpec.Phase = &planpublic.PhaseSpec{
+			Kind: "npm", Index: 2, Authority: "npm",
+			RemainingIntent: planpublic.Intent{Source: "explicit_tools", Tools: []string{}}, Next: "complete",
+		}
+	}
+	publicDocument, err := planpublic.NewDocument(publicSpec)
 	if err != nil {
 		return Result{}, err
 	}
@@ -422,6 +469,45 @@ func classifyNPMExecutionPhase(recipes map[string]operation.InstallRecipe) npmEx
 	return npmExecutionPhaseNone
 }
 
+func selectFreshNPMPhaseRecipe(observation health.InstallationObservation, recipe operation.InstallRecipe) operation.InstallRecipe {
+	hasNPM, prerequisitePackages := false, []string{}
+	for _, step := range recipe.Steps {
+		switch step.Kind {
+		case operation.InstallStepNPMGlobal:
+			hasNPM = true
+		case operation.InstallStepPackageManager:
+			prerequisitePackages = append(prerequisitePackages, step.Packages...)
+		case operation.InstallStepHomebrewCask:
+			return recipe
+		}
+	}
+	if !hasNPM || len(prerequisitePackages) == 0 {
+		return recipe
+	}
+	prerequisite := operation.CloneInstallRecipe(recipe)
+	prerequisite.Authentication = ""
+	prerequisite.Risk = "installs packages from the configured system package manager"
+	prerequisite.Detector = operation.InstallDetector{Kind: operation.InstallDetectorPackageReceipt, Values: slices.Clone(prerequisitePackages)}
+	prerequisite.Steps = prerequisite.Steps[:0]
+	for _, step := range recipe.Steps {
+		if step.Kind == operation.InstallStepPackageManager {
+			prerequisite.Steps = append(prerequisite.Steps, step)
+		}
+	}
+	detected, known := ObservedInstallDetector(observation, prerequisite.Detector)
+	if !known || !detected {
+		return recipe
+	}
+	npm := operation.CloneInstallRecipe(recipe)
+	npm.Steps = npm.Steps[:0]
+	for _, step := range recipe.Steps {
+		if step.Kind == operation.InstallStepNPMGlobal {
+			npm.Steps = append(npm.Steps, step)
+		}
+	}
+	return npm
+}
+
 func recipesRequireManagerIdentity(recipes map[string]operation.InstallRecipe) bool {
 	for _, recipe := range recipes {
 		for _, step := range recipe.Steps {
@@ -439,6 +525,14 @@ func validAcceptedAuthorityDigest(value string) bool {
 }
 
 func blockedResult(intent planpublic.Intent, snapshot health.InstallationSnapshot, code string) (Result, error) {
+	return blockedResultWithPhase(intent, snapshot, code, nil)
+}
+
+func blockedPhaseResult(intent planpublic.Intent, snapshot health.InstallationSnapshot, code string, phase planpublic.PhaseSpec) (Result, error) {
+	return blockedResultWithPhase(intent, snapshot, code, &phase)
+}
+
+func blockedResultWithPhase(intent planpublic.Intent, snapshot health.InstallationSnapshot, code string, phase *planpublic.PhaseSpec) (Result, error) {
 	actions := make([]planpublic.ActionSpec, len(intent.Tools))
 	for index, id := range intent.Tools {
 		actions[index] = publicDecisionAction(id, "blocked", code, publicObservationForTool(snapshot, id))
@@ -446,7 +540,7 @@ func blockedResult(intent planpublic.Intent, snapshot health.InstallationSnapsho
 	document, err := planpublic.NewDocument(planpublic.DocumentSpec{
 		Status: planpublic.StatusBlocked, Platform: snapshot.Platform(), Manager: snapshot.Manager(), Intent: cloneIntent(intent),
 		Snapshot: publicSnapshot(snapshot, intent.Tools), Capabilities: plannedCapabilities(planpublic.StatusBlocked),
-		Summary: planpublic.Summary{Blocked: len(actions)}, Actions: actions,
+		Summary: planpublic.Summary{Blocked: len(actions)}, Actions: actions, Phase: phase,
 	})
 	if err != nil {
 		return Result{}, ErrInvalidRequest
@@ -458,12 +552,33 @@ func publicDecisionAction(id, disposition, code string, observation *planpublic.
 	reasons := map[string]string{
 		"present": "already present", "unsupported": "installation unsupported", "unknown": "installation status unknown",
 		"stale": "installation evidence stale", "environment_mismatch": "installation environment changed", "recipe_drift": "installation recipe changed",
+		"phase_boundary": "installation requires a fresh phase coordinator",
 	}
 	return planpublic.ActionSpec{
 		ActionID: "install:" + id, Kind: "install_tool", ToolID: id, Description: "install " + id,
 		Disposition: disposition, ReasonCode: code, Reason: reasons[code], Ownership: "package_manager", Reversibility: "external",
 		Observation: observation,
 	}
+}
+
+func npmRemainingIntent(intent planpublic.Intent, recipes map[string]operation.InstallRecipe) (planpublic.Intent, error) {
+	remaining := make([]string, 0, len(recipes))
+	for _, id := range intent.Tools {
+		recipe, ok := recipes[id]
+		if !ok {
+			continue
+		}
+		for _, step := range recipe.Steps {
+			if step.Kind == operation.InstallStepNPMGlobal {
+				remaining = append(remaining, id)
+				break
+			}
+		}
+	}
+	if len(remaining) == 0 {
+		return planpublic.Intent{}, ErrInvalidRequest
+	}
+	return planpublic.NormalizeExplicitTools(remaining, intent.Tools)
 }
 
 func publicObservationForTool(snapshot health.InstallationSnapshot, id string) *planpublic.ObservationSpec {

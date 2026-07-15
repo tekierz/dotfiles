@@ -3,6 +3,7 @@ package installplan
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"reflect"
 	"slices"
 	"sort"
@@ -26,6 +27,7 @@ type FreshDependencies struct {
 	DescribeInstall  func(tools.Tool, tools.InstallEnvironment) (operation.InstallRecipe, error)
 	CaptureStatePlan func() (*operation.StatePlan, error)
 	Now              func() time.Time
+	ObserveNPM       func() (pkg.NPMExecutionIdentity, error)
 }
 
 type FreshSession struct {
@@ -110,14 +112,40 @@ func PlanFresh(ctx context.Context, rawTools []string, dependencies FreshDepende
 		snapshot.Platform() != string(platform) || snapshot.Manager() != managerName || snapshot.Digest() == "" || !snapshotMatchesRegistry(snapshot, registryByID) {
 		return FreshSession{}, ErrFreshPlan
 	}
-	result, err := Build(Request{Intent: intent, Snapshot: snapshot, Environment: Environment{Platform: platform, Manager: managerName, ManagerIdentity: managerIdentity, ExpectedGeneration: generation}}, Dependencies{
+	environment := Environment{Platform: platform, Manager: managerName, ManagerIdentity: managerIdentity, ExpectedGeneration: generation}
+	buildDependencies := Dependencies{
 		LookupTool:      func(id string) (tools.Tool, bool) { tool, ok := registryByID[id]; return tool, ok },
 		DescribeInstall: dependencies.DescribeInstall, CaptureStatePlan: dependencies.CaptureStatePlan, Now: dependencies.Now,
-	})
+	}
+	result, err := BuildPhased(Request{Intent: intent, Snapshot: snapshot, Environment: environment}, buildDependencies)
+	if errors.Is(err, ErrNPMExecutionAuthorityUnavailable) {
+		observe := dependencies.ObserveNPM
+		if observe == nil {
+			observe = observeFreshNPMIdentity
+		}
+		identity, observeErr := observe()
+		if observeErr != nil {
+			return FreshSession{}, ErrFreshPlan
+		}
+		environment.NPMIdentity = identity
+		result, err = BuildPhased(Request{Intent: intent, Snapshot: snapshot, Environment: environment}, buildDependencies)
+	}
 	if err != nil {
 		return FreshSession{}, ErrFreshPlan
 	}
 	return FreshSession{result: result, manager: manager}, nil
+}
+
+func observeFreshNPMIdentity() (pkg.NPMExecutionIdentity, error) {
+	npmPath, err := exec.LookPath("npm")
+	if err != nil {
+		return pkg.NPMExecutionIdentity{}, err
+	}
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		return pkg.NPMExecutionIdentity{}, err
+	}
+	return pkg.ObserveNPMExecutionIdentity(npmPath, nodePath)
 }
 
 func explicitIntentEmpty(rawTools []string) bool {
