@@ -32,19 +32,23 @@ func LoadHotkeysConfig() (*HotkeysConfig, error) {
 	}
 	path := filepath.Join(dir, "hotkeys.json")
 
-	data, err := os.ReadFile(path)
-	if err != nil && os.IsNotExist(err) {
+	data, revision, err := readProductConfigJSON(path)
+	if err != nil {
+		return nil, err
+	}
+	if !revision.Exists() {
 		if legacy := legacyHotkeysPath(); legacy != "" && legacy != path {
-			if legacyData, legacyErr := os.ReadFile(legacy); legacyErr == nil {
-				data, err = legacyData, nil
+			legacyData, legacyRevision, legacyErr := readProductConfigJSON(legacy)
+			if legacyErr != nil {
+				return nil, legacyErr
+			}
+			if legacyRevision.Exists() {
+				data, revision = legacyData, legacyRevision
 			}
 		}
 	}
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &HotkeysConfig{Users: make(map[string]*UserHotkeys)}, nil
-		}
-		return nil, err
+	if !revision.Exists() {
+		return &HotkeysConfig{Users: make(map[string]*UserHotkeys)}, nil
 	}
 
 	var cfg HotkeysConfig

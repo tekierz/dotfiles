@@ -12,8 +12,9 @@ import (
 type ConfigValueScope string
 
 const (
-	ConfigValueNative  ConfigValueScope = "native"
-	ConfigValueManaged ConfigValueScope = "dotfiles-managed"
+	ConfigValueNative    ConfigValueScope = "native"
+	ConfigValueManaged   ConfigValueScope = "dotfiles-managed"
+	maxNativeConfigBytes                  = 1 << 20
 )
 
 // ConfigFieldProvenance explains exactly where one recognized current value
@@ -46,7 +47,7 @@ func readNativeConfig(path string) ([]byte, bool, error) {
 		}
 		return nil, false, fmt.Errorf("inspect config root for %s: %w", path, err)
 	}
-	content, revision, err := readToolConfig(root, rel)
+	content, revision, err := readToolConfigWithinLimit(root, rel, maxNativeConfigBytes)
 	if err != nil {
 		return nil, false, fmt.Errorf("read native config %s: %w", path, err)
 	}

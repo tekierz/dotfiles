@@ -109,7 +109,7 @@ func LoadClaudeConfig() (*ClaudeConfig, error) {
 		return nil, fmt.Errorf("resolve Claude config path: %w", err)
 	}
 
-	data, revision, err := safefile.ReadWithin(root, rel)
+	data, revision, err := safefile.ReadWithinLimit(root, rel, maxProductConfigJSONBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -221,9 +221,9 @@ func saveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted *safefile.Rev
 	var existing []byte
 	var revision safefile.Revision
 	if accepted != nil && parents != nil {
-		existing, revision, err = safefile.ReadWithinAuthorized(root, rel, parents)
+		existing, revision, err = safefile.ReadWithinAuthorizedLimit(root, rel, parents, maxProductConfigJSONBytes)
 	} else {
-		existing, revision, err = safefile.ReadWithin(root, rel)
+		existing, revision, err = safefile.ReadWithinLimit(root, rel, maxProductConfigJSONBytes)
 	}
 	if err != nil {
 		return safefile.Revision{}, err

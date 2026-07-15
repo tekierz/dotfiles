@@ -483,6 +483,14 @@ func readToolConfig(root, rel string) ([]byte, safefile.Revision, error) {
 	return content, revision, nil
 }
 
+func readToolConfigWithinLimit(root, rel string, limit int64) ([]byte, safefile.Revision, error) {
+	content, revision, err := safefile.ReadWithinLimit(root, rel, limit)
+	if err != nil {
+		return nil, safefile.Revision{}, fmt.Errorf("failed to read generated config %s: %w", rel, err)
+	}
+	return content, revision, nil
+}
+
 func verifyToolConfigRevision(root, rel string, expected safefile.Revision) error {
 	_, current, err := readToolConfig(root, rel)
 	if err != nil {
