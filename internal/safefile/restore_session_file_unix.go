@@ -5,6 +5,7 @@ package safefile
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 )
 
 // RestoreFile installs one regular file extracted from immutable recursive
@@ -14,6 +15,23 @@ func (s *RestoreSession) RestoreFile(rel string, parents *ParentChain, expected 
 	if err != nil {
 		return Revision{}, err
 	}
+	return s.restoreFileBytes(rel, parents, expected, data, mode)
+}
+
+// RestoreFileWithMode installs immutable snapshot bytes with a separately
+// accepted ordinary permission mode as one atomic replacement.
+func (s *RestoreSession) RestoreFileWithMode(rel string, parents *ParentChain, expected Revision, source *DirectorySnapshot, sourceRel string, desired fs.FileMode) (Revision, error) {
+	data, _, err := ReadDirectorySnapshotFile(source, sourceRel)
+	if err != nil {
+		return Revision{}, err
+	}
+	if desired != desired.Perm() {
+		return Revision{}, fmt.Errorf("%w: %v", ErrInvalidMode, desired)
+	}
+	return s.restoreFileBytes(rel, parents, expected, data, desired)
+}
+
+func (s *RestoreSession) restoreFileBytes(rel string, parents *ParentChain, expected Revision, data []byte, mode fs.FileMode) (Revision, error) {
 	if !expected.Tracked() {
 		return Revision{}, fmt.Errorf("%w: expected restore revision is untracked", ErrRevisionChanged)
 	}
