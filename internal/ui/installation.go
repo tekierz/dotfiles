@@ -927,6 +927,17 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// phases failed rather than silently overwriting a single lastErr.
 	var failures []error
 	noteFailure := func(err error) { failures = append(failures, err) }
+	var configCancellation error
+	recordConfigCancellation := func() bool {
+		if configCancellation != nil {
+			return true
+		}
+		if err := ctx.Err(); err != nil {
+			configCancellation = err
+			return true
+		}
+		return false
+	}
 
 	// Package installation is skipped when no NEW packages are selected (e.g. a
 	// fully-installed machine), but the configuration phases below ALWAYS run.
@@ -981,6 +992,10 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			finish(aggregateFailures(failures))
 			return
 		}
+		if err := ctx.Err(); err != nil {
+			finish(err)
+			return
+		}
 		rollbackExpected = make(map[string]backup.ExpectedState)
 		mutationStarted = true
 		parentsCreated := 0
@@ -989,6 +1004,10 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			createdParents[rel] = snapshot
 		}
 		for _, rel := range plan.parentDirectoryTargets() {
+			if err := ctx.Err(); err != nil {
+				finish(err)
+				return
+			}
 			accepted, acceptedParents, err := plan.acceptedDirectoryAuthority("state:parents", rel)
 			if err != nil {
 				markAction("state:parents", operation.ActionFailed, "parent authority was unavailable")
@@ -1044,6 +1063,10 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			finish(authorityErr)
 			return
 		}
+		if err := ctx.Err(); err != nil {
+			finish(err)
+			return
+		}
 		globalEvidence, saveErr := savePlannedInstallerPreferencesTracked(plan, home, globalRels[0], globalTarget, boundLocker)
 		if saveErr != nil {
 			captureErr := recordFailedActionRollbackState(home, plan, "state:global", saveErr, rollbackExpected)
@@ -1062,17 +1085,28 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 	// configPhase runs a single configuration step, emitting a header line,
 	// advancing the progress step, and recording any failure.
 	configPhase := func(header string, run func() error, okLine string) error {
+		if recordConfigCancellation() {
+			return configCancellation
+		}
 		stepLine(header)
 		if err := run(); err != nil {
+			if recordConfigCancellation() {
+				return configCancellation
+			}
 			emitLine(fmt.Sprintf("  ⚠ %v", err))
 			noteFailure(err)
 			return err
+		} else if recordConfigCancellation() {
+			return configCancellation
 		} else if okLine != "" {
 			emitLine(okLine)
 		}
 		return nil
 	}
 	applyConfigAction := func(actionID, toolID string, run func() ([]tools.MutationEvidence, error)) bool {
+		if recordConfigCancellation() {
+			return false
+		}
 		if persistJournal {
 			invalidateRollbackAction(plan, actionID, rollbackExpected)
 		}
@@ -1102,9 +1136,13 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		} else {
 			markAction(actionID, operation.ActionFailed, "configuration apply failed")
 		}
+		recordConfigCancellation()
 		return succeeded
 	}
 	toolConfigPhase := func(toolID, header string, run func() ([]tools.MutationEvidence, error), okLine string) bool {
+		if recordConfigCancellation() {
+			return false
+		}
 		if !configAllowed[toolID] {
 			return false
 		}
@@ -1129,11 +1167,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 		var helperResult utilityInstallResult
 		_ = configPhase("\n▶ Installing dotfiles utilities...", func() error {
 			if persistJournal {
-				helperResult = installUtilitiesAtAuthorityTracked(executionAuthority, cfg.Utilities, boundLocker, func(name string) {
+				helperResult = installUtilitiesAtAuthorityTrackedWithContext(ctx, executionAuthority, cfg.Utilities, boundLocker, func(name string) {
 					invalidateRollbackAction(plan, "helper:"+name, rollbackExpected)
 				})
 			} else {
-				helperResult = installUtilitiesTracked(cfg.Utilities)
+				helperResult = installUtilitiesTrackedWithContext(ctx, cfg.Utilities)
 			}
 			if helperResult.Err != nil {
 				return fmt.Errorf("failed to install utilities: %w", helperResult.Err)
@@ -1209,10 +1247,10 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 					return nil, err
 				}
 			}
-			evidence, err := tools.SetupTPMAtAuthorityTracked(tmuxCfg, theme, tmuxAuthority.file, tmuxAuthority.parents, tpmAuthority.directory, tpmAuthority.parents, stateAuthority)
+			evidence, err := tools.SetupTPMAtAuthorityTrackedWithContext(ctx, tmuxCfg, theme, tmuxAuthority.file, tmuxAuthority.parents, tpmAuthority.directory, tpmAuthority.parents, stateAuthority)
 			return evidence, wrapMutationError("failed to configure tmux", err)
 		}
-		evidence, err := tools.SetupTPMTracked(tmuxCfg, theme)
+		evidence, err := tools.SetupTPMTrackedWithContext(ctx, tmuxCfg, theme)
 		return evidence, wrapMutationError("failed to configure tmux", err)
 	}, "  ✓ Tmux configured with ~/.tmux.conf")
 	if tmuxConfigured {
@@ -1306,10 +1344,10 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			if err != nil {
 				return nil, err
 			}
-			evidence, err := tools.WriteNeovimConfigAtBoundAuthorityTracked(neovimCfg, theme, accepted.directory, accepted.parents, stateAuthority)
+			evidence, err := tools.WriteNeovimConfigAtBoundAuthorityTrackedWithContext(ctx, neovimCfg, theme, accepted.directory, accepted.parents, stateAuthority)
 			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Neovim", err)
 		}
-		evidence, err := tools.WriteNeovimConfigTracked(neovimCfg, theme)
+		evidence, err := tools.WriteNeovimConfigTrackedWithContext(ctx, neovimCfg, theme)
 		return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Neovim", err)
 	}, neovimSuccessMsg)
 
@@ -1482,6 +1520,11 @@ func runInstallWorkerFromPlanWithRuntime(ctx context.Context, events chan instal
 			evidence, err := tools.WriteGlowConfigTracked(glowConfigFrom(cfg), theme)
 			return []tools.MutationEvidence{evidence}, wrapMutationError("failed to configure Glow", err)
 		}, "  ✓ Glow configured")
+	}
+
+	if recordConfigCancellation() {
+		finish(configCancellation)
+		return
 	}
 
 	// Surface all failures: name each failed step so the Error screen lists
@@ -1803,11 +1846,19 @@ type utilityInstallResult struct {
 type utilityInstaller func(home, name string, content []byte) (tools.MutationEvidence, error)
 
 func installUtilitiesTracked(utilities map[string]bool) utilityInstallResult {
-	return installUtilitiesTrackedWith(utilities, installScriptFileTracked)
+	return installUtilitiesTrackedWithContext(context.Background(), utilities)
 }
 
 func installUtilitiesAtAuthorityTracked(authority map[string]map[string]acceptedTarget, utilities map[string]bool, locker operation.Locker, beforeAttempt func(string)) utilityInstallResult {
-	return installUtilitiesTrackedWithBefore(utilities, beforeAttempt, func(home, name string, content []byte) (tools.MutationEvidence, error) {
+	return installUtilitiesAtAuthorityTrackedWithContext(context.Background(), authority, utilities, locker, beforeAttempt)
+}
+
+func installUtilitiesTrackedWithContext(ctx context.Context, utilities map[string]bool) utilityInstallResult {
+	return installUtilitiesTrackedWithBeforeContext(ctx, utilities, nil, installScriptFileTracked)
+}
+
+func installUtilitiesAtAuthorityTrackedWithContext(ctx context.Context, authority map[string]map[string]acceptedTarget, utilities map[string]bool, locker operation.Locker, beforeAttempt func(string)) utilityInstallResult {
+	return installUtilitiesTrackedWithBeforeContext(ctx, utilities, beforeAttempt, func(home, name string, content []byte) (tools.MutationEvidence, error) {
 		rel := filepath.ToSlash(filepath.Join(".local", "bin", name))
 		accepted, ok := authority["helper:"+name][rel]
 		if !ok || accepted.kind != acceptedFileTarget || !accepted.parents.Tracked() {
@@ -1818,11 +1869,19 @@ func installUtilitiesAtAuthorityTracked(authority map[string]map[string]accepted
 }
 
 func installUtilitiesTrackedWith(utilities map[string]bool, install utilityInstaller) utilityInstallResult {
-	return installUtilitiesTrackedWithBefore(utilities, nil, install)
+	return installUtilitiesTrackedWithBeforeContext(context.Background(), utilities, nil, install)
 }
 
 func installUtilitiesTrackedWithBefore(utilities map[string]bool, beforeAttempt func(string), install utilityInstaller) utilityInstallResult {
+	return installUtilitiesTrackedWithBeforeContext(context.Background(), utilities, beforeAttempt, install)
+}
+
+func installUtilitiesTrackedWithBeforeContext(ctx context.Context, utilities map[string]bool, beforeAttempt func(string), install utilityInstaller) utilityInstallResult {
 	var result utilityInstallResult
+	if ctx == nil {
+		result.Err = errors.New("utility operation context is unavailable")
+		return result
+	}
 	home := os.Getenv("HOME")
 	if home == "" {
 		var err error
@@ -1835,6 +1894,10 @@ func installUtilitiesTrackedWithBefore(utilities map[string]bool, beforeAttempt 
 
 	// Install selected utility scripts
 	for _, name := range enabledHelpers(utilities) {
+		if err := ctx.Err(); err != nil {
+			result.Err = err
+			return result
+		}
 		result.Attempted = append(result.Attempted, name)
 		if beforeAttempt != nil {
 			beforeAttempt(name)

@@ -322,6 +322,18 @@ func WriteNeovimConfig(cfg NeovimConfig, theme string) error {
 }
 
 func WriteNeovimConfigTracked(cfg NeovimConfig, theme string) (MutationEvidence, error) {
+	return WriteNeovimConfigTrackedWithContext(context.Background(), cfg, theme)
+}
+
+// WriteNeovimConfigTrackedWithContext keeps preset acquisition and staged
+// mutations under the caller's operation lifetime.
+func WriteNeovimConfigTrackedWithContext(ctx context.Context, cfg NeovimConfig, theme string) (MutationEvidence, error) {
+	if ctx == nil {
+		return MutationEvidence{}, errors.New("Neovim operation context is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return MutationEvidence{}, err
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return MutationEvidence{}, fmt.Errorf("failed to get home directory: %w", err)
@@ -334,7 +346,7 @@ func WriteNeovimConfigTracked(cfg NeovimConfig, theme string) (MutationEvidence,
 	// could accidentally authorize rollback over a superseding writer.
 	switch cfg.ConfigPreset {
 	case "kickstart", "lazyvim", "nvchad":
-		installed, err := setupNeovimPresetTracked(cfg, theme, nvimDir)
+		installed, err := setupNeovimPresetTrackedWithContext(ctx, cfg, theme, nvimDir)
 		if err != nil {
 			var committed []MutationEvidence
 			if installed != nil {
@@ -374,6 +386,18 @@ func WriteNeovimConfigAtSnapshotTracked(cfg NeovimConfig, theme string, accepted
 }
 
 func WriteNeovimConfigAtBoundAuthorityTracked(cfg NeovimConfig, theme string, accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, state *operation.StateAuthority) (MutationEvidence, error) {
+	return WriteNeovimConfigAtBoundAuthorityTrackedWithContext(context.Background(), cfg, theme, accepted, parents, state)
+}
+
+// WriteNeovimConfigAtBoundAuthorityTrackedWithContext is the reviewed install
+// entry point. Compatibility callers retain the context-free wrapper above.
+func WriteNeovimConfigAtBoundAuthorityTrackedWithContext(ctx context.Context, cfg NeovimConfig, theme string, accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, state *operation.StateAuthority) (MutationEvidence, error) {
+	if ctx == nil {
+		return MutationEvidence{}, errors.New("Neovim operation context is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return MutationEvidence{}, err
+	}
 	if !parents.Tracked() || state == nil {
 		return MutationEvidence{}, fmt.Errorf("%w: accepted Neovim authority is incomplete", safefile.ErrParentChanged)
 	}
@@ -384,7 +408,7 @@ func WriteNeovimConfigAtBoundAuthorityTracked(cfg NeovimConfig, theme string, ac
 	nvimDir := filepath.Join(home, ".config", "nvim")
 	switch cfg.ConfigPreset {
 	case "kickstart", "lazyvim", "nvchad":
-		installed, err := setupNeovimPresetAtSnapshotTracked(cfg, theme, nvimDir, accepted, parents, state)
+		installed, err := setupNeovimPresetAtSnapshotTrackedWithContext(ctx, cfg, theme, nvimDir, accepted, parents, state)
 		if err != nil {
 			var committed []MutationEvidence
 			if installed != nil {
@@ -407,6 +431,16 @@ func setupNeovimPreset(cfg NeovimConfig, theme, nvimDir string) error {
 }
 
 func setupNeovimPresetTracked(cfg NeovimConfig, theme, nvimDir string) (result *safefile.DirectorySnapshot, returnErr error) {
+	return setupNeovimPresetTrackedWithContext(context.Background(), cfg, theme, nvimDir)
+}
+
+func setupNeovimPresetTrackedWithContext(ctx context.Context, cfg NeovimConfig, theme, nvimDir string) (result *safefile.DirectorySnapshot, returnErr error) {
+	if ctx == nil {
+		return nil, errors.New("Neovim operation context is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
@@ -417,10 +451,16 @@ func setupNeovimPresetTracked(cfg NeovimConfig, theme, nvimDir string) (result *
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("inspect Neovim preset target: %w", err)
 	}
-	return setupNeovimPresetAtSnapshotTracked(cfg, theme, nvimDir, nil, nil)
+	return setupNeovimPresetAtSnapshotTrackedWithContext(ctx, cfg, theme, nvimDir, nil, nil)
 }
 
-func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string, accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, states ...*operation.StateAuthority) (result *safefile.DirectorySnapshot, returnErr error) {
+func setupNeovimPresetAtSnapshotTrackedWithContext(ctx context.Context, cfg NeovimConfig, theme, nvimDir string, accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, states ...*operation.StateAuthority) (result *safefile.DirectorySnapshot, returnErr error) {
+	if ctx == nil {
+		return nil, errors.New("Neovim operation context is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	_, ok := neovimConfigRepos[cfg.ConfigPreset]
 	if !ok {
 		return nil, fmt.Errorf("refusing unknown Neovim preset %q", cfg.ConfigPreset)
@@ -468,7 +508,7 @@ func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string,
 
 	// Clone the preset into a temp directory first.  The user's existing config
 	// must not be moved unless the network/git operation has fully succeeded.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	cloneCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	stagingFD, err := operation.OpenStateStagingDirectory(tempDir, createdStaging)
 	if err != nil {
@@ -480,8 +520,11 @@ func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string,
 	commandFactory := func(ctx context.Context, name string, arguments ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, name, arguments...)
 	}
-	if err := clonePinnedGitArtifact(ctx, tempDir, artifact, commandFactory); err != nil {
+	if err := clonePinnedGitArtifact(cloneCtx, tempDir, artifact, commandFactory); err != nil {
 		return nil, fmt.Errorf("stage pinned %s config: %w", cfg.ConfigPreset, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Remove clone metadata through the same descriptor-anchored directory API
@@ -497,7 +540,7 @@ func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string,
 	if err := safefile.RemoveDirectoryWithinSnapshotAuthorized(gitRoot, gitRel, gitSnapshot, gitParents); err != nil {
 		return nil, fmt.Errorf("remove Neovim preset git metadata: %w", err)
 	}
-	if err := writeNeovimStagedPrefs(tempDir, createdStaging, cfg, theme); err != nil {
+	if err := writeNeovimStagedPrefs(ctx, tempDir, createdStaging, cfg, theme); err != nil {
 		return nil, fmt.Errorf("apply preferences to staged Neovim preset: %w", err)
 	}
 	presetSnapshot, err := operation.SnapshotStateStagingDirectory(tempDir, createdStaging)
@@ -505,6 +548,9 @@ func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string,
 		return nil, fmt.Errorf("capture staged Neovim preset: %w", err)
 	}
 	cleanupExpected = presetSnapshot
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var installed *safefile.DirectorySnapshot
 	if accepted != nil {
 		if parents != nil {
@@ -521,7 +567,10 @@ func setupNeovimPresetAtSnapshotTracked(cfg NeovimConfig, theme, nvimDir string,
 	return installed, nil
 }
 
-func writeNeovimStagedPrefs(staging string, authority *operation.StateStagingAuthority, cfg NeovimConfig, theme string) error {
+func writeNeovimStagedPrefs(ctx context.Context, staging string, authority *operation.StateStagingAuthority, cfg NeovimConfig, theme string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	root, initRel, initParents, err := operation.StateStagingDescendantAuthority(staging, authority, "init.lua")
 	if err != nil {
 		return fmt.Errorf("bind staged init.lua: %w", err)
@@ -538,11 +587,17 @@ func writeNeovimStagedPrefs(staging string, authority *operation.StateStagingAut
 		return fmt.Errorf("merge staged init.lua preferences loader: %w", err)
 	}
 	if !bytes.Equal(initContent, updated) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if _, err := safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, initRel, initRevision, initParents, updated, 0600); err != nil {
 			return fmt.Errorf("update staged init.lua: %w", err)
 		}
 	}
 	for _, directory := range []string{"lua", filepath.ToSlash(filepath.Join("lua", "custom"))} {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		dirRoot, dirRel, dirParents, err := operation.StateStagingDescendantAuthority(staging, authority, directory)
 		if err != nil {
 			return fmt.Errorf("bind staged Neovim directory %s: %w", directory, err)
@@ -562,6 +617,9 @@ func writeNeovimStagedPrefs(staging string, authority *operation.StateStagingAut
 	_, prefsRevision, err := safefile.ReadWithinAuthorized(root, prefsRel, prefsParents)
 	if err != nil {
 		return fmt.Errorf("read staged options.lua: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if _, err := safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, prefsRel, prefsRevision, prefsParents, []byte(GenerateNeovimConfig(cfg, theme)), 0600); err != nil {
 		return fmt.Errorf("write staged options.lua: %w", err)
