@@ -3,6 +3,7 @@ package tools
 import (
 	"testing"
 
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
@@ -53,5 +54,35 @@ func TestDescribeInstallRequiresExplicitManager(t *testing.T) {
 	}
 	if _, err := DescribeInstall(NewClaudeCodeTool(), InstallEnvironment{Platform: pkg.PlatformMacOS}); err == nil {
 		t.Fatal("Claude recipe accepted an empty prerequisite manager")
+	}
+}
+
+func TestLMStudioRequiresAURManagerOnArch(t *testing.T) {
+	for _, tc := range []struct {
+		platform  pkg.Platform
+		manager   string
+		supported bool
+	}{
+		{pkg.PlatformArch, "pacman", false}, {pkg.PlatformArch, "paru", true},
+		{pkg.PlatformMacOS, "brew", true}, {pkg.PlatformDebian, "apt", false},
+	} {
+		t.Run(string(tc.platform)+"/"+tc.manager, func(t *testing.T) {
+			tool := NewLMStudioTool()
+			recipe, err := DescribeInstall(tool, InstallEnvironment{Platform: tc.platform, Manager: tc.manager})
+			if (err == nil) != tc.supported {
+				t.Fatalf("recipe supported=%v, want %v; err=%v", err == nil, tc.supported, err)
+			}
+			state, digest, err := observeInstallability(tool, tc.platform, tc.manager, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.supported {
+				if state != health.InstallabilitySupported || digest == "" || recipe.Manager != tc.manager {
+					t.Fatalf("supported recipe=%+v state=%s digest=%q", recipe, state, digest)
+				}
+			} else if state != health.InstallabilityUnsupported || digest != "" {
+				t.Fatalf("unsupported state=%s digest=%q", state, digest)
+			}
+		})
 	}
 }

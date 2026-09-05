@@ -2,12 +2,14 @@ package tools
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
@@ -144,8 +146,7 @@ func NewLMStudioTool() *LMStudioTool {
 				pkg.PlatformMacOS: {"lm-studio"},
 				// lm-studio is AUR-only on Arch; use the actual AUR package name so
 				// paru can locate and build it. Plain pacman will not find this in
-				// official repos, but the installer already guards AUR installs behind
-				// the paru availability check.
+				// official repos; InstallRecipe requires the accepted paru manager.
 				pkg.PlatformArch: {"lmstudio-bin"},
 			},
 			configPaths: []string{},
@@ -155,6 +156,14 @@ func NewLMStudioTool() *LMStudioTool {
 			defaultEnabled: false,
 		},
 	}
+}
+
+// InstallRecipe enforces the manager capability declared by this tool's metadata.
+func (t *LMStudioTool) InstallRecipe(environment InstallEnvironment) (operation.InstallRecipe, error) {
+	if environment.Platform == pkg.PlatformArch && environment.Manager != "paru" {
+		return operation.InstallRecipe{}, fmt.Errorf("%s requires paru for its AUR package", t.ID())
+	}
+	return DescribeInstall(&t.BaseTool, environment)
 }
 
 // IsInstalled checks if LM Studio is available

@@ -117,3 +117,9 @@ Package phase scope: apt.go, pacman.go, manager_executable_identity_test.go and 
 Startup scope: app.go, screen_manager.go and start_screen_test.go. Prepare the selected handler for first render; App.Init owns its one initialization command. Commit 0dfc0fd; initial-route regressions were red, then focused startup/manager race and vet passed. Profile adoption (55c3878), theme retry (5215292) and bounded Updates viewport (9ca40e5) have focused and combined UI race evidence.
 
 CI fixture regressions reproduced locally: inherited XDG/Yazi roots and host-dependent npm/node observation. Tests now supply isolated roots and observed native executable fixtures without running installs. The portable device type fixture uses explicit normalization, avoiding platform-specific unused lint suppression. Combined candidate full tests and lint passed; final race and remote Linux supervisor evidence are in progress.
+
+### Final acceptance gaps
+
+Historical AUR capability regression is source-confirmed for LM Studio: its registry marks lmstudio-bin AUR-only but generic recipes accept plain pacman. Root scope apps.go/install_recipe_test.go: explicit LM Studio recipe requires paru on Arch; verify recipe and installation-health rejection while retaining supported macOS/paru behavior. This enforces repository metadata, not a fresh upstream catalog claim.
+
+Astra safety scope installation.go/new update_lifecycle_test.go: extend cancellation terminal-wait guarantee to Updates, preserve cleanup errors. Astra UI tests scope new update_provider_test.go (pkg and UI) and backup_confirmation_test.go: test actual provider routing and captured backup confirmation authority; any production test seam requires separate review.
