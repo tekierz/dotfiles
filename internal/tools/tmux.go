@@ -217,7 +217,7 @@ func installTPMAtSnapshotTrackedWithContext(ctx context.Context, accepted *safef
 	// artifact loader fetches only the reviewed commit and verifies HEAD before
 	// any bytes can enter the live namespace.
 	commandFactory := func(ctx context.Context, name string, arguments ...string) *exec.Cmd {
-		return exec.CommandContext(ctx, name, arguments...)
+		return exec.CommandContext(ctx, name, arguments...) // #nosec G204 -- clonePinnedGitArtifact supplies literal git and validated pinned-artifact argv.
 	}
 	if err := clonePinnedGitArtifact(cloneCtx, staging, artifact, commandFactory); err != nil {
 		return MutationEvidence{}, fmt.Errorf("stage pinned TPM artifact: %w", err)

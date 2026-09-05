@@ -756,7 +756,7 @@ func projectInstallRecipe(recipe operation.InstallRecipe, digest string) (*planp
 }
 
 func publicAuthentication(value string) (string, bool) {
-	mapping := map[string]string{
+	mapping := map[string]string{ // #nosec G101 -- Authentication requirement labels mapped to public enum tokens, not credential values.
 		"":                                     "none",
 		"interactive provider login":           "interactive_provider_login",
 		"ChatGPT sign-in or an OpenAI API key": "chatgpt_or_openai_api_key",
@@ -768,7 +768,7 @@ func publicAuthentication(value string) (string, bool) {
 }
 
 func publicRisk(value string) (string, bool) {
-	mapping := map[string]string{
+	mapping := map[string]string{ // #nosec G101 -- Authentication requirement labels mapped to public enum tokens, not credential values.
 		"installs packages from the configured system package manager":                                                   "package_manager_install",
 		"downloads and executes npm package lifecycle code":                                                              "npm_lifecycle_code",
 		"installs an npm package with lifecycle scripts disabled; package code runs when Pi is launched":                 "npm_scripts_disabled_runtime_code",

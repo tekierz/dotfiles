@@ -518,7 +518,7 @@ func setupNeovimPresetAtSnapshotTrackedWithContext(ctx context.Context, cfg Neov
 	// The shared artifact loader fetches only the reviewed full commit and
 	// verifies the staged checkout before metadata removal or live-path commit.
 	commandFactory := func(ctx context.Context, name string, arguments ...string) *exec.Cmd {
-		return exec.CommandContext(ctx, name, arguments...)
+		return exec.CommandContext(ctx, name, arguments...) // #nosec G204 -- clonePinnedGitArtifact supplies literal git and validated pinned-artifact argv.
 	}
 	if err := clonePinnedGitArtifact(cloneCtx, tempDir, artifact, commandFactory); err != nil {
 		return nil, fmt.Errorf("stage pinned %s config: %w", cfg.ConfigPreset, err)
