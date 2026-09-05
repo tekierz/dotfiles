@@ -56,9 +56,10 @@ func TestPrivilegedLauncherFailsBeforeUnreviewedResolution(t *testing.T) {
 		t.Run(boundary, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			if boundary == "nil-context" {
+			switch boundary {
+			case "nil-context":
 				ctx = nil
-			} else if boundary == "cancelled" {
+			case "cancelled":
 				cancel()
 			}
 			calls := 0

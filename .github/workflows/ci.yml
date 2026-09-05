@@ -109,6 +109,17 @@ jobs:
       - name: Run tests with race detector
         run: go test -race ./...
 
+      - name: Verify isolated privileged supervisor lifecycle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -c -o "$RUNNER_TEMP/dotfiles-privileged.test" ./internal/runner
+          sudo env CI=true DOTFILES_PRIVILEGED_CI=1 "$RUNNER_TEMP/dotfiles-privileged.test" \
+            -test.run='^TestPrivilegedSupervisorCI$' -test.v -test.timeout=2m \
+            | tee "$RUNNER_TEMP/privileged-supervisor.log"
+          grep -F 'DOTFILES_PRIVILEGED_CI_EXECUTED cases=8' "$RUNNER_TEMP/privileged-supervisor.log"
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
