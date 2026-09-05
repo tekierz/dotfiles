@@ -83,10 +83,11 @@ The TUI uses screen-based navigation (the `Screen` enum in
 
 Each screen is a `ScreenHandler` implemented in package `ui` in a `screen_*.go`
 file (e.g. `screen_welcome.go`, `screen_manage.go`, `screen_config_*.go`).
-`App.Update` delegates to the `ScreenManager` (`uiTickMsg` and
-`installCacheDoneMsg` are handled globally first); `App.View` delegates to
-`ScreenManager.View()`. `NewApp` always wires the `ScreenManager` via
-`initScreenManager()`.
+`App.Update` reduces App-owned installation, Updates, Backups and Users results
+before screen dispatch, rejecting stale or duplicate request generations.
+`App.View` delegates to `ScreenManager.View()`. `NewApp` prepares the first
+handler without starting work; `App.Init` initializes the final CLI destination
+once and retains its command. Normal navigation initializes the target handler.
 
 ### Async Patterns
 
