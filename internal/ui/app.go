@@ -180,20 +180,24 @@ func (a *App) adoptProfileSettings(settings *config.GlobalConfig) tea.Cmd {
 // standalone "Change theme" from the main menu actually sticks across runs.
 // On failure it records a brief human-readable message in themeStatus that the
 // view layer can surface to the user instead of silently discarding the error.
-func (a *App) persistTheme() {
+func (a *App) persistTheme() error {
 	g, err := config.LoadGlobalConfig()
-	if err != nil || g == nil {
-		if err != nil {
-			a.themeStatus = "Failed to save theme: " + err.Error()
-		}
-		return
+	if err == nil && g == nil {
+		err = errors.New("global settings unavailable")
+	}
+	if err != nil {
+		a.themeStatus = "Failed to save theme: " + err.Error()
+		return err
 	}
 	g.Theme = a.theme
 	if err := config.SaveGlobalConfig(g); err != nil {
 		a.themeStatus = "Failed to save theme: " + err.Error()
-		return
+		return err
 	}
 	a.themeStatus = ""
+	a.syncSharedSettings()
+	a.invalidateSettingsReviews()
+	return nil
 }
 
 // snapshotManageBaseline records the current Manage config + theme as the

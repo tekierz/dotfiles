@@ -70,7 +70,9 @@ func (s *themePickerScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		case "enter":
 			if a.themeStandalone {
 				// Standalone mode: persist the already-live theme.
-				a.persistTheme()
+				if err := a.persistTheme(); err != nil {
+					return s, nil
+				}
 				if a.themeReturn == ScreenMainMenu {
 					// In-TUI call (main menu): return to the main menu, stay in TUI.
 					return s, NavigateTo(ScreenMainMenu)
