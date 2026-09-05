@@ -122,6 +122,14 @@ func loadUsersCmd() tea.Cmd {
 	}
 }
 
+// createUserCmd keeps the New action separate from explicit Save/upsert.
+func createUserCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		err := config.CreateUserProfile(config.DefaultUserProfile(name))
+		return userSavedMsg{name: name, err: err}
+	}
+}
+
 // saveUserCmd saves a user profile
 func saveUserCmd(name, theme, nav, keyboard string) tea.Cmd {
 	return func() tea.Msg {
@@ -344,7 +352,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.usersCreating = false
 				name := a.usersNewName
 				a.usersNewName = ""
-				return a.startAsync(asyncUserOperation, saveUserCmd(name, "catppuccin-mocha", "emacs", "linux"))
+				return a.startAsync(asyncUserOperation, createUserCmd(name))
 			}
 			return nil
 		case "backspace":
