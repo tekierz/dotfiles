@@ -1,0 +1,16 @@
+package runner
+import("context";"os";"path/filepath";"testing";"time")
+func TestAuditCancelLeavesChildMutation(t *testing.T) {
+ marker:=filepath.Join(t.TempDir(),"after-cancel")
+ ctx,cancel:=context.WithCancel(context.Background()); defer cancel()
+ stream,err:=RunStreaming(ctx,"/bin/sh","-c",`(sleep 0.3; printf mutated > "$1") & echo ready; wait`,"audit",marker)
+ if err!=nil {t.Fatal(err)}
+ <-stream.Output
+ cancel()
+ select {case <-stream.Done: t.Log("Done immediate"); case <-time.After(150*time.Millisecond): t.Log("Done remains blocked after cancellation")}
+ time.Sleep(250*time.Millisecond)
+ body,err:=os.ReadFile(marker)
+ if err!=nil { t.Fatal("child did not mutate",err) }
+ t.Logf("confirmed post-cancel mutation: %q",body)
+ for range stream.Output {}
+}

@@ -1,0 +1,307 @@
+{
+  "branches": [
+    {
+      "name": "claude/project-analysis-report-bn2Eh",
+      "commit": {
+        "sha": "5716d215930e6a83fa6ae2feca658bd9037c65c7",
+        "url": "https://api.github.com/repos/tekierz/dotfiles/commits/5716d215930e6a83fa6ae2feca658bd9037c65c7"
+      },
+      "protected": false,
+      "protection": {
+        "enabled": false,
+        "required_status_checks": {
+          "enforcement_level": "off",
+          "contexts": [],
+          "checks": []
+        }
+      },
+      "protection_url": "https://api.github.com/repos/tekierz/dotfiles/branches/claude/project-analysis-report-bn2Eh/protection"
+    },
+    {
+      "name": "develop",
+      "commit": {
+        "sha": "a08759b321bf3172aad99378b8c1c57ba126da25",
+        "url": "https://api.github.com/repos/tekierz/dotfiles/commits/a08759b321bf3172aad99378b8c1c57ba126da25"
+      },
+      "protected": false,
+      "protection": {
+        "enabled": false,
+        "required_status_checks": {
+          "enforcement_level": "off",
+          "contexts": [],
+          "checks": []
+        }
+      },
+      "protection_url": "https://api.github.com/repos/tekierz/dotfiles/branches/develop/protection"
+    },
+    {
+      "name": "fix/v2.1.2",
+      "commit": {
+        "sha": "2bde16e805582603d57acb3de4beb009e9b9d021",
+        "url": "https://api.github.com/repos/tekierz/dotfiles/commits/2bde16e805582603d57acb3de4beb009e9b9d021"
+      },
+      "protected": false,
+      "protection": {
+        "enabled": false,
+        "required_status_checks": {
+          "enforcement_level": "off",
+          "contexts": [],
+          "checks": []
+        }
+      },
+      "protection_url": "https://api.github.com/repos/tekierz/dotfiles/branches/fix/v2.1.2/protection"
+    },
+    {
+      "name": "main",
+      "commit": {
+        "sha": "bb3cbf9e60573ecb1dbd0c375e1e6c55a260864f",
+        "url": "https://api.github.com/repos/tekierz/dotfiles/commits/bb3cbf9e60573ecb1dbd0c375e1e6c55a260864f"
+      },
+      "protected": true,
+      "protection": {
+        "enabled": true,
+        "required_status_checks": {
+          "enforcement_level": "non_admins",
+          "contexts": [
+            "Lint",
+            "Test",
+            "Build (ubuntu-latest)"
+          ],
+          "checks": [
+            {
+              "context": "Lint",
+              "app_id": 15368
+            },
+            {
+              "context": "Test",
+              "app_id": 15368
+            },
+            {
+              "context": "Build (ubuntu-latest)",
+              "app_id": 15368
+            }
+          ]
+        }
+      },
+      "protection_url": "https://api.github.com/repos/tekierz/dotfiles/branches/main/protection"
+    },
+    {
+      "name": "release-remediation",
+      "commit": {
+        "sha": "b30b9c626903d8e98e19e596023abd506c04b437",
+        "url": "https://api.github.com/repos/tekierz/dotfiles/commits/b30b9c626903d8e98e19e596023abd506c04b437"
+      },
+      "protected": false,
+      "protection": {
+        "enabled": false,
+        "required_status_checks": {
+          "enforcement_level": "off",
+          "contexts": [],
+          "checks": []
+        }
+      },
+      "protection_url": "https://api.github.com/repos/tekierz/dotfiles/branches/release-remediation/protection"
+    },
+    {
+      "name": "worktree-audit-remediation",
+      "commit": {
+        "sha": "bb813df34664960a67345c06e97cb276f3db12b3",
+        "url": "https://api.github.com/repos/tekierz/dotfiles/commits/bb813df34664960a67345c06e97cb276f3db12b3"
+      },
+      "protected": false,
+      "protection": {
+        "enabled": false,
+        "required_status_checks": {
+          "enforcement_level": "off",
+          "contexts": [],
+          "checks": []
+        }
+      },
+      "protection_url": "https://api.github.com/repos/tekierz/dotfiles/branches/worktree-audit-remediation/protection"
+    }
+  ],
+  "protection": {
+    "url": "https://api.github.com/repos/tekierz/dotfiles/branches/main/protection",
+    "required_status_checks": {
+      "url": "https://api.github.com/repos/tekierz/dotfiles/branches/main/protection/required_status_checks",
+      "strict": false,
+      "contexts": [
+        "Lint",
+        "Test",
+        "Build (ubuntu-latest)"
+      ],
+      "contexts_url": "https://api.github.com/repos/tekierz/dotfiles/branches/main/protection/required_status_checks/contexts",
+      "checks": [
+        {
+          "context": "Lint",
+          "app_id": 15368
+        },
+        {
+          "context": "Test",
+          "app_id": 15368
+        },
+        {
+          "context": "Build (ubuntu-latest)",
+          "app_id": 15368
+        }
+      ]
+    },
+    "required_signatures": {
+      "url": "https://api.github.com/repos/tekierz/dotfiles/branches/main/protection/required_signatures",
+      "enabled": false
+    },
+    "enforce_admins": {
+      "url": "https://api.github.com/repos/tekierz/dotfiles/branches/main/protection/enforce_admins",
+      "enabled": false
+    },
+    "required_linear_history": {
+      "enabled": false
+    },
+    "allow_force_pushes": {
+      "enabled": false
+    },
+    "allow_deletions": {
+      "enabled": false
+    },
+    "block_creations": {
+      "enabled": false
+    },
+    "required_conversation_resolution": {
+      "enabled": false
+    },
+    "lock_branch": {
+      "enabled": false
+    },
+    "allow_fork_syncing": {
+      "enabled": false
+    }
+  },
+  "rulesets": [],
+  "tags": [
+    {
+      "name": "v2.0.2",
+      "zipball_url": "https://api.github.com/repos/tekierz/dotfiles/zipball/refs/tags/v2.0.2",
+      "tarball_url": "https://api.github.com/repos/tekierz/dotfiles/tarball/refs/tags/v2.0.2",
+      "commit": {
+        "sha": "906752872794a759ecb32406c60cb8af166fb9af",
+        "url": "https://api.github.com/repos/tekierz/dotfiles/commits/906752872794a759ecb32406c60cb8af166fb9af"
+      },
+      "node_id": "REF_kwDOQyPndrByZWZzL3RhZ3MvdjIuMC4y"
+    },
+    {
+      "name": "v2.0.1",
+      "zipball_url": "https://api.github.com/repos/tekierz/dotfiles/zipball/refs/tags/v2.0.1",
+      "tarball_url": "https://api.github.com/repos/tekierz/dotfiles/tarball/refs/tags/v2.0.1",
+      "commit": {
+        "sha": "906752872794a759ecb32406c60cb8af166fb9af",
+        "url": "https://api.github.com/repos/tekierz/dotfiles/commits/906752872794a759ecb32406c60cb8af166fb9af"
+      },
+      "node_id": "REF_kwDOQyPndrByZWZzL3RhZ3MvdjIuMC4x"
+    }
+  ],
+  "releases": [],
+  "pulls": [],
+  "runs": [
+    {
+      "id": 28698640818,
+      "name": "CI",
+      "head_branch": "main",
+      "head_sha": "bb3cbf9e60573ecb1dbd0c375e1e6c55a260864f",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-07-04T07:07:21Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/28698640818"
+    },
+    {
+      "id": 28307497045,
+      "name": "CI",
+      "head_branch": "main",
+      "head_sha": "c04c1d6a5452f888159cf855e19ce20465635970",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-06-28T01:23:06Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/28307497045"
+    },
+    {
+      "id": 21148488614,
+      "name": "Claude Code",
+      "head_branch": "main",
+      "head_sha": "8e6357d12e7b1c4ac93266b7ffcc94c56326c3b2",
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-01-19T18:53:34Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/21148488614"
+    },
+    {
+      "id": 21148411473,
+      "name": "CI",
+      "head_branch": "fix/v2.1.1",
+      "head_sha": "af5e74dc82c974980b4ac131617ddc79608aa379",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-01-19T18:50:11Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/21148411473"
+    },
+    {
+      "id": 21148411472,
+      "name": "Claude Code Review",
+      "head_branch": "fix/v2.1.1",
+      "head_sha": "af5e74dc82c974980b4ac131617ddc79608aa379",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-01-19T18:50:11Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/21148411472"
+    },
+    {
+      "id": 21131369806,
+      "name": "CI",
+      "head_branch": "main",
+      "head_sha": "8e6357d12e7b1c4ac93266b7ffcc94c56326c3b2",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-01-19T09:02:12Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/21131369806"
+    },
+    {
+      "id": 21131328148,
+      "name": "Claude Code Review",
+      "head_branch": "feature/beta-v2.1",
+      "head_sha": "c0fc9145c9fcec83d05c83fd2d4b78e06421c8cd",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-01-19T09:00:49Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/21131328148"
+    },
+    {
+      "id": 21131328143,
+      "name": "CI",
+      "head_branch": "feature/beta-v2.1",
+      "head_sha": "c0fc9145c9fcec83d05c83fd2d4b78e06421c8cd",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-01-19T09:00:49Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/21131328143"
+    },
+    {
+      "id": 21128666306,
+      "name": "Claude Code Review",
+      "head_branch": "feature/beta-v2.1",
+      "head_sha": "a72bd2edad8a198899211579edabd4c43f3e46d9",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-01-19T07:17:55Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/21128666306"
+    },
+    {
+      "id": 21128666300,
+      "name": "CI",
+      "head_branch": "feature/beta-v2.1",
+      "head_sha": "a72bd2edad8a198899211579edabd4c43f3e46d9",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-01-19T07:17:54Z",
+      "html_url": "https://github.com/tekierz/dotfiles/actions/runs/21128666300"
+    }
+  ],
+  "observed_date": "2026-09-05"
+}

@@ -42,3 +42,17 @@
   tests-first checkpoint, Sol may make the smallest tests-only persistence change after root
   approval. Production work must return to the Sol-orchestrator/Terra-implementer split, and
   the directly persisted contract still requires independent adversarial review.
+- When the user asks to finish implementation, measure and report progress in runnable product
+  code first. Governance documents, policy tests, scope transitions, and ledger commits are
+  prerequisites or evidence, not implementation progress, and must not dominate the work or
+  the status report after the governing contract is already sound.
+- Root-owned staging must never leave implementation agents waiting at a state-machine gate.
+  Commit planned, frozen, and red-test checkpoints immediately; otherwise agents may either
+  idle without product output or begin code before authority exists. If code appears early,
+  preserve it outside the worktree, restore the exact parent without destructive Git commands,
+  and reapply it only after the correct tests-first checkpoint.
+- When the user explicitly prioritizes a working dogfood build, optimize for complete runnable
+  behavior and useful operational logging. Use existing tests plus the smallest compile/smoke
+  checks needed to keep the application testable; defer expanded adversarial, race, policy, and
+  cross-platform matrices until the end-to-end feature path exists. Do not let per-slice release
+  ceremony delay a build the user can install and exercise manually.

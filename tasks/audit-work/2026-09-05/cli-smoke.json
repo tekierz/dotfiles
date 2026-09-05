@@ -1,0 +1,94 @@
+[
+  {
+    "args": [
+      "--help"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.703,
+    "stdout_bytes": 1464,
+    "stderr_bytes": 0
+  },
+  {
+    "args": [
+      "version"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.006,
+    "stdout_bytes": 21,
+    "stderr_bytes": 0
+  },
+  {
+    "args": [
+      "theme",
+      "list"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.005,
+    "stdout_bytes": 299,
+    "stderr_bytes": 0
+  },
+  {
+    "args": [
+      "backups"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.005,
+    "stdout_bytes": 103,
+    "stderr_bytes": 0
+  },
+  {
+    "args": [
+      "status",
+      "--json"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.011,
+    "stdout_bytes": 19476,
+    "stderr_bytes": 0,
+    "valid_json": true
+  },
+  {
+    "args": [
+      "support",
+      "--json"
+    ],
+    "exit": 2,
+    "elapsed_seconds": 0.017,
+    "stdout_bytes": 20518,
+    "stderr_bytes": 0,
+    "valid_json": true
+  },
+  {
+    "args": [
+      "plan",
+      "--json"
+    ],
+    "exit": 2,
+    "elapsed_seconds": 0.006,
+    "stdout_bytes": 372,
+    "stderr_bytes": 0,
+    "valid_json": true
+  },
+  {
+    "args": [
+      "apply",
+      "--yes"
+    ],
+    "exit": 2,
+    "elapsed_seconds": 0.005,
+    "stdout_bytes": 0,
+    "stderr_bytes": 22
+  },
+  {
+    "args": [
+      "plan",
+      "--json",
+      "--tool",
+      "no-such-tool"
+    ],
+    "exit": 1,
+    "elapsed_seconds": 0.005,
+    "stdout_bytes": 0,
+    "stderr_bytes": 23
+  }
+]

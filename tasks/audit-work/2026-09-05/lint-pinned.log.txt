@@ -1,0 +1,2 @@
+2026/09/05 10:43:19 failed to create modcache index dir: mkdir /Users/tiki7/Library/Caches/goimports: operation not permitted
+0 issues.

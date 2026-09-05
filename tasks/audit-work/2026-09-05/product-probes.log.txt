@@ -1,0 +1,31 @@
+=== RUN   TestAuditDroppedUpdateResult
+    audit_repro_test.go:19: after reentry checking=true done=false results=0 retry=false
+    audit_repro_test.go:20: completed update query was lost after navigating away
+--- FAIL: TestAuditDroppedUpdateResult (0.00s)
+=== RUN   TestAuditBackupConfirmationTarget
+    audit_repro_test.go:30: prompt="Restore backup 'reviewed-A'? (y/n)" executed="unreviewed-B" validation-error=directory tree changed during safe operation: backup catalog authority is incomplete
+    audit_repro_test.go:31: confirmation executes different backup from displayed prompt
+--- FAIL: TestAuditBackupConfirmationTarget (0.00s)
+=== RUN   TestAuditCreateExistingUser
+    audit_repro_test.go:42: existing profile before=dracula/vim after=catppuccin-mocha/emacs
+    audit_repro_test.go:43: New User silently overwrites existing profile
+--- FAIL: TestAuditCreateExistingUser (0.00s)
+=== RUN   TestAuditThemeSaveFailureQuits
+    audit_repro_test.go:53: save error="Failed to save theme: failed to parse global config: invalid character 'i' looking for beginning of value" command=tea.QuitMsg
+    audit_repro_test.go:54: save failure exits instead of displaying error
+--- FAIL: TestAuditThemeSaveFailureQuits (0.00s)
+=== RUN   TestAuditUpdateListViewport
+    audit_repro_test.go:62: rendered width=80 height=48 terminal=80x24 lines=48
+    audit_repro_test.go:63: update list overflows terminal without a scrolling viewport
+--- FAIL: TestAuditUpdateListViewport (0.00s)
+=== RUN   TestAuditUserSwitchInMemorySettings
+    audit_repro_test.go:74: persisted=dracula/vim app=catppuccin-mocha/emacs context=catppuccin-mocha/emacs
+    audit_repro_test.go:75: successful user switch does not update active app settings
+--- FAIL: TestAuditUserSwitchInMemorySettings (0.01s)
+=== RUN   TestAuditBackupRunningAllowsMouseNavigation
+    audit_repro_test.go:85: after finishing away and reentry: backupRunning=true status=""
+    audit_repro_test.go:86: mouse navigation during backup drops completion and blocks future backup actions
+--- FAIL: TestAuditBackupRunningAllowsMouseNavigation (28.45s)
+FAIL
+FAIL	github.com/tekierz/dotfiles/internal/ui	28.856s
+FAIL
