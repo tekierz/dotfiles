@@ -319,7 +319,7 @@ func captureRegularFileAt(parentFD int, expected directoryEntryState, budget *sn
 	if err != nil {
 		return nil, 0, classifyLeafOpenError(parentFD, expected.name, err)
 	}
-	file := os.NewFile(uintptr(fd), expected.name)
+	file := os.NewFile(uintptr(fd), expected.name) // #nosec G115 -- Successful open/openat returns a nonnegative native file descriptor.
 	if file == nil {
 		_ = unix.Close(fd)
 		return nil, 0, fmt.Errorf("wrap snapshot file descriptor %q", expected.name)
@@ -391,7 +391,7 @@ func listDirectoryStates(directoryFD int, limit int) ([]directoryEntryState, err
 	if err != nil {
 		return nil, fmt.Errorf("open directory snapshot scan: %w", err)
 	}
-	file := os.NewFile(uintptr(scanFD), "directory-snapshot")
+	file := os.NewFile(uintptr(scanFD), "directory-snapshot") // #nosec G115 -- Successful open/openat returns a nonnegative native file descriptor.
 	if file == nil {
 		_ = unix.Close(scanFD)
 		return nil, fmt.Errorf("wrap directory snapshot scan descriptor")

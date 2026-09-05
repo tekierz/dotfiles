@@ -148,7 +148,7 @@ func readNPMExecutionNodeFormat(identity ExecutableIdentity) (npmNodeNativeForma
 	if err != nil {
 		return npmNodeNativeFormatInvalid, errNPMExecutionIdentityObservation
 	}
-	file := os.NewFile(uintptr(fd), "npm-execution-node-format")
+	file := os.NewFile(uintptr(fd), "npm-execution-node-format") // #nosec G115 -- Successful open/openat returns a nonnegative native file descriptor.
 	if file == nil {
 		_ = syscall.Close(fd)
 		return npmNodeNativeFormatInvalid, errNPMExecutionIdentityObservation
@@ -196,7 +196,7 @@ func readNPMExecutionShebang(identity ExecutableIdentity) ([]byte, error) {
 	if err != nil {
 		return nil, errNPMExecutionIdentityObservation
 	}
-	file := os.NewFile(uintptr(fd), "npm-execution-shebang")
+	file := os.NewFile(uintptr(fd), "npm-execution-shebang") // #nosec G115 -- Successful open/openat returns a nonnegative native file descriptor.
 	if file == nil {
 		_ = syscall.Close(fd)
 		return nil, errNPMExecutionIdentityObservation

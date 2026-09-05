@@ -91,7 +91,7 @@ func readLeafWithinParent(parentFD int, target string, limit *int64) ([]byte, Re
 	if err != nil {
 		return nil, Revision{}, classifyLeafOpenError(parentFD, target, err)
 	}
-	file := os.NewFile(uintptr(fd), target)
+	file := os.NewFile(uintptr(fd), target) // #nosec G115 -- Successful open/openat returns a nonnegative native file descriptor.
 	if file == nil {
 		_ = unix.Close(fd)
 		return nil, Revision{}, fmt.Errorf("wrap target descriptor")

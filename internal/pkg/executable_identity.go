@@ -133,7 +133,7 @@ func observeExecutableIdentity(path string, hooks *executableIdentityObservation
 	if err != nil {
 		return ExecutableIdentity{}, errExecutableIdentityChanged
 	}
-	file := os.NewFile(uintptr(fd), "executable-identity")
+	file := os.NewFile(uintptr(fd), "executable-identity") // #nosec G115 -- Successful open/openat returns a nonnegative native file descriptor.
 	if file == nil {
 		_ = syscall.Close(fd)
 		return ExecutableIdentity{}, errExecutableIdentityChanged

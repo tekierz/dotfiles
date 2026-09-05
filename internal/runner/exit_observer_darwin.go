@@ -45,7 +45,7 @@ func (observer *darwinExitObserver) Wait() error {
 		case err != nil:
 			return err
 		case n > 0 && events[0].Flags&unix.EV_ERROR != 0:
-			return syscall.Errno(events[0].Data)
+			return syscall.Errno(events[0].Data) // #nosec G115 -- EV_ERROR Data is a kernel errno, a nonnegative native error number.
 		case n > 0:
 			return nil
 		}

@@ -151,7 +151,7 @@ func OpenDirectoryWithinAuthorized(root, rel string, parents *ParentChain, expec
 		_ = unix.Close(fd)
 		return nil, err
 	}
-	return os.NewFile(uintptr(fd), target), nil
+	return os.NewFile(uintptr(fd), target), nil // #nosec G115 -- Successful openat returns a nonnegative native file descriptor.
 }
 
 // CaptureChildDirectoryWithinAuthorized observes one direct child through a
@@ -168,7 +168,7 @@ func CaptureChildDirectoryWithinAuthorized(root, directoryRel, child string, par
 		return nil, nil, err
 	}
 	defer func() { _ = directory.Close() }()
-	directoryFD := int(directory.Fd())
+	directoryFD := int(directory.Fd()) // #nosec G115 -- This open file owns a native int descriptor returned by OpenDirectoryWithinAuthorized.
 	directoryEntry, err := parentChainEntryForFD(directoryFD, directoryRel)
 	if err != nil {
 		return nil, nil, fmt.Errorf("identify authorized directory: %w", err)
@@ -238,7 +238,7 @@ func CaptureChildDirectoryWithinAuthorized(root, directoryRel, child string, par
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: authorized directory changed after child observation", errors.Join(ErrParentChanged, err))
 	}
-	reopenedEntry, identifyErr := parentChainEntryForFD(int(reopened.Fd()), directoryRel)
+	reopenedEntry, identifyErr := parentChainEntryForFD(int(reopened.Fd()), directoryRel) // #nosec G115 -- The open file owns a native int descriptor from the authorized openat path.
 	closeErr := reopened.Close()
 	if identifyErr != nil || closeErr != nil || reopenedEntry != directoryEntry {
 		return nil, nil, fmt.Errorf("%w: authorized directory changed after child observation", ErrParentChanged)
