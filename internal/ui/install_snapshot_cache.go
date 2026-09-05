@@ -68,7 +68,7 @@ func observeUtilityInstallations() (map[string]bool, error) {
 	}
 	installed := make(map[string]bool, 3)
 	for _, id := range []string{"hk", "caff", "sshh"} {
-		_, err := os.Stat(filepath.Join(home, ".local", "bin", id))
+		_, err := os.Stat(filepath.Join(home, ".local", "bin", id)) // #nosec G703 -- Read-only discovery under the owner-selected HOME with a fixed literal utility name.
 		installed[id] = err == nil
 	}
 	return installed, nil

@@ -31,6 +31,9 @@ func NewConfigZshScreen(ctx *ScreenContext) *configZshScreen {
 func zshAdjust(a *App, _ string, fwd bool) {
 	cfg := a.deepDiveConfig
 	idx := a.configFieldIndex
+	if idx < 0 {
+		return
+	}
 	switch {
 	case idx < 4: // Prompt style selection
 		opts := []string{"p10k", "starship", "pure", "minimal"}

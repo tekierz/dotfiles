@@ -70,7 +70,7 @@ func (a *App) ensureInstallCache() {
 	if home != "" {
 		binDir := filepath.Join(home, ".local", "bin")
 		for _, util := range []string{"hk", "caff", "sshh"} {
-			_, err := os.Stat(filepath.Join(binDir, util))
+			_, err := os.Stat(filepath.Join(binDir, util)) // #nosec G703 -- Read-only discovery under the owner-selected HOME with a fixed literal utility name.
 			a.manageInstalled[util] = err == nil
 		}
 	}
