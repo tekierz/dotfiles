@@ -54,6 +54,41 @@ func TestRestoreSkipsSymlinkedParent(t *testing.T) {
 	}
 }
 
+// TestRestoreSkipsSymlinkedBackupSource verifies that the read side is guarded
+// too: a malicious backup source symlink must not cause restore to copy data
+// from outside the selected backup directory.
+func TestRestoreSkipsSymlinkedBackupSource(t *testing.T) {
+	home := t.TempDir()
+	backupDir := t.TempDir()
+	outside := t.TempDir()
+
+	relPath := ".zshrc"
+	outsideFile := filepath.Join(outside, "stolen")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(backupDir, EncodeName(relPath))); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, ManifestName), []byte(ManifestLine(relPath, 0o600)), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	result, err := Restore(backupDir, home)
+	if err != nil {
+		t.Fatalf("Restore returned fatal error: %v", err)
+	}
+	if result.Count() != 0 {
+		t.Fatalf("expected 0 restored files, got %d", result.Count())
+	}
+	if _, ok := result.Skipped[relPath]; !ok {
+		t.Fatalf("expected %q to be skipped, skipped=%v", relPath, result.Skipped)
+	}
+	if _, err := os.Stat(filepath.Join(home, relPath)); !os.IsNotExist(err) {
+		t.Fatalf("destination was restored from symlink source, stat err=%v", err)
+	}
+}
+
 // TestRestoreAllowsNewDirsUnderHome verifies the symlinked-parent guard does NOT
 // reject legitimate restores into directories that do not exist yet under the
 // real home. EvalSymlinks must resolve the deepest existing ancestor, not the

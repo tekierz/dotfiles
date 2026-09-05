@@ -2,7 +2,7 @@
 
 A cross-platform terminal environment management platform with **16 customizable themes**.
 
-Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. Features an interactive TUI for installation and configuration, or use CLI commands directly. A separate native Windows installer (`bin/dotfiles-setup.ps1`, PowerShell) is also available.
+Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. Features an interactive Go TUI for installation and configuration, or use CLI commands directly.
 
 ## Quick Start
 
@@ -33,7 +33,7 @@ make build
 | `dotfiles hotkeys` | View keybindings cheatsheet |
 | `dotfiles update` | Check for package updates |
 | `dotfiles status` | Show current configuration |
-| `dotfiles theme list` | List available themes |
+| `dotfiles theme --list` | List available themes |
 | `dotfiles theme set <name>` | Set theme (run `dotfiles install` to apply) |
 | `dotfiles config <tool>` | Configure a specific tool |
 | `dotfiles user <name>` | Switch to / manage a user profile |
@@ -56,23 +56,18 @@ make build
 | **fzf** | Fuzzy finder |
 | **bat** | `cat` with syntax highlighting |
 | **delta** | Beautiful git diffs |
+| **ripgrep** | Fast recursive search |
+| **fd** | Fast, friendly `find` replacement |
+| **fswatch** | Cross-platform file change monitor |
 | **btop** | System monitor |
-| **fastfetch** | System info display |
 | **neovim** | Editor (Kickstart.nvim) |
-| **sshh** | Quick SSH connection manager |
-| **macmon** | macOS system monitor (macOS only) |
-
-### Disk & Network Analysis Tools
-
-| Tool | Description |
-|------|-------------|
-| **ncdu** | Interactive disk usage analyzer |
-| **duf** | Modern `df` replacement with colors |
-| **dust** | Intuitive `du` with visual bars |
-| **bandwhich** | Real-time bandwidth by process |
-| **gping** | Ping with a live graph |
-| **doggo** | Modern DNS client (better `dig`) |
-| **trippy** | Visual traceroute + ping |
+| **lazygit** | Git terminal UI |
+| **lazydocker** | Docker terminal UI (macOS/Arch) |
+| **glow** | Markdown viewer |
+| **Claude Code** | CLI plus MCP configuration |
+| **Tailscale** | Mesh VPN |
+| **Sunshine** | Game streaming host |
+| **Moonlight** | Game streaming client |
 
 ### macOS Quality-of-Life Apps (optional, macOS only)
 
@@ -80,28 +75,22 @@ make build
 |-----|-------------|
 | **Rectangle** | Window snapping & management |
 | **Raycast** | Spotlight replacement with superpowers |
-| **Stats** | System monitor in menu bar |
-| **AltTab** | Windows-style alt-tab switcher |
-| **MonitorControl** | Control external monitor brightness |
-| **Mos** | Smooth scrolling for external mouse |
-| **Karabiner-Elements** | Keyboard customization |
+| **Zen Browser** | Privacy-focused browser |
+| **Cursor** | AI code editor |
+| **LM Studio** | Local LLM desktop app |
+| **OBS Studio** | Video recording and streaming |
 | **IINA** | Modern video player |
-| **The Unarchiver** | Archive extraction |
 | **AppCleaner** | Clean app uninstallation |
-| **mas** | Mac App Store CLI |
-| **trash** | Move files to trash from CLI |
 
 ### Raspberry Pi Support
 
-Optimized configurations for different Pi models:
+The Go app detects Raspberry Pi systems and trims heavy tools on low-memory models.
 
-| Model | Flag | Notes |
-|-------|------|-------|
-| **Pi 5** | `--raspi5` | Full toolset, all features |
-| **Pi 4** | `--raspi` | Full toolset |
-| **Pi Zero 2** | `--raspizero2` | Lightweight (skips yazi, btop) |
-
-Raspberry Pi installs via apt + manual builds for modern tools not in repos.
+| Model | Notes |
+|-------|------|
+| **Pi 5** | Full toolset where packages are available |
+| **Pi 4** | Full toolset where packages are available |
+| **Pi Zero 2** | Lightweight mode skips heavy tools |
 
 ## Features
 
@@ -144,7 +133,7 @@ All tools share a unified color scheme. Choose from 16 themes:
 ```bash
 dotfiles theme set dracula  # Set theme to Dracula
 dotfiles theme set nord     # Set theme to Nord
-dotfiles theme list         # Show all themes
+dotfiles theme --list       # Show all themes
 dotfiles status             # Show current settings
 ```
 
@@ -210,9 +199,8 @@ Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
 | `dotfiles` | Main management interface |
 | `hk` | Hotkey reference cheatsheet |
 | `caff` | Toggle system sleep (like Caffeine) |
+| `sshh` | Quick SSH connection manager backed by `~/.sshh` |
 | `y` | Yazi file manager (cd on exit) |
-
-`sshh` (Quick SSH connection manager) is installed from its own Homebrew tap ([github.com/tekierz/sshh](https://github.com/tekierz/sshh)), not bundled or managed by dotfiles.
 
 ### Shell Aliases
 
@@ -225,17 +213,6 @@ lt      # tree view
 
 # Navigation
 cd      # zoxide (smart jump)
-
-# Disk analysis
-df      # duf (colorful disk free)
-du      # dust (visual disk usage)
-diskuse # ncdu (interactive analyzer)
-
-# Network analysis
-ping    # gping (graphical ping)
-dig     # doggo (modern DNS)
-trace   # trippy (visual traceroute)
-bandwidth # bandwhich (bandwidth monitor)
 ```
 
 ## Configuration Files
@@ -253,21 +230,6 @@ After running, configs are placed in:
 | `~/.config/dotfiles/settings` | Theme, navigation, and active user |
 | `~/.config/dotfiles/users/` | User profile settings |
 | `~/.sshh` | SSH hosts for sshh |
-
-## Legacy Bash Script
-
-The original bash setup script is still available for direct installation:
-
-```bash
-# Quick install via curl
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash
-
-# With all macOS apps
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --macos-apps
-
-# Raspberry Pi
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --raspi
-```
 
 ## Post-Install
 

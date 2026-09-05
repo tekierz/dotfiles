@@ -455,3 +455,88 @@ func TestNavBlockedWhileStreaming(t *testing.T) {
 		}
 	})
 }
+
+func TestManageSavedMsgHandledAfterNavigation(t *testing.T) {
+	ctx := newGoldenContext(t)
+	app := ctx.app
+	app.manageConfig = NewManageConfig()
+	app.snapshotManageBaseline()
+
+	app.manageConfig.GhosttyFontSize++
+	if changed := changedManageTools(&app.manageConfigBaseline, app.manageConfig, app.manageConfigBaselineTheme, app.theme); len(changed) == 0 {
+		t.Fatal("test setup failed: expected a changed Manage tool before save completion")
+	}
+
+	app.screenMgr.Navigate(ScreenBackups)
+	app.Update(manageSavedMsg{})
+
+	if app.manageStatus != "Saved ✓" {
+		t.Fatalf("manageStatus = %q, want saved status", app.manageStatus)
+	}
+	if changed := changedManageTools(&app.manageConfigBaseline, app.manageConfig, app.manageConfigBaselineTheme, app.theme); len(changed) != 0 {
+		t.Fatalf("manage baseline was not refreshed globally; changed tools after save = %v", changed)
+	}
+}
+
+func TestSetStartScreenNavigatesScreenManagerImmediately(t *testing.T) {
+	withTempHome(t)
+	app := NewApp(true)
+
+	app.SetStartScreen(ScreenManage)
+
+	if app.screenMgr.Current() == nil {
+		t.Fatal("screen manager current screen is nil after SetStartScreen")
+	}
+	if got := app.screenMgr.Current().ID(); got != ScreenManage {
+		t.Fatalf("screen manager current screen = %v, want ScreenManage", got)
+	}
+}
+
+func TestManageGlobalFieldsSyncScreenContext(t *testing.T) {
+	ctx := newGoldenContext(t)
+	app := ctx.app
+	app.manageConfig = NewManageConfig()
+	app.theme = defaultTheme
+	app.navStyle = navEmacs
+	app.animationsEnabled = true
+	app.syncScreenContext()
+
+	liveCtx := app.screenMgr.Context()
+	screen := NewManageScreen(liveCtx)
+	fields := app.manageFieldsFor(manageItemGlobal)
+
+	app.configFieldIndex = findManageFieldIndex(t, fields, manageFieldTheme)
+	screen.manageAdjustField(fields, 1)
+	if liveCtx.Theme != app.theme {
+		t.Fatalf("context theme = %q, want app theme %q", liveCtx.Theme, app.theme)
+	}
+
+	app.configFieldIndex = findManageFieldIndex(t, fields, "nav")
+	screen.manageAdjustField(fields, 1)
+	if app.navStyle != navVim {
+		t.Fatalf("navStyle = %q, want %q after cycle", app.navStyle, navVim)
+	}
+	if liveCtx.NavStyle != app.navStyle {
+		t.Fatalf("context nav style = %q, want app nav style %q", liveCtx.NavStyle, app.navStyle)
+	}
+
+	app.configFieldIndex = findManageFieldIndex(t, fields, manageFieldAnims)
+	screen.manageToggleField(fields)
+	if app.animationsEnabled {
+		t.Fatal("animationsEnabled = true, want false after toggle")
+	}
+	if liveCtx.AnimationsEnabled != app.animationsEnabled {
+		t.Fatalf("context animations = %v, want app animations %v", liveCtx.AnimationsEnabled, app.animationsEnabled)
+	}
+}
+
+func findManageFieldIndex(t *testing.T, fields []manageField, key string) int {
+	t.Helper()
+	for i, field := range fields {
+		if field.key == key {
+			return i
+		}
+	}
+	t.Fatalf("field %q not found in %#v", key, fields)
+	return 0
+}

@@ -40,16 +40,15 @@ beta has since resolved):
 
 ### Missing Features (Low Priority)
 
-> **Status:** Disk/network tools are now installed by the **legacy bash script**
-> (`bin/dotfiles-setup`, ~lines 941–952 / 1110+). They are **not** yet registered in the
-> Go TUI tool registry — no corresponding tool files exist in `internal/tools/`.
+> **Status:** Disk/network tools were part of the removed legacy installer, not the
+> current Go TUI registry. No corresponding tool files exist in `internal/tools/`.
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| fastfetch | Low | System info display (in bash script; not in Go registry) |
-| ncdu, duf, dust | Low | Disk analysis tools (in bash script; not in Go registry) |
+| fastfetch | Low | System info display (formerly in removed installer; not in Go registry) |
+| ncdu, duf, dust | Low | Disk analysis tools (formerly in removed installer; not in Go registry) |
 | tlrc | Low | TL;DR client |
-| bandwhich, gping, doggo, trippy | Low | Network tools (in bash script; not in Go registry) |
+| bandwhich, gping, doggo, trippy | Low | Network tools (formerly in removed installer; not in Go registry) |
 | Stats, AltTab, MonitorControl, Mos | Low | macOS apps |
 
 ### Platform Gaps (Medium Priority)
@@ -238,10 +237,10 @@ beta has since resolved):
   - DONE: `IsLightweightMode()` / `IsHeavy()` gating skips heavy tools on low-memory systems
 
 - [~] **Task 4.3:** Add optional disk/network tools (partial)
-  - DONE (bash): fastfetch, ncdu, duf, dust, bandwhich, gping, doggo, trippy are installed by
-    the legacy bash script `bin/dotfiles-setup` (~lines 941-952 / 1110+)
+  - Historical note: fastfetch, ncdu, duf, dust, bandwhich, gping, doggo, and trippy were
+    handled by the removed legacy installer.
   - REMAINING (Go TUI): no corresponding tool files exist in `internal/tools/`; these are not
-    yet registered in the Go registry
+    registered in the Go registry.
 
 ### Phase 5: Testing & Documentation
 

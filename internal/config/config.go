@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ErrNoConfigDir is returned when the config directory cannot be determined
@@ -72,22 +73,95 @@ func DefaultGlobalConfig() *GlobalConfig {
 	}
 }
 
-// ConfigDir returns the dotfiles config directory path
-// Returns empty string if HOME is not set and XDG_CONFIG_HOME is not available.
+// ConfigDir returns the absolute dotfiles config directory path. Relative
+// XDG_CONFIG_HOME/HOME values are ignored rather than being used for config
+// writes or destructive cleanup paths.
 func ConfigDir() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Clean(filepath.Join(xdg, "dotfiles"))
+		if filepath.IsAbs(xdg) {
+			return filepath.Clean(filepath.Join(xdg, "dotfiles"))
+		}
 	}
 	home := os.Getenv("HOME")
-	if home == "" {
+	if home == "" || !filepath.IsAbs(home) {
 		// Fallback: try to get home directory from os.UserHomeDir
 		var err error
 		home, err = os.UserHomeDir()
-		if err != nil || home == "" {
+		if err != nil || home == "" || !filepath.IsAbs(home) {
 			return ""
 		}
 	}
 	return filepath.Clean(filepath.Join(home, ".config", "dotfiles"))
+}
+
+// SafeRemoveAllUnder removes target only when target resolves under base. It is
+// intended for config-owned destructive deletes such as backup cleanup and
+// uninstall. Symlinked intermediate directories are resolved through the deepest
+// existing ancestor, so paths like <base>/link/child cannot delete outside base.
+func SafeRemoveAllUnder(base, target string) error {
+	if base == "" || target == "" {
+		return ErrNoConfigDir
+	}
+	if !filepath.IsAbs(base) || !filepath.IsAbs(target) {
+		return fmt.Errorf("refusing to remove relative path: base=%q target=%q", base, target)
+	}
+
+	cleanBase := filepath.Clean(base)
+	cleanTarget := filepath.Clean(target)
+	if cleanTarget == string(os.PathSeparator) {
+		return fmt.Errorf("refusing to remove filesystem root")
+	}
+
+	realBase, err := filepath.EvalSymlinks(cleanBase)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("resolve base: %w", err)
+	}
+	realBase = filepath.Clean(realBase)
+
+	resolvedTarget, exists, err := resolveDeepestExisting(cleanTarget)
+	if err != nil {
+		return fmt.Errorf("resolve target: %w", err)
+	}
+	if exists {
+		if !pathWithin(resolvedTarget, realBase) {
+			return fmt.Errorf("refusing to remove %s outside %s", cleanTarget, cleanBase)
+		}
+	} else {
+		// No target ancestor exists. This is a no-op for RemoveAll, but still
+		// require the lexical target to be under the requested base.
+		if !pathWithin(cleanTarget, cleanBase) {
+			return fmt.Errorf("refusing to remove %s outside %s", cleanTarget, cleanBase)
+		}
+	}
+
+	return os.RemoveAll(cleanTarget)
+}
+
+func resolveDeepestExisting(path string) (string, bool, error) {
+	probe := filepath.Clean(path)
+	for {
+		resolved, err := filepath.EvalSymlinks(probe)
+		if err == nil {
+			return filepath.Clean(resolved), true, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", false, err
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return "", false, nil
+		}
+		probe = parent
+	}
+}
+
+func pathWithin(path, base string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanBase := filepath.Clean(base)
+	return cleanPath == cleanBase || strings.HasPrefix(cleanPath, cleanBase+string(os.PathSeparator))
 }
 
 // ToolsDir returns the per-tool config directory path.

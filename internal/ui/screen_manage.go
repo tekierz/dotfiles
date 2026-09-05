@@ -104,14 +104,7 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 	// --- Async results (delegated here while this screen is active) ---
 	case manageSavedMsg:
-		if msg.err != nil {
-			a.manageStatus = fmt.Sprintf("Save failed: %v", msg.err)
-		} else {
-			a.manageStatus = "Saved ✓"
-			// Refresh the diff baseline so the next save only applies tools changed
-			// since THIS save (otherwise a second save would re-apply the same tools).
-			a.snapshotManageBaseline()
-		}
+		a.handleManageSavedMsg(msg)
 		return s, nil
 
 		// The streaming/terminal install messages (manageInstallDoneMsg,
@@ -396,8 +389,11 @@ func (s *manageScreen) manageAdjustField(fields []manageField, dir int) {
 	case manageFieldOption:
 		if f.str != nil && len(f.options) > 0 {
 			*f.str = cycleStringOption(f.options, *f.str, dir > 0)
-			if f.key == manageFieldTheme {
+			switch f.key {
+			case manageFieldTheme:
 				a.syncThemeIndex()
+			case "nav":
+				a.syncScreenContext()
 			}
 		}
 	case manageFieldNumber:
@@ -415,12 +411,16 @@ func (s *manageScreen) manageAdjustField(fields []manageField, dir int) {
 
 // manageToggleField flips the current toggle field, if any.
 func (s *manageScreen) manageToggleField(fields []manageField) {
+	a := s.App()
 	f, ok := s.manageCurrentField(fields)
 	if !ok {
 		return
 	}
 	if f.kind == manageFieldToggle && f.b != nil {
 		*f.b = !*f.b
+		if f.key == manageFieldAnims {
+			a.syncScreenContext()
+		}
 	}
 }
 

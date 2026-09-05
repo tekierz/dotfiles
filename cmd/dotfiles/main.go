@@ -860,12 +860,17 @@ func uninstallBinaryNames() []string {
 // removeConfigDir removes the dotfiles configuration directory.
 func removeConfigDir(configDir string) {
 	fmt.Printf("Removing configuration directory: %s\n", configDir)
+	if configDir == "" {
+		fmt.Println("  Configuration directory not found.")
+		fmt.Println()
+		return
+	}
 	if _, err := os.Stat(configDir); err != nil {
 		fmt.Println("  Configuration directory not found.")
 		fmt.Println()
 		return
 	}
-	if err := os.RemoveAll(configDir); err != nil {
+	if err := config.SafeRemoveAllUnder(configDir, configDir); err != nil {
 		fmt.Fprintf(os.Stderr, "  Warning: Could not remove config directory: %v\n", err)
 	} else {
 		fmt.Println("  Configuration directory removed.")

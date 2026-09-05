@@ -107,12 +107,12 @@ cp ~/.claude.json ~/.claude.json.testbak 2>/dev/null
 ```bash
 ./bin/dotfiles version
 ./bin/dotfiles status
-./bin/dotfiles theme list            # NOTE: 'list', not '--list' (doc fix)
+./bin/dotfiles theme --list
 ./bin/dotfiles theme set dracula     # saves theme; run 'dotfiles install' to apply
 ./bin/dotfiles update check          # prints outdated packages (shouldn't hang on a no-TTY sudo)
 ./bin/dotfiles --help
 ```
-- [ ] `theme list` shows 16 themes; `theme --list` should error (flag removed — confirms the doc form).
+- [ ] `theme --list` shows 16 themes.
 - [ ] `update check` returns promptly and doesn't block on `sudo` (brew path on Mac).
 
 ---

@@ -22,7 +22,7 @@ dotfiles backups            # List backups (CLI)
 dotfiles restore            # Launch TUI backup selector (ScreenBackups)
 dotfiles restore <name>     # Restore a specific backup (CLI)
 dotfiles theme              # Launch TUI theme picker
-dotfiles theme list         # List themes (CLI)
+dotfiles theme --list       # List themes (CLI)
 dotfiles theme set <name>   # Set theme directly (CLI)
 dotfiles config <tool>      # Configure a tool (ghostty, tmux, zsh, neovim, git, yazi, fzf, apps, utilities)
 dotfiles version            # Print version information
@@ -95,6 +95,7 @@ func init() {
 
     // Per-command flags
     hotkeysCmd.Flags().String("tool", "", "Filter hotkeys by tool (tmux, zsh, neovim, etc.)")
+    themeCmd.Flags().Bool("list", false, "List available themes")
 
     uninstallCmd.Flags().Bool("keep-config", false, "Keep ~/.config/dotfiles directory")
     uninstallCmd.Flags().Bool("keep-binaries", false, "Keep installed binaries")

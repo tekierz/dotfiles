@@ -54,6 +54,62 @@ func TestConfigDir(t *testing.T) {
 	}
 }
 
+func TestConfigDirIgnoresRelativeEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", "relative/config")
+	t.Setenv("HOME", home)
+
+	expected := filepath.Join(home, ".config", "dotfiles")
+	if dir := ConfigDir(); dir != expected {
+		t.Fatalf("ConfigDir() = %q, want %q", dir, expected)
+	}
+
+	t.Setenv("HOME", "relative-home")
+	if dir := ConfigDir(); dir != "" {
+		t.Fatalf("ConfigDir() with relative XDG_CONFIG_HOME and HOME = %q, want empty", dir)
+	}
+}
+
+func TestSafeRemoveAllUnderAllowsChild(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "backups", "old")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "manifest.tsv"), []byte("ok"), 0o600); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+
+	if err := SafeRemoveAllUnder(base, target); err != nil {
+		t.Fatalf("SafeRemoveAllUnder() returned error: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target still exists after remove, stat err=%v", err)
+	}
+}
+
+func TestSafeRemoveAllUnderRejectsSymlinkEscape(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "victim")
+	if err := os.WriteFile(outsideFile, []byte("do not remove"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	linkPath := filepath.Join(base, "link")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	err := SafeRemoveAllUnder(base, filepath.Join(linkPath, "victim"))
+	if err == nil {
+		t.Fatal("SafeRemoveAllUnder() succeeded through symlink escape, want error")
+	}
+	if _, statErr := os.Stat(outsideFile); statErr != nil {
+		t.Fatalf("outside file was affected, stat err=%v", statErr)
+	}
+}
+
 func TestToolsDir(t *testing.T) {
 	origXDG := os.Getenv("XDG_CONFIG_HOME")
 	defer func() {

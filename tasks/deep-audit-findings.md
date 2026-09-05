@@ -64,7 +64,7 @@ Most of the 30 confirmed high findings are not independent — they cluster into
 
 **Covers:** C22 (CRITICAL — installed `dotfiles restore` restores nothing: undefined `is_safe_restore_path` in the embedded CLI heredoc), C23 (embedded CLI can't theme catppuccin-frappe/macchiato, silently renders Mocha), and the medium C24 (`--theme` with no value aborts under `set -u`).
 
-**Root cause:** `bin/dotfiles-setup` contains the outer setup script **and** an embedded `dotfiles` management CLI heredoc that duplicates functions (`is_safe_restore_path`, `load_theme_colors`). The copies have drifted: the embedded restore calls a function that was never pasted into the heredoc (→ 127 not-found → every file skipped → restore is a total no-op), and the embedded `load_theme_colors` is missing two themes that its own `SUPPORTED_THEMES` advertises.
+**Root cause:** The removed legacy installer contained the outer setup script **and** an embedded `dotfiles` management CLI heredoc that duplicated functions (`is_safe_restore_path`, `load_theme_colors`). The copies drifted: the embedded restore called a function that was never pasted into the heredoc (→ 127 not-found → every file skipped → restore is a total no-op), and the embedded `load_theme_colors` missed two themes that its own `SUPPORTED_THEMES` advertised.
 
 **Systemic fix:** Paste the missing `is_safe_restore_path` body into the `DOTFILES_CLI_EOF` heredoc (fixes C22). Add the frappe/macchiato cases to the embedded `load_theme_colors` and make the `*)` default error instead of silently substituting Mocha (C23). Guard `--theme`'s `$2` with `${2:-}` (C24). Long-term, generate the embedded CLI's duplicated tables/functions from a single source so the two copies cannot drift. Add a smoke test running the generated `~/.local/bin/dotfiles restore` against a fixture.
 
@@ -251,22 +251,25 @@ Proof: I drove the Factory-created handler for ALL 33 migrated screens through V
 ### C22. Installed `dotfiles restore` silently restores nothing: undefined `is_safe_restore_path` in embedded CLI
 
 - **Severity:** CRITICAL | **Dimension:** bash
-- **Location:** `bin/dotfiles-setup` : 3256-3291 (call at 3261); function only defined at 794
-- **Problem:** The embedded `dotfiles` management CLI heredoc (DOTFILES_CLI_EOF, lines 2322-3441) defines its own `restore_backup`, which at line 3261 calls `if ! is_safe_restore_path "$original"; then ... skip ... fi`. But `is_safe_restore_path` is ONLY defined in the OUTER setup script (line 794); it is never included inside the DOTFILES_CLI_EOF heredoc. The installed `~/.local/bin/dotfiles` therefore has no such function. The embedded CLI has no `set -e`/`set -u` (header at lines 2323), so the missing function does not abort — instead `is_safe_restore_path` exits 127 (command not found), making `! is_safe_restore_path` TRUE for EVERY manifest line. Result: every entry hits the `Skipping unsafe restore path` branch, `((errors++))`, `continue`. Net effect: `dotfiles restore` restores 0 files, removes 0 files, reports N errors, and the user's pre-setup configs are never restored. The user-facing `dotfiles restore` / `dotfiles backups`-then-`restore` flow is completely broken. (The OUTER `dotfiles-setup --restore` path works because it DOES define the function at 794.) Traced: install writes CLI -> user runs `dotfiles restore` -> restore_backup loops manifest -> calls missing is_safe_restore_path -> 127 -> all entries skipped.
+- **Location:** removed legacy installer heredoc
+- **Problem:** The embedded `dotfiles` management CLI heredoc defined its own `restore_backup` and called `is_safe_restore_path`, but that function was only defined in the outer setup script. The installed `~/.local/bin/dotfiles` therefore had no such function. Net effect: `dotfiles restore` restored 0 files, removed 0 files, reported N errors, and the user's pre-setup configs were never restored.
+- **Resolution:** Closed by removing the legacy installer and its embedded duplicate CLI; restore now lives in the Go app.
 - **Fix:** Add the `is_safe_restore_path` function definition inside the DOTFILES_CLI_EOF heredoc (paste the same body as lines 794-812) before `restore_backup` is defined in the embedded CLI. Alternatively, factor the guard into the manifest-loop inline. Add a smoke test that runs the generated `~/.local/bin/dotfiles restore` against a fixture manifest and asserts files are actually restored.
 
 ### C23. Embedded `dotfiles` CLI cannot theme catppuccin-frappe / catppuccin-macchiato (silently renders Mocha)
 
 - **Severity:** HIGH | **Dimension:** bash
-- **Location:** `bin/dotfiles-setup` : 2379-2495 (case labels), 2492-2493 (default fallthrough)
-- **Problem:** The embedded CLI's `load_theme_colors` (lines 2379-2495) is missing two themes that are present in its own `SUPPORTED_THEMES` (line 2332) and offered by `interactive_select_theme`: `catppuccin-frappe` and `catppuccin-macchiato`. The case statement jumps from `catppuccin-latte` (line 2392) straight to `dracula` (line 2402), and the `*)` default at line 2492 silently calls `load_theme_colors "catppuccin-mocha"`. So `dotfiles theme catppuccin-frappe` passes the SUPPORTED_THEMES validation (line 3351), sets THEME=catppuccin-frappe, writes that to the settings file, but `apply_theme`->update_ghostty/tmux/yazi/bat all load MOCHA colors. The user gets Mocha colors while `dotfiles status` reports 'frappe'. The OUTER setup script's `load_theme_colors` (lines 34-278) DOES include both themes, so the very first `dotfiles-setup --theme catppuccin-frappe` install is correct — but any later theme switch to frappe/macchiato via the installed CLI regresses to Mocha. This is a latent divergence between the two copies of `load_theme_colors` in the same file.
+- **Location:** removed legacy installer heredoc
+- **Problem:** The embedded CLI's `load_theme_colors` missed two themes that were present in its own `SUPPORTED_THEMES`: `catppuccin-frappe` and `catppuccin-macchiato`. Selecting either theme persisted the requested name but rendered Mocha colors.
+- **Resolution:** Closed by removing the duplicate theme implementation; theme handling now lives in the Go app.
 - **Fix:** Add the `catppuccin-frappe)` and `catppuccin-macchiato)` cases to the embedded CLI's `load_theme_colors` (copy color blocks from the outer function lines 75-110). Better: de-duplicate by generating the embedded CLI's theme table from a single source so the two copies cannot drift. Also change the `*)` default to error/return non-zero instead of silently substituting Mocha, so missing themes surface loudly.
 
-### C24. `dotfiles-setup --theme` with no value aborts with `$2: unbound variable` under set -u instead of the friendly error
+### C24. Removed legacy installer `--theme` with no value aborted with `$2: unbound variable` under set -u instead of the friendly error
 
 - **Severity:** MEDIUM | **Dimension:** bash
-- **Location:** `bin/dotfiles-setup` : 582-597 (specifically 583)
-- **Problem:** `set -euo pipefail` is enabled at line 9, so `set -u` is active throughout argument parsing. In the `--theme` case, line 583 is `if [[ -n "$2" && ! "$2" =~ ^- ]]; then`. `$2` is referenced WITHOUT a default. If a user runs `dotfiles-setup --theme` as the final argument (no value), `$2` is unset and `set -u` aborts the entire script with `bin/dotfiles-setup: line 583: $2: unbound variable`. The intended `else` branch (lines 592-596) that prints `Error: --theme requires a theme name` is therefore unreachable in exactly the case it was written for. Reproduced: a minimal `set -euo pipefail` arg loop with bare `--theme` prints `$2: unbound variable`. Note the `--restore` case at line 568 correctly guards with `${2:-}`; only `--theme` regressed.
+- **Location:** removed legacy installer argument parser
+- **Problem:** The shell parser referenced `$2` without a default while `set -u` was active, so a bare `--theme` aborted before reaching its friendly validation branch.
+- **Resolution:** Closed by removing the legacy installer. Theme selection is handled by `dotfiles theme set <name>` and the TUI picker.
 - **Fix:** Change line 583 to use a default: `if [[ -n "${2:-}" && ! "${2:-}" =~ ^- ]]; then` (and the body's `THEME="$2"` is fine once the guard passes). This restores the intended user-facing error message.
 
 ### C25. Neovim 'nvchad' preset silently degrades to a hand-rolled minimal config (ghostty-class option/value mismatch)
@@ -414,14 +417,14 @@ Grouped by dimension. Each is a one-line title, location, and short fix. The DEA
 
 ### bash (4)
 
-- **`everforest` theme available in Go TUI but unsupported by bash setup/CLI (theme write-back renders as Mocha or is rejected)** — `bin/dotfiles-setup`:26 (SUPPORTED_THEMES), 2332 (CLI SUPPORTED_THEMES), 34-278 & 2379-2495 (load_theme_colors)  
-  Fix: Add an `everforest` color block to both copies of `load_theme_colors` and to both `SUPPORTED_THEMES` strings, OR remove everforest from the Go theme list. Long term, generate the bash theme tables and SUPPORTED_THEMES from the same source of truth as the Go registry to prevent drift; add a cross-repo test asserting the two theme lists match.
-- **`.zshrc` `trace` alias never created: gated on `command -v trippy` but trippy installs the `trip` binary** — `bin/dotfiles-setup`:1303 (also 993 brew install, 1175/1200 references)  
-  Fix: Change the guard to the real binary: `command -v trip &> /dev/null && alias trace='trip'`. Verify against the Go tools registry's notion of the trippy binary so both agree.
-- **`list_backups` file count becomes malformed `0\n0` when a manifest has no backed-up files** — `bin/dotfiles-setup`:778 (setup) and 3213 (embedded CLI)  
-  Fix: Drop the redundant fallback; `grep -c` already prints 0 on no match: `local files; files=$(grep -c "|yes" "$manifest" 2>/dev/null); files=${files:-0}`. Or `files=$(grep -c "|yes" "$manifest" 2>/dev/null || true)`.
-- **Multiline fzf-colors sed substitution drops trailing backslash line-continuations, embedding literal newlines in FZF_DEFAULT_OPTS** — `bin/dotfiles-setup`:1411-1414 (setup) and 2913-2942 (update_fzf)  
-  Fix: Avoid sed for multi-line structured insertion: delete the placeholder/marker region and append the freshly generated block with `cat >>`, or use awk/printf to splice between the `>>>`/`<<<` markers. This also removes the `&`/delimiter-injection fragility inherent to building sed replacements from generated content.
+- **`everforest` theme available in Go TUI but unsupported by the removed shell setup/CLI**  
+  Resolution: closed by removing the duplicate shell theme implementation.
+- **`.zshrc` `trace` alias never created in the removed shell setup path**  
+  Resolution: closed by removing that setup path.
+- **Shell `list_backups` file count became malformed `0\n0` when a manifest had no backed-up files**  
+  Resolution: closed by removing the duplicate shell backup implementation.
+- **Multiline fzf-colors sed substitution in the removed shell setup path dropped trailing backslash line-continuations**  
+  Resolution: closed by removing that setup path.
 
 ### security (3)
 

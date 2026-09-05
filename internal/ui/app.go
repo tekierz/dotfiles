@@ -102,8 +102,20 @@ func (a *App) syncThemeIndex() {
 		if t.name == a.theme {
 			a.themeIndex = i
 			SetTheme(a.theme) // Apply theme colors for live preview
+			a.syncScreenContext()
 			return
 		}
+	}
+}
+
+func (a *App) syncScreenContext() {
+	if a.screenMgr == nil {
+		return
+	}
+	if ctx := a.screenMgr.Context(); ctx != nil {
+		ctx.Theme = a.theme
+		ctx.NavStyle = a.navStyle
+		ctx.AnimationsEnabled = a.animationsEnabled
 	}
 }
 
@@ -679,7 +691,8 @@ func restoreBackupCmd(b BackupEntry) tea.Cmd {
 // deleteBackupCmd deletes a backup directory.
 func deleteBackupCmd(b BackupEntry) tea.Cmd {
 	return func() tea.Msg {
-		err := os.RemoveAll(b.Path)
+		backupsDir := filepath.Join(config.ConfigDir(), "backups")
+		err := config.SafeRemoveAllUnder(backupsDir, b.Path)
 		return backupDeleteDoneMsg{name: b.Name, err: err}
 	}
 }
@@ -815,7 +828,11 @@ func cleanupBackups() {
 		return
 	}
 
-	backupsDir := filepath.Join(config.ConfigDir(), "backups")
+	configDir := config.ConfigDir()
+	if configDir == "" {
+		return
+	}
+	backupsDir := filepath.Join(configDir, "backups")
 	entries, err := os.ReadDir(backupsDir)
 	if err != nil {
 		return
@@ -865,7 +882,7 @@ func cleanupBackups() {
 
 		if shouldDelete {
 			backupPath := filepath.Join(backupsDir, bk.name)
-			os.RemoveAll(backupPath)
+			_ = config.SafeRemoveAllUnder(backupsDir, backupPath)
 		}
 	}
 }
@@ -928,6 +945,9 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 // was one of these results; the screen handlers delegate to the same methods.
 func (a *App) handleOperationCompletionMsg(msg tea.Msg) (tea.Cmd, bool) {
 	switch m := msg.(type) {
+	case manageSavedMsg:
+		a.handleManageSavedMsg(m)
+		return nil, true
 	case backupRestoreDoneMsg:
 		a.handleBackupRestoreDoneMsg(m)
 		return nil, true
@@ -943,6 +963,15 @@ func (a *App) handleOperationCompletionMsg(msg tea.Msg) (tea.Cmd, bool) {
 		return a.handleUserSwitchedMsg(m), true
 	}
 	return nil, false
+}
+
+func (a *App) handleManageSavedMsg(msg manageSavedMsg) {
+	if msg.err != nil {
+		a.manageStatus = fmt.Sprintf("Save failed: %v", msg.err)
+		return
+	}
+	a.manageStatus = "Saved ✓"
+	a.snapshotManageBaseline()
 }
 
 // Update handles messages.
@@ -1167,12 +1196,14 @@ func (a *App) SetStartScreen(screen Screen) {
 		if a.skipIntro || !a.animationsEnabled {
 			a.screen = ScreenWelcome
 			a.animationDone = true
+			a.navigateStartScreenNow()
 			return
 		}
 
 		a.screen = ScreenAnimation
 		a.animFrame = 0
 		a.animationDone = false
+		a.navigateStartScreenNow()
 		return
 	}
 
@@ -1180,6 +1211,7 @@ func (a *App) SetStartScreen(screen Screen) {
 	if a.skipIntro || !a.animationsEnabled {
 		a.screen = screen
 		a.animationDone = true
+		a.navigateStartScreenNow()
 		return
 	}
 
@@ -1187,6 +1219,13 @@ func (a *App) SetStartScreen(screen Screen) {
 	a.screen = ScreenAnimation
 	a.animFrame = 0
 	a.animationDone = false
+	a.navigateStartScreenNow()
+}
+
+func (a *App) navigateStartScreenNow() {
+	if a.screenMgr != nil {
+		a.screenMgr.Navigate(a.screen)
+	}
 }
 
 // SetHotkeyFilter sets the tool filter for hotkeys screen.

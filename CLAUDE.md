@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is **dotfiles**: a cross-platform terminal environment management platform that creates a consistent terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. It includes:
 
 - **Go TUI Application** (`cmd/dotfiles/`) - Interactive installer and management platform using Bubble Tea
-- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,500 lines of bash)
+- **Embedded utility scripts** (`internal/scripts/`) - Small helpers installed by the Go app (`hk`, `caff`, `sshh`)
 
 The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 25+ other terminal tools with unified theming. v2.1 added Tailscale (VPN), Sunshine/Moonlight (game streaming), and Claude Code (MCP configuration).
 
@@ -16,7 +16,6 @@ The Go application provides installation, configuration, and updates for zsh, tm
 ```
 cmd/
   dotfiles/              # Go CLI entry point (Cobra + Bubble Tea)
-  installer/             # Standalone installer entry point (main.go)
 internal/
   config/                # Configuration loading/saving (JSON)
   hotkeys/               # Hotkey definitions for tools
@@ -26,13 +25,10 @@ internal/
   tools/                 # Tool registry (30 tools)
   ui/                    # Bubble Tea TUI (~14,600 lines)
 bin/
-  dotfiles               # Built Go binary
-  dotfiles-setup         # Legacy bash script
-  dotfiles-setup.ps1     # Windows PowerShell setup script
+  dotfiles               # Generated Go binary (ignored; created by make build)
 docs/
   tools.md               # Detailed tool reference
   beta.plan              # Planned improvements for next release
-  v2-analysis-plan.md    # v2 analysis / planning notes
   security-scanning.md   # Security scanning reference
 ```
 
@@ -106,7 +102,7 @@ dotfiles config <tool>    # Configure a specific tool
 dotfiles status           # Print status (CLI)
 dotfiles backups          # List backups (CLI)
 dotfiles restore <name>   # Restore backup (CLI)
-dotfiles theme list       # List themes (CLI)
+dotfiles theme --list     # List themes (CLI)
 dotfiles theme set <name> # Set theme directly (CLI)
 dotfiles user [name]      # Manage users (add/delete subcommands)
 dotfiles users            # List users (CLI)
@@ -122,7 +118,7 @@ dotfiles uninstall        # Remove dotfiles and restore config
 - **Platform detection**: macOS (Homebrew), Arch (pacman/paru), Debian (apt)
 - **Tool registry**: Interface-based tool definitions with platform-specific packages
 - **Backup & restore**: Timestamped backups in `~/.config/dotfiles/backups/`
-- **Legacy cleanup**: `cleanupOldInstallations()` removes old dotfiles-tui/dotfiles-setup binaries
+- **Legacy cleanup**: current installs still remove stale `dotfiles-tui` / `dotfiles-setup` binaries from older releases
 
 ## Development
 

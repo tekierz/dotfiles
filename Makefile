@@ -2,13 +2,12 @@
 
 # Binary names
 DOTFILES_BIN = bin/dotfiles
-SETUP_SCRIPT = bin/dotfiles-setup
 
 # Go build flags
 LDFLAGS = -s -w
 VERSION = 2.0.1
 
-# Build the main dotfiles CLI (new)
+# Build the dotfiles CLI
 build:
 	@echo "Building dotfiles CLI..."
 	go build -ldflags "$(LDFLAGS) -X main.version=$(VERSION)" -o $(DOTFILES_BIN) ./cmd/dotfiles
@@ -34,13 +33,12 @@ run-status: dev
 	./$(DOTFILES_BIN) status
 
 run-theme: dev
-	./$(DOTFILES_BIN) theme list
+	./$(DOTFILES_BIN) theme --list
 
 # Install to system
 install: build
-	@echo "Installing..."
+	@echo "Installing dotfiles..."
 	install -m 755 $(DOTFILES_BIN) /usr/local/bin/dotfiles
-	install -m 755 $(SETUP_SCRIPT) /usr/local/bin/dotfiles-setup
 
 # Run tests
 test:

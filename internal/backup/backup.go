@@ -173,6 +173,29 @@ func resolvedParentWithinHome(dstPath, home string) (bool, error) {
 	}
 }
 
+func sourcePathWithinBackup(srcPath, backupDir string) (bool, error) {
+	info, err := os.Lstat(srcPath)
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return false, nil
+	}
+
+	realBackup, err := filepath.EvalSymlinks(backupDir)
+	if err != nil {
+		return false, err
+	}
+	realParent, err := filepath.EvalSymlinks(filepath.Dir(srcPath))
+	if err != nil {
+		return false, err
+	}
+
+	realBackup = filepath.Clean(realBackup)
+	realParent = filepath.Clean(realParent)
+	return realParent == realBackup || strings.HasPrefix(realParent, realBackup+string(os.PathSeparator)), nil
+}
+
 // RestoreResult reports the outcome of a restore for a single backup.
 type RestoreResult struct {
 	// Restored is the relative path of each file successfully restored.
@@ -266,6 +289,16 @@ func Restore(backupDir, home string) (RestoreResult, error) {
 		}
 		if !withinHome {
 			result.Skipped[it.relPath] = "refusing to write through symlinked parent outside home"
+			continue
+		}
+
+		withinBackup, serr := sourcePathWithinBackup(srcPath, backupDir)
+		if serr != nil {
+			result.Skipped[it.relPath] = fmt.Sprintf("read backup file: %v", serr)
+			continue
+		}
+		if !withinBackup {
+			result.Skipped[it.relPath] = "refusing to read backup source outside backup directory"
 			continue
 		}
 

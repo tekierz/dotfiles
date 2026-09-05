@@ -7,7 +7,8 @@ Source: comprehensive audit (71 confirmed findings) + user direction (maximal sc
 - Scope: **everything**, including large refactors (tool-file consolidation, splitting giant files).
 - Claude MCP: **fix properly** (correct file, merge-not-overwrite, real package names, install CLI).
 - Abandoned refactor: **complete the migration** (all screens onto ScreenManager/handler + DI).
-- Bash script: **fix everything**.
+- Legacy installer: earlier remediation fixed several shell issues; current direction is
+  **remove the legacy installer surface and standardize on the Go app**.
 
 ## Phase 0 — Docs + Deps (DONE)
 - [x] Documentation accuracy across 13 files + registry comment — commit `68392dd`
@@ -19,7 +20,7 @@ Source: comprehensive audit (71 confirmed findings) + user direction (maximal sc
 - [x] tools/: claude_code installs CLI, Pi platform package fallback, cask IsInstalled, neovim LSP name
 - [x] runner/ + scripts/: command-injection hardening, script/PID perms, remove vestigial dead code
 - [x] cmd/: backup/restore path safety + perms, uninstall restore-failure handling, cmd/installer removed
-- [x] bin/dotfiles-setup: rm -rf-before-clone, chsh /etc/shells guard, stale zshrc blocks, dead code
+- [x] Historical legacy installer fixes: rm-before-clone, shell-change guard, stale zshrc blocks, dead code
 
 ## Phase B — UI correctness bugs (pre-migration, in current structure) — DONE
 - [x] installation.go data race — converted to channel + listen-Cmd message passing (verified `go test -race`)
@@ -93,16 +94,16 @@ Deferred (recommended follow-ups, not blocking):
 - [x] Run automated pre-PR verification: build, vet, gofmt, golangci-lint(0),
       staticcheck(0), govulncheck(0 @1.25.8), shellcheck(11 baseline), test -race — all green
 - [x] Review UI ScreenManager/async/navigation changes for regressions
-- [x] Review CLI, backup/restore, legacy bash, and security-sensitive paths
+- [x] Review CLI, backup/restore, legacy installer, and security-sensitive paths
 - [x] Review package manager/tool/config/CI changes for correctness and merge risk
 - [x] Fix confirmed blockers with focused patches:
       - app.go: globalize Backups/Users operation-completion results
         (restore/delete/create, save/delete/switch) so a result arriving after the
         user tabbed away is not dropped — same drop-on-navigate class as the load
         results, extended to action completions (handlers extracted; screens delegate)
-      - main.go/bin/dotfiles-setup: uninstall listed a non-existent `y` script;
+      - main.go/legacy installer compatibility: uninstall listed a non-existent `y` script;
         corrected to the real `sshh` utility via uninstallBinaryNames()
-      - bin/dotfiles-setup caff: validate the PID is numeric AND belongs to a
+      - legacy caff script: validate the PID is numeric AND belongs to a
         caffeinate/systemd-inhibit process before signalling it; write PID with umask 077
       - cmd: add `dotfiles theme --list` flag
 - [x] Re-run targeted + full verification after fixes — all green
@@ -110,3 +111,37 @@ Deferred (recommended follow-ups, not blocking):
       Regression tests added: TestBackup/UserCompletionHandledAfterTabAway,
       TestLegacyCaffValidatesPidBeforeKill, TestUninstallBinaryNamesIncludeInstalledUtilities,
       TestThemeListFlagRuns.
+
+## Phase I — Go-Only Deployability Cleanup — AUTOMATED VERIFICATION DONE
+Design spec: `tasks/go-only-deployability-spec.md`
+
+- [x] Fix remaining Go PR blockers before merge:
+      global Manage save completion, config-dir safe deletion, restore source
+      symlink containment, Manage context sync, CLI start-screen routing
+- [x] Remove legacy installer surface:
+      shell/PowerShell installers, stale formula, Bash heredoc drift tests,
+      README curl-to-shell install docs, legacy-only tool docs
+- [x] Keep upgrade compatibility:
+      cleanup old installed `dotfiles-setup` / `dotfiles-tui` binaries from the Go app
+- [x] Stop tracking the generated `bin/dotfiles` binary; `make build` recreates it locally
+- [x] Re-run full automated pre-PR verification
+- [x] Update manual test plan for the Go-only branch
+- [ ] Manual TUI walkthrough from `tasks/manual-test-plan.md` (not run in this automated pass)
+
+### Phase I Review
+
+- Removed the legacy shell/PowerShell installers, stale formula, checked-in generated binary,
+  and Bash-heredoc drift tests.
+- Fixed remaining Go blockers: async Manage save completion after navigation, config-owned
+  destructive delete containment, restore-source symlink containment, Manage global context
+  sync, and direct CLI start-screen routing.
+- Verification passed: gofmt, go test, go vet, go test -race, golangci-lint, govulncheck,
+  temp-path build, and CLI smoke (`version`, `theme --list`).
+
+## Phase J — Final Go-Only Merge Audit
+
+- [ ] Re-baseline current Go-only worktree and treat legacy Bash removals as intentional
+- [ ] Fix current blocking lint findings in `internal/ui/app.go`
+- [ ] Fix Arch AUR-only package routing when `paru` is unavailable
+- [ ] Run final verification suite: gofmt, tests, race, vet, build, golangci-lint, govulncheck, CLI smoke
+- [ ] Record final review result and residual risks
