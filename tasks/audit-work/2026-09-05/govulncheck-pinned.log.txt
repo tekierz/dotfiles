@@ -1,0 +1,17 @@
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-4602
+    FileInfo can escape from a Root in os
+  More info: https://pkg.go.dev/vuln/GO-2026-4602
+  Standard library
+    Found in: os@go1.25.6
+    Fixed in: os@go1.25.8
+    Example traces found:
+      #1: internal/safefile/directory_unix.go:331:30: safefile.listDirectoryStates calls os.File.ReadDir
+      #2: internal/operation/journal.go:383:28: operation.Journal.TerminalBackupPaths calls os.ReadDir
+
+Your code is affected by 1 vulnerability from the Go standard library.
+This scan also found 6 vulnerabilities in packages you import and 24
+vulnerabilities in modules you require, but your code doesn't appear to call
+these vulnerabilities.
+Use '-show verbose' for more details.

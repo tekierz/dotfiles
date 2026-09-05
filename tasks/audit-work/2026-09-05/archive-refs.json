@@ -1,0 +1,487 @@
+[
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ai-integration-truth",
+    "commit": "30e7aa67aef8625e94ce5c3423ea787e8de4b304",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1-restore-authority",
+    "commit": "5ef729681c2c29bfe96e2ce1a3fcc25d195b26af",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1-snapshot-extraction",
+    "commit": "7044d5e7623c2542a19ea8102c8b3176b48b19b6",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1a-snapshot-extraction-v2",
+    "commit": "1f4908dc64884ccfdc008d16530b655c7c5a2872",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1a-snapshot-extraction-v3",
+    "commit": "78be48e1538d0027fd469ae53417f7a9be525572",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1a-snapshot-extraction-v4",
+    "commit": "6da74030e31171ace0fde321dc6efeb57a13feef",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1a-snapshot-extraction-v5",
+    "commit": "161671b1e9e19198c3f3bb518ebf4bb6a420cd25",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1b-immutable-restore-kernel",
+    "commit": "b320b0185dc55f65d7d952612b11dfa423bd5148",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1b-immutable-restore-kernel-v2",
+    "commit": "b3b43be972e8ed1c8e53f83f02ec8507718dfe31",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1b2-catalog-acceptance",
+    "commit": "d3ef3601461c81e782754037ad3fc093e612017b",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1c-opaque-catalog-restore",
+    "commit": "46fa3bc4392c75c66ae32064c9030add835cc7af",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1sf1-restore-parent-authority",
+    "commit": "351fb1c94258e5020cbdd3a978bcd200e5e6e939",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1sf2-restore-leaf-mutations",
+    "commit": "11cfa8881517cad99b78093008c9eb832cf496bf",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1sf2d-restore-directory-mutations",
+    "commit": "75efdc0e13601856b33926f1ba178223bbbf37e4",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1sf2f-file-leaf-mutations",
+    "commit": "a4375bd181e79593a1cb4c0950fbf86e3824c571",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1sf2f-file-leaf-mutations-v2",
+    "commit": "6c58f00598ed1db2f7038bef98c244c0fc7bfd5a",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ba1sf2m-explicit-mode-restore",
+    "commit": "17caa20bea45f0534d19903eeabcd5544d09973e",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/bc1-cli-restore-dogfood",
+    "commit": "5d745203c3f58be6ef41123e4cc18b3dabb162b8",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/bc2-tui-restore-dogfood",
+    "commit": "62ce702b2dc57cf9e0f9cf26f91ff358a43d9ef4",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/bounded-backup-product",
+    "commit": "77e2ba54e9bd1172a3e24f69f7ba5a37a65ca5ba",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/bounded-config-product",
+    "commit": "04ad8be81a056d82f58436b13cbb818ce566ba2f",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/claude-mcp-product",
+    "commit": "c9469bdcc8d7b6b6b7790695638927599548be42",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/cli-contract-product",
+    "commit": "bb75fee2524faee716ee327807f0539b49dc199e",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/config-cancellation-product",
+    "commit": "1f092c55838a37800eca5544531e9154c6db4d1b",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/deep-dive-phase-continuation",
+    "commit": "48f097c5ec481e31f3168d0e80ded8cbd7b8fd5f",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/dogfood-observability",
+    "commit": "1b15440cc3d64ccc85adda5ec2b6b77321b6fe13",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/g3-runner-lifecycle-resplit-reconciliation",
+    "commit": "201d5826103beabd5f73b9bf99049f37df1143d1",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/g3-split-roadmap-reconciliation",
+    "commit": "b12ad28c54b8786f01abb8a287af38578635a276",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/g3a-plan-catalog-resplit",
+    "commit": "0182fe7f5784193d79f9fceaa5bb77d1f548964d",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/g3b-todo-control-sync",
+    "commit": "92183d79e0a3bc66b35cbd941bdfd0fdc9d4a8a9",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/g3c-file-directory-leaf-reconciliation",
+    "commit": "b74c79924968c0ec0d341f159f28c24d7e65da1b",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/g3d-todo-policy-sync",
+    "commit": "ed921d1b8a12506612a60822997fee39143553ea",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/local-dogfood-2026-07-14",
+    "commit": "ea54a14ab4226c53bfdb0715ecd790d0977f3e80",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/local-dogfood-product-2",
+    "commit": "890c4468253b919dde1e7c05451ca2567073b2ba",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/npm-cli-adapter",
+    "commit": "bca61f6506ddebbb8d9778bcf9d8a3713bb77a53",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/npm-executor-product",
+    "commit": "4a7e48cb7b461fce95003e6394b4512f0421b5c1",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/npm-phase-coordinator",
+    "commit": "0723b40a231a9541f71a9e9f52c76dcb069d7dc8",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/npm-phase-product-foundation",
+    "commit": "ff767f579bc0d0af275b6b2145223b9afff2bc95",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/npm-wizard-adapter",
+    "commit": "6cf87b627ae99e2cc4eb001cdce3aa7d49b98374",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/open-source-release-readiness",
+    "commit": "890c4468253b919dde1e7c05451ca2567073b2ba",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/pinned-tool-artifacts",
+    "commit": "cac56231ddf8773d4149e64d1d8e0af5191b2bd6",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1-runner-kernel",
+    "commit": "d31b41319fe947783719ccf50162134cb11f3ebe",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1-runner-kernel-v2",
+    "commit": "1b6f03b1c21d31e6906d8fa9f569ba9b96d1a93c",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1p-privileged-supervisor-product",
+    "commit": "3fb4694dd6a1245a42b00e75f4eded727a39d3a1",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1u-ordinary-streaming-lifecycle",
+    "commit": "59bda6c580b092c6b3658c0aafc037e80e9caa74",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1u-ordinary-streaming-lifecycle-v2",
+    "commit": "216cf577bd3d4e122a1023ab9403961d9fc01258",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1ul-ordinary-streaming-lifecycle",
+    "commit": "c257bfd8d8d52f9dce308365ae9b94d54c78e82f",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1ula-streaming-adapters",
+    "commit": "3857b3cb2e0659eb6e464b511463208db917a1e6",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1ulk-private-lifecycle-kernel",
+    "commit": "c8c222135346c378a395f72b4ec355768bfca1ff",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1ulk-private-lifecycle-kernel-v2",
+    "commit": "0573819664089a90e738d47ca4478e5277b9664a",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1ulk-private-lifecycle-kernel-v3",
+    "commit": "ec45b95491d3afdd3553bc367b6f9694b5fd5410",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1ulk-private-lifecycle-kernel-v4",
+    "commit": "ca8869148ae9dd22fd569effcbf28e3c9e556037",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1uo-native-exit-observer",
+    "commit": "ef624405ee852cfbb0c41deea373578d47124894",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/rk1uo-native-exit-observer-v2",
+    "commit": "19fabd71edb1cce3cf7938866e8cd4982904b216",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/sequential-apt-product",
+    "commit": "c41e0ea07893b4df0e539de245ea76e8b9ed8cd0",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/sp1-artifact-authority",
+    "commit": "880be507ac223d2349c04c732b1888efece0ac86",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/sshh-product-hardening",
+    "commit": "7719a291bf62d402d6d32f8d1751a1cb4c2e8c97",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/ui1-deep-dive-viewport",
+    "commit": "4852d235291a4c2499aaca5852da3560e51a83ca",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/uninstall-catalog-product",
+    "commit": "caafae3f716c31c58ca133bf7d40904dff2f130b",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/update-provider-product",
+    "commit": "131dab7b89ae6cb7e956850a613994fd8c529472",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/update-routing-product",
+    "commit": "33ad67ac4ca4ee704ad1bc2363d9088605810c4b",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/feature/update-surface-product",
+    "commit": "878ea0c965d04fc1ef30ebb8643781f39ecfebae",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/main",
+    "commit": "c04c1d6a5452f888159cf855e19ce20465635970",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/release-remediation",
+    "commit": "d77c0f790a3694df21dfc8e784eef66dfb2614b2",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/branches/worktree-audit-remediation",
+    "commit": "bb813df34664960a67345c06e97cb276f3db12b3",
+    "kind": "branches"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/remote-before/claude/project-analysis-report-bn2Eh",
+    "commit": "5716d215930e6a83fa6ae2feca658bd9037c65c7",
+    "kind": "remote-before"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/remote-before/develop",
+    "commit": "a08759b321bf3172aad99378b8c1c57ba126da25",
+    "kind": "remote-before"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/remote-before/fix/v2.1.2",
+    "commit": "2bde16e805582603d57acb3de4beb009e9b9d021",
+    "kind": "remote-before"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/remote-before/main",
+    "commit": "bb3cbf9e60573ecb1dbd0c375e1e6c55a260864f",
+    "kind": "remote-before"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/remote-before/release-remediation",
+    "commit": "b30b9c626903d8e98e19e596023abd506c04b437",
+    "kind": "remote-before"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/remote-before/worktree-audit-remediation",
+    "commit": "bb813df34664960a67345c06e97cb276f3db12b3",
+    "kind": "remote-before"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/00",
+    "commit": "1bf104912611e51461633b55cae96d13e033dc04",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/01",
+    "commit": "46856f5f1abfe32d1784f22f580e536721f55604",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/02",
+    "commit": "e68470399b3b4590fb4ea805df309645599f6867",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/03",
+    "commit": "a9d2a909623341ed35eb95635025b3284a3a098d",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/04",
+    "commit": "3443713287847a338598953b2b4369ce5f69bd17",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/05",
+    "commit": "7ecde742a61e087e275eacb147fceabea5bd944b",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/06",
+    "commit": "c9e7f9fff02fb5b7ff6e93a2cdad87c8bced30e7",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/07",
+    "commit": "11af0e7fef9d0bdcdb58d5fe8026ea7c03559785",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/08",
+    "commit": "5e4101d01123f2968a138d5e6d8d604f2fd93eb6",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/09",
+    "commit": "48d10f312c8403809dfd4b04b3ec1e9cd6c30318",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/10",
+    "commit": "5c36205bd4f88efe1ffc2323feade7edf947deb1",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/11",
+    "commit": "03c377477eb37fccea3a708798dcd2ef769ceb77",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/12",
+    "commit": "5d94b104dc2d8c4d2a3cfbe0bc6d8cd971968d7a",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/13",
+    "commit": "07be19ef983f9c45955c7c95e85ef1d7e040e265",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/14",
+    "commit": "5aa55847c280446e79e9971f8dc1921ae0a91e92",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/15",
+    "commit": "553ab4cb5e962c8b225a1d0e9790682d630f7a08",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/16",
+    "commit": "f287c5132ad0c819d3074c06045840759aabd468",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/17",
+    "commit": "230f8da89274b7098d36a9702958410133f50921",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/18",
+    "commit": "352176438d677bc5e109cdafa708f03c024c1f7d",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/19",
+    "commit": "0066d0d4a365046ef0f47f4e171ee17e17ec0461",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/20",
+    "commit": "54d7cc80940ba35870761cc17233038ce3d85907",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/21",
+    "commit": "dc74fc559cc8a6c340d3529271721c9886613036",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/stashes/22",
+    "commit": "2bf6e77e87601730b8843c8c4106d8f15b2dd8d6",
+    "kind": "stash"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/worktrees/integration-root",
+    "commit": "2b831471fc1bc3f5173eb5b12e6eeff367c8d2e5",
+    "kind": "worktree-source-snapshot"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/worktrees/open-source-release-readiness",
+    "commit": "bb1f472c455724a8b7bbd307c1e7f2b191ac509e",
+    "kind": "worktree-source-snapshot"
+  },
+  {
+    "ref": "refs/heads/archive/2026-09-05/worktrees/audit-remediation",
+    "commit": "776a8cf5ad5c75d4357acfcfac77175ae1aff2f7",
+    "kind": "worktree-source-snapshot"
+  }
+]

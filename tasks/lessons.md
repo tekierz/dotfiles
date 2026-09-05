@@ -5,9 +5,10 @@
   completion is recorded only in the delivering commit.
 - Verification is commit-candidate evidence, not a reusable historical claim. Any production
   edit expires it; run the frozen acceptance gates again before marking or committing work.
-- For this remediation program, use a Sol-named agent to orchestrate and review
-  each bounded slice and a Terra-named agent to implement it; the root agent
-  coordinates verification and logical commits rather than bypassing that split.
+- Use gpt-6-astra for every subagent. Vary reasoning effort by task difficulty,
+  not model family: low for straightforward tasks, medium for ordinary work,
+  high or higher for complex implementation and safety review. The user confirmed
+  this on 2026-09-05; old Sol/Terra and global mixed-model rules are superseded.
 - When the user asks for persistent multi-agent execution, keep at least one bounded
   reviewer or implementation agent visibly active whenever concurrency permits. Check
   agent state before reporting progress; an errored or completed thread is not active work.
@@ -38,7 +39,21 @@
 - Terminal category styling must preserve meaning without color or decorative glyphs. Treat
   narrow layouts, plain-ASCII terminals, and reduced-color environments as first-class
   acceptance cases rather than visual polish deferred until release.
-- If two consecutive Terra implementation turns fail to persist an explicitly requested
-  tests-first checkpoint, Sol may make the smallest tests-only persistence change after root
-  approval. Production work must return to the Sol-orchestrator/Terra-implementer split, and
+- If two consecutive implementation-agent turns fail to persist an explicitly requested
+  tests-first checkpoint, the Astra reviewer may make the smallest tests-only persistence change after root
+  approval. Production work must return to the Astra reviewer/implementer ownership split, and
   the directly persisted contract still requires independent adversarial review.
+- When the user asks to finish implementation, measure and report progress in runnable product
+  code first. Governance documents, policy tests, scope transitions, and ledger commits are
+  prerequisites or evidence, not implementation progress, and must not dominate the work or
+  the status report after the governing contract is already sound.
+- Root-owned staging must never leave implementation agents waiting at a state-machine gate.
+  Commit planned, frozen, and red-test checkpoints immediately; otherwise agents may either
+  idle without product output or begin code before authority exists. If code appears early,
+  preserve it outside the worktree, restore the exact parent without destructive Git commands,
+  and reapply it only after the correct tests-first checkpoint.
+- When the user explicitly prioritizes a working dogfood build, optimize for complete runnable
+  behavior and useful operational logging. Use existing tests plus the smallest compile/smoke
+  checks needed to keep the application testable; defer expanded adversarial, race, policy, and
+  cross-platform matrices until the end-to-end feature path exists. Do not let per-slice release
+  ceremony delay a build the user can install and exercise manually.

@@ -1,5 +1,55 @@
 # Release-Readiness Plan
 
+## Active integration and remediation — 2026-09-05
+
+User selected `release-remediation` at `d77c0f7` as the integration baseline, authorized saving/syncing work and dated archive refs, requested dirty-worktree analysis, and requires Astra for all subagents.
+
+Canonical current plan: [integration-plan-2026-09-05.md](integration-plan-2026-09-05.md). The July fixed-catalog program below is historical; its ledger is preserved and does not certify the existing 35-commit import.
+
+- [x] Preserve six dirty worktrees plus repository/ref/stash history in a verified local recovery archive.
+- [x] Create 97 dated archive refs and three source snapshots; preserve generated output locally.
+- [x] Update local/global model instructions to Astra and retain previous global instruction files.
+- [ ] Complete change-level dirty-worktree analysis and publish the reviewed preservation checkpoint.
+- [ ] Build and verify the isolated combined candidate, then integrate bounded fixes and synchronize remote CI.
+
+## Human-readable HTML audit guide — 2026-09-05
+
+- [x] Define the guide around the completed audit, its branch distinctions, and evidence limits.
+- [x] Build a standalone HTML artifact with finding exploration, development sequence, and acceptance criteria.
+- [x] Verify content completeness, interactions, responsive layout, and print behavior.
+- [x] Link the completed artifact and record results.
+
+### Review
+
+Completed artifact: [Open the HTML audit guide](codebase-git-audit-2026-09-05.html).
+
+- All 18 findings include practical impact, source evidence, newer-branch status, and proposed acceptance criteria.
+- Includes repository-state map, four illustrated failure scenarios, verification limits, and five development work packages.
+- Browser-verified filters, expansion, deep links, plain-text brief export, full-content printing, and layouts at 1440/1024/768/390/320px.
+- Independent content review found no material deviations from the canonical audit. All relative source links and IDs validate; no external scripts, fonts, or styles are required.
+- Screenshots and print/download checks are under `output/playwright/`; no product code or Git state changed.
+
+## Current codebase and Git repository audit — 2026-09-05
+
+Scope: current `release-remediation` checkout at `d77c0f790a3694df21dfc8e784eef66dfb2614b2`, with separate accounting for other local branches, worktrees, and remote evidence. Audit only; no product edits or Git mutations. Preserve existing changes to `tasks/lessons.md` and untracked `tasks/pi-agent-integration-spec.md`.
+
+- [x] Read project guidance, previous findings, and establish the current checkout baseline.
+- [x] Inventory repository/history/worktrees, dependencies, automation, and distribution.
+- [x] Independently review execution, recovery/configuration, and CLI/TUI behavior.
+- [x] Run safe build, tests/race, static/security checks, and isolated CLI smoke checks.
+- [x] Reconcile findings against current code and branch integration evidence.
+- [x] Publish a prioritized report with evidence, limitations, and remediation order.
+
+### Review
+
+Completed report: [codebase-git-audit-2026-09-05.md](codebase-git-audit-2026-09-05.md).
+
+- Verdict: not ready for release; 5 P1, 12 P2, and 1 latent P3 findings, with current-checkout versus newer-branch evidence separated.
+- Pinned build/vet/lint/Staticcheck/test/race and all four cross-builds pass; the pinned vulnerability gate fails for GO-2026-4602, with applicability limits documented.
+- Independent temporary-fixture probes reproduced backup target drift, recovery integrity/memory issues, lifecycle/UI failures, and APT receipt errors.
+- Live GitHub evidence confirms stale remote delivery, required-check naming drift, and the unsafe old Homebrew formula.
+- Existing newer product and release-preparation work was inventoried to avoid duplicate remediation. No production or Git mutations were made.
+
 ## Active implementation — 2026-07-13
 
 - [x] Commit G0's canonical audit, implementation catalog, and active roadmap reset.
