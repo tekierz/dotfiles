@@ -333,6 +333,9 @@ func ConfigDir() string {
 			return ""
 		}
 	}
+	if !filepath.IsAbs(home) {
+		return ""
+	}
 	return filepath.Clean(filepath.Join(home, ".config", "dotfiles"))
 }
 
