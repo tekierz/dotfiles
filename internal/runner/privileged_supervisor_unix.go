@@ -13,7 +13,7 @@ import (
 var execLookPath = exec.LookPath
 
 func validateTrustedPrivilegedFile(path string, requireRootOwner bool) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- this read-only check validates the allowlisted absolute executable before spawn.
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 || info.Mode().Perm()&0o022 != 0 {
 		return errInvalidPrivilegedRequest
 	}
@@ -38,7 +38,7 @@ func runPrivilegedSupervisor(args []string, control io.Reader, stdout, stderr io
 	if err := validateTrustedPrivilegedFile(target, true); err != nil {
 		return 125
 	}
-	// #nosec G204 -- target is a clean absolute, root-owned, non-writable,
+	// #nosec G204 G702 -- target is a clean absolute, root-owned, non-writable,
 	// allowlisted package-manager executable and args are literal bounded argv.
 	//nolint:noctx // The supervisor control pipe and explicit group kill/reap path own cancellation.
 	command := exec.Command(target, append([]string(nil), args[1:]...)...)

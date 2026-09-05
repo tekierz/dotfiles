@@ -50,7 +50,7 @@ func killPrivilegedAdoptedDescendants() error {
 		return errPrivilegedSupervisorCleanup
 	}
 	for _, childrenPath := range childrenFiles {
-		data, readErr := os.ReadFile(childrenPath)
+		data, readErr := os.ReadFile(childrenPath) // #nosec G304 -- path comes only from the literal /proc/self/task/*/children kernel glob.
 		if readErr != nil {
 			return readErr
 		}

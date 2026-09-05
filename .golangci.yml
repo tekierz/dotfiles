@@ -40,6 +40,12 @@ linters:
 
   exclusions:
     rules:
+      # Unix Stat_t field widths differ between Darwin and Linux. These exact
+      # field conversions keep shared code compiling on both platforms.
+      - path: internal/(pkg/executable_identity|safefile/(anchored_unix|directory_unix|parent_chain_unix|replace_unix))\.go
+        linters: [unconvert]
+        text: "unnecessary conversion"
+        source: 'u?int(32|64)\([[:alnum:]_]+\.(Dev|Mode|Nlink)\)'
       # Test fixtures intentionally execute discovered local binaries and read
       # temporary paths. Production subprocess/path findings remain blocking.
       - path: _test\.go

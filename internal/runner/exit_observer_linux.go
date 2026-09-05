@@ -25,7 +25,7 @@ func newStreamingExitObserver(pid int) (streamingExitObserver, error) {
 }
 
 func (observer *linuxExitObserver) Wait() error {
-	poll := []unix.PollFd{{Fd: int32(observer.fd), Events: unix.POLLIN}}
+	poll := []unix.PollFd{{Fd: int32(observer.fd), Events: unix.POLLIN}} // #nosec G115 -- pidfd_open returns a non-negative C int descriptor.
 	for {
 		if observer.closed.Load() {
 			return errStreamingExitObserverClosed
