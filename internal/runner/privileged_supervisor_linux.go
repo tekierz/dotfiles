@@ -19,26 +19,9 @@ func enablePrivilegedDescendantReaping() error {
 }
 
 func reapPrivilegedDescendants() error {
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		pid, err := syscall.Wait4(-1, nil, syscall.WNOHANG, nil)
-		switch {
-		case errors.Is(err, syscall.EINTR):
-			continue
-		case errors.Is(err, syscall.ECHILD):
-			return nil
-		case err != nil:
-			return err
-		case pid > 0:
-			continue
-		case time.Now().After(deadline):
-			return errPrivilegedSupervisorCleanup
-		}
-		if err := killPrivilegedAdoptedDescendants(); err != nil {
-			return err
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	return reapPrivilegedChildrenWithDeps(func() (int, error) {
+		return syscall.Wait4(-1, nil, syscall.WNOHANG, nil)
+	}, killPrivilegedAdoptedDescendants, time.Now, time.Sleep)
 }
 
 func killPrivilegedAdoptedDescendants() error {

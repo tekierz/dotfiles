@@ -58,24 +58,7 @@ func runPrivilegedSupervisor(args []string, control io.Reader, stdout, stderr io
 		_, _ = control.Read(one[:])
 		controlClosed <- struct{}{}
 	}()
-	waited := make(chan error, 1)
-	go func() { waited <- command.Wait() }()
-
-	var waitErr error
-	var cleanupErr error
-	select {
-	case waitErr = <-waited:
-		// The exact leader exited. Kill any descendant that outlived it before
-		// returning its status, then reap descendants adopted by the supervisor.
-		cleanupErr = killPrivilegedGroup(command.Process.Pid)
-	case <-controlClosed:
-		cleanupErr = killPrivilegedGroup(command.Process.Pid)
-		if cleanupErr != nil {
-			_ = command.Process.Kill()
-		}
-		waitErr = <-waited
-	}
-	cleanupErr = errors.Join(cleanupErr, reapPrivilegedDescendants())
+	waitErr, cleanupErr := finishPrivilegedCommand(command, controlClosed, defaultPrivilegedLifecycleDeps())
 	if cleanupErr != nil {
 		_, _ = io.WriteString(stderr, errPrivilegedSupervisorCleanup.Error()+"\n")
 		return 125
