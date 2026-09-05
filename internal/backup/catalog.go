@@ -26,19 +26,18 @@ type CatalogEntry struct {
 }
 
 type catalogAuthority struct {
-	anchor   string
-	rel      string
-	snapshot *safefile.DirectorySnapshot
-	parents  *safefile.ParentChain
-	restore  *catalogRestoreSnapshot
+	anchor  string
+	rel     string
+	source  safefile.DirectoryAuthority
+	parents *safefile.ParentChain
+	restore *catalogRestoreSnapshot
 }
 
 // catalogRestoreSnapshot is the parse-only catalog authority consumed by the
-// later restore join. Its source and items are private so mutable CatalogEntry
+// later restore join. Its items are private so mutable CatalogEntry
 // display fields cannot redirect a retained source or target.
 type catalogRestoreSnapshot struct {
-	source *safefile.DirectorySnapshot
-	items  []catalogRestoreItem
+	items []catalogRestoreItem
 }
 
 type catalogRestoreItem struct {
@@ -51,7 +50,8 @@ type catalogRestoreItem struct {
 
 // ListCatalog returns only exact real directories containing a readable valid
 // manifest. Interrupted partial backup roots and symlinked/replaced entries are
-// omitted rather than presented as restorable sessions.
+// omitted rather than presented as restorable sessions. Only bounded metadata
+// and compact source authority survive listing; payload captures are transient.
 func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 	if info, err := os.Lstat(filepath.Clean(backupsDir)); errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -64,6 +64,7 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G304 -- Only bounded names are enumerated here; accepted entries require descriptor-anchored snapshots and parent authority below.
 	directory, err := os.Open(backupsDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -84,6 +85,9 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 	}
 	home, _ := os.UserHomeDir()
 	result := make([]CatalogEntry, 0, len(entries))
+	var catalogParents *safefile.ParentChain
+	var manifestBytes int64
+	restoreItems := 0
 	for _, entry := range entries {
 		name := entry.Name()
 		if !validCatalogName(name) {
@@ -98,7 +102,7 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 		if readErr != nil {
 			continue
 		}
-		restore, parseErr := parseCatalogRestoreSnapshot(manifest, home, snapshot)
+		restore, parseErr := parseCatalogRestoreSnapshot(manifest, home)
 		if parseErr != nil {
 			continue
 		}
@@ -109,6 +113,22 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 		if snapshotErr != nil || !safefile.SameDirectoryRootState(current, snapshot) || current.Digest() != snapshot.Digest() {
 			continue
 		}
+		source, authorityErr := safefile.CompactDirectoryAuthority(snapshot)
+		if authorityErr != nil {
+			continue
+		}
+		if len(restore.items) > maxCatalogRestoreItems-restoreItems || int64(len(manifest)) > maxCatalogManifestBytes-manifestBytes {
+			return nil, fmt.Errorf("backup catalog metadata exceeds %d restore items or %d manifest bytes", maxCatalogRestoreItems, maxCatalogManifestBytes)
+		}
+		restoreItems += len(restore.items)
+		manifestBytes += int64(len(manifest))
+		// All entries share one catalog parent. Keep one accepted chain rather
+		// than retaining the same ancestor names for every backup.
+		if catalogParents == nil {
+			catalogParents = parents
+		} else if !safefile.SameParentChain(catalogParents, parents) {
+			return nil, fmt.Errorf("backup catalog parent changed during listing: %w", safefile.ErrParentChanged)
+		}
 		_, size := snapshot.RecursiveFileStats(ManifestName)
 		timestamp := time.Time{}
 		if info, infoErr := entry.Info(); infoErr == nil {
@@ -117,7 +137,7 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 		result = append(result, CatalogEntry{
 			Name: name, Path: filepath.Join(backupsDir, name), Timestamp: timestamp,
 			FileCount: len(restore.items), Size: size,
-			authority: &catalogAuthority{anchor: anchor, rel: rel, snapshot: snapshot, parents: parents, restore: restore},
+			authority: &catalogAuthority{anchor: anchor, rel: rel, source: source, parents: catalogParents, restore: restore},
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -129,10 +149,7 @@ func ListCatalog(backupsDir string) ([]CatalogEntry, error) {
 	return result, nil
 }
 
-func parseCatalogRestoreSnapshot(data []byte, home string, source *safefile.DirectorySnapshot) (*catalogRestoreSnapshot, error) {
-	if source == nil || source.Digest() == ([32]byte{}) {
-		return nil, fmt.Errorf("catalog restore source authority is incomplete")
-	}
+func parseCatalogRestoreSnapshot(data []byte, home string) (*catalogRestoreSnapshot, error) {
 	items := make([]catalogRestoreItem, 0)
 	seen := make(map[string]struct{})
 	err := scanBackupManifest(data, func(raw string) error {
@@ -155,7 +172,7 @@ func parseCatalogRestoreSnapshot(data []byte, home string, source *safefile.Dire
 	if err != nil {
 		return nil, err
 	}
-	return &catalogRestoreSnapshot{source: source, items: items}, nil
+	return &catalogRestoreSnapshot{items: items}, nil
 }
 
 func parseCatalogRestoreItem(line, home string) (catalogRestoreItem, error) {
@@ -240,19 +257,26 @@ func validateRawCatalogRestoreTarget(target string, absolute bool) error {
 }
 
 func ValidateCatalogEntry(entry CatalogEntry) error {
-	if entry.authority == nil || entry.authority.snapshot == nil || !entry.authority.parents.Tracked() ||
-		entry.authority.restore == nil || entry.authority.restore.source != entry.authority.snapshot || entry.authority.restore.items == nil {
-		return fmt.Errorf("%w: backup catalog authority is incomplete", safefile.ErrDirectoryChanged)
+	_, err := captureCatalogEntry(entry)
+	return err
+}
+
+// captureCatalogEntry pins the selected immutable payloads only after matching
+// their listing authority. Restore retains this capture across every write.
+func captureCatalogEntry(entry CatalogEntry) (*safefile.DirectorySnapshot, error) {
+	if entry.authority == nil || !entry.authority.source.Tracked() || !entry.authority.parents.Tracked() ||
+		entry.authority.restore == nil || entry.authority.restore.items == nil {
+		return nil, fmt.Errorf("%w: backup catalog authority is incomplete", safefile.ErrDirectoryChanged)
 	}
 	current, err := safefile.SnapshotDirectoryWithinBudget(entry.authority.anchor, entry.authority.rel, backupSnapshotBudget)
-	if err != nil || !safefile.SameDirectoryRootState(current, entry.authority.snapshot) || current.Digest() != entry.authority.snapshot.Digest() {
-		return fmt.Errorf("selected backup changed after listing: %w", errors.Join(safefile.ErrDirectoryChanged, err))
+	if err != nil || !entry.authority.source.Matches(current) {
+		return nil, fmt.Errorf("selected backup changed after listing: %w", errors.Join(safefile.ErrDirectoryChanged, err))
 	}
 	bound, err := safefile.BindParentChainWithin(entry.authority.anchor, entry.authority.rel, entry.authority.parents, nil)
 	if err != nil || !safefile.SameParentChain(bound, entry.authority.parents) {
-		return fmt.Errorf("selected backup parent changed after listing: %w", errors.Join(safefile.ErrParentChanged, err))
+		return nil, fmt.Errorf("selected backup parent changed after listing: %w", errors.Join(safefile.ErrParentChanged, err))
 	}
-	return nil
+	return current, nil
 }
 
 // RestoreCatalogEntry restores only the immutable source, target, kind, and
@@ -265,7 +289,8 @@ func ValidateCatalogEntry(entry CatalogEntry) error {
 func RestoreCatalogEntry(entry CatalogEntry, home string) (RestoreResult, error) {
 	result := RestoreResult{Skipped: map[string]string{}, Warnings: map[string]string{}}
 	operation.Trace(operation.TraceRestore, operation.TraceRunning, operation.TraceCounts{})
-	if err := ValidateCatalogEntry(entry); err != nil {
+	source, err := captureCatalogEntry(entry)
+	if err != nil {
 		traceCatalogRestoreResult(result, err)
 		return result, err
 	}
@@ -277,7 +302,7 @@ func RestoreCatalogEntry(entry CatalogEntry, home string) (RestoreResult, error)
 
 	restore := entry.authority.restore
 	for _, item := range restore.items {
-		restoreCatalogItem(&result, session, home, restore.source, item)
+		restoreCatalogItem(&result, session, home, source, item)
 	}
 	traceCatalogRestoreResult(result, nil)
 	return result, nil
@@ -381,10 +406,11 @@ func recordCatalogRestore(result *RestoreResult, target, operation, committedWar
 }
 
 func RemoveCatalogEntry(entry CatalogEntry) error {
-	if err := ValidateCatalogEntry(entry); err != nil {
+	source, err := captureCatalogEntry(entry)
+	if err != nil {
 		return err
 	}
-	return safefile.RemoveDirectoryWithinSnapshotAuthorized(entry.authority.anchor, entry.authority.rel, entry.authority.snapshot, entry.authority.parents)
+	return safefile.RemoveDirectoryWithinSnapshotAuthorized(entry.authority.anchor, entry.authority.rel, source, entry.authority.parents)
 }
 
 func catalogAnchor(backupsDir string) (string, string, error) {

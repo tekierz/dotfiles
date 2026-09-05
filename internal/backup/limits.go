@@ -15,6 +15,8 @@ const (
 	maxBackupSnapshotFiles           = 16384
 	maxBackupFileBytes         int64 = 16 << 20
 	maxBackupTotalBytes        int64 = 256 << 20
+	maxCatalogRestoreItems           = 16384
+	maxCatalogManifestBytes    int64 = 8 << 20
 )
 
 var backupSnapshotBudget = safefile.SnapshotBudget{
