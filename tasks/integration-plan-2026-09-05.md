@@ -31,11 +31,11 @@ New fixes remain bounded, with named ownership, focused failing tests first wher
 - [x] Fix APT receipt-state semantics independently of update execution (candidate `a8c69d0`; focused tests/package race/vet passed).
 - [ ] Fix cancellation wrappers and restore meaningful privileged-streaming acceptance coverage.
 - [x] Replace catalog-wide payload retention (`3dcec08`; full affected packages and focused race passed).
-- [ ] Fix App-owned async results, duplicate-profile creation, live profile application, theme-save errors and Updates viewport in sequential UI slices.
+- [x] Fix App-owned async results, duplicate-profile creation, live profile application, theme-save errors and Updates viewport in sequential UI slices.
 - [ ] Adapt useful historical context/start-screen/relative-HOME/AUR observations only after confirming current defects.
-- [ ] Upgrade to a supported patched analysis-compatible Go toolchain and unify PR/integration/main/tag quality gates.
+- [x] Upgrade to a supported patched analysis-compatible Go toolchain and unify PR/integration/main/tag quality gates.
 - [ ] Verify the combined candidate, integrate it to release-remediation, sync it and establish current remote CI/protection evidence.
-- [ ] Prepare the external Homebrew ownership-safe formula change with verified artifact inputs.
+- [x] Prepare the external Homebrew ownership-safe formula change with verified artifact inputs.
 - [ ] Record remaining real-platform, Homebrew, owner-hardware and publication gates; do not claim unrun gates passed.
 
 ## Initial bounded contracts
@@ -105,3 +105,15 @@ R1 (safety writer): private actual launcher construction in `runner/privileged_l
 - Homebrew ownership-only patch, tests and verified existing source SHA saved in `tasks/audit-work/2026-09-05/homebrew-proposal/`; no live install or tap publication.
 
 The first upgraded all-suite run used `/tmp` fixtures with a mismatched inherited group, causing authority checks to reject them. That run is invalid environment evidence. Repeating with the owner-private TMPDIR passed the full suite; do not weaken ownership checks to accommodate an unsuitable harness directory.
+
+### First remote CI repair (root writer)
+
+Run33988086766 passed Security/macOS tests/both builds; Linux tests and lint failed. Narrow tests-only paths: tools/config_validation_test.go and yazi_test.go must isolate inherited XDG/Yazi roots; pkg/executable_identity_test.go must keep platform-dependent Stat_t.Dev conversion with a justified unconvert annotation. Investigate UI/manage_pi_reachability_test.go platform-bound snapshot mismatch before changing expectations. Preserve product fail-closed behavior. Regression under hostile inherited paths, focused checks, then remote rerun.
+
+### Package phases and startup completion
+
+Package phase scope: apt.go, pacman.go, manager_executable_identity_test.go and new privileged_phase_test.go. Private per-instance factories retain production trusted defaults, validate captured identities before every phase, exercise actual public manager methods, phase draining, failure/cancellation and identity drift. Commit af2df9d; pkg/runner/installapply, package race and vet passed.
+
+Startup scope: app.go, screen_manager.go and start_screen_test.go. Prepare the selected handler for first render; App.Init owns its one initialization command. Commit 0dfc0fd; initial-route regressions were red, then focused startup/manager race and vet passed. Profile adoption (55c3878), theme retry (5215292) and bounded Updates viewport (9ca40e5) have focused and combined UI race evidence.
+
+CI fixture regressions reproduced locally: inherited XDG/Yazi roots and host-dependent npm/node observation. Tests now supply isolated roots and observed native executable fixtures without running installs. The portable device type fixture uses explicit normalization, avoiding platform-specific unused lint suppression. Combined candidate full tests and lint passed; final race and remote Linux supervisor evidence are in progress.
