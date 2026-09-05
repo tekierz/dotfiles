@@ -40,6 +40,7 @@ func runPrivilegedSupervisor(args []string, control io.Reader, stdout, stderr io
 	}
 	// #nosec G204 -- target is a clean absolute, root-owned, non-writable,
 	// allowlisted package-manager executable and args are literal bounded argv.
+	//nolint:noctx // The supervisor control pipe and explicit group kill/reap path own cancellation.
 	command := exec.Command(target, append([]string(nil), args[1:]...)...)
 	command.Env = privilegedTargetEnvironment()
 	command.Dir = "/"

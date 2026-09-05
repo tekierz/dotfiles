@@ -704,6 +704,7 @@ func TestProductionToolsMutationCallsitesMatchAuditedManifest(t *testing.T) {
 		"tool.go:os.MkdirAll":                                             {1, "external XDG trusted-root bootstrap"},
 		"tool.go:safefile.EnsureDirectoryWithin":                          {1, "ordinary config parent bootstrap"},
 		"tool.go:safefile.ReadWithin":                                     {2, "ordinary generated-config observation"},
+		"tool.go:safefile.ReadWithinLimit":                                {1, "bounded read-only generated-config observation"},
 		"yazi_import.go:safefile.ReadWithinLimit":                         {2, "read-only descriptor-anchored native Yazi observation classification"},
 		"tool.go:safefile.ReplaceWithin":                                  {1, "ordinary generated-config replacement"},
 		"tool.go:safefile.ReplaceWithinRevisionTracked":                   {1, "ordinary revision/evidence replacement"},

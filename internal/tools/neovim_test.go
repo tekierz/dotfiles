@@ -156,9 +156,20 @@ func installFakeGit(t *testing.T, fail bool) {
 if [ "$FAKE_GIT_FAIL" = "1" ]; then
 	exit 42
 fi
-dest="$5"
-mkdir -p "$dest/.git"
-printf '%s\n' '-- cloned preset' > "$dest/init.lua"
+case "$1" in
+	init)
+		mkdir -p .git
+		printf '%s\n' '-- cloned preset' > init.lua
+		;;
+	remote|fetch|checkout)
+		;;
+	rev-parse)
+		printf '%s\n' "$FAKE_GIT_COMMIT"
+		;;
+	*)
+		exit 43
+		;;
+esac
 `
 	if err := os.WriteFile(gitPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write fake git: %v", err)
@@ -169,4 +180,5 @@ printf '%s\n' '-- cloned preset' > "$dest/init.lua"
 	} else {
 		t.Setenv("FAKE_GIT_FAIL", "0")
 	}
+	t.Setenv("FAKE_GIT_COMMIT", kickstartNvimCommit)
 }

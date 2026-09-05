@@ -202,7 +202,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 				outcome = installationOutcomeSucceeded
 				a.deepDiveContinuation = nil
 			default:
-				msg.err = fmt.Errorf("Deep Dive continuation result did not match the reviewed phase")
+				msg.err = fmt.Errorf("reviewed Deep Dive continuation result did not match the reviewed phase")
 				outcome = installationOutcomeFailed
 				a.deepDiveContinuation = nil
 			}

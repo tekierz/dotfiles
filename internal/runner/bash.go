@@ -103,6 +103,7 @@ func (s *StreamingCmd) Wait() error {
 // RunStreaming executes a command and streams output line-by-line
 // Returns a StreamingCmd that provides channels for output and completion
 func RunStreaming(ctx context.Context, name string, args ...string) (*StreamingCmd, error) {
+	//nolint:noctx // startStreamingLifecycle owns context cancellation and process-group cleanup.
 	cmd := exec.Command(name, args...)
 	cmd.Env = os.Environ()
 	// Connect stdin to /dev/null to prevent commands from hanging waiting for input
@@ -150,6 +151,7 @@ func RunStreamingWithSudo(ctx context.Context, name string, args ...string) (*St
 	sudoArgs = append(sudoArgs, append([]string(nil), args...)...)
 	// #nosec G204 -- sudo, supervisor, and target are exact validated absolute
 	// paths; arguments remain literal argv entries and never enter a shell.
+	//nolint:noctx // The streaming lifecycle and supervisor control pipe own cancellation and cleanup.
 	command := exec.Command(sudo, sudoArgs...)
 	command.Env = privilegedLauncherEnvironment()
 	command.Dir = "/"

@@ -1,18 +1,28 @@
 # Release process
 
 Tagged releases are built by `.github/workflows/release.yml` from the exact tag
-commit. The workflow reruns module, formatting, vet, normal-test, and race-test
-gates before publishing anything. GoReleaser and Syft are installed at pinned
-versions, not moving `latest` selectors.
+commit. The workflow rejects malformed semantic-version tags and tags whose
+commit is not contained in `main`. It reruns module, formatting, vet,
+normal-test, race-test, ShellCheck, Staticcheck, and govulncheck gates before
+publishing anything. Release tools are installed at pinned versions, not moving
+`latest` selectors.
 
 ## Artifacts
 
 Every release produces static `darwin` and `linux` binaries for `amd64` and
-`arm64`, wrapped in deterministic `tar.gz` archives with the license and README.
-It also publishes a source archive and one SPDX JSON SBOM per archive/source artifact.
-The workflow creates `dotfiles_release_checksums.txt` over all five archives and all
-five SBOMs, verifies it, and records GitHub provenance for every named artifact.
-GoReleaser keeps the release in draft until those checks and attestations succeed.
+`arm64`, wrapped in deterministic `tar.gz` archives with the project license,
+README, third-party notices, and dependency license texts. It also publishes a
+source archive and one SPDX JSON SBOM per archive/source artifact. The workflow
+creates `dotfiles_release_checksums.txt` over all five archives and all five
+SBOMs, verifies it, and records GitHub provenance for every named artifact.
+GoReleaser keeps the release in draft until those checks and attestations
+succeed.
+
+The Go binaries and their archives use the commit timestamp, `-trimpath`, and
+an empty Go build ID so repeated builds from the same source and toolchain are
+byte-identical. SBOM documents carry generator metadata; their exact bytes are
+covered by the release checksum and attestation rather than described as
+reproducible across separate generation runs.
 
 Consumers can verify a downloaded archive with:
 
@@ -41,11 +51,16 @@ hardware test matrix, and Homebrew install/upgrade/rollback trial must also pass
 ## Remaining distribution gates
 
 - The external `tekierz/homebrew-tap` is a hard tag gate. As verified on
-  2026-07-10, its `Formula/dotfiles.rb` still targets v2.0.1 and unconditionally
+  2026-07-16, its `Formula/dotfiles.rb` still targets v2.0.1 and unconditionally
   unlinks `dotfiles-tui` and `dotfiles-setup` executables by basename during
   install. Remove that unowned deletion, update the formula from the published
   archive checksum, correct its stale feature/command documentation, and test a
   clean install plus an upgrade from the last supported version.
+- The repository's current owner settings do not yet provide a complete public
+  release boundary. Require the stable `Release Gate` check with strict
+  up-to-date branches, enable private vulnerability reporting, secret scanning
+  and push protection, and enable the dependency graph plus Dependabot security
+  updates before publishing.
 - GitHub provenance is configured, but Apple Developer ID signing/notarization is
   not possible until release credentials and an ownership policy are provisioned.
   Do not describe standalone macOS archives as notarized before that gate exists.

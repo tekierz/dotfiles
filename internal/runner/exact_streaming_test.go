@@ -222,7 +222,10 @@ func TestExactStreamingCancelCompletionRaceIsBounded(t *testing.T) {
 
 func waitExactPID(t *testing.T, path string) int {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	// Starting the child can be delayed when the full race-enabled suite is
+	// competing for CPU. This setup allowance does not widen the two-second
+	// cancellation bound asserted by the test itself.
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
 		if err == nil {

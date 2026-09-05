@@ -1,8 +1,18 @@
 # dotfiles
 
+[![CI](https://github.com/tekierz/dotfiles/actions/workflows/ci.yml/badge.svg)](https://github.com/tekierz/dotfiles/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tekierz/dotfiles?display_name=tag&sort=semver)](https://github.com/tekierz/dotfiles/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A cross-platform terminal environment management platform with **16 customizable themes**.
 
 Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. Features an interactive TUI for installation and configuration, or use CLI commands directly.
+
+> [!IMPORTANT]
+> This application installs packages and changes user configuration files.
+> Review the generated plan before applying it, run the application as your
+> normal user rather than through `sudo`, and keep an independent machine
+> backup.
 
 ## Quick Start
 
@@ -267,7 +277,12 @@ timestamps; keep an independent machine backup when those attributes matter.
 | `caff` | Toggle system sleep (like Caffeine) |
 | `y` | Yazi file manager (cd on exit) |
 
-`sshh` (Quick SSH connection manager) is bundled with dotfiles and installed to `~/.local/bin/sshh` by default. The fail-closed uninstall command retains helpers until ownership manifests and anchored removal are implemented.
+`sshh` (Quick SSH connection manager) is a small helper maintained and
+distributed as part of this repository. It is installed to
+`~/.local/bin/sshh` by default; it is not fetched from, or guaranteed to be
+command-compatible with, the separate `tekierz/sshh` repository or Homebrew
+formula. The fail-closed uninstall command retains helpers until ownership
+manifests and anchored removal are implemented.
 
 ### Shell Aliases
 
@@ -338,11 +353,62 @@ from historical raw URLs. Existing users should install the Go application, run
 - **macOS**: Homebrew
 - **Arch Linux**: pacman, paru (for AUR)
 - **Debian/Ubuntu**: apt (some tools need Homebrew)
+- **Build from source**: Go version declared in [`go.mod`](go.mod)
+
+Windows is not supported. Package and architecture availability is determined
+by upstream package managers and can differ between distributions and releases.
+
+## Privacy and Network Access
+
+The `dotfiles` application has no telemetry service, user account, or automatic
+support upload. Its configuration, operation journals, backups, and diagnostic
+data remain on the local machine unless you explicitly copy or share them.
+
+Install and update operations invoke third-party package managers and tools such
+as Homebrew, apt, pacman, Git, and npm. Those subprocesses may contact their own
+upstream services and are governed by their respective privacy and security
+policies. Review an installation plan before approving it.
+
+Only `dotfiles support --json` is designed as a bounded, redacted
+support-sharing projection. Always inspect even that output before sharing it.
+Raw logs, configuration, operation journals, backups, and `doctor --json` can
+contain private diagnostic information.
+
+## Security and Support
+
+For security vulnerabilities, follow the private reporting process in
+[SECURITY.md](SECURITY.md). Please do not disclose suspected vulnerabilities in
+a public issue.
+
+For reproducible defects and feature requests, use
+[GitHub Issues](https://github.com/tekierz/dotfiles/issues). Community support is
+provided on a best-effort basis; this project does not include a service-level
+agreement or commercial support commitment.
+
+## Limitations
+
+- The application targets macOS, Arch-family Linux, Debian-family Linux, and
+  Raspberry Pi systems; other operating systems and distributions are
+  unsupported.
+- Package availability and third-party behavior are outside this project's
+  control.
+- Rollback preserves the documented regular-file and POSIX-mode subset, not
+  every filesystem attribute. See [Backup & Restore](#backup--restore).
+- The application does not manage or sanitize credentials belonging to package
+  managers, Git hosts, npm, MCP servers, or installed tools.
+- Theme and product names belong to their respective owners. Their inclusion
+  identifies compatibility or inspiration and does not imply endorsement.
+
+## Contributing
+
+Bug reports, focused feature proposals, documentation improvements, and code
+contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and follow
+the [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+Copyright (c) 2025-2026 Pratik (tekierz). Released under the
+[MIT License](LICENSE).
 
-## Related
-
-- [sshh](https://github.com/tekierz/sshh) - Quick SSH connection manager
+Compiled releases include third-party open-source components under their own
+licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

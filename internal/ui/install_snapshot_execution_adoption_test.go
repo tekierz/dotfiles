@@ -225,9 +225,15 @@ func TestManageInstallIRoutesTypedStateToReviewedPlan(t *testing.T) {
 			if !ok {
 				t.Fatal("reviewed plan exposes no snapshot authority")
 			}
+			phaseSnapshot, err := health.NewInstallationSnapshot(health.InstallationSnapshotSpec{
+				Generation: 1, Platform: snapshot.Platform(), Manager: snapshot.Manager(), Tools: snapshot.Tools(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			schema, generation, platform, manager, digest := snapshotAuthority.installSnapshotAuthority()
-			if schema != snapshot.SchemaVersion() || generation != snapshot.Generation() || platform != snapshot.Platform() || manager != snapshot.Manager() || digest != snapshot.Digest() {
-				t.Fatalf("reviewed snapshot authority=(%d,%d,%q,%q,%q), want exact accepted snapshot", schema, generation, platform, manager, digest)
+			if schema != phaseSnapshot.SchemaVersion() || generation != phaseSnapshot.Generation() || platform != phaseSnapshot.Platform() || manager != phaseSnapshot.Manager() || digest != phaseSnapshot.Digest() {
+				t.Fatalf("reviewed phase snapshot authority=(%d,%d,%q,%q,%q), want canonical fresh phase snapshot", schema, generation, platform, manager, digest)
 			}
 			tool, _ := registry.Get("zsh")
 			recipe, err := tools.DescribeInstall(tool, tools.InstallEnvironment{Platform: pkg.PlatformMacOS, Manager: "brew"})

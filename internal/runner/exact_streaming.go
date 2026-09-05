@@ -36,6 +36,7 @@ func RunExactStreaming(ctx context.Context, request ExactStreamingRequest) (*Str
 	args := append([]string(nil), request.Args...)
 	environment := append([]string(nil), request.Env...)
 	// #nosec G204 -- Path is validated as an exact clean absolute path; Args are literal argv.
+	//nolint:noctx // startStreamingLifecycle owns context cancellation and process-group cleanup.
 	command := exec.Command(request.Path, args...)
 	command.Env = environment
 	command.Dir = request.Dir

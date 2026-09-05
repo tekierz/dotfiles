@@ -596,10 +596,6 @@ func blockedResult(intent planpublic.Intent, snapshot health.InstallationSnapsho
 	return blockedResultWithPhase(intent, snapshot, code, nil)
 }
 
-func blockedPhaseResult(intent planpublic.Intent, snapshot health.InstallationSnapshot, code string, phase planpublic.PhaseSpec) (Result, error) {
-	return blockedResultWithPhase(intent, snapshot, code, &phase)
-}
-
 func blockedResultWithPhase(intent planpublic.Intent, snapshot health.InstallationSnapshot, code string, phase *planpublic.PhaseSpec) (Result, error) {
 	actions := make([]planpublic.ActionSpec, len(intent.Tools))
 	for index, id := range intent.Tools {

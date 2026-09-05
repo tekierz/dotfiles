@@ -490,7 +490,7 @@ func (a *App) refreshPendingInstallPlan() {
 		case deepDiveContinuationConfigReview:
 			plan, err = buildConfigContinuationPlan(a, runtime, time.Now(), a.deepDiveContinuation)
 		default:
-			err = fmt.Errorf("Deep Dive continuation is invalid")
+			err = fmt.Errorf("reviewed Deep Dive continuation is invalid")
 		}
 	} else {
 		requested, phased, intentErr := deepDivePhasedIntent(a, runtime)
@@ -499,7 +499,7 @@ func (a *App) refreshPendingInstallPlan() {
 		} else if phased {
 			a.deepDiveContinuation = newDeepDiveContinuation(a, requested)
 			if a.deepDiveContinuation == nil {
-				err = fmt.Errorf("Deep Dive continuation is unavailable")
+				err = fmt.Errorf("reviewed Deep Dive continuation is unavailable")
 			} else {
 				plan, err = buildPackageOnlyInstallPlan(a, runtime, time.Now(), a.installationSnapshot, requested)
 			}
@@ -1054,6 +1054,10 @@ func buildPackageOnlyInstallPlan(a *App, installRuntime toolInstallRuntime, now 
 		if hasAccepted {
 			return nil, errors.New(installationSnapshotUnavailable)
 		}
+		return nil, errors.New(installationSnapshotUnavailable)
+	case planpublic.StatusReplanRequired:
+		// BuildPhased returns executable plans as ready. A replan-only public
+		// projection must never be adopted as fresh UI execution authority.
 		return nil, errors.New(installationSnapshotUnavailable)
 	default:
 		return nil, errors.New(installationSnapshotUnavailable)

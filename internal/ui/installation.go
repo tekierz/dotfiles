@@ -1845,14 +1845,6 @@ type utilityInstallResult struct {
 
 type utilityInstaller func(home, name string, content []byte) (tools.MutationEvidence, error)
 
-func installUtilitiesTracked(utilities map[string]bool) utilityInstallResult {
-	return installUtilitiesTrackedWithContext(context.Background(), utilities)
-}
-
-func installUtilitiesAtAuthorityTracked(authority map[string]map[string]acceptedTarget, utilities map[string]bool, locker operation.Locker, beforeAttempt func(string)) utilityInstallResult {
-	return installUtilitiesAtAuthorityTrackedWithContext(context.Background(), authority, utilities, locker, beforeAttempt)
-}
-
 func installUtilitiesTrackedWithContext(ctx context.Context, utilities map[string]bool) utilityInstallResult {
 	return installUtilitiesTrackedWithBeforeContext(ctx, utilities, nil, installScriptFileTracked)
 }
@@ -1870,10 +1862,6 @@ func installUtilitiesAtAuthorityTrackedWithContext(ctx context.Context, authorit
 
 func installUtilitiesTrackedWith(utilities map[string]bool, install utilityInstaller) utilityInstallResult {
 	return installUtilitiesTrackedWithBeforeContext(context.Background(), utilities, nil, install)
-}
-
-func installUtilitiesTrackedWithBefore(utilities map[string]bool, beforeAttempt func(string), install utilityInstaller) utilityInstallResult {
-	return installUtilitiesTrackedWithBeforeContext(context.Background(), utilities, beforeAttempt, install)
 }
 
 func installUtilitiesTrackedWithBeforeContext(ctx context.Context, utilities map[string]bool, beforeAttempt func(string), install utilityInstaller) utilityInstallResult {

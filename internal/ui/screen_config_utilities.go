@@ -59,7 +59,7 @@ func (s *configUtilitiesScreen) View(width, height int) string {
 		return installStatusLoadingView(a, width, height)
 	}
 
-	title := renderConfigTitle("", "Utilities", "Helper tools from tekierz/homebrew-tap")
+	title := renderConfigTitle("", "Utilities", "Bundled local helper scripts")
 
 	cfg := a.deepDiveConfig
 	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(60))

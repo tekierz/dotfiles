@@ -182,13 +182,28 @@ func TestInstallplanServiceWiringRejectsPresentUnknownAndRecipeDrift(t *testing.
 }
 
 func TestInstallplanServiceWiringPreservesReviewedPiAndT3Recipes(t *testing.T) {
-	t.Run("pi-phase-blocked", func(t *testing.T) {
+	t.Run("pi-prerequisite-phase-ready", func(t *testing.T) {
 		app, _, base := newPlanTestApp(t)
 		setManageTruthSnapshot(t, app, 144, pkg.PlatformMacOS, "brew", manageTruthObservation(t, "pi", health.PresenceMissing))
 		calls := &installplanWiringCalls{}
 		plan, err := buildInstallPlanForTools(app, installplanWiringRuntime(t, base, calls), time.Now(), []string{"pi"})
-		if plan != nil || err == nil || err.Error() != installationSnapshotUnavailable || !slices.Equal(calls.lookup, []string{"pi"}) || !slices.Equal(calls.describe, []string{"pi"}) || calls.capture != 0 {
-			t.Fatalf("Pi phase result=plan %v error %v calls %+v", plan, err, *calls)
+		if err != nil || plan == nil {
+			t.Fatalf("Pi phase result=plan %v error %v", plan, err)
+		}
+		phase, phased := plan.phase()
+		if !phased || phase.Kind() != operation.InstallPhasePrerequisite || phase.Index() != 1 ||
+			phase.Authority() != operation.InstallAuthorityManager ||
+			!slices.Equal(phase.RequestedTools(), []string{"pi"}) ||
+			!slices.Equal(phase.RemainingTools(), []string{"pi"}) {
+			t.Fatalf("Pi prerequisite authority = %+v (phased=%v)", phase, phased)
+		}
+		actions := plan.actions()
+		if len(actions) != 1 || actions[0].Kind != operation.KindInstallTool || actions[0].InstallRecipe == nil ||
+			len(actions[0].InstallRecipe.Steps) != 1 || actions[0].InstallRecipe.Steps[0].Kind != operation.InstallStepPackageManager {
+			t.Fatalf("Pi prerequisite actions = %+v", actions)
+		}
+		if calls.registered != 1 || !slices.Equal(calls.lookup, []string{"pi"}) || !slices.Equal(calls.describe, []string{"pi"}) || calls.capture != 1 {
+			t.Fatalf("Pi phase calls = %+v", *calls)
 		}
 	})
 	t.Run("t3-ready", func(t *testing.T) {

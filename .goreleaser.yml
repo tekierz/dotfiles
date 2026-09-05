@@ -18,6 +18,7 @@ builds:
     flags:
       - -mod=readonly
       - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w -buildid= -X main.version={{ .Version }}
 
@@ -43,6 +44,18 @@ archives:
           mode: 0644
           mtime: "{{ .CommitDate }}"
       - src: README.md
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: THIRD_PARTY_NOTICES.md
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSES/*
         info:
           owner: root
           group: root

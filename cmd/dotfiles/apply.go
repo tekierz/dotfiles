@@ -190,6 +190,10 @@ func validApplySuccess(result installapply.Result, expectedHash string, requeste
 	switch result.PhaseKind {
 	case "":
 		return result.PhaseIndex == 0 && len(phaseRequested) == 0
+	case operation.InstallPhasePrerequisite:
+		// A prerequisite phase is never a complete apply success. It must be
+		// returned through validApplyReplanRequired with phase-complete status.
+		return false
 	case operation.InstallPhaseNPM:
 		return result.PhaseIndex == 2 && slices.Equal(phaseRequested, requestedTools)
 	default:

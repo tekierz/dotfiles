@@ -14,11 +14,16 @@ CI installs tools at explicit versions:
 | golangci-lint | v2.5.0 | Multi-linter and gosec gate |
 | Staticcheck | v0.7.0 | Go 1.25-aware static analysis |
 | govulncheck | v1.1.4 | Reachable Go vulnerability analysis |
+| Gitleaks | v8.30.1 | Secret scanning with a reviewed narrow fixture allowlist |
 | GoReleaser | v2.17.0 | Release-configuration validation |
+| actionlint | v1.7.12 | GitHub Actions syntax and expression validation |
 | ShellCheck | runner package | Maintained shell-script analysis |
 
 GitHub Actions are referenced by immutable commit SHA. Dependabot checks Go
 modules and Actions weekly, but updates still require normal review and CI.
+CodeQL analyzes Go on pull requests, `main`, and a weekly schedule. Dependency
+Review rejects pull requests that introduce moderate-or-higher known
+vulnerabilities or AGPL-only dependencies.
 
 ## Local checks
 
@@ -34,7 +39,10 @@ go test -race ./...
 golangci-lint run --timeout=5m
 staticcheck ./...
 govulncheck ./...
-shellcheck scripts/install-hooks.sh
+gitleaks git --redact --no-banner .
+gitleaks dir --redact --no-banner .
+shellcheck scripts/*.sh tests/*.sh
+actionlint .github/workflows/*.yml
 goreleaser check
 ```
 
@@ -44,12 +52,20 @@ shown by `make release-check` and pinned in the release workflow.
 
 ## What is blocking
 
-- Formatting, module drift, vet, golangci-lint, Staticcheck, ShellCheck, and
-  GoReleaser configuration failures fail the lint job.
-- A reachable vulnerability fails the security job.
+- Formatting, module drift, vet, golangci-lint, Staticcheck, ShellCheck,
+  actionlint, and GoReleaser configuration failures fail the lint job.
+- A reachable vulnerability or source secret finding fails the security job.
 - Build, normal tests, and race tests must pass on both Ubuntu and macOS.
+- The stable `Release Gate` check succeeds only when lint, vulnerability,
+  platform test, and platform build jobs all succeed.
 - A tag remains a draft until exact platform archives, executable layout and
   version, SPDX SBOMs, checksums, and GitHub provenance all validate.
+
+Repository settings must require the stable `Release Gate` check on an
+up-to-date branch. GitHub secret scanning, push protection, Dependabot security
+updates, the dependency graph used by Dependency Review, and private
+vulnerability reporting are owner-controlled repository settings and should be
+enabled before a public release.
 
 There is no `continue-on-error` security or lint gate. Do not weaken a gate to
 make a release green. A narrowly justified exclusion must identify the exact

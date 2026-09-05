@@ -207,10 +207,9 @@ func containsToolID(ids []string, target string) bool {
 func TestCollectSelectedToolsIncludesMissingSupportedCore(t *testing.T) {
 	cfg := NewDeepDiveConfig()
 	a := &App{
-		deepDiveConfig:       cfg,
-		manageInstalled:      make(map[string]bool),
-		manageInstalledReady: true,
+		deepDiveConfig: cfg,
 	}
+	seedTypedReadyInstallCache(t, a, map[string]bool{})
 
 	selected := a.collectSelectedTools()
 	for _, id := range alwaysConfiguredToolIDs {
@@ -225,10 +224,18 @@ func TestCorePlanSkipsUnsupportedDebianAndPiTools(t *testing.T) {
 		t.Run(string(platform), func(t *testing.T) {
 			runtime := registryRuntime(platform, map[string]bool{})
 			a := &App{
-				deepDiveConfig:       NewDeepDiveConfig(),
-				manageInstalled:      make(map[string]bool),
-				manageInstalledReady: true,
+				deepDiveConfig: NewDeepDiveConfig(),
 			}
+			snapshot, err := tools.ObserveInstallationHealth(context.Background(), tools.NewRegistry().All(), runtime.detectManager(), platform, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.installationSnapshotGeneration = 1
+			a.installationSnapshotTerminal = true
+			a.installationSnapshot = snapshot
+			a.installationSnapshotManagerIdentity = stableUIManagerIdentity()
+			a.installationSnapshotReady = true
+			a.manageInstalledReady = true
 			selected := a.collectSelectedToolsWithRuntime(runtime)
 			for _, unsupported := range []string{"ghostty", "yazi"} {
 				if containsToolID(selected, unsupported) {
@@ -294,29 +301,18 @@ func TestWizardExecutesBaseToolAgainstInjectedPiPlatform(t *testing.T) {
 	}
 }
 
-func TestClaudeCustomInstallerUsesInjectedPiPrerequisitesAndNPMPhase(t *testing.T) {
-	binDir := t.TempDir()
-	npmPath := filepath.Join(binDir, "npm")
-	if err := os.WriteFile(npmPath, []byte("#!/bin/sh\necho npm-phase\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir)
-
+func TestClaudeLegacyCustomInstallerFailsClosedBeforeAnyPhase(t *testing.T) {
 	mgr := pkg.NewMockPackageManager()
 	claude := tools.NewClaudeCodeTool()
 	var lines []string
 	err := installTool(context.Background(), claude, mgr, pkg.PlatformPi, func(line string) {
 		lines = append(lines, line)
 	})
-	if err != nil {
-		t.Fatalf("injected Pi Claude install: %v", err)
+	if !errors.Is(err, tools.ErrReviewedInstallRequired) {
+		t.Fatalf("legacy Pi Claude install error = %v, want reviewed recipe requirement", err)
 	}
-	want := tools.PackagesForPlatform(claude.Packages(), pkg.PlatformPi)
-	if len(mgr.InstallCalls) != 1 || !reflect.DeepEqual(mgr.InstallCalls[0], want) {
-		t.Fatalf("Claude Pi prerequisites = %v, want Debian fallback %v", mgr.InstallCalls, want)
-	}
-	if !reflect.DeepEqual(lines, []string{"npm-phase"}) {
-		t.Fatalf("Claude custom npm phase was bypassed or not streamed: %v", lines)
+	if len(mgr.InstallCalls) != 0 || len(lines) != 0 {
+		t.Fatalf("legacy Claude route acquired mutation authority: installs=%v lines=%v", mgr.InstallCalls, lines)
 	}
 }
 
@@ -434,7 +430,8 @@ func TestClaudeNodePresentWithoutClaudeRemainsMissingInPlan(t *testing.T) {
 	for _, id := range alwaysConfiguredToolIDs {
 		observations[id] = true
 	}
-	a := &App{deepDiveConfig: cfg, manageInstalled: observations, manageInstalledReady: true}
+	a := &App{deepDiveConfig: cfg}
+	seedTypedReadyInstallCache(t, a, observations)
 	if selected := a.collectSelectedTools(); !containsToolID(selected, "claude-code") {
 		t.Fatalf("Claude did not enter the install plan when Node existed but its CLI was absent: %v", selected)
 	}

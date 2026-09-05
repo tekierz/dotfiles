@@ -108,6 +108,9 @@ dev-deps:
 	@echo "Installing development dependencies..."
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
 	go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+	go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+	go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+	go install github.com/zricethezav/gitleaks/v8@v8.30.1
 
 # Validate the pinned GoReleaser v2 configuration and its SBOM dependency.
 release-check:

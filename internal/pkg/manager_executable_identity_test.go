@@ -682,11 +682,41 @@ func managerBuilderName(call *ast.CallExpr) string {
 		}
 		qualified := owner.Name + "." + function.Sel.Name
 		switch qualified {
-		case "exec.CommandContext", "runner.RunStreaming", "runner.RunStreamingWithSudo":
+		case "exec.CommandContext", "runner.RunStreaming", "runner.RunStreamingWithSudo", "runner.RunSequentialStreaming":
 			return qualified
 		}
 	}
 	return ""
+}
+
+func exactIdentityInvocationPath(expression ast.Expr, identity string) bool {
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "invocationPath" {
+		return false
+	}
+	identifier, ok := selector.X.(*ast.Ident)
+	return ok && identifier.Name == identity
+}
+
+func exactSequentialStreamingPhases(arguments []ast.Expr, phaseBuilder, identity string) bool {
+	if len(arguments) != 2 {
+		return false
+	}
+	for _, expression := range arguments {
+		call, ok := expression.(*ast.CallExpr)
+		if !ok || len(call.Args) < 2 {
+			return false
+		}
+		builder, ok := call.Fun.(*ast.Ident)
+		if !ok || builder.Name != phaseBuilder {
+			return false
+		}
+		phaseIdentity, ok := call.Args[1].(*ast.Ident)
+		if !ok || phaseIdentity.Name != identity {
+			return false
+		}
+	}
+	return true
 }
 
 func exactManagerExecutableCall(expression ast.Expr, receiver string) bool {
@@ -742,6 +772,8 @@ func TestManagerExecutableIdentityExecutionBuildersAreExhaustivelyClassified(t *
 		receiver  string
 		auxiliary map[string]bool
 		allowSudo bool
+		identity  string
+		phase     string
 		expected  map[string]map[string]int
 	}{
 		{file: "brew.go", receiver: "b", expected: map[string]map[string]int{
@@ -752,13 +784,14 @@ func TestManagerExecutableIdentityExecutionBuildersAreExhaustivelyClassified(t *
 			"InstallStreaming": {"runner.RunStreaming": 1}, "InstallCasksStreaming": {"runner.RunStreaming": 1},
 			"UpdateStreaming": {"runner.RunStreaming": 1}, "UpdateAllStreaming": {"runner.RunStreaming": 1},
 		}},
-		{file: "apt.go", receiver: "a", auxiliary: map[string]bool{"dpkg": true, "dpkg-query": true}, allowSudo: true, expected: map[string]map[string]int{
+		{file: "apt.go", receiver: "a", auxiliary: map[string]bool{"dpkg": true, "dpkg-query": true}, allowSudo: true, identity: "identity", phase: "aptStreamingPhase", expected: map[string]map[string]int{
 			"Install": {"packageCommand": 1}, "Uninstall": {"packageCommand": 1}, "IsInstalledContext": {"packageCommandWithContext": 1},
 			"GetVersion": {"packageCommand": 1}, "CheckOutdated": {"packageCommand": 1}, "Update": {"packageCommand": 2},
 			"UpdateAll": {"packageCommand": 2}, "Search": {"packageCommand": 1}, "getInstalledVersions": {"packageCommand": 1},
 			"ListInstalled": {"packageCommand": 1}, "InstallStreaming": {"runner.RunStreamingWithSudo": 1},
-			"UpdateStreaming":    {"exec.CommandContext": 1, "runner.RunStreamingWithSudo": 1},
-			"UpdateAllStreaming": {"runner.RunStreamingWithSudo": 2},
+			"UpdateStreaming":    {"runner.RunSequentialStreaming": 1},
+			"UpdateAllStreaming": {"runner.RunSequentialStreaming": 1},
+			"aptStreamingPhase":  {"runner.RunStreamingWithSudo": 1},
 		}},
 		{file: "pacman.go", receiver: "p", auxiliary: map[string]bool{"checkupdates": true}, allowSudo: true, expected: map[string]map[string]int{
 			"Install": {"packageCommand": 2}, "Uninstall": {"packageCommand": 2}, "IsInstalledContext": {"packageCommandWithContext": 1},
@@ -796,13 +829,23 @@ func TestManagerExecutableIdentityExecutionBuildersAreExhaustivelyClassified(t *
 						observed[function.Name.Name] = make(map[string]int)
 					}
 					observed[function.Name.Name][builder]++
-					targetIndex := map[string]int{"packageCommand": 1, "packageCommandWithContext": 2, "exec.CommandContext": 1, "runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1}[builder]
+					targetIndex := map[string]int{"packageCommand": 1, "packageCommandWithContext": 2, "exec.CommandContext": 1, "runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1, "runner.RunSequentialStreaming": 1}[builder]
 					if len(call.Args) <= targetIndex {
 						t.Errorf("%s has malformed %s builder", test.file, builder)
 						return true
 					}
+					if builder == "runner.RunSequentialStreaming" {
+						if exactSequentialStreamingPhases(call.Args[targetIndex:], test.phase, test.identity) {
+							return true
+						}
+						t.Errorf("%s sequential streaming builder lacks exact trusted phases", test.file)
+						return true
+					}
 					target := call.Args[targetIndex]
 					if exactManagerExecutableCall(target, test.receiver) {
+						return true
+					}
+					if builder == "runner.RunStreamingWithSudo" && exactIdentityInvocationPath(target, test.identity) {
 						return true
 					}
 					if literal, ok := stringLiteral(target); ok && test.auxiliary[literal] && builder != "runner.RunStreamingWithSudo" && builder != "exec.CommandContext" {
@@ -834,7 +877,7 @@ func TestManagerExecutableIdentityExecutionBuildersAreExhaustivelyClassified(t *
 						return true
 					}
 					qualified := owner.Name + "." + value.Sel.Name
-					if (qualified == "exec.CommandContext" || qualified == "runner.RunStreaming" || qualified == "runner.RunStreamingWithSudo") && !allowedBuilderPositions[value.Pos()] {
+					if (qualified == "exec.CommandContext" || qualified == "runner.RunStreaming" || qualified == "runner.RunStreamingWithSudo" || qualified == "runner.RunSequentialStreaming") && !allowedBuilderPositions[value.Pos()] {
 						t.Errorf("%s aliases builder %s", test.file, qualified)
 					}
 					if qualified == "exec.Command" || qualified == "exec.Cmd" || qualified == "os.StartProcess" || qualified == "syscall.Exec" || qualified == "syscall.ForkExec" || qualified == "syscall.StartProcess" {
@@ -885,7 +928,7 @@ func TestManagerExecutableIdentityBrewExecutionIgnoresHostilePATH(t *testing.T) 
 	requireManagerCaptureLog(t, logPath, "target:"+captured+" <install> <--cask> <ghostty>")
 }
 
-func TestManagerExecutableIdentityAptExecutionUsesCapturedChild(t *testing.T) {
+func TestManagerExecutableIdentityAptNonStreamingExecutionUsesCapturedChild(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "capture.log")
 	t.Setenv("MANAGER_CAPTURE_LOG", logPath)
 	captured := writeCapturedManagerExecutable(t, "apt")
@@ -918,18 +961,6 @@ func TestManagerExecutableIdentityAptExecutionUsesCapturedChild(t *testing.T) {
 		"target:"+captured+" <update>",
 		"sudo <"+captured+"> <install> <-y> <tmux>",
 		"target:"+captured+" <install> <-y> <tmux>",
-	)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	resetManagerCaptureLog(t, logPath)
-	command, err := manager.UpdateStreaming(ctx, "zsh")
-	waitManagerStreaming(t, command, err)
-	requireManagerCaptureLog(t, logPath,
-		"sudo <-n> <"+captured+"> <update>",
-		"target:"+captured+" <update>",
-		"sudo <"+captured+"> <install> <-y> <zsh>",
-		"target:"+captured+" <install> <-y> <zsh>",
 	)
 }
 
@@ -965,16 +996,6 @@ func TestManagerExecutableIdentityPacmanAndParuSudoRouting(t *testing.T) {
 		requireManagerCaptureLog(t, logPath,
 			"sudo <"+captured+"> <-R> <--noconfirm> <git>",
 			"target:"+captured+" <-R> <--noconfirm> <git>",
-		)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		resetManagerCaptureLog(t, logPath)
-		command, err := manager.InstallStreaming(ctx, "zsh")
-		waitManagerStreaming(t, command, err)
-		requireManagerCaptureLog(t, logPath,
-			"sudo <"+captured+"> <-S> <--noconfirm> <--needed> <zsh>",
-			"target:"+captured+" <-S> <--noconfirm> <--needed> <zsh>",
 		)
 	})
 

@@ -1,5 +1,70 @@
 # Release-Readiness Plan
 
+## Open-source release readiness — 2026-07-16
+
+- [x] Reconcile stale CLI, package-manager, tool, and UI fixtures with the completed
+      phased-install, privileged-supervisor, pinned-artifact, and typed-health contracts.
+- [x] Make the full automated pre-PR gate pass: module integrity, build, vet, lint,
+      Staticcheck, unit/race tests, formatting, vulnerability scan, and ShellCheck.
+- [x] Audit MIT licensing, third-party notices, public documentation, contribution,
+      security-reporting, support, privacy, and repository hygiene for a public release.
+- [x] Harden GitHub Actions and release construction for least privilege, pinned tools,
+      reproducible cross-platform artifacts, checksums, SBOMs, signatures/attestations,
+      and protected publication.
+- [x] Verify macOS/Linux cross-builds, CLI contracts, artifact contents, secret scanning,
+      and cross-repository Homebrew/sshh compatibility without publishing or pushing.
+- [x] Record the remaining manual owner-hardware, distribution, canary, and public-release
+      gates that cannot be completed safely from this checkout.
+
+### Open-source release review
+
+- Created `feature/open-source-release-readiness` from the completed product
+  checkpoint `890c446`; no release-readiness changes are staged, committed, or
+  pushed.
+- Reconciled the completed phased install, trusted package-manager supervisor,
+  pinned Neovim artifact, typed snapshot, Pi reachability, responsive UI, and
+  Claude fail-closed behavior with the automated suite. Production safety was
+  not weakened to preserve obsolete fixtures.
+- Added the public MIT release surface: canonical license attribution,
+  third-party notices and exact license/patent texts, security and contribution
+  policies, Contributor Covenant, issue forms, pull-request template, privacy,
+  support, limitation, and non-endorsement guidance.
+- Added CodeQL, dependency review, Gitleaks, actionlint, stable CI aggregation,
+  release-tag ancestry validation, full tag-time static/vulnerability/secret
+  gates, and license-notice assertions in every binary/source release archive.
+  All external Actions remain pinned to immutable commit SHAs.
+- Exact Go 1.25.6 module/tidy/format/build/vet/test/race gates pass. Pinned
+  golangci-lint v2.5.0, Staticcheck v0.7.0, govulncheck v1.1.4, actionlint
+  v1.7.12, Gitleaks v8.30.1, ShellCheck, and GoReleaser v2.17.0 pass.
+  Gitleaks reports no findings across 679 commits or the release worktree.
+- The local GoReleaser snapshot produced and verified four static macOS/Linux
+  amd64/arm64 archives, five SPDX SBOMs, five archives, and checksums. Every
+  binary archive contains the MIT license, README, third-party notices, and
+  dependency license texts. Repeated snapshots produced byte-identical binaries
+  and `tar.gz` archives after freezing the Go module timestamp. SBOM generator
+  metadata is verified by per-release checksums/attestations rather than claimed
+  as cross-run reproducible. The source-archive notice assertion remains
+  intentionally enforced by the tag workflow; an uncommitted local snapshot
+  uses `git archive HEAD` and therefore cannot include newly untracked files.
+- CLI smoke passes for help, version, status text/JSON, and explicit read-only
+  plan JSON. The bundled `sshh` helper is now described truthfully as distinct
+  from the separate upstream repository/formula.
+- **Owner-controlled GitHub gates:** require the stable `Release Gate` check on
+  a strict up-to-date branch, enable private vulnerability reporting, secret
+  scanning and push protection, the dependency graph, and Dependabot security
+  updates. Current remote settings do not yet enforce those controls.
+- **Distribution blocker:** `tekierz/homebrew-tap` still ships v2.0.1, deletes
+  legacy executables by unowned basename, and documents stale commands. After a
+  candidate tag creates exact assets/checksums, update the formula, remove the
+  deletion, add tap licensing/CI, and perform clean-install plus v2.0.1
+  upgrade/rollback trials.
+- **Manual release gates:** confirm public copyright attribution and provenance
+  of hand-authored palettes/helper fragments; provide a private maintainer
+  contact; run macOS, CachyOS, and fresh Raspberry Pi dogfood including Apply,
+  Save, restore, cancellation, and upgrade paths; decide whether Apple
+  signing/notarization is required; then run canary/beta promotion before the
+  public tag.
+
 ## Active implementation — 2026-07-13
 
 - [x] Commit G0's canonical audit, implementation catalog, and active roadmap reset.

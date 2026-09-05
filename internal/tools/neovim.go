@@ -329,7 +329,7 @@ func WriteNeovimConfigTracked(cfg NeovimConfig, theme string) (MutationEvidence,
 // mutations under the caller's operation lifetime.
 func WriteNeovimConfigTrackedWithContext(ctx context.Context, cfg NeovimConfig, theme string) (MutationEvidence, error) {
 	if ctx == nil {
-		return MutationEvidence{}, errors.New("Neovim operation context is unavailable")
+		return MutationEvidence{}, errors.New("neovim operation context is unavailable")
 	}
 	if err := ctx.Err(); err != nil {
 		return MutationEvidence{}, err
@@ -393,7 +393,7 @@ func WriteNeovimConfigAtBoundAuthorityTracked(cfg NeovimConfig, theme string, ac
 // entry point. Compatibility callers retain the context-free wrapper above.
 func WriteNeovimConfigAtBoundAuthorityTrackedWithContext(ctx context.Context, cfg NeovimConfig, theme string, accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, state *operation.StateAuthority) (MutationEvidence, error) {
 	if ctx == nil {
-		return MutationEvidence{}, errors.New("Neovim operation context is unavailable")
+		return MutationEvidence{}, errors.New("neovim operation context is unavailable")
 	}
 	if err := ctx.Err(); err != nil {
 		return MutationEvidence{}, err
@@ -436,7 +436,7 @@ func setupNeovimPresetTracked(cfg NeovimConfig, theme, nvimDir string) (result *
 
 func setupNeovimPresetTrackedWithContext(ctx context.Context, cfg NeovimConfig, theme, nvimDir string) (result *safefile.DirectorySnapshot, returnErr error) {
 	if ctx == nil {
-		return nil, errors.New("Neovim operation context is unavailable")
+		return nil, errors.New("neovim operation context is unavailable")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -456,7 +456,7 @@ func setupNeovimPresetTrackedWithContext(ctx context.Context, cfg NeovimConfig, 
 
 func setupNeovimPresetAtSnapshotTrackedWithContext(ctx context.Context, cfg NeovimConfig, theme, nvimDir string, accepted *safefile.DirectorySnapshot, parents *safefile.ParentChain, states ...*operation.StateAuthority) (result *safefile.DirectorySnapshot, returnErr error) {
 	if ctx == nil {
-		return nil, errors.New("Neovim operation context is unavailable")
+		return nil, errors.New("neovim operation context is unavailable")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

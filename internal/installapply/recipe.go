@@ -112,6 +112,10 @@ func ExecuteRecipeWithAuthority(ctx context.Context, recipe operation.InstallRec
 			if err := validateAcceptedManagerIdentity(manager, authority.Manager, false); err != nil {
 				return err
 			}
+		case operation.InstallStepNPMGlobal:
+			// Pure npm recipes return through ExecuteAcceptedNPMRecipe above;
+			// mixed authority recipes are rejected before reaching this loop.
+			return ErrNPMExecutionAuthorityRequired
 		default:
 			return fmt.Errorf("unsupported reviewed install step %q", step.Kind)
 		}
@@ -145,6 +149,10 @@ func ExecuteRecipeWithAuthority(ctx context.Context, recipe operation.InstallRec
 					return err
 				}
 			}
+		case operation.InstallStepNPMGlobal:
+			// This remains a fail-closed guard if the authority partitioning
+			// above is ever changed without updating manager execution.
+			return ErrNPMExecutionAuthorityRequired
 		}
 	}
 	return nil

@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   release:
-    name: Reproducible release
+    name: Verified release
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -34,6 +34,17 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Verify release tag and source provenance
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$RELEASE_SHA"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+
       - name: Verify source and release gates
         run: |
           go mod verify
@@ -42,6 +53,7 @@ jobs:
           go test ./...
           go test -race ./...
           test -z "$(gofmt -l .)"
+          shellcheck scripts/*.sh tests/*.sh
 
       - name: Install pinned release tooling
         env:
@@ -51,9 +63,16 @@ jobs:
           echo "$GOBIN" >> "$GITHUB_PATH"
           go install github.com/goreleaser/goreleaser/v2@v2.17.0
           go install github.com/anchore/syft/cmd/syft@v1.44.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
 
-      - name: Validate release configuration
-        run: goreleaser check
+      - name: Validate release configuration and static safety
+        run: |
+          goreleaser check
+          staticcheck ./...
+          govulncheck ./...
+          gitleaks dir --redact --no-banner .
 
       - name: Build a draft release with archives and SBOMs
         env:
@@ -84,6 +103,12 @@ jobs:
               test -x "$binary"
               test -f "$(dirname "$binary")/LICENSE"
               test -f "$(dirname "$binary")/README.md"
+              test -f "$(dirname "$binary")/THIRD_PARTY_NOTICES.md"
+              test -f "$(dirname "$binary")/LICENSES/MIT.txt"
+              test -f "$(dirname "$binary")/LICENSES/Apache-2.0.txt"
+              test -f "$(dirname "$binary")/LICENSES/Go-PATENTS.txt"
+              test -f "$(dirname "$binary")/LICENSES/pflag-BSD-3-Clause.txt"
+              test -f "$(dirname "$binary")/LICENSES/x-sys-BSD-3-Clause.txt"
               if [ "$os/$arch" = "linux/amd64" ]; then
                 test "$("$binary" version)" = "dotfiles version $version"
                 test "$("$binary" --version)" = "dotfiles version $version"
@@ -92,8 +117,22 @@ jobs:
             done
           done
           test "$archive_count" = 4
-          test -f "dist/dotfiles_${version}_source.tar.gz"
-          test -f "dist/dotfiles_${version}_source.tar.gz.sbom.json"
+          source_archive="dist/dotfiles_${version}_source.tar.gz"
+          test -f "$source_archive"
+          test -f "${source_archive}.sbom.json"
+          tar -tzf "$source_archive" > "$verify_root/source-contents.txt"
+          for path in \
+            LICENSE \
+            README.md \
+            THIRD_PARTY_NOTICES.md \
+            LICENSES/MIT.txt \
+            LICENSES/Apache-2.0.txt \
+            LICENSES/Go-PATENTS.txt \
+            LICENSES/pflag-BSD-3-Clause.txt \
+            LICENSES/x-sys-BSD-3-Clause.txt
+          do
+            grep -Fx "dotfiles-${version}/${path}" "$verify_root/source-contents.txt"
+          done
           test "$(find dist -maxdepth 1 -name '*.tar.gz' -type f | wc -l | tr -d ' ')" = 5
           test "$(find dist -maxdepth 1 -name '*.sbom.json' -type f | wc -l | tr -d ' ')" = 5
           jq -e '[.[] | select(.type == "Archive") | [.goos, .goarch]] | sort == [["darwin","amd64"],["darwin","arm64"],["linux","amd64"],["linux","arm64"]]' dist/artifacts.json

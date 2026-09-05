@@ -7,18 +7,32 @@ import (
 	"testing"
 
 	"github.com/tekierz/dotfiles/internal/health"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-func assertPiPhaseBlocked(t *testing.T, app *App, cmdPresent bool) {
+func assertPiPhaseReady(t *testing.T, app *App, cmdPresent bool, action string, presence health.Presence) {
 	t.Helper()
-	if cmdPresent || app.pendingInstallPlan != nil || app.installPlanError == nil || app.installPlanError.Error() != installationSnapshotUnavailable || app.manageStatus != installationSnapshotUnavailable {
-		t.Fatalf("Pi phase block=(cmd=%v,plan=%v,error=%v,status=%q), want nil/nil/%q/%q", cmdPresent, app.pendingInstallPlan != nil, app.installPlanError, app.manageStatus, installationSnapshotUnavailable, installationSnapshotUnavailable)
+	if !cmdPresent || app.pendingInstallPlan == nil || app.installPlanError != nil || app.manageStatus != action+" requested" {
+		t.Fatalf("Pi phase review=(cmd=%v,plan=%v,error=%v,status=%q), want command/plan/nil/%q", cmdPresent, app.pendingInstallPlan != nil, app.installPlanError, app.manageStatus, action+" requested")
+	}
+	phase, phased := app.pendingInstallPlan.phase()
+	wantKind := operation.InstallPhasePrerequisite
+	wantAuthority := operation.InstallAuthorityManager
+	wantRemaining := []string{"pi"}
+	if presence == health.PresencePartial {
+		wantKind = operation.InstallPhaseNPM
+		wantAuthority = operation.InstallAuthorityNPM
+		wantRemaining = nil
+	}
+	if !phased || phase.Kind() != wantKind || phase.Authority() != wantAuthority ||
+		!slices.Equal(phase.RequestedTools(), []string{"pi"}) || !slices.Equal(phase.RemainingTools(), wantRemaining) {
+		t.Fatalf("Pi reviewed phase = %+v (phased=%v)", phase, phased)
 	}
 }
 
-func TestManagePiInstallIsReachableButTemporarilyFailsClosedFromEitherPaneAndCase(t *testing.T) {
+func TestManagePiInstallReachesReviewedPrerequisitePhaseFromEitherPaneAndCase(t *testing.T) {
 	for _, presence := range []health.Presence{health.PresenceMissing, health.PresencePartial} {
 		for _, pane := range []int{managePaneTools, managePaneSettings} {
 			for _, key := range []string{"i", "I"} {
@@ -30,7 +44,11 @@ func TestManagePiInstallIsReachableButTemporarilyFailsClosedFromEitherPaneAndCas
 					selectManageTruthItem(t, app, "pi")
 					app.managePane = pane
 					cmd := NewManageScreen(ctx).handleKey(keyMsg(key))
-					assertPiPhaseBlocked(t, app, cmd != nil)
+					action := "Install"
+					if presence == health.PresencePartial {
+						action = "Repair"
+					}
+					assertPiPhaseReady(t, app, cmd != nil, action, presence)
 				})
 			}
 		}

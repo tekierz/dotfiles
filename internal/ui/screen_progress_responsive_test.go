@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/operation"
 )
 
 func TestProgressScreenResponsiveStatesFitSupportedTerminals(t *testing.T) {
@@ -18,16 +19,19 @@ func TestProgressScreenResponsiveStatesFitSupportedTerminals(t *testing.T) {
 		{width: 120, height: 40},
 	}
 	states := []struct {
-		name     string
-		running  bool
-		complete bool
-		outcome  installationOutcome
-		title    string
-		help     string
-		phase    string
+		name      string
+		running   bool
+		complete  bool
+		outcome   installationOutcome
+		title     string
+		help      string
+		phase     string
+		phaseKind operation.InstallPhaseKind
 	}{
 		{name: "running", running: true, outcome: installationOutcomeRunning, title: "Installing...", help: "Installation in progress", phase: "Configuring git"},
 		{name: "succeeded", complete: true, outcome: installationOutcomeSucceeded, title: "Installation Complete", help: "[ENTER] Continue", phase: "Configuring tools"},
+		{name: "replan-required", complete: true, outcome: installationOutcomeReplanRequired, title: "Prerequisites Complete", help: "[ENTER] Continue", phase: "Installing Node/npm prerequisites", phaseKind: operation.InstallPhasePrerequisite},
+		{name: "configuration-review-required", complete: true, outcome: installationOutcomeConfigurationReviewRequired, title: "Tools Installed", help: "[ENTER] Continue", phase: "Installing reviewed npm tools", phaseKind: operation.InstallPhaseNPM},
 		{name: "failed", complete: true, outcome: installationOutcomeFailed, title: "Installation Incomplete", help: "[ENTER] Continue", phase: "Configuring git"},
 	}
 
@@ -42,6 +46,7 @@ func TestProgressScreenResponsiveStatesFitSupportedTerminals(t *testing.T) {
 				ctx.app.installComplete = state.complete
 				ctx.app.installOutcome = state.outcome
 				ctx.app.installSummaryFacts.outcome = state.outcome
+				ctx.app.installSummaryFacts.phaseKind = state.phaseKind
 				ctx.app.installPlannedSteps = 10
 				ctx.app.installStep = 6
 				ctx.app.installOutput = []string{
@@ -62,6 +67,13 @@ func TestProgressScreenResponsiveStatesFitSupportedTerminals(t *testing.T) {
 				case installationOutcomeSucceeded:
 					if !strings.Contains(plain, "✓") || strings.Contains(plain, "░") {
 						t.Fatalf("succeeded %dx%d did not render an exclusively complete bar/state:\n%s", size.width, size.height, plain)
+					}
+				case installationOutcomeReplanRequired, installationOutcomeConfigurationReviewRequired:
+					if !strings.Contains(plain, "✓") || strings.Contains(plain, "░") {
+						t.Fatalf("%s %dx%d did not render an exclusively complete phase boundary:\n%s", state.name, size.width, size.height, plain)
+					}
+					if strings.Contains(plain, "Installation Complete") {
+						t.Fatalf("%s %dx%d rendered false full-install completion:\n%s", state.name, size.width, size.height, plain)
 					}
 				case installationOutcomeFailed:
 					for _, forbidden := range []string{"Installation Complete", "✓", "100%"} {

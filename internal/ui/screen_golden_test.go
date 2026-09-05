@@ -367,8 +367,7 @@ func TestDeepDiveMenuScreenGolden(t *testing.T) {
 		"Ghostty",
 		"Tmux",
 		"Zsh",
-		"Neovim",
-		"Continue to Installation",
+		"↓ more",
 		"navigate",
 	}
 	for _, want := range wantSubstrings {
@@ -998,8 +997,7 @@ func TestConfigClaudeCodeReachableViaManager(t *testing.T) {
 		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
-	app.manageInstalled = map[string]bool{}
-	app.manageInstalledReady = true
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenConfigClaudeCode)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenConfigClaudeCode")

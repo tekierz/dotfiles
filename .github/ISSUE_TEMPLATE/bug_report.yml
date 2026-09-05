@@ -1,0 +1,72 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "Bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security vulnerabilities here. Follow SECURITY.md.
+        Remove credentials, private paths, hostnames, raw configuration, backups, and operation journals before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Paste the output of `dotfiles version`.
+      placeholder: dotfiles version 2.x.x
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Arch or Arch-based Linux
+        - Debian or Debian-based Linux
+        - Raspberry Pi OS
+        - Other or unsupported
+    validations:
+      required: true
+  - type: input
+    id: architecture
+    attributes:
+      label: Architecture
+      placeholder: arm64, amd64
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give the shortest command or TUI sequence that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Reviewed diagnostics
+      description: Optional. Prefer inspected `dotfiles support --json` output. Do not post raw private diagnostics.
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I removed credentials and personal or machine-identifying information.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

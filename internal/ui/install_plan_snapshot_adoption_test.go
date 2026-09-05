@@ -152,6 +152,7 @@ func TestInstallSnapshotPlannerDecisionMatrix(t *testing.T) {
 		wantDetected   bool
 		wantIntent     string
 		wantErr        bool
+		wantFiltered   bool
 		partialFixture func(*testing.T, toolInstallRuntime, string) health.InstallationObservation
 	}{
 		{name: "present skips install", presence: health.PresencePresent, installability: health.InstallabilitySupported, legacyValue: false, wantIntent: "none"},
@@ -161,12 +162,12 @@ func TestInstallSnapshotPlannerDecisionMatrix(t *testing.T) {
 		{name: "receipt partial and supported repairs", presence: health.PresencePartial, installability: health.InstallabilitySupported, legacyValue: true, wantApply: true, wantRepair: true, wantIntent: "repair"},
 		{name: "authoritative package and direct disagreement repairs", presence: health.PresencePartial, installability: health.InstallabilitySupported, legacyValue: true, wantApply: true, wantRepair: true, wantIntent: "repair", wantDetected: true, partialFixture: plannerDisagreementPartialObservation},
 		{name: "nonauthoritative receipt positive evidence is unresolved", presence: health.PresencePartial, installability: health.InstallabilitySupported, legacyValue: true, wantErr: true, partialFixture: plannerReceiptPositivePartialObservation},
-		{name: "unknown returns error without install actions", presence: health.PresenceUnknown, installability: health.InstallabilitySupported, legacyValue: false, wantErr: true},
-		{name: "missing and unsupported returns error without actions", presence: health.PresenceMissing, installability: health.InstallabilityUnsupported, legacyValue: false, wantErr: true},
-		{name: "missing and unknown installability returns error without actions", presence: health.PresenceMissing, installability: health.InstallabilityUnknown, legacyValue: false, wantErr: true},
-		{name: "partial and unsupported returns error without actions", presence: health.PresencePartial, installability: health.InstallabilityUnsupported, legacyValue: false, wantErr: true},
-		{name: "partial and unknown installability returns error without actions", presence: health.PresencePartial, installability: health.InstallabilityUnknown, legacyValue: false, wantErr: true},
-		{name: "absent observation returns error without actions", omit: true, legacyValue: false, wantErr: true},
+		{name: "unknown is filtered without install actions", presence: health.PresenceUnknown, installability: health.InstallabilitySupported, legacyValue: false, wantFiltered: true},
+		{name: "missing and unsupported is filtered without actions", presence: health.PresenceMissing, installability: health.InstallabilityUnsupported, legacyValue: false, wantFiltered: true},
+		{name: "missing and unknown installability is filtered without actions", presence: health.PresenceMissing, installability: health.InstallabilityUnknown, legacyValue: false, wantFiltered: true},
+		{name: "partial and unsupported is filtered without actions", presence: health.PresencePartial, installability: health.InstallabilityUnsupported, legacyValue: false, wantFiltered: true},
+		{name: "partial and unknown installability is filtered without actions", presence: health.PresencePartial, installability: health.InstallabilityUnknown, legacyValue: false, wantFiltered: true},
+		{name: "absent observation is filtered without actions", omit: true, legacyValue: false, wantFiltered: true},
 	}
 
 	for _, tt := range tests {
@@ -230,6 +231,15 @@ func TestInstallSnapshotPlannerDecisionMatrix(t *testing.T) {
 				if action.Kind == operation.KindInstallTool && action.ToolID == targetID {
 					targetActions = append(targetActions, action)
 				}
+			}
+			if tt.wantFiltered {
+				if len(targetActions) != 0 {
+					t.Fatalf("filtered tool produced install actions: %+v", targetActions)
+				}
+				if _, _, found := plan.installAuthority(targetID); found {
+					t.Fatal("filtered tool retained install authority")
+				}
+				return
 			}
 			projection, ok := any(plan).(installPlanAuthorityProjection)
 			if !ok {

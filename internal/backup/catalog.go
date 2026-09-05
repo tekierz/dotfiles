@@ -229,7 +229,7 @@ func validateRawCatalogRestoreTarget(target string, absolute bool) error {
 	slashTarget := filepath.ToSlash(target)
 	components := strings.Split(slashTarget, "/")
 	for index, component := range components {
-		if component == "." || component == ".." || component == "" && !(absolute && index == 0) {
+		if component == "." || component == ".." || component == "" && (!absolute || index != 0) {
 			return fmt.Errorf("catalog restore target %q is not canonical", target)
 		}
 	}

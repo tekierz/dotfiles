@@ -48,7 +48,13 @@ func TestApplyCommandCanonicalRequestAndSingleWriteSuccess(t *testing.T) {
 			if ctx == nil || !reflect.DeepEqual(request.RawTools, []string{"git", "zsh"}) || request.ExpectedHash != hash {
 				t.Fatalf("request=%+v ctx=%v", request, ctx)
 			}
-			return installapply.Result{OperationID: applyTestOperationID, PlanHash: hash, Status: operation.StatusSucceeded, Succeeded: 2}, nil
+			return installapply.Result{
+				OperationID: applyTestOperationID,
+				PlanHash:    hash,
+				Status:      operation.StatusSucceeded,
+				Succeeded:   2,
+				Next:        installapply.NextComplete,
+			}, nil
 		},
 		signalContext: func(parent context.Context) (context.Context, context.CancelFunc) {
 			signalCalls++
@@ -111,8 +117,8 @@ func TestApplyCommandErrorExitAndRedactionMapping(t *testing.T) {
 		{name: "cancelled", err: errors.Join(installapply.ErrApplyFailed, context.Canceled, errors.New("/Users/private token=SECRET")), code: 130, message: applyCancelledMessage},
 		{name: "deadline", err: context.DeadlineExceeded, code: 1, message: applyFailedMessage},
 		{name: "failure", err: errors.Join(installapply.ErrApplyFailed, errors.New("/Users/private token=SECRET")), code: 1, message: applyFailedMessage},
-		{name: "invalid success", result: installapply.Result{OperationID: "bad\nSECRET", PlanHash: hash, Status: operation.StatusSucceeded, Succeeded: 1}, code: 1, message: applyFailedMessage},
-		{name: "unicode operation id", result: installapply.Result{OperationID: "operation-α", PlanHash: hash, Status: operation.StatusSucceeded, Succeeded: 1}, code: 1, message: applyFailedMessage},
+		{name: "invalid success", result: installapply.Result{OperationID: "bad\nSECRET", PlanHash: hash, Status: operation.StatusSucceeded, Succeeded: 1, Next: installapply.NextComplete}, code: 1, message: applyFailedMessage},
+		{name: "unicode operation id", result: installapply.Result{OperationID: "operation-α", PlanHash: hash, Status: operation.StatusSucceeded, Succeeded: 1, Next: installapply.NextComplete}, code: 1, message: applyFailedMessage},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,7 +192,13 @@ func TestApplyCommandSuccessWriterFailuresUsePostMutationMessage(t *testing.T) {
 	for _, writer := range []*planTestWriter{{short: true}, {err: errors.New("SECRET writer failure")}} {
 		command := newApplyCommand(applyCommandRuntime{
 			apply: func(context.Context, installapply.Request) (installapply.Result, error) {
-				return installapply.Result{OperationID: applyTestOperationID, PlanHash: hash, Status: operation.StatusSucceeded, Succeeded: 1}, nil
+				return installapply.Result{
+					OperationID: applyTestOperationID,
+					PlanHash:    hash,
+					Status:      operation.StatusSucceeded,
+					Succeeded:   1,
+					Next:        installapply.NextComplete,
+				}, nil
 			},
 			signalContext: func(parent context.Context) (context.Context, context.CancelFunc) { return context.WithCancel(parent) },
 		})
@@ -235,7 +247,7 @@ func TestRegisteredApplyCommandAndRootExitContract(t *testing.T) {
 		stdout string
 		stderr string
 	}{
-		{name: "success", args: []string{"apply", "--yes", "--plan-hash", hash, "--tool", "git"}, result: installapply.Result{OperationID: applyTestOperationID, PlanHash: hash, Status: operation.StatusSucceeded, Succeeded: 1}, code: 0, stdout: "installation applied: operation=" + applyTestOperationID + " plan_hash=" + hash + " succeeded=1 failed=0\n"},
+		{name: "success", args: []string{"apply", "--yes", "--plan-hash", hash, "--tool", "git"}, result: installapply.Result{OperationID: applyTestOperationID, PlanHash: hash, Status: operation.StatusSucceeded, Succeeded: 1, Next: installapply.NextComplete}, code: 0, stdout: "installation applied: operation=" + applyTestOperationID + " plan_hash=" + hash + " succeeded=1 failed=0\n"},
 		{name: "syntax", args: []string{"apply", "--plan-hash", hash, "--tool", "git"}, code: 2, stderr: applySyntaxMessage + "\n"},
 		{name: "hash", args: []string{"apply", "--yes", "--plan-hash", hash, "--tool", "git"}, err: installapply.ErrPlanHashMismatch, code: 2, stderr: applyHashMessage + "\n"},
 		{name: "not ready", args: []string{"apply", "--yes", "--plan-hash", hash, "--tool", "git"}, err: installapply.ErrPlanNotReady, code: 2, stderr: applyNotReadyMessage + "\n"},
