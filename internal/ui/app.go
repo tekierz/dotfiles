@@ -231,12 +231,13 @@ func (a *App) revertThemeToSaved() {
 type App struct {
 	asyncRequests [5]asyncRequest
 
-	screen        Screen
-	startScreen   Screen // Initial screen to show (for CLI routing)
-	skipIntro     bool
-	width         int
-	height        int
-	animationDone bool
+	screen             Screen
+	startScreen        Screen // Initial screen to show (for CLI routing)
+	startupInitialized bool
+	skipIntro          bool
+	width              int
+	height             int
+	animationDone      bool
 
 	// Screen manager for migrated screens (nil during transition)
 	screenMgr *ScreenManager
@@ -609,7 +610,7 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		app.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]*config.UserHotkeys)}
 	}
 
-	if skipIntro {
+	if skipIntro || !app.animationsEnabled {
 		app.screen = ScreenWelcome
 		app.animationDone = true
 	} else {
@@ -622,32 +623,29 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		opt(app)
 	}
 
-	// Every live screen is a migrated ScreenHandler, so the ScreenManager is
-	// mandatory. Wire it and eagerly enter managed mode on the start screen so
-	// the first rendered frame (which Bubble Tea draws before Init's command is
-	// processed) is never blank.
+	// Prepare the first render without invoking a handler's Init. CLI routing
+	// may still change, and App.Init must retain the selected handler's command.
+	if app.screen == ScreenAnimation && (app.skipIntro || !app.animationsEnabled) {
+		app.screen, app.animationDone = app.postIntroScreen, true
+	}
 	app.initScreenManager()
-	app.screenMgr.Navigate(app.screen)
+	app.screenMgr.prepare(app.screen)
 
 	return app
 }
 
 // Init initializes the application
 func (a *App) Init() tea.Cmd {
-	cmds := []tea.Cmd{}
-	// Drive the start screen through the ScreenManager so the screen's Init()
-	// runs. The intro animation (animationScreen.Init) issues tickAnimation();
-	// the Update screen (updateScreen.Init) kicks
-	// the update check; the Progress screen (progressScreen.Init) triggers the
-	// install. App.Init therefore must NOT duplicate those, or they would
-	// double-fire.
-	cmds = append(cmds, NavigateTo(a.screen))
+	if a.startupInitialized {
+		return nil
+	}
+	a.startupInitialized = true
+	// Initialize the already-renderable final CLI destination before preload,
+	// so Manage's own load guard avoids a duplicate installation query.
+	cmds := []tea.Cmd{a.screenMgr.initCurrent()}
 	if a.animationsEnabled {
 		cmds = append(cmds, tickUI())
 	}
-	// Preload install cache immediately on startup for faster Deep Dive/Manage transitions.
-	// By loading during the intro animation, the cache is ready when the user
-	// navigates to those screens.
 	if cmd := a.startInstallCacheLoad(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -1339,11 +1337,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the UI through the ScreenManager. Every live screen is a
 // migrated ScreenHandler, so the manager always renders the current screen.
 func (a *App) View() string {
-	// Defensive: if no navigation has landed yet (no current screen), navigate to
-	// the start screen so the first frame is never blank. NewApp already navigates
-	// at construction, so this is belt-and-suspenders.
+	// Rendering may prepare a missing handler, but must never start work whose
+	// command cannot be returned from View. App.Init owns startup initialization.
 	if a.screenMgr.Current() == nil {
-		a.screenMgr.Navigate(a.screen)
+		a.screenMgr.prepare(a.screen)
 	}
 	return a.screenMgr.View()
 }
@@ -1393,8 +1390,17 @@ func sudoPromptCmd() tea.ExecCommand {
 	return execCommand{Cmd: cmd, cancel: cancel}
 }
 
-// SetStartScreen sets the initial screen to display (for CLI routing)
+// SetStartScreen selects the initial CLI route before Init. Once running,
+// callers navigate through NavigateMsg instead.
 func (a *App) SetStartScreen(screen Screen) {
+	if a.startupInitialized {
+		return
+	}
+	defer func() {
+		if a.screenMgr != nil {
+			a.screenMgr.prepare(a.screen)
+		}
+	}()
 	a.startScreen = screen
 	// Always land on the requested screen after the intro.
 	a.postIntroScreen = screen
@@ -1424,9 +1430,7 @@ func (a *App) SetStartScreen(screen Screen) {
 	// Within standalone mode, themeReturn==ScreenMainMenu distinguishes an
 	// in-TUI call (main menu "Theme") from a CLI call (constructor default
 	// ScreenWelcome), so we leave themeReturn unchanged here.
-	if screen == ScreenThemePicker {
-		a.themeStandalone = true
-	}
+	a.themeStandalone = screen == ScreenThemePicker
 
 	// Starting explicitly at the animation means "intro → welcome".
 	if screen == ScreenAnimation {

@@ -6,8 +6,9 @@ import tea "github.com/charmbracelet/bubbletea"
 // It provides a clean separation between the App's Bubble Tea model and
 // individual screen implementations.
 type ScreenManager struct {
-	// Current screen (nil only before the first Navigate)
-	current ScreenHandler
+	// Current screen (nil until preparation or navigation).
+	current            ScreenHandler
+	currentInitialized bool
 
 	// Screen factory for creating new screens
 	factory ScreenFactory
@@ -17,8 +18,7 @@ type ScreenManager struct {
 }
 
 // NewScreenManager creates a new screen manager with the given context.
-// current is nil until the first Navigate; callers Navigate the start screen at
-// construction time so the first rendered frame is never blank.
+// current is nil until preparation or navigation selects a handler.
 func NewScreenManager(ctx *ScreenContext, factory ScreenFactory) *ScreenManager {
 	return &ScreenManager{
 		ctx:     ctx,
@@ -26,7 +26,7 @@ func NewScreenManager(ctx *ScreenContext, factory ScreenFactory) *ScreenManager 
 	}
 }
 
-// Current returns the current screen handler (nil before the first Navigate).
+// Current returns the selected screen handler, even before its Init runs.
 func (sm *ScreenManager) Current() ScreenHandler {
 	return sm.current
 }
@@ -47,31 +47,34 @@ func (sm *ScreenManager) IncrementUIFrame() {
 	sm.ctx.UIFrame++
 }
 
-// Navigate changes to a new screen by creating its handler via the factory.
-// The factory maps every navigable screen and panics on an unmapped one, so a
-// successful Navigate always lands on a real handler.
-func (sm *ScreenManager) Navigate(screenID Screen) tea.Cmd {
+// prepare selects a handler for rendering without beginning its async work.
+// Startup can retarget this selection until App.Init owns the final Init command.
+func (sm *ScreenManager) prepare(screenID Screen) {
 	handler := sm.factory(screenID, sm.ctx)
 	if handler == nil {
-		// Defensive: the factory is expected to panic on unmapped screens, but a
-		// nil handler from a custom/test factory must also fail loud rather than
-		// leaving the manager in an inert state.
 		panic("screen manager: factory returned nil handler — every navigable screen must be mapped")
 	}
-	return sm.navigateToHandler(handler)
-}
-
-// navigateToHandler switches to a managed screen handler
-func (sm *ScreenManager) navigateToHandler(handler ScreenHandler) tea.Cmd {
-	// Inject context if the screen supports it
 	if setter, ok := handler.(ContextSetter); ok {
 		setter.SetContext(sm.ctx)
 	}
-
 	sm.current = handler
+	sm.currentInitialized = false
+}
 
-	// Return the screen's init command
-	return handler.Init()
+// initCurrent transfers this handler's one initialization command to the caller.
+func (sm *ScreenManager) initCurrent() tea.Cmd {
+	if sm.current == nil || sm.currentInitialized {
+		return nil
+	}
+	sm.currentInitialized = true
+	return sm.current.Init()
+}
+
+// Navigate changes screens and returns its initialization command immediately.
+// Normal event-loop navigation keeps its existing lifecycle behavior.
+func (sm *ScreenManager) Navigate(screenID Screen) tea.Cmd {
+	sm.prepare(screenID)
+	return sm.initCurrent()
 }
 
 // Update handles a message for the current screen.
@@ -97,6 +100,7 @@ func (sm *ScreenManager) Update(msg tea.Msg) (tea.Cmd, bool) {
 			setter.SetContext(sm.ctx)
 		}
 		sm.current = nextScreen
+		sm.currentInitialized = true
 	}
 
 	return cmd, true
