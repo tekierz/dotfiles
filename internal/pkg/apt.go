@@ -98,10 +98,8 @@ func (a *AptManager) IsInstalledContext(ctx context.Context, pkg string) bool {
 	if a.executablePath() == "" {
 		return false
 	}
-	// `dpkg -s` exits 0 even for a removed-but-not-purged package (status
-	// "deinstall ok config-files"), which would falsely report it installed.
-	// Query the Status field directly and require "install ok installed",
-	// matching the filter ListInstalled uses (C11).
+	// Selection (including hold) is policy; only actual status/error state
+	// determines whether a healthy installed receipt exists.
 	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, "dpkg-query", "-W", "-f=${Status}", pkg)
 	defer cancel()
 	var out bytes.Buffer
@@ -109,18 +107,13 @@ func (a *AptManager) IsInstalledContext(ctx context.Context, pkg string) bool {
 	if err := cmd.Run(); err != nil {
 		return false
 	}
-	return strings.TrimSpace(out.String()) == "install ok installed"
+	return aptStatusInstalled(out.String())
 }
 
 func (a *AptManager) GetVersion(pkg string) (string, error) {
 	if a.executablePath() == "" {
 		return "", errPackageManagerUnavailable
 	}
-	// `dpkg -s` exits 0 and reports a Version for a removed-but-not-purged
-	// package (status "deinstall ok config-files"), which contradicts
-	// IsInstalled. Query Status and Version together and only report a version
-	// when the package is actually installed ("install ok installed"), matching
-	// IsInstalled's filter exactly.
 	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg-query", "-W", "-f=${Status}\t${Version}", pkg)
 	defer cancel()
 	var out bytes.Buffer
@@ -131,7 +124,7 @@ func (a *AptManager) GetVersion(pkg string) (string, error) {
 	}
 
 	parts := strings.SplitN(strings.TrimSpace(out.String()), "\t", 2)
-	if strings.TrimSpace(parts[0]) != "install ok installed" {
+	if !aptStatusInstalled(parts[0]) {
 		return "", fmt.Errorf("package %s not installed", pkg)
 	}
 	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
@@ -283,71 +276,49 @@ func (a *AptManager) Search(query string) ([]Package, error) {
 	return packages, nil
 }
 
-// getInstalledVersions returns a map of all installed package names to their versions
-// using a single dpkg-query command instead of individual dpkg -s calls per package.
-// This eliminates the N+1 query problem that caused 5-25 second startup delays.
-func (a *AptManager) getInstalledVersions() (map[string]string, error) {
-	if a.executablePath() == "" {
-		return nil, errPackageManagerUnavailable
-	}
-	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg-query", "-W", "-f=${Package}\t${Version}\n")
-	defer cancel()
-	var out bytes.Buffer
-	cmd.Stdout = &out
-
-	if err := cmd.Run(); err != nil {
-		return nil, err
-	}
-
-	versions := make(map[string]string)
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	for _, line := range lines {
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) == 2 {
-			versions[parts[0]] = parts[1]
-		}
-	}
-
-	return versions, nil
+// aptStatusInstalled ignores the desired selection while requiring fully
+// installed, error-free state. Pending triggers and partial installs are not
+// healthy receipts, even when dpkg's desired action is install.
+func aptStatusInstalled(status string) bool {
+	fields := strings.Fields(status)
+	return len(fields) == 3 && fields[1] == "ok" && fields[2] == "installed"
 }
 
 func (a *AptManager) ListInstalled() ([]Package, error) {
+	return a.ListInstalledContext(context.Background())
+}
+
+// ListInstalledContext collects status and versions in one read-only query.
+// binary:Package preserves architecture qualifiers instead of collapsing
+// co-installed architectures into one version-map entry.
+func (a *AptManager) ListInstalledContext(ctx context.Context) ([]Package, error) {
 	if a.executablePath() == "" {
 		return nil, errPackageManagerUnavailable
 	}
-	// Get all versions in a single batch query (avoids N+1 problem)
-	versions, err := a.getInstalledVersions()
-	if err != nil {
-		return nil, err
-	}
-
-	// Get list of installed packages
-	cmd, cancel := packageCommand(packageQueryTimeout, "dpkg", "--get-selections")
+	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, "dpkg-query", "-W", "-f=${binary:Package}\t${Status}\t${Version}\n")
 	defer cancel()
-	var out bytes.Buffer
-	cmd.Stdout = &out
-
-	if err := cmd.Run(); err != nil {
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
+	return parseAptInstalledReceipts(string(out)), nil
+}
 
+func parseAptInstalledReceipts(output string) []Package {
 	var packages []Package
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	for _, line := range lines {
-		parts := strings.Fields(line)
-		if len(parts) >= 2 && parts[1] == "install" {
-			name := parts[0]
-			// Look up version from pre-fetched map instead of individual GetVersion call
-			version := versions[name]
-			packages = append(packages, Package{
-				Name:           name,
-				CurrentVersion: version,
-				InstalledBy:    "apt",
-			})
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 3 || fields[0] == "" || !aptStatusInstalled(fields[1]) || strings.TrimSpace(fields[2]) == "" {
+			continue
 		}
+		packages = append(packages, Package{
+			Name: fields[0], CurrentVersion: strings.TrimSpace(fields[2]), InstalledBy: "apt",
+		})
 	}
-
-	return packages, nil
+	return packages
 }
 
 // NeedsSudo returns true for apt (requires sudo for package operations)

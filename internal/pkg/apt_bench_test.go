@@ -5,66 +5,19 @@ import (
 	"testing"
 )
 
-// Mock dpkg output for benchmarking without requiring actual dpkg
-const mockDpkgOutput = `accountsservice	install
-acl	install
-adduser	install
-apt	install
-base-files	install
-bash	install
-curl	install
-git	install
-neovim	install
-tmux	install
-vim	install
-zsh	install`
-
-// BenchmarkParseDpkgOutput benchmarks parsing dpkg --get-selections output
+// BenchmarkParseDpkgOutput exercises the production receipt parser.
 func BenchmarkParseDpkgOutput(b *testing.B) {
-	output := mockDpkgOutput
-
-	b.ResetTimer()
+	output := "curl\tinstall ok installed\t1.0\nlibc6:arm64\thold ok installed\t2.40\nbroken\tinstall ok unpacked\t1\n"
 	for i := 0; i < b.N; i++ {
-		lines := strings.Split(strings.TrimSpace(output), "\n")
-		var packages []Package
-		for _, line := range lines {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 && parts[1] == "install" {
-				packages = append(packages, Package{
-					Name:        parts[0],
-					InstalledBy: "apt",
-				})
-			}
-		}
-		_ = packages
+		_ = parseAptInstalledReceipts(output)
 	}
 }
 
-// BenchmarkListInstalledMock benchmarks parsing with 1000 packages
 func BenchmarkListInstalledMock(b *testing.B) {
-	// Create mock output with 1000 packages
-	var builder strings.Builder
-	for i := 0; i < 1000; i++ {
-		builder.WriteString("package-")
-		builder.WriteString(strings.Repeat("x", 20))
-		builder.WriteString("\tinstall\n")
-	}
-	output := builder.String()
-
+	output := strings.Repeat("package-name\tinstall ok installed\t1.0\n", 1000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		lines := strings.Split(strings.TrimSpace(output), "\n")
-		packages := make([]Package, 0, len(lines))
-		for _, line := range lines {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 && parts[1] == "install" {
-				packages = append(packages, Package{
-					Name:        parts[0],
-					InstalledBy: "apt",
-				})
-			}
-		}
-		_ = packages
+		_ = parseAptInstalledReceipts(output)
 	}
 }
 

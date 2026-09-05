@@ -784,11 +784,11 @@ func TestManagerExecutableIdentityExecutionBuildersAreExhaustivelyClassified(t *
 			"InstallStreaming": {"runner.RunStreaming": 1}, "InstallCasksStreaming": {"runner.RunStreaming": 1},
 			"UpdateStreaming": {"runner.RunStreaming": 1}, "UpdateAllStreaming": {"runner.RunStreaming": 1},
 		}},
-		{file: "apt.go", receiver: "a", auxiliary: map[string]bool{"dpkg": true, "dpkg-query": true}, allowSudo: true, identity: "identity", phase: "aptStreamingPhase", expected: map[string]map[string]int{
+		{file: "apt.go", receiver: "a", auxiliary: map[string]bool{"dpkg-query": true}, allowSudo: true, identity: "identity", phase: "aptStreamingPhase", expected: map[string]map[string]int{
 			"Install": {"packageCommand": 1}, "Uninstall": {"packageCommand": 1}, "IsInstalledContext": {"packageCommandWithContext": 1},
 			"GetVersion": {"packageCommand": 1}, "CheckOutdated": {"packageCommand": 1}, "Update": {"packageCommand": 2},
-			"UpdateAll": {"packageCommand": 2}, "Search": {"packageCommand": 1}, "getInstalledVersions": {"packageCommand": 1},
-			"ListInstalled": {"packageCommand": 1}, "InstallStreaming": {"runner.RunStreamingWithSudo": 1},
+			"UpdateAll": {"packageCommand": 2}, "Search": {"packageCommand": 1},
+			"ListInstalledContext": {"packageCommandWithContext": 1}, "InstallStreaming": {"runner.RunStreamingWithSudo": 1},
 			"UpdateStreaming":    {"runner.RunSequentialStreaming": 1},
 			"UpdateAllStreaming": {"runner.RunSequentialStreaming": 1},
 			"aptStreamingPhase":  {"runner.RunStreamingWithSudo": 1},
