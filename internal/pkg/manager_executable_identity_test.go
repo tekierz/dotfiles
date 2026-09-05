@@ -672,7 +672,7 @@ func TestManagerExecutableIdentityFormattingIsPathFree(t *testing.T) {
 func managerBuilderName(call *ast.CallExpr) string {
 	switch function := call.Fun.(type) {
 	case *ast.Ident:
-		if function.Name == "packageCommand" || function.Name == "packageCommandWithContext" {
+		if function.Name == "packageCommand" || function.Name == "packageCommandWithContext" || function.Name == "startPrivileged" {
 			return function.Name
 		}
 	case *ast.SelectorExpr:
@@ -682,7 +682,7 @@ func managerBuilderName(call *ast.CallExpr) string {
 		}
 		qualified := owner.Name + "." + function.Sel.Name
 		switch qualified {
-		case "exec.CommandContext", "runner.RunStreaming", "runner.RunStreamingWithSudo", "runner.RunSequentialStreaming":
+		case "exec.CommandContext", "runner.RunStreaming", "runner.RunStreamingWithSudo", "runner.RunSequentialStreaming", "a.privilegedStreaming", "p.privilegedStreaming":
 			return qualified
 		}
 	}
@@ -698,13 +698,13 @@ func exactIdentityInvocationPath(expression ast.Expr, identity string) bool {
 	return ok && identifier.Name == identity
 }
 
-func exactSequentialStreamingPhases(arguments []ast.Expr, phaseBuilder, identity string) bool {
+func exactSequentialStreamingPhases(arguments []ast.Expr, phaseBuilder, identity, receiver string) bool {
 	if len(arguments) != 2 {
 		return false
 	}
 	for _, expression := range arguments {
 		call, ok := expression.(*ast.CallExpr)
-		if !ok || len(call.Args) < 2 {
+		if !ok || len(call.Args) < 3 {
 			return false
 		}
 		builder, ok := call.Fun.(*ast.Ident)
@@ -713,6 +713,14 @@ func exactSequentialStreamingPhases(arguments []ast.Expr, phaseBuilder, identity
 		}
 		phaseIdentity, ok := call.Args[1].(*ast.Ident)
 		if !ok || phaseIdentity.Name != identity {
+			return false
+		}
+		factory, ok := call.Args[2].(*ast.SelectorExpr)
+		if !ok || factory.Sel.Name != "privilegedStreaming" {
+			return false
+		}
+		owner, ok := factory.X.(*ast.Ident)
+		if !ok || owner.Name != receiver {
 			return false
 		}
 	}
@@ -788,18 +796,18 @@ func TestManagerExecutableIdentityExecutionBuildersAreExhaustivelyClassified(t *
 			"Install": {"packageCommand": 1}, "Uninstall": {"packageCommand": 1}, "IsInstalledContext": {"packageCommandWithContext": 1},
 			"GetVersion": {"packageCommand": 1}, "CheckOutdated": {"packageCommand": 1}, "Update": {"packageCommand": 2},
 			"UpdateAll": {"packageCommand": 2}, "Search": {"packageCommand": 1},
-			"ListInstalledContext": {"packageCommandWithContext": 1}, "InstallStreaming": {"runner.RunStreamingWithSudo": 1},
+			"ListInstalledContext": {"packageCommandWithContext": 1}, "InstallStreaming": {"runner.RunStreamingWithSudo": 1, "a.privilegedStreaming": 1},
 			"UpdateStreaming":    {"runner.RunSequentialStreaming": 1},
 			"UpdateAllStreaming": {"runner.RunSequentialStreaming": 1},
-			"aptStreamingPhase":  {"runner.RunStreamingWithSudo": 1},
+			"aptStreamingPhase":  {"runner.RunStreamingWithSudo": 1, "startPrivileged": 1},
 		}},
 		{file: "pacman.go", receiver: "p", auxiliary: map[string]bool{"checkupdates": true}, allowSudo: true, expected: map[string]map[string]int{
 			"Install": {"packageCommand": 2}, "Uninstall": {"packageCommand": 2}, "IsInstalledContext": {"packageCommandWithContext": 1},
 			"GetVersion": {"packageCommand": 1}, "CheckOutdated": {"packageCommand": 1}, "checkOfficialUpdates": {"packageCommand": 2},
 			"Update": {"packageCommand": 2}, "UpdateAll": {"packageCommand": 2}, "Search": {"packageCommand": 1},
-			"ListInstalled": {"packageCommand": 1}, "InstallStreaming": {"runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1},
-			"UpdateStreaming":    {"runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1},
-			"UpdateAllStreaming": {"runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1},
+			"ListInstalled": {"packageCommand": 1}, "InstallStreaming": {"runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1, "p.privilegedStreaming": 1},
+			"UpdateStreaming":    {"runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1, "p.privilegedStreaming": 1},
+			"UpdateAllStreaming": {"runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1, "p.privilegedStreaming": 1},
 		}},
 	}
 	for _, test := range tests {
@@ -829,13 +837,13 @@ func TestManagerExecutableIdentityExecutionBuildersAreExhaustivelyClassified(t *
 						observed[function.Name.Name] = make(map[string]int)
 					}
 					observed[function.Name.Name][builder]++
-					targetIndex := map[string]int{"packageCommand": 1, "packageCommandWithContext": 2, "exec.CommandContext": 1, "runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1, "runner.RunSequentialStreaming": 1}[builder]
+					targetIndex := map[string]int{"packageCommand": 1, "packageCommandWithContext": 2, "exec.CommandContext": 1, "runner.RunStreaming": 1, "runner.RunStreamingWithSudo": 1, "runner.RunSequentialStreaming": 1, "a.privilegedStreaming": 1, "p.privilegedStreaming": 1, "startPrivileged": 1}[builder]
 					if len(call.Args) <= targetIndex {
 						t.Errorf("%s has malformed %s builder", test.file, builder)
 						return true
 					}
 					if builder == "runner.RunSequentialStreaming" {
-						if exactSequentialStreamingPhases(call.Args[targetIndex:], test.phase, test.identity) {
+						if exactSequentialStreamingPhases(call.Args[targetIndex:], test.phase, test.identity, test.receiver) {
 							return true
 						}
 						t.Errorf("%s sequential streaming builder lacks exact trusted phases", test.file)
@@ -845,7 +853,7 @@ func TestManagerExecutableIdentityExecutionBuildersAreExhaustivelyClassified(t *
 					if exactManagerExecutableCall(target, test.receiver) {
 						return true
 					}
-					if builder == "runner.RunStreamingWithSudo" && exactIdentityInvocationPath(target, test.identity) {
+					if (builder == "runner.RunStreamingWithSudo" || builder == "startPrivileged") && exactIdentityInvocationPath(target, test.identity) {
 						return true
 					}
 					if literal, ok := stringLiteral(target); ok && test.auxiliary[literal] && builder != "runner.RunStreamingWithSudo" && builder != "exec.CommandContext" {

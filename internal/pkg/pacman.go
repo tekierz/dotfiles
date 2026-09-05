@@ -16,6 +16,8 @@ type PacmanManager struct {
 	useParu  bool // Use paru for AUR support
 	identity ExecutableIdentity
 	state    executableResolutionState
+	// Optional private instance dependency; nil uses the real trusted launcher.
+	privilegedStreaming func(context.Context, string, ...string) (*runner.StreamingCmd, error)
 }
 
 // NewPacmanManager creates a new pacman manager
@@ -535,6 +537,9 @@ func (p *PacmanManager) InstallStreaming(ctx context.Context, packages ...string
 	// pacman needs sudo
 	args := []string{"-S", "--noconfirm", "--needed"}
 	args = append(args, packages...)
+	if p.privilegedStreaming != nil {
+		return p.privilegedStreaming(ctx, p.executablePath(), args...)
+	}
 	return runner.RunStreamingWithSudo(ctx, p.executablePath(), args...)
 }
 
@@ -558,6 +563,9 @@ func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string)
 
 	// pacman needs sudo
 	args := pacmanUpdateArgs(nil, packages)
+	if p.privilegedStreaming != nil {
+		return p.privilegedStreaming(ctx, p.executablePath(), args...)
+	}
 	return runner.RunStreamingWithSudo(ctx, p.executablePath(), args...)
 }
 
@@ -572,6 +580,9 @@ func (p *PacmanManager) UpdateAllStreaming(ctx context.Context) (*runner.Streami
 	}
 	if identity, ok := p.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
 		return nil, errPackageManagerUnavailable
+	}
+	if p.privilegedStreaming != nil {
+		return p.privilegedStreaming(ctx, p.executablePath(), "-Syu", "--noconfirm")
 	}
 	return runner.RunStreamingWithSudo(ctx, p.executablePath(), "-Syu", "--noconfirm")
 }

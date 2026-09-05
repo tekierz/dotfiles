@@ -14,6 +14,8 @@ import (
 type AptManager struct {
 	identity ExecutableIdentity
 	state    executableResolutionState
+	// Optional private instance dependency; nil uses the real trusted launcher.
+	privilegedStreaming func(context.Context, string, ...string) (*runner.StreamingCmd, error)
 }
 
 // NewAptManager creates a new apt manager
@@ -340,6 +342,9 @@ func (a *AptManager) InstallStreaming(ctx context.Context, packages ...string) (
 
 	args := []string{"install", "-y"}
 	args = append(args, packages...)
+	if a.privilegedStreaming != nil {
+		return a.privilegedStreaming(ctx, a.executablePath(), args...)
+	}
 	return runner.RunStreamingWithSudo(ctx, a.executablePath(), args...)
 }
 
@@ -359,8 +364,8 @@ func (a *AptManager) UpdateStreaming(ctx context.Context, packages ...string) (*
 	args := []string{"install", "-y"}
 	args = append(args, packages...)
 	return runner.RunSequentialStreaming(ctx,
-		aptStreamingPhase("apt update", identity, "update"),
-		aptStreamingPhase("apt targeted upgrade", identity, args...),
+		aptStreamingPhase("apt update", identity, a.privilegedStreaming, "update"),
+		aptStreamingPhase("apt targeted upgrade", identity, a.privilegedStreaming, args...),
 	)
 }
 
@@ -375,18 +380,21 @@ func (a *AptManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingC
 		return nil, errPackageManagerUnavailable
 	}
 	return runner.RunSequentialStreaming(ctx,
-		aptStreamingPhase("apt update", identity, "update"),
-		aptStreamingPhase("apt upgrade", identity, "upgrade", "-y"),
+		aptStreamingPhase("apt update", identity, a.privilegedStreaming, "update"),
+		aptStreamingPhase("apt upgrade", identity, a.privilegedStreaming, "upgrade", "-y"),
 	)
 }
 
-func aptStreamingPhase(name string, identity ExecutableIdentity, args ...string) runner.SequentialStreamingPhase {
+func aptStreamingPhase(name string, identity ExecutableIdentity, startPrivileged func(context.Context, string, ...string) (*runner.StreamingCmd, error), args ...string) runner.SequentialStreamingPhase {
 	argv := append([]string(nil), args...)
 	return runner.SequentialStreamingPhase{
 		Name: name,
 		Start: func(ctx context.Context) (*runner.StreamingCmd, error) {
 			if identity.Revalidate() != nil {
 				return nil, errPackageManagerUnavailable
+			}
+			if startPrivileged != nil {
+				return startPrivileged(ctx, identity.invocationPath, argv...)
 			}
 			return runner.RunStreamingWithSudo(ctx, identity.invocationPath, argv...)
 		},
