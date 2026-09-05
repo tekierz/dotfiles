@@ -89,6 +89,13 @@ func (s *manageScreen) navigateTab(target Screen) tea.Cmd {
 // Update handles keyboard, mouse, and the Manage async result messages.
 func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	a := s.App()
+	theme, nav, animations := a.theme, a.navStyle, a.animationsEnabled
+	defer func() {
+		if a.theme != theme || a.navStyle != nav || a.animationsEnabled != animations {
+			a.syncSharedSettings()
+			a.invalidateSettingsReviews()
+		}
+	}()
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {

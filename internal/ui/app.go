@@ -113,6 +113,69 @@ func (a *App) syncThemeIndex() {
 	}
 }
 
+// syncSharedSettings keeps every screen's read view aligned with App settings.
+func (a *App) syncSharedSettings() {
+	a.syncThemeIndex()
+	if a.screenMgr != nil {
+		ctx := a.screenMgr.Context()
+		ctx.Theme, ctx.NavStyle, ctx.AnimationsEnabled = a.theme, a.navStyle, a.animationsEnabled
+	}
+}
+
+// invalidateSettingsReviews drops unexecuted authority bound to earlier choices.
+// Running operations retain the immutable plan/continuation they already own.
+func (a *App) invalidateSettingsReviews() {
+	if !a.installRunning {
+		a.invalidatePendingInstallPlan()
+		a.deepDiveContinuation = nil
+		a.installReviewTools = nil
+	}
+	if !a.manageSaveRunning {
+		a.pendingManageSavePlan = nil
+		a.manageSavePlanErr = nil
+	}
+	if !a.standaloneConfigRunning {
+		a.standaloneConfigPlan = nil
+		a.standaloneConfigErr = nil
+	}
+}
+
+func (a *App) adoptProfileSettings(settings *config.GlobalConfig) tea.Cmd {
+	wasEnabled := a.animationsEnabled
+	a.theme, a.navStyle, a.animationsEnabled = settings.Theme, settings.NavStyle, !settings.DisableAnimations
+	a.syncSharedSettings()
+	a.invalidateSettingsReviews()
+	a.hotkeysActiveUser, a.hotkeysActiveUserCached = settings.ActiveUser, true
+	// Invalidate old read generations before allowing another screen to enter.
+	a.asyncRequests[asyncUpdates].generation++
+	a.asyncRequests[asyncUpdates].pending = false
+	a.updateChecking, a.updateCheckDone = false, false
+	a.updateResults, a.updateError = nil, nil
+	a.updateIndex = 0
+	a.updateSelected = make(map[int]bool)
+	tools.GetRegistry().InvalidateCache()
+	var commands []tea.Cmd
+	if !a.installRunning {
+		commands = append(commands, a.beginInstallationSnapshotLoad(defaultInstallationSnapshotCacheRuntime()))
+	} else {
+		// Do not let a cache refresh erase an executing plan; its completion owns
+		// the next refresh. Reject any old observation in the meantime.
+		a.installationSnapshotGeneration++
+		a.installationSnapshotReady, a.installationSnapshotLoading = false, false
+		a.installationSnapshotTerminal = false
+		a.installationSnapshotStale = a.installationSnapshot.Digest() != ""
+		a.installCacheLoading, a.manageInstalledReady = false, false
+	}
+	if a.currentScreenIs(ScreenUpdate) && !a.updateRunning {
+		a.updateChecking = true
+		commands = append(commands, a.startAsync(asyncUpdates, checkUpdatesCmd()))
+	}
+	if a.animationsEnabled && !wasEnabled {
+		commands = append(commands, tickUI())
+	}
+	return tea.Batch(commands...)
+}
+
 // persistTheme saves the currently selected theme to the global config, so a
 // standalone "Change theme" from the main menu actually sticks across runs.
 // On failure it records a brief human-readable message in themeStatus that the

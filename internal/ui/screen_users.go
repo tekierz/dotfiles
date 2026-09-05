@@ -85,8 +85,9 @@ type userDeletedMsg struct {
 
 // userSwitchedMsg is sent after switching to a user
 type userSwitchedMsg struct {
-	name string
-	err  error
+	name     string
+	err      error
+	settings *config.GlobalConfig
 }
 
 // loadUsersCmd loads all user profiles
@@ -187,10 +188,17 @@ func switchUserCmd(name string) tea.Cmd {
 		if err != nil {
 			return userSwitchedMsg{name: name, err: err}
 		}
-		if err := config.ApplyUserProfile(profile); err != nil {
+		settings, err := config.LoadGlobalConfig()
+		if err != nil {
 			return userSwitchedMsg{name: name, err: err}
 		}
-		return userSwitchedMsg{name: name}
+		settings.Theme, settings.NavStyle, settings.ActiveUser = profile.Theme, profile.NavStyle, profile.Name
+		if err := config.SaveGlobalConfig(settings); err != nil {
+			return userSwitchedMsg{name: name, err: err}
+		}
+		// Return the exact saved settings, including the retained motion policy;
+		// reloading after the write could adopt an unrelated subsequent edit.
+		return userSwitchedMsg{name: name, settings: config.CloneGlobalConfig(settings)}
 	}
 }
 
@@ -313,9 +321,13 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		if msg.err != nil {
 			a.usersStatus = fmt.Sprintf("Switch failed: %v", msg.err)
 		} else {
+			if msg.settings == nil {
+				a.usersStatus = "Switch failed: saved settings unavailable"
+				return s, nil
+			}
+			adoption := a.adoptProfileSettings(msg.settings)
 			a.usersStatus = fmt.Sprintf("Switched to %s ✓", msg.name)
-			// Reload user list to update active indicator.
-			return s, a.startAsync(asyncUsers, loadUsersCmd())
+			return s, tea.Batch(adoption, a.startAsync(asyncUsers, loadUsersCmd()))
 		}
 		return s, nil
 	}

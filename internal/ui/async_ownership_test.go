@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
@@ -166,7 +167,7 @@ func TestAsyncOwnershipBackupOperations(t *testing.T) {
 }
 
 func TestAsyncOwnershipUserOperationsAndReadInvalidation(t *testing.T) {
-	for _, payload := range []tea.Msg{userSavedMsg{name: "Alice"}, userDeletedMsg{name: "Alice"}, userSwitchedMsg{name: "Alice"}, userSavedMsg{err: errors.New("denied")}, userDeletedMsg{err: errors.New("denied")}, userSwitchedMsg{err: errors.New("denied")}} {
+	for _, payload := range []tea.Msg{userSavedMsg{name: "Alice"}, userDeletedMsg{name: "Alice"}, userSwitchedMsg{name: "Alice", settings: config.DefaultGlobalConfig()}, userSavedMsg{err: errors.New("denied")}, userDeletedMsg{err: errors.New("denied")}, userSwitchedMsg{err: errors.New("denied")}} {
 		t.Run(fmt.Sprintf("%T/%v", payload, payload), func(t *testing.T) {
 			withTempHome(t)
 			a := NewApp(true)
@@ -194,8 +195,12 @@ func TestAsyncOwnershipUserOperationsAndReadInvalidation(t *testing.T) {
 				if follow == nil {
 					t.Fatal("user refresh lost")
 				}
-				if _, ok := follow().(appAsyncResult); !ok {
-					t.Fatal("user refresh lacks identity")
+				if _, switched := payload.(userSwitchedMsg); !switched {
+					if _, ok := follow().(appAsyncResult); !ok {
+						t.Fatal("user refresh lacks identity")
+					}
+				} else if !a.asyncRequests[asyncUsers].pending {
+					t.Fatal("switch refresh lacks identity")
 				}
 			}
 			_, duplicate := a.Update(done)
