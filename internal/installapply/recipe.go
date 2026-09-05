@@ -188,7 +188,8 @@ func streamOutput(ctx context.Context, command *runner.StreamingCmd, emitLine fu
 		select {
 		case <-ctx.Done():
 			command.Cancel()
-			return ctx.Err()
+			// The caller owns the operation lock until terminal cleanup finishes.
+			return errors.Join(ctx.Err(), command.Wait())
 		case line, ok := <-command.Output:
 			if !ok {
 				return nil
@@ -204,7 +205,7 @@ func waitStreaming(ctx context.Context, command *runner.StreamingCmd) error {
 	select {
 	case <-ctx.Done():
 		command.Cancel()
-		return ctx.Err()
+		return errors.Join(ctx.Err(), command.Wait())
 	case err, ok := <-command.Done:
 		if !ok {
 			return nil

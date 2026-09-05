@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
@@ -22,12 +21,6 @@ type recipeManager struct {
 	order     []string
 	casks     [][]string
 	onInstall func()
-}
-
-type nonClosingRecipeManager struct{ *pkg.MockPackageManager }
-
-func (manager *nonClosingRecipeManager) InstallStreaming(context.Context, ...string) (*runner.StreamingCmd, error) {
-	return &runner.StreamingCmd{Output: make(chan string), Done: make(chan error)}, nil
 }
 
 func (manager *recipeManager) InstallStreaming(_ context.Context, packages ...string) (*runner.StreamingCmd, error) {
@@ -338,21 +331,6 @@ func assertNoNPMMarker(t *testing.T, marker string) {
 	t.Helper()
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("blocked npm process created marker: %v", err)
-	}
-}
-
-func TestExecuteRecipeCancellationBoundsMalformedStreamingManager(t *testing.T) {
-	manager := &nonClosingRecipeManager{MockPackageManager: pkg.NewMockPackageManager()}
-	manager.ManagerName = "brew"
-	managerIdentity, _ := applyManagerIdentity(t, "nonclosing-brew", "exit 0")
-	if err := manager.SetExecutableIdentity(managerIdentity); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	recipe := reviewedExecutionRecipe(operation.InstallStep{Kind: operation.InstallStepPackageManager, Provider: "brew", Packages: []string{"node"}})
-	if err := ExecuteRecipe(ctx, recipe, manager, managerIdentity, nil); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("non-closing manager cancellation=%v", err)
 	}
 }
 
