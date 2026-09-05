@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -133,7 +134,7 @@ func TestAptReceiptsCanceledBatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	got, err := mgr.ListInstalledContext(ctx)
-	if err != context.Canceled || len(got) != 0 {
+	if !errors.Is(err, context.Canceled) || len(got) != 0 {
 		t.Fatalf("canceled batch=%v %v", got, err)
 	}
 	if _, err := os.Stat(log); !os.IsNotExist(err) {
@@ -168,7 +169,7 @@ func TestAptReceiptsCancelRunningBatch(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancel error=%v", err)
 		}
 	case <-time.After(5 * time.Second):

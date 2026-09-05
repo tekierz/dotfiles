@@ -22,11 +22,8 @@ import (
 // startTabTargetLoad / mainMenuScreen.selectItem), and Init() is idempotent, so
 // the list loads exactly once however the screen is entered.
 //
-// Async-in-handler: because the ScreenManager delegates every non-navigation
-// message to this handler while it is active, the backup async results are
-// handled here (not in App.Update): backupsLoadedMsg, backupRestoreDoneMsg,
-// backupDeleteDoneMsg, backupCreateDoneMsg. The delete/create handlers re-issue
-// loadBackupsCmd to refresh the list, keeping the async chain going.
+// App validates generation-bound completions globally and invokes these reducers
+// regardless of the active tab. Delete/create reducers retain the follow-up read.
 type backupsScreen struct {
 	BaseScreen
 }
@@ -49,7 +46,7 @@ func (s *backupsScreen) Init() tea.Cmd {
 	}
 	if !a.backupsLoading && !a.backupsLoaded {
 		a.backupsLoading = true
-		return loadBackupsCmd()
+		return a.startAsync(asyncBackups, loadBackupsCmd())
 	}
 	return nil
 }
@@ -71,7 +68,7 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
 
-	// --- Async results (delegated here while this screen is active) ---
+	// --- App routes accepted async results here even while another tab is active. ---
 	case backupsLoadedMsg:
 		a.backupsLoading = false
 		a.backupsLoaded = true
@@ -136,7 +133,7 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// Refresh backup list (re-issue the load so the chain continues).
 			a.backupsLoaded = false
 			a.backupsLoading = true
-			return s, loadBackupsCmd()
+			return s, a.startAsync(asyncBackups, loadBackupsCmd())
 		}
 		return s, nil
 
@@ -154,7 +151,7 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// Refresh backup list (re-issue the load so the chain continues).
 			a.backupsLoaded = false
 			a.backupsLoading = true
-			return s, loadBackupsCmd()
+			return s, a.startAsync(asyncBackups, loadBackupsCmd())
 		}
 		return s, nil
 	}
@@ -184,10 +181,10 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			switch a.backupConfirmType {
 			case "restore":
 				a.backupRunning = true
-				return restoreBackupCmd(a.backupConfirmName, a.backupConfirmEntry)
+				return a.startAsync(asyncBackupOperation, restoreBackupCmd(a.backupConfirmName, a.backupConfirmEntry))
 			case "delete":
 				a.backupRunning = true
-				return deleteBackupCmd(a.backupConfirmName, a.backupConfirmEntry)
+				return a.startAsync(asyncBackupOperation, deleteBackupCmd(a.backupConfirmName, a.backupConfirmEntry))
 			default:
 				a.backupStatusWarning = false
 				a.backupStatus = "Unknown backup confirmation action"
@@ -243,14 +240,14 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.backupRunning = true
 		a.backupStatusWarning = false
 		a.backupStatus = "Creating backup..."
-		return createBackupCmd()
+		return a.startAsync(asyncBackupOperation, createBackupCmd())
 	case "r", "R": // Refresh backup list
 		a.backupsLoaded = false
 		a.backupsLoading = true
 		a.backupStatusWarning = false
 		a.backupStatus = ""
 		a.backupError = nil
-		return loadBackupsCmd()
+		return a.startAsync(asyncBackups, loadBackupsCmd())
 	case "esc":
 		// ScreenMainMenu is migrated; route through the ScreenManager.
 		return NavigateTo(ScreenMainMenu)
@@ -269,6 +266,9 @@ func (s *backupsScreen) clearConfirmation() {
 // handleMouse handles mouse clicks on the backups screen.
 func (s *backupsScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	a := s.App()
+	if a.backupRunning || a.backupConfirmMode {
+		return nil
+	}
 	m := tea.MouseEvent(msg)
 
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the

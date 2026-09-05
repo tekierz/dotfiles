@@ -162,6 +162,8 @@ func (a *App) revertThemeToSaved() {
 
 // App is the main application model
 type App struct {
+	asyncRequests [5]asyncRequest
+
 	screen        Screen
 	startScreen   Screen // Initial screen to show (for CLI routing)
 	skipIntro     bool
@@ -449,7 +451,7 @@ func (a *App) postIntroTransition() tea.Cmd {
 	case ScreenUpdate:
 		if !a.updateChecking && !a.updateCheckDone {
 			a.updateChecking = true
-			async = checkUpdatesCmd()
+			async = a.startAsync(asyncUpdates, checkUpdatesCmd())
 		}
 	case ScreenManage, ScreenHotkeys:
 		async = a.startInstallCacheLoad()
@@ -1077,7 +1079,134 @@ func plannedBackupTargets(home string, files []string) ([]backup.Target, error) 
 }
 
 // Update handles messages
+// asyncChannel identifies App-owned work whose lifetime is independent of tabs.
+type asyncChannel uint8
+
+const (
+	asyncUpdates asyncChannel = iota
+	asyncBackups
+	asyncUsers
+	asyncBackupOperation
+	asyncUserOperation
+)
+
+type asyncRequest struct {
+	generation uint64
+	pending    bool
+}
+
+type appAsyncResult struct {
+	channel    asyncChannel
+	generation uint64
+	payload    tea.Msg
+}
+
+// startAsync allocates identity on the event loop; workers capture only values.
+// Read refreshes supersede earlier reads. Mutations are serialized per owner.
+func (a *App) startAsync(channel asyncChannel, cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	request := &a.asyncRequests[channel]
+	if channel >= asyncBackupOperation && request.pending {
+		return nil
+	}
+	if channel >= asyncBackupOperation {
+		a.invalidateAsyncRead(channel)
+	}
+	request.generation++
+	request.pending = true
+	generation := request.generation
+	return func() tea.Msg {
+		return appAsyncResult{channel: channel, generation: generation, payload: cmd()}
+	}
+}
+
+// A mutation invalidates reads both before it starts and when it terminates:
+// a refresh may have started during the operation on another tab.
+func (a *App) invalidateAsyncRead(operation asyncChannel) {
+	var read asyncChannel
+	switch operation { //nolint:exhaustive // Only mutation channels invalidate reads.
+	case asyncBackupOperation:
+		read = asyncBackups
+		a.backupsLoading, a.backupsLoaded = false, false
+	case asyncUserOperation:
+		read = asyncUsers
+		a.usersLoaded = false
+	default:
+		return
+	}
+	a.asyncRequests[read].generation++
+	a.asyncRequests[read].pending = false
+}
+
+func asyncResultChannel(msg tea.Msg) (asyncChannel, bool) {
+	switch msg.(type) {
+	case updateCheckDoneMsg:
+		return asyncUpdates, true
+	case backupsLoadedMsg:
+		return asyncBackups, true
+	case userLoadedMsg:
+		return asyncUsers, true
+	case backupRestoreDoneMsg, backupDeleteDoneMsg, backupCreateDoneMsg:
+		return asyncBackupOperation, true
+	case userSavedMsg, userDeletedMsg, userSwitchedMsg:
+		return asyncUserOperation, true
+	default:
+		return 0, false
+	}
+}
+
+// reduceAsyncResult uses the existing screen reducers without navigating or
+// calling Init. Follow-up reads therefore survive completion on another tab.
+func (a *App) reduceAsyncResult(msg tea.Msg) (tea.Cmd, bool) {
+	channel, known := asyncResultChannel(msg)
+	if result, ok := msg.(appAsyncResult); ok {
+		channel, known = asyncResultChannel(result.payload)
+		if !known || channel != result.channel {
+			return nil, true
+		}
+		request := &a.asyncRequests[channel]
+		if !request.pending || request.generation != result.generation {
+			return nil, true
+		}
+		request.pending = false
+		msg = result.payload
+	} else {
+		if !known {
+			return nil, false
+		}
+		// Untagged helper/legacy results cannot supersede a channel once live
+		// generation-bound work has started (including after it has completed).
+		if a.asyncRequests[channel].generation != 0 {
+			return nil, true
+		}
+	}
+	ctx := a.screenMgr.Context()
+	var handler ScreenHandler
+	switch channel {
+	case asyncUpdates:
+		handler = NewUpdateScreen(ctx)
+	case asyncBackups:
+		handler = NewBackupsScreen(ctx)
+	case asyncUsers:
+		handler = NewUsersScreen(ctx)
+	case asyncBackupOperation:
+		a.invalidateAsyncRead(asyncBackupOperation)
+		handler = NewBackupsScreen(ctx)
+	case asyncUserOperation:
+		a.invalidateAsyncRead(asyncUserOperation)
+		handler = NewUsersScreen(ctx)
+	}
+	_, cmd := handler.Update(msg)
+	return cmd, true
+}
+
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if cmd, handled := a.reduceAsyncResult(msg); handled {
+		return a, cmd
+	}
+
 	// Handle window resize for screen manager
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		a.width = wsm.Width
@@ -1133,8 +1262,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Note: the intro animation (tickMsg / animationDoneMsg),
 	// the install flow (installStartMsg / sudoRequiredMsg / sudoCachedMsg /
 	// installOutputMsg / installEventMsg / installDoneMsg) and the
-	// Users async results (userLoadedMsg / userSavedMsg / userDeletedMsg /
-	// userSwitchedMsg) are all handled by their migrated ScreenHandlers via the
+	// remaining screen-local results are handled by their ScreenHandlers via the
 	// ScreenManager, which delegates every non-navigation message to the active
 	// handler.
 	cmd, _ := a.screenMgr.Update(msg)
@@ -1171,7 +1299,7 @@ func (e execCommand) SetStderr(w io.Writer) { e.Stderr = w }
 // sudoPromptCmd returns a command that prompts for sudo credentials
 func sudoPromptCmd() tea.ExecCommand {
 	// Use a script that shows a nice message then prompts for sudo
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // #nosec G118 -- ownership transfers to execCommand.cancel; Run defers cancellation.
 	cmd := exec.CommandContext(ctx, "bash", "-c", `
 		echo ""
 		echo "┌────────────────────────────────────────────┐"

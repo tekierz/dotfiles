@@ -25,7 +25,8 @@ import (
 // the check runs exactly once however the screen is entered.
 //
 // Async handling: the on-enter check result (updateCheckDoneMsg) is handled
-// here while this screen is active. The streaming/terminal update messages
+// here after App validates its generation, regardless of the active tab.
+// The streaming/terminal update messages
 // (updateSudoRequiredMsg, updateStartMsg, updateStreamMsg) are instead handled
 // GLOBALLY in App.Update before delegation, so the re-arm/finalize/refresh
 // chain survives navigation away from this screen (the worker goroutine +
@@ -62,7 +63,7 @@ func (s *updateScreen) Init() tea.Cmd {
 	}
 	if !a.updateChecking && !a.updateCheckDone {
 		a.updateChecking = true
-		return checkUpdatesCmd()
+		return a.startAsync(asyncUpdates, checkUpdatesCmd())
 	}
 	return nil
 }
@@ -90,7 +91,7 @@ func (s *updateScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
 
-	// --- Async results (delegated here while this screen is active) ---
+	// --- App routes accepted async results here even while another tab is active. ---
 	case updateCheckDoneMsg:
 		a.updateChecking = false
 		a.updateCheckDone = true
@@ -215,7 +216,7 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.updateStatus = ""
 		a.updateSelected = make(map[int]bool)
 		a.clearInstallLogs()
-		return checkUpdatesCmd()
+		return a.startAsync(asyncUpdates, checkUpdatesCmd())
 	case "c", "C": // Clear logs
 		if !a.updateRunning && len(a.installLogs) > 0 {
 			a.clearInstallLogs()

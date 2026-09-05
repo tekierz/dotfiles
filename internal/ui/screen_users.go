@@ -203,12 +203,9 @@ func switchUserCmd(name string) tea.Cmd {
 // kicks this load before navigating, and both guard on usersLoaded, so the list
 // loads exactly once however the screen is entered.
 //
-// Async-in-handler: because the ScreenManager delegates every non-navigation
-// message to this handler while it is active, the Users async results are
-// handled here (not in App.Update): userLoadedMsg, userSavedMsg, userDeletedMsg,
-// userSwitchedMsg. The save/delete/switch results re-issue loadUsersCmd to
-// refresh the list. Deleting the active user clears ActiveUser inside
-// deleteUserCmd (the Phase B fix), preserved here.
+// App validates generation-bound completions globally and invokes these reducers
+// regardless of the active tab. Save/delete/switch retain their follow-up read.
+// Deleting the active user still clears ActiveUser inside deleteUserCmd.
 type usersScreen struct {
 	BaseScreen
 }
@@ -231,7 +228,7 @@ func (s *usersScreen) Init() tea.Cmd {
 	}
 	if !a.usersLoaded {
 		a.usersLoaded = true
-		return loadUsersCmd()
+		return a.startAsync(asyncUsers, loadUsersCmd())
 	}
 	return nil
 }
@@ -263,7 +260,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
 
-	// --- Async results (delegated here while this screen is active) ---
+	// --- App routes accepted async results here even while another tab is active. ---
 	case userLoadedMsg:
 		if msg.err != nil {
 			// Reset the guard so re-entering the screen retries the load
@@ -271,6 +268,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.usersLoaded = false
 			a.usersStatus = fmt.Sprintf("Load failed: %v", msg.err)
 		} else {
+			a.usersLoaded = true
 			a.usersItems = msg.users
 			a.usersStatus = ""
 		}
@@ -282,7 +280,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		} else {
 			a.usersStatus = fmt.Sprintf("Saved %s ✓", msg.name)
 			// Reload user list.
-			return s, loadUsersCmd()
+			return s, a.startAsync(asyncUsers, loadUsersCmd())
 		}
 		return s, nil
 
@@ -299,7 +297,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			if a.usersIndex > 0 {
 				a.usersIndex--
 			}
-			return s, loadUsersCmd()
+			return s, a.startAsync(asyncUsers, loadUsersCmd())
 		}
 		return s, nil
 
@@ -309,7 +307,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		} else {
 			a.usersStatus = fmt.Sprintf("Switched to %s ✓", msg.name)
 			// Reload user list to update active indicator.
-			return s, loadUsersCmd()
+			return s, a.startAsync(asyncUsers, loadUsersCmd())
 		}
 		return s, nil
 	}
@@ -321,6 +319,12 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	a := s.App()
 	key := msg.String()
+	if a.asyncRequests[asyncUserOperation].pending {
+		if target, ok := tabNavigationTarget(key); ok && target != s.ID() {
+			return s.navigateTab(target)
+		}
+		return nil
+	}
 
 	// Handle new user name input.
 	switch {
@@ -340,7 +344,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.usersCreating = false
 				name := a.usersNewName
 				a.usersNewName = ""
-				return saveUserCmd(name, "catppuccin-mocha", "emacs", "linux")
+				return a.startAsync(asyncUserOperation, saveUserCmd(name, "catppuccin-mocha", "emacs", "linux"))
 			}
 			return nil
 		case "backspace":
@@ -369,7 +373,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.usersDeleting = false
 			if a.usersIndex < len(a.usersItems) {
 				name := a.usersItems[a.usersIndex].name
-				return deleteUserCmd(name)
+				return a.startAsync(asyncUserOperation, deleteUserCmd(name))
 			}
 			return nil
 		case "n", "N", "esc":
@@ -454,7 +458,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			// Switch to selected user.
 			if a.usersIndex < len(a.usersItems) {
 				name := a.usersItems[a.usersIndex].name
-				return switchUserCmd(name)
+				return a.startAsync(asyncUserOperation, switchUserCmd(name))
 			}
 		} else {
 			// Cycle option field.
@@ -485,13 +489,13 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// Save current user's settings.
 		if len(a.usersItems) > 0 && a.usersIndex < len(a.usersItems) {
 			item := a.usersItems[a.usersIndex]
-			return saveUserCmd(item.name, item.theme, item.navStyle, item.keyboard)
+			return a.startAsync(asyncUserOperation, saveUserCmd(item.name, item.theme, item.navStyle, item.keyboard))
 		}
 		return nil
 
 	case "r":
 		// Refresh user list.
-		return loadUsersCmd()
+		return a.startAsync(asyncUsers, loadUsersCmd())
 
 	case "esc":
 		// ScreenMainMenu is migrated; route through the ScreenManager. ('q' is

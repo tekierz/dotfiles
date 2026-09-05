@@ -39,19 +39,19 @@ func startTabTargetLoad(a *App, target Screen) tea.Cmd {
 	case ScreenUpdate:
 		if !a.updateChecking && !a.updateCheckDone {
 			a.updateChecking = true
-			return checkUpdatesCmd()
+			return a.startAsync(asyncUpdates, checkUpdatesCmd())
 		}
 	case ScreenManage:
 		return a.startInstallCacheLoad()
 	case ScreenUsers:
 		if !a.usersLoaded {
 			a.usersLoaded = true
-			return loadUsersCmd()
+			return a.startAsync(asyncUsers, loadUsersCmd())
 		}
 	case ScreenBackups:
 		if !a.backupsLoading && !a.backupsLoaded {
 			a.backupsLoading = true
-			return loadBackupsCmd()
+			return a.startAsync(asyncBackups, loadBackupsCmd())
 		}
 	}
 	return nil

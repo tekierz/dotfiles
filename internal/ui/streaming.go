@@ -141,5 +141,5 @@ func (a *App) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
 	a.updateSelected = make(map[int]bool)
 	a.updateCheckDone = false
 	a.updateChecking = true
-	return checkUpdatesCmd()
+	return a.startAsync(asyncUpdates, checkUpdatesCmd())
 }
