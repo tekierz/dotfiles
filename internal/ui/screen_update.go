@@ -342,7 +342,7 @@ func (s *updateScreen) View(width, height int) string {
 	if selectedCount > 0 {
 		subtitleText += fmt.Sprintf(" • %d selected", selectedCount)
 	}
-	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(subtitleText)
+	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(subtitleText, maxInt(1, width)))
 
 	// Show status message if any
 	var statusLine string
@@ -351,11 +351,36 @@ func (s *updateScreen) View(width, height int) string {
 		if strings.Contains(a.updateStatus, "failed") {
 			statusStyle = lipgloss.NewStyle().Foreground(ColorRed)
 		}
-		statusLine = statusStyle.Render(a.updateStatus)
+		statusLine = statusStyle.Render(truncateVisible(a.updateStatus, maxInt(1, width)))
 	}
 
-	boxOuterW := min(92, maxInt(44, width-8))
-	innerTextW := maxInt(20, boxOuterW-4) // border(2) + paddingX(2)
+	boxOuterW := min(92, maxInt(4, width-4))
+	innerTextW := maxInt(1, boxOuterW-4) // border(2) + paddingX(2)
+
+	// Measure chrome first so both result rows and footer stay inside the terminal.
+	helpText := "↑↓ navigate • space select • enter update • a update all • r refresh • esc menu"
+	if width < 80 {
+		helpText = "↑↓ move • space select • enter update\na all • r refresh • esc menu"
+	}
+	helpStyle := HelpStyle.Width(maxInt(1, width))
+	if height < 20 {
+		helpStyle = helpStyle.Padding(0, 0)
+	}
+	help := helpStyle.Render(helpText)
+	contentParts := []string{tabBar, "", title, subtitle}
+	if a.updateError != nil {
+		contentParts = append(contentParts, lipgloss.NewStyle().Foreground(ColorYellow).Render(
+			truncateVisible(fmt.Sprintf("⚠ some checks failed: %v", a.updateError), maxInt(1, width))))
+	}
+	if statusLine != "" {
+		contentParts = append(contentParts, statusLine)
+	}
+	prefix := lipgloss.JoinVertical(lipgloss.Left, append(contentParts, "")...)
+	suffix := lipgloss.JoinVertical(lipgloss.Left, "", help)
+	// Two column-heading rows, two border rows, and one visible-range row.
+	rows := maxInt(1, height-lipgloss.Height(prefix)-lipgloss.Height(suffix)-5)
+	start := maxInt(0, min(a.updateIndex-rows+1, len(updates)-rows))
+	end := min(len(updates), start+rows)
 
 	// Package list
 	var pkgLines []string
@@ -363,7 +388,8 @@ func (s *updateScreen) View(width, height int) string {
 	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-21s %-8s %-12s %-12s", "PACKAGE", "PROVIDER", "CURRENT", "LATEST")), innerTextW))
 	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-21s %-8s %-12s %-12s", strings.Repeat("─", 21), strings.Repeat("─", 8), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
 
-	for i, p := range updates {
+	for i := start; i < end; i++ {
+		p := updates[i]
 		cursor := "  "
 		checkbox := "○"
 		style := lipgloss.NewStyle().Foreground(ColorText)
@@ -391,6 +417,7 @@ func (s *updateScreen) View(width, height int) string {
 		pkgLines = append(pkgLines, truncateVisible(line, innerTextW))
 	}
 
+	pkgLines = append(pkgLines, truncateVisible(fmt.Sprintf("Showing %d–%d of %d", start+1, end, len(updates)), innerTextW))
 	packageList := strings.Join(pkgLines, "\n")
 
 	listBox := lipgloss.NewStyle().
@@ -400,21 +427,7 @@ func (s *updateScreen) View(width, height int) string {
 		Width(maxInt(1, boxOuterW-2)). // border adds 2
 		Render(packageList)
 
-	help := HelpStyle.Render("↑↓ navigate • space select • enter update • a update all • r refresh • esc menu")
-
-	// Build content with optional status line
-	var contentParts []string
-	contentParts = append(contentParts, tabBar, "", title, subtitle)
-	if a.updateError != nil {
-		warn := lipgloss.NewStyle().Foreground(ColorYellow).Render(
-			truncateVisible(fmt.Sprintf("⚠ some checks failed: %v", a.updateError), innerTextW))
-		contentParts = append(contentParts, warn)
-	}
-	if statusLine != "" {
-		contentParts = append(contentParts, statusLine)
-	}
-	contentParts = append(contentParts, "", listBox, "", help)
-	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
+	content := lipgloss.JoinVertical(lipgloss.Left, prefix, listBox, suffix)
 
 	return lipgloss.Place(width, height,
 		lipgloss.Center, lipgloss.Top,
