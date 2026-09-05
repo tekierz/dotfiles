@@ -2103,6 +2103,10 @@ func (a *App) listenUpdateStreamCmd() tea.Cmd {
 // teardownStream()'s a.streamCancel() call is sufficient (same contract as
 // streamingInstallToolCmd). The returned Cmd listens for the first event.
 func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
+	return a.streamingUpdateCmdWithResolver(packages, pkg.ManagerForExecutionProvider)
+}
+
+func (a *App) streamingUpdateCmdWithResolver(packages []pkg.Package, resolve func(pkg.ExecutionProvider) pkg.PackageManager) tea.Cmd {
 	// Cancelable context stored on App so navigate-away / Ctrl+C / teardownStream()
 	// cancels it, which (via exec.CommandContext inside RunStreaming) stops the
 	// subprocess and unblocks the worker's bounded-channel sends instead of leaking
@@ -2120,7 +2124,14 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 		results := make([]pkg.UpdateResult, len(packages))
 		var runErrs []error
 		for _, group := range groupUpdatesByProvider(packages) {
-			manager := pkg.ManagerForExecutionProvider(group.provider)
+			if err := ctx.Err(); err != nil {
+				runErrs = append(runErrs, err)
+				for index, update := range group.packages {
+					results[group.indices[index]] = pkg.UpdateResult{Package: update, Error: err}
+				}
+				continue
+			}
+			manager := resolve(group.provider)
 			if manager == nil {
 				err := fmt.Errorf("update provider %q is unavailable or ambiguous", group.provider)
 				runErrs = append(runErrs, err)
@@ -2136,15 +2147,9 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 			}
 			cmd, err := manager.UpdateStreaming(ctx, names...)
 			if err == nil && cmd != nil {
-				for line := range cmd.Output {
-					select {
-					case stream <- updateStreamMsg{line: line}:
-					case <-ctx.Done():
-						return
-					}
-				}
-				err = cmd.Wait()
+				err = consumeUpdateOutput(ctx, cmd, stream)
 			}
+			err = errors.Join(ctx.Err(), err)
 
 			var stillOutdated map[string]bool
 			recheckOK := false
@@ -2164,10 +2169,7 @@ func (a *App) streamingUpdateCmd(packages []pkg.Package) tea.Cmd {
 			}
 		}
 
-		select {
-		case stream <- updateStreamMsg{done: true, results: results, err: errors.Join(runErrs...)}:
-		case <-ctx.Done():
-		}
+		publishUpdateCompletion(ctx, stream, updateStreamMsg{done: true, results: results, err: errors.Join(runErrs...)})
 	}()
 
 	return a.listenUpdateStreamCmd()
@@ -2243,7 +2245,10 @@ func recheckOutdatedNames(mgr pkg.PackageManager, packages []pkg.Package) (still
 // channel are set on the main loop; a.streamCmd is deliberately not set (context
 // cancellation is sufficient for teardown — see streamingUpdateCmd).
 func (a *App) streamingUpdateAllCmd() tea.Cmd {
-	mgr := pkg.DetectManager()
+	return a.streamingUpdateAllCmdWithManager(pkg.DetectManager())
+}
+
+func (a *App) streamingUpdateAllCmdWithManager(mgr pkg.PackageManager) tea.Cmd {
 	if mgr == nil {
 		return func() tea.Msg {
 			return updateStreamMsg{done: true, err: fmt.Errorf("no package manager detected")}
@@ -2265,37 +2270,55 @@ func (a *App) streamingUpdateAllCmd() tea.Cmd {
 		// run blocking pre-work (greedy outdated pre-check / apt index refresh) that
 		// must not stall the event loop.
 		cmd, err := mgr.UpdateAllStreaming(ctx)
-		if err != nil {
-			select {
-			case stream <- updateStreamMsg{done: true, err: err}:
-			case <-ctx.Done():
-			}
-			return
+		if err == nil && cmd != nil {
+			err = consumeUpdateOutput(ctx, cmd, stream)
 		}
-		if cmd == nil {
-			// Nothing outdated (no-op): clean completion.
-			select {
-			case stream <- updateStreamMsg{done: true}:
-			case <-ctx.Done():
-			}
-			return
-		}
-
-		for line := range cmd.Output {
-			select {
-			case stream <- updateStreamMsg{line: line}:
-			case <-ctx.Done():
-				return
-			}
-		}
-		err = cmd.Wait()
-		select {
-		case stream <- updateStreamMsg{done: true, err: err}:
-		case <-ctx.Done():
-		}
+		publishUpdateCompletion(ctx, stream, updateStreamMsg{done: true, err: errors.Join(ctx.Err(), err)})
 	}()
 
 	return a.listenUpdateStreamCmd()
+}
+
+// consumeUpdateOutput keeps the worker alive until the command's terminal
+// contract completes, including when cancellation interrupts output forwarding.
+func consumeUpdateOutput(ctx context.Context, cmd *runner.StreamingCmd, stream chan<- updateStreamMsg) error {
+	for {
+		select {
+		case <-ctx.Done():
+			cmd.Cancel()
+			return errors.Join(ctx.Err(), cmd.Wait())
+		case line, ok := <-cmd.Output:
+			if !ok {
+				return errors.Join(cmd.Wait(), ctx.Err())
+			}
+			select {
+			case stream <- updateStreamMsg{line: line}:
+			case <-ctx.Done():
+				cmd.Cancel()
+				return errors.Join(ctx.Err(), cmd.Wait())
+			}
+		}
+	}
+}
+
+// A cancelled UI may stop draining progress. Retain the terminal event without
+// blocking teardown: the sole producer can discard one old line to make room.
+func publishUpdateCompletion(ctx context.Context, stream chan updateStreamMsg, msg updateStreamMsg) {
+	select {
+	case stream <- msg:
+		return
+	case <-ctx.Done():
+	}
+	select {
+	case stream <- msg:
+		return
+	default:
+	}
+	select {
+	case <-stream:
+	default:
+	}
+	stream <- msg
 }
 
 // saveInstallerConfig saves theme and nav style during installer flow. It
