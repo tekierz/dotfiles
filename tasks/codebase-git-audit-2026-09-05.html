@@ -23,7 +23,7 @@
 <aside class="sidebar" aria-label="Guide navigation">
 <a class="brand" href="#overview"><span aria-hidden="true">~/</span> dotfiles</a>
 <div class="sidebar-label">Development field guide</div>
-<nav aria-label="Contents">
+<nav aria-label="Contents"><a href="#integration-update"><span>↳</span>Integration &amp; worktrees</a>
 <a href="#overview" aria-current="location"><span>01</span> The decision</a>
 <a href="#baseline"><span>02</span> Which code is where</a>
 <a href="#patterns"><span>03</span> How failures happen</a>
@@ -42,7 +42,7 @@
 <h2 id="integration-title">One integration branch. Preserved history.</h2>
 <p><strong>Use <code>release-remediation</code>, starting at <code>d77c0f7</code>, for integration.</strong> The audit below remains evidence about that original snapshot. Existing product work and the saved release-preparation patch are being tested together in an isolated candidate before integration.</p>
 <div class="decision"><h3>What the dirty worktrees contain</h3><p>All six dirty trees are preserved. Three contain source or documentation; three contain generated binaries only. Saving a snapshot does not approve its implementation.</p></div>
-<div class="table-scroll"><table><thead><tr><th>Worktree</th><th>Disposition</th><th>Development value</th></tr></thead><tbody>
+<div class="table-wrap"><table><thead><tr><th>Worktree</th><th>Disposition</th><th>Development value</th></tr></thead><tbody>
 <tr><td>Integration root</td><td>Save source + local evidence</td><td>Audit, HTML guide, probes, plans, and proposed Pi design.</td></tr>
 <tr><td>Release readiness</td><td>Preserve and reconcile</td><td>50 changed source/doc paths: release automation, policies, licenses, fixture updates. Restore lost execution coverage and complete gates before acceptance.</td></tr>
 <tr><td>Historical audit remediation</td><td>Archive; adapt selected intentions</td><td>Most implementation is superseded. Recheck absolute HOME, Manage context, first-frame routing, and AUR capability. Old pathname deletion logic must not replace current authority checks.</td></tr>
@@ -51,7 +51,7 @@
 <tr><td>Local dogfood product 2</td><td>Local artifact archive</td><td>Two Linux binaries. Its committed 35 product changes are reviewed separately.</td></tr>
 </tbody></table></div>
 <p>History is labeled <code>archive/2026-09-05/{branches,remote-before,stashes,worktrees}/…</code>. Private recovery also retains generated files and original working states. Source snapshots: root <code>2b83147</code>, release preparation <code>bb1f472</code>, historical audit <code>776a8cf</code>.</p>
-<p><strong>Confirmed follow-up gaps:</strong> the newer candidate still returns from cancellation before terminal cleanup and retains every catalog payload. Its removed privileged-streaming assertions need meaningful replacement. These findings remain open until acceptance tests pass.</p>
+<p><strong>Follow-up execution:</strong> the saved release-preparation snapshot reproduced early cancellation return and catalog-wide payload retention. The isolated integration candidate now has tested repairs for those defects, APT receipts, and async UI result ownership. Full candidate and remote acceptance remain in progress; privileged execution coverage is being restored. See the current plan for commit-level evidence.</p>
 <p><a class="button" href="dirty-worktree-analysis-2026-09-05.md">Read the worktree analysis</a> <a class="button" href="integration-plan-2026-09-05.md">Current execution plan</a> <a class="button" href="repository-sync-2026-09-05.md">Preservation and remote evidence</a></p>
 </section>
 <section class="hero" id="overview" aria-labelledby="hero-title">

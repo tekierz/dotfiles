@@ -9,7 +9,7 @@ Canonical current plan: [integration-plan-2026-09-05.md](integration-plan-2026-0
 - [x] Preserve six dirty worktrees plus repository/ref/stash history in a verified local recovery archive.
 - [x] Create 97 dated archive refs and three source snapshots; preserve generated output locally.
 - [x] Update local/global model instructions to Astra and retain previous global instruction files.
-- [ ] Complete change-level dirty-worktree analysis and publish the reviewed preservation checkpoint.
+- [x] Complete change-level dirty-worktree analysis and publish the reviewed preservation checkpoint (97 exact remote archive matches; `release-remediation` checkpoint `391a793`).
 - [ ] Build and verify the isolated combined candidate, then integrate bounded fixes and synchronize remote CI.
 
 ## Human-readable HTML audit guide — 2026-09-05

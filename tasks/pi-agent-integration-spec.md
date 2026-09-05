@@ -1,7 +1,7 @@
 # Pi-Agent Integration Architecture
 
-**Status:** Exploration / proposed roadmap  
-**Created:** 2026-07-10  
+**Status:** Exploration / proposed roadmap
+**Created:** 2026-07-10
 **Scope:** Restructure dotfiles around a deterministic profile-and-state engine, then integrate Pi progressively from a read-only companion through an embedded assistant and extensibility platform.
 
 ## Executive Summary
@@ -579,4 +579,3 @@ The migration can be incremental:
 If Pi is removed, the application should still know exactly what the user wants, what the machine has, what will change, and how to apply it safely.
 
 Pi should make that system dramatically easier to use—not become the only component capable of understanding it.
-

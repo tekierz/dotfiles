@@ -26,11 +26,11 @@ New fixes remain bounded, with named ownership, focused failing tests first wher
 - [x] Create 97 dated archive refs, including three source snapshots; preserve generated artifacts locally.
 - [x] Update repository/global model policy to Astra; preserve prior global instructions.
 - [x] Complete dirty-worktree disposition report and record unique salvage candidates.
-- [ ] Scan archive source history and push dated refs plus the audit/planning checkpoint without force.
-- [ ] Prepare isolated combined product/release-preparation candidate and record current tests.
-- [ ] Fix APT receipt-state semantics independently of update execution.
+- [x] Scan archive source history and push dated refs plus the audit/planning checkpoint without force.
+- [x] Prepare isolated combined product/release-preparation candidate; full Go1.26.8 suite passed on the tested intermediate candidate.
+- [x] Fix APT receipt-state semantics independently of update execution (candidate `a8c69d0`; focused tests/package race/vet passed).
 - [ ] Fix cancellation wrappers and restore meaningful privileged-streaming acceptance coverage.
-- [ ] Replace catalog-wide payload retention with practical bounded listing/selected-source authority.
+- [x] Replace catalog-wide payload retention (`3dcec08`; full affected packages and focused race passed).
 - [ ] Fix App-owned async results, duplicate-profile creation, live profile application, theme-save errors and Updates viewport in sequential UI slices.
 - [ ] Adapt useful historical context/start-screen/relative-HOME/AUR observations only after confirming current defects.
 - [ ] Upgrade to a supported patched analysis-compatible Go toolchain and unify PR/integration/main/tag quality gates.
@@ -63,3 +63,45 @@ Dirty-worktree report: `tasks/dirty-worktree-analysis-2026-09-05.md`.
 Candidate spot-checks already show cancellation wrappers still return before terminal wait, and per-entry backup limits still permit retention of every payload. Both findings remain open. Release-preparation also removed two real privileged-streaming assertions without equivalent production-path replacement; restore meaningful coverage before acceptance.
 
 Existing newer fixes must be checked with acceptance assertions, not by reading a green result from defect-asserting audit probes. Some saved probes intentionally pass when a bug exists.
+
+### UI async ownership scoped exception (before edits)
+
+The P2-5 slice may touch eight production paths because every launch must carry generation identity: `internal/ui/app.go`, `cache.go`, `state_helpers.go`, `screen_mainmenu.go`, `streaming.go`, `screen_update.go`, `screen_backups.go`, and `screen_users.go`. Keep reducers/helpers in app.go; cap 800 changed lines and sixteen total paths. No profile/theme/viewport fixes in this slice. Agent freezes exact names against the tree before editing.
+
+### Shared quality gate and toolchain (root writer)
+
+Paths: `go.mod`, `Makefile`, `.github/workflows/ci.yml`, `release.yml`, `codeql.yml`, `dependency-review.yml`, `docs/releasing.md`, `docs/security-scanning.md`. Use supported Go 1.26.8 and a Go 1.26-compatible pinned linter; verify official release metadata. Make CI itself callable from tags so direct PR/integration checks retain existing required names. Publication depends on the complete reusable gate; retain tag ancestry to main. Validate actionlint, package/tool compatibility, security and complete candidate gates before acceptance. No release tag or main promotion is authorized by this patch.
+
+### Linter migration follow-up (before edits)
+
+New golangci-lint enables optional Staticcheck QF1012 formatting suggestions (96 sites), absent from standalone Staticcheck's normal gate. Exclude only that optional quick-fix rule while retaining all security checks and normal Staticcheck. Review each new gosec diagnostic against its exact boundary, using per-line rule-specific explanations only for false positives; fix real defects. The descriptor conversion slice owns `internal/pkg/executable_identity.go`, `npm_execution_identity.go`, `internal/safefile/anchored_unix.go`, `directory_unix.go`, `parent_chain_unix.go`, `internal/runner/exit_observer_darwin.go` (six production paths). A second slice owns command-factory false-positive explanations in runner/bash.go, tools/neovim.go, tools/tmux.go, installplan/service.go. UI diagnostics serialize with the UI writer. Security rules are not globally disabled.
+
+### Catalog metadata ownership (safety writer)
+
+Freeze compact recursive authority in new safefile directory_authority files; edit backup catalog/limits and tests. Aggregate caps: 16,384 accepted restore items and 8 MiB manifest text, with existing per-backup snapshot limits. Whole-list failure on budget exhaustion preserves retention safety; selected restore captures immutable bytes. Regression and replacement/mutation tests precede acceptance.
+
+### Historical relative-HOME salvage (root writer)
+
+Only `internal/config/config.go` and new `config_home_test.go`: ConfigDir must return unavailable when HOME is relative and no absolute XDG root exists; absolute XDG remains valid. Red regression then config tests. This adapts one useful historical dirty-tree intention without importing obsolete filesystem helpers.
+
+### Updates viewport (root writer)
+
+Only `internal/ui/screen_update.go` and new `update_viewport_test.go`. Derive a height-bounded visible range from current cursor and available chrome/log space, retain full package identities/selections, keep header/help/cursor visible at80x24 and smaller supported sizes, and exercise navigation/resize. No shared App fields or provider execution changes.
+
+### Privileged execution verification slices
+
+R1 (safety writer): private actual launcher construction in `runner/privileged_launcher.go` plus tests, preserve trusted defaults in bash.go, replace obsolete argv-only test, exercise sequence via real fake-shell phases. R2 separate Linux-only opt-in supervisor harness, isolated child processes, fake root-owned apt/pacman in ephemeral GitHub runner; no owner sudo/package execution. Root wires exact guarded test invocation. Package-manager phase wiring is a later bounded pkg slice. Per-slice limits remain six production/sixteen total/800 lines.
+
+## Intermediate execution evidence
+
+- `a8c69d0`: actual APT receipt state; focused/package race/vet passed.
+- `85001c4`: cancellation waits for terminal cleanup; package/cask and real operation-lock contention regressions passed.
+- `071dc45`: App-owned async results; full UI tests/race and stale/duplicate-generation cases passed.
+- `3dcec08`: compact catalog authority; full safefile/backup/UI/CLI and focused race passed. Per-backup snapshot memory remains transient.
+- `05aaf48`: create-only profiles; duplicate bytes and cooperating cross-process creators verified, config/UI race passed. Cold operation-state bootstrap can explicitly fail closed before the profile lock; same-UID noncooperating rename limitations are unchanged.
+- `274f070`: relative HOME rejected; historical intention adapted with red/green regression.
+- `03c0347`: Go1.26.8/shared workflow gate. Current vulnerability scan: zero reachable findings, one uncalled module advisory. Module tidy/verify and GoReleaser/actionlint checks passed. Full candidate/remote gates remain required after final edits.
+- `05cbc31`: actual privileged launcher construction/sequence tests; runner/installapply/race passed. Linux supervisor execution and pkg phase-wiring verification are separate follow-ups.
+- Homebrew ownership-only patch, tests and verified existing source SHA saved in `tasks/audit-work/2026-09-05/homebrew-proposal/`; no live install or tap publication.
+
+The first upgraded all-suite run used `/tmp` fixtures with a mismatched inherited group, causing authority checks to reject them. That run is invalid environment evidence. Repeating with the owner-private TMPDIR passed the full suite; do not weaken ownership checks to accommodate an unsuitable harness directory.
