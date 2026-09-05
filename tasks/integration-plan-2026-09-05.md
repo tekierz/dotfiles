@@ -29,14 +29,14 @@ New fixes remain bounded, with named ownership, focused failing tests first wher
 - [x] Scan archive source history and push dated refs plus the audit/planning checkpoint without force.
 - [x] Prepare isolated combined product/release-preparation candidate; full Go1.26.8 suite passed on the tested intermediate candidate.
 - [x] Fix APT receipt-state semantics independently of update execution (candidate `a8c69d0`; focused tests/package race/vet passed).
-- [ ] Fix cancellation wrappers and restore meaningful privileged-streaming acceptance coverage.
+- [x] Fix cancellation wrappers and restore meaningful privileged-streaming acceptance coverage.
 - [x] Replace catalog-wide payload retention (`3dcec08`; full affected packages and focused race passed).
 - [x] Fix App-owned async results, duplicate-profile creation, live profile application, theme-save errors and Updates viewport in sequential UI slices.
-- [ ] Adapt useful historical context/start-screen/relative-HOME/AUR observations only after confirming current defects.
+- [x] Adapt useful historical context/start-screen/relative-HOME/AUR observations only after confirming current defects.
 - [x] Upgrade to a supported patched analysis-compatible Go toolchain and unify PR/integration/main/tag quality gates.
-- [ ] Verify the combined candidate, integrate it to release-remediation, sync it and establish current remote CI/protection evidence.
+- [x] Verify the combined candidate, integrate it to release-remediation, sync it and establish current remote CI/protection evidence.
 - [x] Prepare the external Homebrew ownership-safe formula change with verified artifact inputs.
-- [ ] Record remaining real-platform, Homebrew, owner-hardware and publication gates; do not claim unrun gates passed.
+- [x] Record remaining real-platform, Homebrew, owner-hardware and publication gates; do not claim unrun gates passed.
 
 ## Initial bounded contracts
 
@@ -123,3 +123,15 @@ CI fixture regressions reproduced locally: inherited XDG/Yazi roots and host-dep
 Historical AUR capability regression is source-confirmed for LM Studio: its registry marks lmstudio-bin AUR-only but generic recipes accept plain pacman. Root scope apps.go/install_recipe_test.go: explicit LM Studio recipe requires paru on Arch; verify recipe and installation-health rejection while retaining supported macOS/paru behavior. This enforces repository metadata, not a fresh upstream catalog claim.
 
 Astra safety scope installation.go/new update_lifecycle_test.go: extend cancellation terminal-wait guarantee to Updates, preserve cleanup errors. Astra UI tests scope new update_provider_test.go (pkg and UI) and backup_confirmation_test.go: test actual provider routing and captured backup confirmation authority; any production test seam requires separate review.
+
+### Supervisor ordering/deadline hardening
+
+Frozen scope: privileged_supervisor_unix.go/linux.go plus new privileged_lifecycle.go/test.go. Commit f7ff93f: private actual post-start lifecycle preserves leader PID until all group/leader signals finish, joins the no-reap observer before Wait, then reaps descendants. Reaping control checks its deadline on every iteration, including interrupted waits and successful child reaps. Red traces reproduced both original defects; full runner, focused race, lint and Linux crosscompile/vet passed. The existing eight-case privileged Linux harness must pass on this final source before integration.
+
+Update worker commit b9c365d applies cancel-then-Wait to targeted/all workers, retains cleanup errors and terminal publication with a full abandoned queue, and prevents later provider starts after cancellation. Full UI, focused race and lint passed. Production provider/backup confirmation acceptance in31a12ca passes without public/global test bypasses.
+
+## Final review
+
+Final product source f7ff93f passed full local normal/race suites, both target-OS lint configurations, vet and Staticcheck, plus remote CI33989632246 (all jobs/Release Gate) and CodeQL33989634951. The actual Linux privileged harness marker confirms eight cases executed successfully after the final supervisor repair. Unpublished four-platform packaging/SBOM/checksum rehearsal and seven isolated CLI smoke checks passed. See integration-results-2026-09-05.md and the18-row finding-disposition for accepted fixes and remaining boundaries.
+
+The program integrates into release-remediation; main and tags remain unchanged. The external Homebrew proposal, real owner/platform smoke trials and release publication remain explicit gates. Dependency Review is blocked by the disabled repository dependency graph; user input to enable it is pending. No historical July ledger or unrun manual test is silently treated as accepted.

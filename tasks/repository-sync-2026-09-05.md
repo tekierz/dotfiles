@@ -18,7 +18,7 @@ See the [dirty-worktree analysis](dirty-worktree-analysis-2026-09-05.md). Three 
 - `archive/2026-09-05/worktrees/open-source-release-readiness` — `bb1f472c455724a8b7bbd307c1e7f2b191ac509e`
 - `archive/2026-09-05/worktrees/audit-remediation` — `776a8cf5ad5c75d4357acfcfac77175ae1aff2f7`
 
-The isolated `integration/2026-09-05-candidate` starts from the release-preparation snapshot, which includes the 35 newer product commits. Its acceptance is in progress; publication as an archive does not mean release readiness.
+The isolated `integration/2026-09-05-candidate` starts from the release-preparation snapshot, which includes the 35 newer product commits. The combined source and bounded audit repairs culminate in f7ff93f, verified by remote CI33989632246 and CodeQL, then integrated to release-remediation. Archive publication alone is not release readiness.
 
 ## Instruction policy
 

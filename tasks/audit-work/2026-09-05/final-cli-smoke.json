@@ -1,0 +1,59 @@
+{
+  "source_commit": "f7ff93f",
+  "snapshot_version": "0.0.1-next",
+  "isolated_home": true,
+  "host_package_commands": false,
+  "checks": [
+    {
+      "args": [
+        "version"
+      ],
+      "exit": 0,
+      "stdout_bytes": 28
+    },
+    {
+      "args": [
+        "--version"
+      ],
+      "exit": 0,
+      "stdout_bytes": 28
+    },
+    {
+      "args": [
+        "--help"
+      ],
+      "exit": 0,
+      "stdout_bytes": 1464
+    },
+    {
+      "args": [
+        "status"
+      ],
+      "exit": 0,
+      "stdout_bytes": 604
+    },
+    {
+      "args": [
+        "backups"
+      ],
+      "exit": 0,
+      "stdout_bytes": 133
+    },
+    {
+      "args": [
+        "theme",
+        "list"
+      ],
+      "exit": 0,
+      "stdout_bytes": 299
+    },
+    {
+      "args": [
+        "support",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout_bytes": 20507
+    }
+  ]
+}

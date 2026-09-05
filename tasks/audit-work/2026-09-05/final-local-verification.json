@@ -1,0 +1,83 @@
+{
+  "date": "2026-09-05",
+  "source_commit": "f7ff93feddbdf616b9b44784ba95a90159b7d0be",
+  "go": "1.26.8",
+  "checks": [
+    {
+      "check": "accepted-test",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "accepted-race",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "accepted-linux-lint",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "accepted-darwin-lint",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "accepted-static",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "accepted-vet",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "accepted-package",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "accepted-secrets",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "accepted-workflows",
+      "exit": 0,
+      "scope": "final product source"
+    },
+    {
+      "check": "final-modules",
+      "exit": 0,
+      "scope": "unchanged dependency/workflow inputs"
+    },
+    {
+      "check": "final-tidy",
+      "exit": 0,
+      "scope": "unchanged dependency/workflow inputs"
+    },
+    {
+      "check": "final-shell",
+      "exit": 0,
+      "scope": "unchanged dependency/workflow inputs"
+    },
+    {
+      "check": "final-vuln-online",
+      "exit": 0,
+      "scope": "unchanged dependency/workflow inputs"
+    }
+  ],
+  "html": {
+    "widths": [
+      1440,
+      390,
+      320
+    ],
+    "page_overflow": false,
+    "current_finding_rows": 18,
+    "brief_download_verified": true
+  },
+  "manual_release_gates": "See integration-results-2026-09-05.md"
+}

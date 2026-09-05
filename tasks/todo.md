@@ -10,7 +10,7 @@ Canonical current plan: [integration-plan-2026-09-05.md](integration-plan-2026-0
 - [x] Create 97 dated archive refs and three source snapshots; preserve generated output locally.
 - [x] Update local/global model instructions to Astra and retain previous global instruction files.
 - [x] Complete change-level dirty-worktree analysis and publish the reviewed preservation checkpoint (97 exact remote archive matches; `release-remediation` checkpoint `391a793`).
-- [ ] Build and verify the isolated combined candidate, then integrate bounded fixes and synchronize remote CI.
+- [x] Build and verify the combined candidate and integrate bounded fixes; final source f7ff93f passed remote CI/CodeQL, local gates and unpublished packaging. See [integration results](integration-results-2026-09-05.md) for remaining release gates.
 
 ## Human-readable HTML audit guide — 2026-09-05
 
