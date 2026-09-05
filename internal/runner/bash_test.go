@@ -215,34 +215,6 @@ func TestRunStreamingCancel(t *testing.T) {
 	}
 }
 
-// TestRunStreamingWithSudoBuildsCorrectArgv verifies the sudo wrapper prepends
-// "sudo" and keeps the target command + args as separate literal argv entries
-// (no shell concatenation that could enable injection).
-func TestRunStreamingWithSudoBuildsCorrectArgv(t *testing.T) {
-	t.Parallel()
-
-	// We do not actually run sudo (would prompt / require privileges). We build
-	// the command via the same path RunStreamingWithSudo uses and inspect argv.
-	// To avoid invoking sudo, replicate the exact argv-construction contract:
-	// sudo, name, args... — and assert RunStreamingWithSudo would produce it.
-	// Since RunStreamingWithSudo calls RunStreaming("sudo", name, args...),
-	// and RunStreaming may fail to start sudo in CI, we assert on the argv of a
-	// stand-in by constructing it the same way and comparing.
-	name := "pacman"
-	args := []string{"-S", "pkg; rm -rf /"}
-	wantArgv := []string{"sudo", "pacman", "-S", "pkg; rm -rf /"}
-
-	got := append([]string{"sudo"}, append([]string{name}, args...)...)
-	if !reflect.DeepEqual(got, wantArgv) {
-		t.Fatalf("sudo argv construction = %#v, want %#v", got, wantArgv)
-	}
-
-	// And prove the metachar arg stays a single literal element.
-	if got[3] != "pkg; rm -rf /" {
-		t.Fatalf("metachar arg was split/altered: %q", got[3])
-	}
-}
-
 // TestNeedsSudoDoesNotPanic exercises NeedsSudo on the current platform and
 // asserts it returns a value consistent with the OS family (best-effort; the
 // function shells out to `uname -s`).
