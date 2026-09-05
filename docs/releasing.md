@@ -2,9 +2,11 @@
 
 Tagged releases are built by `.github/workflows/release.yml` from the exact tag
 commit. The workflow rejects malformed semantic-version tags and tags whose
-commit is not contained in `main`. It reruns module, formatting, vet,
-normal-test, race-test, ShellCheck, Staticcheck, and govulncheck gates before
-publishing anything. Release tools are installed at pinned versions, not moving
+commit is not contained in `main`. It invokes the same reusable CI workflow as pull requests and integration
+pushes: module, formatting, vet, golangci-lint, ShellCheck, Staticcheck,
+govulncheck, Gitleaks, workflow/release validation, and normal/race tests and
+binary smoke checks on both Ubuntu and macOS. Publication requires that
+complete gate to succeed at the exact tag commit. Release tools are installed at pinned versions, not moving
 `latest` selectors.
 
 ## Artifacts
@@ -67,3 +69,11 @@ hardware test matrix, and Homebrew install/upgrade/rollback trial must also pass
 - Keep the retired Bash installer absent from source, packaging, CI, and active
   installation docs. `TestLegacyInstallerIsNotDistributed` enforces the local
   distribution invariant.
+
+## September toolchain baseline
+
+`go.mod` pins Go 1.26.8, a supported patched release verified against the
+[Go release history](https://go.dev/doc/devel/release#go1.26.0).
+The pinned golangci-lint v2.11.4 supports Go 1.26; see the
+[upstream changelog](https://golangci-lint.run/docs/product/changelog/).
+Local verification must use the pinned toolchain and matching analysis tools.

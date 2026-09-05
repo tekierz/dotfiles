@@ -16,8 +16,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  quality:
+    name: Exact tag quality
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release:
     name: Verified release
+    needs: [quality]
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -45,16 +52,6 @@ jobs:
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$RELEASE_SHA" origin/main
 
-      - name: Verify source and release gates
-        run: |
-          go mod verify
-          go mod tidy -diff
-          go vet ./...
-          go test ./...
-          go test -race ./...
-          test -z "$(gofmt -l .)"
-          shellcheck scripts/*.sh tests/*.sh
-
       - name: Install pinned release tooling
         env:
           GOBIN: ${{ runner.temp }}/release-bin
@@ -63,16 +60,6 @@ jobs:
           echo "$GOBIN" >> "$GITHUB_PATH"
           go install github.com/goreleaser/goreleaser/v2@v2.17.0
           go install github.com/anchore/syft/cmd/syft@v1.44.0
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-          go install github.com/zricethezav/gitleaks/v8@v8.30.1
-          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
-
-      - name: Validate release configuration and static safety
-        run: |
-          goreleaser check
-          staticcheck ./...
-          govulncheck ./...
-          gitleaks dir --redact --no-banner .
 
       - name: Build a draft release with archives and SBOMs
         env:

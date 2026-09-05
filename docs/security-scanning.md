@@ -1,8 +1,10 @@
 # Security and quality gates
 
 The blocking workflow is `.github/workflows/ci.yml`. It runs on pull requests
-and pushes to `main` or `master`; tagged releases rerun the core gates in
-`.github/workflows/release.yml` before a draft can be published.
+and pushes to `main`, `master`, `release-remediation`, or `integration/**`.
+Tagged releases call that exact same workflow before a draft can be published.
+Direct CI preserves the required `Lint`, `Test`, and `Build (ubuntu-latest)`
+check names; the stable `Test` job requires both platform test jobs.
 
 ## Pinned tooling
 
@@ -11,8 +13,8 @@ CI installs tools at explicit versions:
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Go toolchain | `go.mod` | Build, test, race, vet, module verification |
-| golangci-lint | v2.5.0 | Multi-linter and gosec gate |
-| Staticcheck | v0.7.0 | Go 1.25-aware static analysis |
+| golangci-lint | v2.11.4 | Multi-linter and gosec gate |
+| Staticcheck | v0.7.0 | Go 1.26-aware static analysis |
 | govulncheck | v1.1.4 | Reachable Go vulnerability analysis |
 | Gitleaks | v8.30.1 | Secret scanning with a reviewed narrow fixture allowlist |
 | GoReleaser | v2.17.0 | Release-configuration validation |
@@ -21,7 +23,7 @@ CI installs tools at explicit versions:
 
 GitHub Actions are referenced by immutable commit SHA. Dependabot checks Go
 modules and Actions weekly, but updates still require normal review and CI.
-CodeQL analyzes Go on pull requests, `main`, and a weekly schedule. Dependency
+CodeQL analyzes Go on pull requests, `main`, `release-remediation`, and a weekly schedule. Dependency
 Review rejects pull requests that introduce moderate-or-higher known
 vulnerabilities or AGPL-only dependencies.
 

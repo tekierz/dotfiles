@@ -29,6 +29,10 @@ linters:
     - whitespace
 
   settings:
+    staticcheck:
+      # Optional formatting quick-fix introduced by the linter upgrade; keep
+      # security and correctness checks unchanged. Standalone staticcheck also runs.
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022", "-QF1012"]
     revive:
       rules:
         - name: exported
