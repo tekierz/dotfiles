@@ -1,5 +1,7 @@
 # Release-Remediation Workflow Guardrails
 
+Current September execution is governed by [integration-plan-2026-09-05.md](integration-plan-2026-09-05.md), including its explicit existing-candidate import exception. The state-machine/ledger procedure below remains the historical July protocol. New fixes retain bounded ownership, review, and verification under the current plan. All subagents use Astra.
+
 These controls are mandatory for every remaining release-remediation slice. They
 exist to keep review findings from silently expanding an uncommitted change set.
 
@@ -10,7 +12,7 @@ Before production edits, root records and freezes:
 - one outcome and one authority boundary;
 - one delivery surface: headless CLI, Manage, or wizard;
 - included behavior and explicit deferrals;
-- an exact writable path allowlist and one Terra writer;
+- an exact writable path allowlist and one Astra implementer writer;
 - the invariant/test matrix, verification commands, and intended commit message.
 
 The state machine is:
@@ -24,7 +26,7 @@ to that commit candidate and expires after any production edit.
 ## Hard scope ceilings
 
 The default ceiling is six production files, sixteen total files, or 800 changed
-lines. Exceeding any one ceiling stops production edits. Sol must split the work or
+lines. Exceeding any one ceiling stops production edits. Astra reviewer must split the work or
 root must record a before-the-fact exception in the active scope contract.
 
 A new package, authority domain, execution surface, or architectural dependency is
@@ -61,8 +63,8 @@ requires its predecessor's unique final closure and a slice ID never previously 
 
 ## Agent ownership
 
-- Sol owns the contract, scope decisions, and final read-only review.
-- One Terra implementer owns each writable path allowlist.
+- Astra reviewer owns the contract, scope decisions, and final read-only review.
+- One Astra implementer owns each writable path allowlist.
 - Adversarial agents are read-only.
 - Parallel writers are allowed only on disjoint path allowlists.
 - Root alone updates the active plan, stages, verifies, and commits.
@@ -97,7 +99,7 @@ Before starting another slice:
 - formatting and `git diff --check` pass;
 - focused tests and affected-package race tests pass;
 - full tests, vet, pinned lint, and Staticcheck pass;
-- Sol and the adversarial reviewer report no sustained blocker; and
+- Astra reviewer and the adversarial reviewer report no sustained blocker; and
 - residual risks and deferred work are recorded.
 
 Once this gate is green, commit immediately. Optional improvements become named

@@ -1,0 +1,42 @@
+package backup
+import (
+ "bytes"
+ "fmt"
+ "os"
+ "path/filepath"
+ "runtime"
+ "testing"
+ "github.com/tekierz/dotfiles/internal/safefile"
+)
+func TestAuditCatalogRetainsAllPayloadBytes(t *testing.T) {
+ home := t.TempDir(); t.Setenv("HOME",home)
+ root := filepath.Join(home,"backups")
+ const files=4; const size=4*1024*1024
+ for i:=0;i<files;i++ {
+  path:=filepath.Join(root,fmt.Sprintf("b%d",i)); if err:=os.MkdirAll(path,0700);err!=nil {t.Fatal(err)}
+  if err:=os.WriteFile(filepath.Join(path,"payload"),bytes.Repeat([]byte("x"),size),0600);err!=nil {t.Fatal(err)}
+  if err:=os.WriteFile(filepath.Join(path,ManifestName),[]byte("payload\t600\n"),0600);err!=nil {t.Fatal(err)}
+ }
+ runtime.GC(); var before,after runtime.MemStats; runtime.ReadMemStats(&before)
+ entries,err:=ListCatalog(root);if err!=nil||len(entries)!=files {t.Fatalf("entries=%d err=%v",len(entries),err)}
+ runtime.GC();runtime.ReadMemStats(&after);runtime.KeepAlive(entries)
+ t.Logf("Catalog payload=%d bytes, retained heap growth=%d bytes",files*size,int64(after.HeapAlloc)-int64(before.HeapAlloc))
+ if after.HeapAlloc-before.HeapAlloc < files*size {t.Fatal("expected entire backup payload retained")}
+}
+func TestAuditRestoreAcceptsChangedSourceAfterCatalogValidation(t *testing.T) {
+ home:=t.TempDir();t.Setenv("HOME",home)
+ for _,name:=range []string{"first","second"} {if err:=os.WriteFile(filepath.Join(home,name),[]byte("original"),0600);err!=nil {t.Fatal(err)}}
+ root:=filepath.Join(home,"backups");path:=filepath.Join(root,"selected")
+ if _,err:=Create(home,path,[]string{"first","second"});err!=nil {t.Fatal(err)}
+ catalog,err:=ListCatalog(root);if err!=nil||len(catalog)!=1 {t.Fatalf("catalog=%d err=%v",len(catalog),err)}
+ if err:=ValidateCatalogEntry(catalog[0]);err!=nil {t.Fatal(err)}
+ result,err:=restoreWithReplace(path,home,func(root,rel string,data []byte,mode os.FileMode)error {
+   if rel=="first" {if err:=os.WriteFile(filepath.Join(path,"second"),[]byte("changed after validation"),0600);err!=nil{return err}}
+   return safefile.ReplaceWithin(root,rel,data,mode)
+ })
+ if err!=nil||len(result.Skipped)>0 {t.Fatalf("result=%+v err=%v",result,err)}
+ got,err:=os.ReadFile(filepath.Join(home,"second"));if err!=nil {t.Fatal(err)}
+ if string(got)!="changed after validation" {t.Fatalf("got=%q",got)}
+ t.Logf("Restore succeeds with changed payload: %q",got)
+ if err:=ValidateCatalogEntry(catalog[0]);err==nil {t.Fatal("expected old authority to reject modified backup")}
+}

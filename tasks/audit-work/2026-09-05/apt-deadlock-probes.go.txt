@@ -1,0 +1,17 @@
+package pkg
+import("context";"os";"path/filepath";"testing";"time")
+func TestAuditAptAllWaitDeadlock(t *testing.T) {
+ dir:=t.TempDir()
+ for name,script:=range map[string]string{
+ "sudo":"#!/bin/sh\nexec \"$@\"\n",
+ "apt":"#!/bin/sh\ni=0; while [ $i -lt 120 ]; do echo output; i=$((i+1)); done\n",
+ }{if err:=os.WriteFile(filepath.Join(dir,name),[]byte(script),0700);err!=nil{t.Fatal(err)}}
+ t.Setenv("PATH",dir)
+ manager:=NewAptManager()
+ ctx,cancel:=context.WithCancel(context.Background()); defer cancel()
+ done:=make(chan error,1)
+ go func(){_,err:=manager.UpdateAllStreaming(ctx);done<-err}()
+ select{case err:=<-done:t.Fatalf("expected block, got %v",err);case <-time.After(200*time.Millisecond):t.Log("120-line update cannot return stream; blocked until cancellation")}
+ cancel()
+ select{case err:=<-done:t.Logf("returned only on cancellation: %v",err);case<-time.After(time.Second):t.Fatal("failed cleanup")}
+}

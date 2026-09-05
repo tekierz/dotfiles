@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Subagent model policy — updated 2026-09-05
+
+- Use `gpt-6-astra` for every subagent: research, planning, implementation, review, and verification.
+- Use low reasoning for straightforward inventory or mechanical tasks, medium for ordinary implementation, and high or higher for difficult architecture, security, concurrency, and adversarial review.
+- Keep one bounded task per agent and disjoint writable ownership. Agent roles do not select different models.
+- This policy supersedes older Sol/Terra, GPT-5.x, Claude-family, or wrapper-model assignments in repository instructions, plans, lessons, and global guidance.
+- If Astra is unavailable, report that limitation rather than silently substituting another model.
+
 ## Project Overview
 
 This is **dotfiles**: a cross-platform terminal environment management platform

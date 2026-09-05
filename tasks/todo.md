@@ -1,69 +1,54 @@
 # Release-Readiness Plan
 
-## Open-source release readiness — 2026-07-16
+## Active integration and remediation — 2026-09-05
 
-- [x] Reconcile stale CLI, package-manager, tool, and UI fixtures with the completed
-      phased-install, privileged-supervisor, pinned-artifact, and typed-health contracts.
-- [x] Make the full automated pre-PR gate pass: module integrity, build, vet, lint,
-      Staticcheck, unit/race tests, formatting, vulnerability scan, and ShellCheck.
-- [x] Audit MIT licensing, third-party notices, public documentation, contribution,
-      security-reporting, support, privacy, and repository hygiene for a public release.
-- [x] Harden GitHub Actions and release construction for least privilege, pinned tools,
-      reproducible cross-platform artifacts, checksums, SBOMs, signatures/attestations,
-      and protected publication.
-- [x] Verify macOS/Linux cross-builds, CLI contracts, artifact contents, secret scanning,
-      and cross-repository Homebrew/sshh compatibility without publishing or pushing.
-- [x] Record the remaining manual owner-hardware, distribution, canary, and public-release
-      gates that cannot be completed safely from this checkout.
+User selected `release-remediation` at `d77c0f7` as the integration baseline, authorized saving/syncing work and dated archive refs, requested dirty-worktree analysis, and requires Astra for all subagents.
 
-### Open-source release review
+Canonical current plan: [integration-plan-2026-09-05.md](integration-plan-2026-09-05.md). The July fixed-catalog program below is historical; its ledger is preserved and does not certify the existing 35-commit import.
 
-- Created `feature/open-source-release-readiness` from the completed product
-  checkpoint `890c446`; no release-readiness changes are staged, committed, or
-  pushed.
-- Reconciled the completed phased install, trusted package-manager supervisor,
-  pinned Neovim artifact, typed snapshot, Pi reachability, responsive UI, and
-  Claude fail-closed behavior with the automated suite. Production safety was
-  not weakened to preserve obsolete fixtures.
-- Added the public MIT release surface: canonical license attribution,
-  third-party notices and exact license/patent texts, security and contribution
-  policies, Contributor Covenant, issue forms, pull-request template, privacy,
-  support, limitation, and non-endorsement guidance.
-- Added CodeQL, dependency review, Gitleaks, actionlint, stable CI aggregation,
-  release-tag ancestry validation, full tag-time static/vulnerability/secret
-  gates, and license-notice assertions in every binary/source release archive.
-  All external Actions remain pinned to immutable commit SHAs.
-- Exact Go 1.25.6 module/tidy/format/build/vet/test/race gates pass. Pinned
-  golangci-lint v2.5.0, Staticcheck v0.7.0, govulncheck v1.1.4, actionlint
-  v1.7.12, Gitleaks v8.30.1, ShellCheck, and GoReleaser v2.17.0 pass.
-  Gitleaks reports no findings across 679 commits or the release worktree.
-- The local GoReleaser snapshot produced and verified four static macOS/Linux
-  amd64/arm64 archives, five SPDX SBOMs, five archives, and checksums. Every
-  binary archive contains the MIT license, README, third-party notices, and
-  dependency license texts. Repeated snapshots produced byte-identical binaries
-  and `tar.gz` archives after freezing the Go module timestamp. SBOM generator
-  metadata is verified by per-release checksums/attestations rather than claimed
-  as cross-run reproducible. The source-archive notice assertion remains
-  intentionally enforced by the tag workflow; an uncommitted local snapshot
-  uses `git archive HEAD` and therefore cannot include newly untracked files.
-- CLI smoke passes for help, version, status text/JSON, and explicit read-only
-  plan JSON. The bundled `sshh` helper is now described truthfully as distinct
-  from the separate upstream repository/formula.
-- **Owner-controlled GitHub gates:** require the stable `Release Gate` check on
-  a strict up-to-date branch, enable private vulnerability reporting, secret
-  scanning and push protection, the dependency graph, and Dependabot security
-  updates. Current remote settings do not yet enforce those controls.
-- **Distribution blocker:** `tekierz/homebrew-tap` still ships v2.0.1, deletes
-  legacy executables by unowned basename, and documents stale commands. After a
-  candidate tag creates exact assets/checksums, update the formula, remove the
-  deletion, add tap licensing/CI, and perform clean-install plus v2.0.1
-  upgrade/rollback trials.
-- **Manual release gates:** confirm public copyright attribution and provenance
-  of hand-authored palettes/helper fragments; provide a private maintainer
-  contact; run macOS, CachyOS, and fresh Raspberry Pi dogfood including Apply,
-  Save, restore, cancellation, and upgrade paths; decide whether Apple
-  signing/notarization is required; then run canary/beta promotion before the
-  public tag.
+- [x] Preserve six dirty worktrees plus repository/ref/stash history in a verified local recovery archive.
+- [x] Create 97 dated archive refs and three source snapshots; preserve generated output locally.
+- [x] Update local/global model instructions to Astra and retain previous global instruction files.
+- [x] Complete change-level dirty-worktree analysis and publish the reviewed preservation checkpoint (97 exact remote archive matches; `release-remediation` checkpoint `391a793`).
+- [ ] Build and verify the isolated combined candidate, then integrate bounded fixes and synchronize remote CI.
+
+## Human-readable HTML audit guide — 2026-09-05
+
+- [x] Define the guide around the completed audit, its branch distinctions, and evidence limits.
+- [x] Build a standalone HTML artifact with finding exploration, development sequence, and acceptance criteria.
+- [x] Verify content completeness, interactions, responsive layout, and print behavior.
+- [x] Link the completed artifact and record results.
+
+### Review
+
+Completed artifact: [Open the HTML audit guide](codebase-git-audit-2026-09-05.html).
+
+- All 18 findings include practical impact, source evidence, newer-branch status, and proposed acceptance criteria.
+- Includes repository-state map, four illustrated failure scenarios, verification limits, and five development work packages.
+- Browser-verified filters, expansion, deep links, plain-text brief export, full-content printing, and layouts at 1440/1024/768/390/320px.
+- Independent content review found no material deviations from the canonical audit. All relative source links and IDs validate; no external scripts, fonts, or styles are required.
+- Screenshots and print/download checks are under `output/playwright/`; no product code or Git state changed.
+
+## Current codebase and Git repository audit — 2026-09-05
+
+Scope: current `release-remediation` checkout at `d77c0f790a3694df21dfc8e784eef66dfb2614b2`, with separate accounting for other local branches, worktrees, and remote evidence. Audit only; no product edits or Git mutations. Preserve existing changes to `tasks/lessons.md` and untracked `tasks/pi-agent-integration-spec.md`.
+
+- [x] Read project guidance, previous findings, and establish the current checkout baseline.
+- [x] Inventory repository/history/worktrees, dependencies, automation, and distribution.
+- [x] Independently review execution, recovery/configuration, and CLI/TUI behavior.
+- [x] Run safe build, tests/race, static/security checks, and isolated CLI smoke checks.
+- [x] Reconcile findings against current code and branch integration evidence.
+- [x] Publish a prioritized report with evidence, limitations, and remediation order.
+
+### Review
+
+Completed report: [codebase-git-audit-2026-09-05.md](codebase-git-audit-2026-09-05.md).
+
+- Verdict: not ready for release; 5 P1, 12 P2, and 1 latent P3 findings, with current-checkout versus newer-branch evidence separated.
+- Pinned build/vet/lint/Staticcheck/test/race and all four cross-builds pass; the pinned vulnerability gate fails for GO-2026-4602, with applicability limits documented.
+- Independent temporary-fixture probes reproduced backup target drift, recovery integrity/memory issues, lifecycle/UI failures, and APT receipt errors.
+- Live GitHub evidence confirms stale remote delivery, required-check naming drift, and the unsafe old Homebrew formula.
+- Existing newer product and release-preparation work was inventoried to avoid duplicate remediation. No production or Git mutations were made.
 
 ## Active implementation — 2026-07-13
 

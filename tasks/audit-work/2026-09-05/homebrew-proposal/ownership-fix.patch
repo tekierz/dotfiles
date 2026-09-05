@@ -1,0 +1,34 @@
+diff --git a/Formula/dotfiles.rb b/Formula/dotfiles.rb
+index 9ceeb7d..1734045 100644
+--- a/Formula/dotfiles.rb
++++ b/Formula/dotfiles.rb
+@@ -16,10 +16,2 @@ class Dotfiles < Formula
+-    # Clean up old binaries from previous installations
+-    old_binaries = ["dotfiles-tui", "dotfiles-setup"]
+-    old_binaries.each do |old_bin|
+-      old_path = HOMEBREW_PREFIX/"bin"/old_bin
+-      if old_path.exist?
+-        ohai "Removing old binary: #{old_bin}"
+-        old_path.unlink
+-      end
+-    end
+-
++    # Homebrew owns this formula's keg. Legacy executables require a separate
++    # ownership review; never remove an arbitrary prefix/bin entry here.
+@@ -40 +32 @@ class Dotfiles < Formula
+-        dotfiles theme --list # List available themes
++        dotfiles theme list   # List available themes
+@@ -53 +45,2 @@ class Dotfiles < Formula
+-      If you had either installed, they have been automatically cleaned up.
++      Existing legacy executables are preserved. Review their ownership before
++      removing them; use brew uninstall for a legacy formula you still have installed.
+diff --git a/README.md b/README.md
+index c63b097..ff1b884 100644
+--- a/README.md
++++ b/README.md
+@@ -43 +43 @@ dotfiles
+-- `dotfiles theme --list` - List available themes
++- `dotfiles theme list` - List available themes
+@@ -67 +67 @@ sshh         # Connect
+-If you previously had `dotfiles-setup` or `dotfiles-tui` installed, the new unified `dotfiles` formula will automatically clean them up during installation.
++The `dotfiles` formula preserves existing `dotfiles-setup` and `dotfiles-tui` executables. Review their ownership before removing them. If a legacy Homebrew formula is installed, remove it through Homebrew so its own keg is unlinked safely.

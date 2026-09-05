@@ -1,0 +1,23 @@
+package pkg
+import("os";"path/filepath";"testing")
+func TestAuditAptReceiptSelectionIsNotInstalledState(t *testing.T) {
+ for _,tc:= range []struct{name,status,selection string; wantList int}{
+  {"held-installed","hold ok installed","hold",0},
+  {"selected-but-unpacked","install ok unpacked","install",1},
+ } {t.Run(tc.name,func(t *testing.T){
+ dir:=t.TempDir()
+ scripts:=map[string]string{
+ "apt":"#!/bin/sh\nexit 0\n",
+ "dpkg-query":"#!/bin/sh\ncase \"$2\" in\n '-f=${Status}') printf '%s' \"$AUDIT_STATUS\";;\n *) printf 'zsh\\t1.0\\n';;\nesac\n",
+ "dpkg":"#!/bin/sh\nprintf 'zsh\\t%s\\n' \"$AUDIT_SELECTION\"\n",
+ }
+ for name,script:=range scripts {if err:=os.WriteFile(filepath.Join(dir,name),[]byte(script),0700);err!=nil {t.Fatal(err)}}
+ t.Setenv("PATH",dir);t.Setenv("AUDIT_STATUS",tc.status);t.Setenv("AUDIT_SELECTION",tc.selection)
+ manager:=NewAptManager()
+ if !manager.IsAvailable(){t.Fatal("fake apt unavailable")}
+ installed:=manager.IsInstalled("zsh")
+ packages,err:=manager.ListInstalled();if err!=nil {t.Fatal(err)}
+ t.Logf("status=%q selection=%q: IsInstalled=%v ListInstalled=%v",tc.status,tc.selection,installed,packages)
+ if installed || len(packages)!=tc.wantList {t.Fatal("reproduction did not match identified defect")}
+ })}
+}

@@ -72,11 +72,11 @@ and PRs require explicit user authorization when execution begins.
 With four available agent slots:
 
 1. Root owns integration, the canonical plan, verification, and Git actions.
-2. One Sol agent freezes and reviews up to two disjoint slices.
-3. Terra A owns writer worktree A.
-4. Terra B owns writer worktree B.
+2. One Astra reviewer agent freezes and reviews up to two disjoint slices.
+3. Astra implementation agent A owns writer worktree A.
+4. Astra implementation agent B owns writer worktree B.
 
-After implementation, the two Terra slots stop writing and become independent adversarial
+After implementation, the two Astra implementer slots stop writing and become independent adversarial
 review slots for the opposite slice. Root integrates only after both reviews and the exact
 candidate gates pass. There are never more than two simultaneous writers.
 
@@ -86,8 +86,8 @@ resolves overlapping writes by hand; the affected slices are re-planned.
 
 ### Pipeline cadence
 
-- Sol freezes red-test contracts for the next pair while root verifies the previous pair.
-- Terra A and Terra B implement concurrently.
+- Astra reviewer freezes red-test contracts for the next pair while root verifies the previous pair.
+- Astra implementation agent A and Astra implementation agent B implement concurrently.
 - Reviews run concurrently after both writers stop.
 - Root integrates in dependency order and runs the merge barrier.
 - Evidence expires after any production edit.
@@ -162,7 +162,7 @@ flowchart TD
 
 ## 5. Slice catalog
 
-Likely paths are planning allowlists, not authorization to edit them. Sol must freeze the
+Likely paths are planning allowlists, not authorization to edit them. Astra reviewer must freeze the
 exact list before each slice.
 
 ### Governance
@@ -408,7 +408,7 @@ The commit exit gate is:
 - full go test and go test -race;
 - go vet, pinned golangci-lint, Staticcheck;
 - govulncheck and ShellCheck when relevant;
-- Sol and adversarial review with no sustained blocker.
+- Astra reviewer and adversarial review with no sustained blocker.
 
 ## 8. Merge barriers
 
