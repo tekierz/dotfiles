@@ -34,6 +34,7 @@ func TestWriteBtopConfigRejectsInjectedOrUnsupportedValuesBeforeMutation(t *test
 func TestWriteBtopConfigCreatesReferencedOverrideTheme(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	cfg := BtopConfig{Theme: "gruvbox", UpdateMs: 2000, GraphType: "braille", TempScale: "celsius", ShownBoxes: "cpu mem"}
 	if err := WriteBtopConfig(cfg, "nord"); err != nil {
 		t.Fatal(err)

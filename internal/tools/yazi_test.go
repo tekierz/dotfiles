@@ -112,6 +112,8 @@ func TestGeneratedYaziTripleImportsAsExactCurrent(t *testing.T) {
 func TestWriteYaziConfigWritesAllFiles(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("YAZI_CONFIG_HOME", "")
 
 	cfg := YaziConfig{
 		Keymap:      "emacs",

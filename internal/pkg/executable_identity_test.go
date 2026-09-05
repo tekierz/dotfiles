@@ -91,7 +91,7 @@ func TestExecutableIdentityDigestEncodingAndSeparation(t *testing.T) {
 	if !ok {
 		t.Fatal("executable stat lacks Unix device/inode identity")
 	}
-	want := expectedExecutableIdentityDigest(path, canonical, info.Size(), uint32(info.Mode()), uint64(stat.Dev), stat.Ino, content)
+	want := expectedExecutableIdentityDigest(path, canonical, info.Size(), uint32(info.Mode()), uint64(stat.Dev), stat.Ino, content) //nolint:unconvert // Stat_t.Dev is int32 on Darwin and uint64 on Linux.
 	if identity.Digest() != want {
 		t.Fatalf("digest = %q, want canonical encoding %q", identity.Digest(), want)
 	}

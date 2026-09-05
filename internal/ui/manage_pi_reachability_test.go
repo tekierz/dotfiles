@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -33,6 +35,19 @@ func assertPiPhaseReady(t *testing.T, app *App, cmdPresent bool, action string, 
 }
 
 func TestManagePiInstallReachesReviewedPrerequisitePhaseFromEitherPaneAndCase(t *testing.T) {
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	// Plan construction observes these identities; the returned install command is never run.
+	native, err := os.ReadFile("/bin/sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "node"), native, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "npm"), []byte("#!/usr/bin/env node\n// reviewed npm identity fixture\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for _, presence := range []health.Presence{health.PresenceMissing, health.PresencePartial} {
 		for _, pane := range []int{managePaneTools, managePaneSettings} {
 			for _, key := range []string{"i", "I"} {
