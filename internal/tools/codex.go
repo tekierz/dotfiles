@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
@@ -26,6 +27,10 @@ func NewCodexTool() *CodexTool {
 func (t *CodexTool) IsInstalled() bool { return directInstallationDetected(t) }
 func (t *CodexTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	return binaryAvailable("codex")
+}
+
+func (t *CodexTool) InstallationDirectAlternatives(DirectInstallationObservation) []health.DirectAlternative {
+	return recipeBinaryHealth("codex")
 }
 
 func (t *CodexTool) Install(pkg.PackageManager) error {

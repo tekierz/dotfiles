@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
@@ -26,6 +27,10 @@ func NewPiTool() *PiTool {
 func (t *PiTool) IsInstalled() bool { return directInstallationDetected(t) }
 func (t *PiTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	return binaryAvailable("pi")
+}
+
+func (t *PiTool) InstallationDirectAlternatives(DirectInstallationObservation) []health.DirectAlternative {
+	return recipeBinaryHealth("pi")
 }
 
 func (t *PiTool) Install(pkg.PackageManager) error {

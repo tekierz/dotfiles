@@ -238,7 +238,7 @@ func build(request Request, dependencies Dependencies, phased bool) (Result, err
 			return blockedResult(intent, request.Snapshot, "recipe_drift")
 		}
 		if phased {
-			recipe = selectFreshNPMPhaseRecipe(observation, recipe)
+			recipe = selectFreshNPMPhaseRecipe(observation, recipe, request.Snapshot.Manager())
 			digest, err = operation.InstallRecipeDigest(recipe)
 			if err != nil {
 				return Result{}, ErrInvalidRequest
@@ -292,7 +292,7 @@ func build(request Request, dependencies Dependencies, phased bool) (Result, err
 			}
 			digest, digestErr := operation.InstallRecipeDigest(prerequisite)
 			observation, observed := request.Snapshot.Tool(id)
-			detected, known := ObservedInstallDetector(observation, prerequisite.Detector)
+			detected, known := observedNPMPrerequisiteReceipts(observation, prerequisite, request.Snapshot.Manager())
 			publicInstall, publicErr := projectInstallRecipe(prerequisite, digest)
 			if digestErr != nil || !observed || !known || publicErr != nil {
 				return Result{}, ErrInvalidRequest
@@ -519,12 +519,12 @@ func classifyNPMExecutionPhase(recipes map[string]operation.InstallRecipe) npmEx
 	return npmExecutionPhaseNone
 }
 
-func selectFreshNPMPhaseRecipe(observation health.InstallationObservation, recipe operation.InstallRecipe) operation.InstallRecipe {
+func selectFreshNPMPhaseRecipe(observation health.InstallationObservation, recipe operation.InstallRecipe, manager string) operation.InstallRecipe {
 	prerequisite, ok := npmPrerequisitePhaseRecipe(recipe)
 	if !ok {
 		return recipe
 	}
-	detected, known := ObservedInstallDetector(observation, prerequisite.Detector)
+	detected, known := observedNPMPrerequisiteReceipts(observation, prerequisite, manager)
 	if !known || !detected {
 		return recipe
 	}
@@ -536,6 +536,50 @@ func selectFreshNPMPhaseRecipe(observation health.InstallationObservation, recip
 		}
 	}
 	return npm
+}
+
+// Node receipts establish npm prerequisites, not installation of the CLI. Read
+// only the accepted manager's namespace: a cask named node is not its formula.
+func observedNPMPrerequisiteReceipts(observation health.InstallationObservation, prerequisite operation.InstallRecipe, manager string) (bool, bool) {
+	if _, err := operation.InstallRecipeDigest(prerequisite); err != nil || prerequisite.Detector.Kind != operation.InstallDetectorPackageReceipt {
+		return false, false
+	}
+	facet := observation.Package()
+	if manager == "" || prerequisite.Manager != manager || facet.Provider != manager {
+		return false, false
+	}
+	for _, step := range prerequisite.Steps {
+		if step.Kind != operation.InstallStepPackageManager {
+			return false, false
+		}
+	}
+	wanted := health.PackageNamespaceSystem
+	if manager == "brew" {
+		wanted = health.PackageNamespaceFormula
+	}
+	for _, namespace := range facet.Namespaces {
+		if namespace.Namespace != wanted {
+			continue
+		}
+		if !namespace.Complete {
+			return false, false
+		}
+		installed := true
+		for _, value := range prerequisite.Detector.Values {
+			if !slices.Contains(namespace.ExpectedReceipts, value) {
+				return false, false
+			}
+			if slices.Contains(namespace.ObservedReceipts, value) {
+				continue
+			}
+			if !slices.Contains(namespace.MissingReceipts, value) {
+				return false, false
+			}
+			installed = false
+		}
+		return installed, true
+	}
+	return false, false
 }
 
 func recipeHasNPM(recipe operation.InstallRecipe) bool {

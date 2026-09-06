@@ -65,6 +65,7 @@ func manageTruthObservationWithInstallability(t *testing.T, id string, presence 
 
 	packageReceipts := make([]string, 0)
 	seenReceipts := make(map[string]struct{})
+	npmPrerequisites := false
 	for _, step := range recipe.Steps {
 		var receipts []string
 		switch step.Kind {
@@ -72,6 +73,7 @@ func manageTruthObservationWithInstallability(t *testing.T, id string, presence 
 			receipts = step.Packages
 		case operation.InstallStepNPMGlobal:
 			// NPM globals are detected by their binary, not a package receipt.
+			npmPrerequisites = true
 		case operation.InstallStepHomebrewCask:
 			receipts = step.Casks
 		}
@@ -113,6 +115,15 @@ func manageTruthObservationWithInstallability(t *testing.T, id string, presence 
 			State: state, Provider: "brew", ExpectedReceipts: packageReceipts,
 			ObservedReceipts: observed, MissingReceipts: missing, UnresolvedReceipts: unresolved,
 			Authoritative: true, Complete: complete,
+		}
+		if npmPrerequisites {
+			// Match the real observer: Node formula receipts describe only the
+			// prerequisite phase; the CLI binary establishes product presence.
+			spec.Package.Authoritative = false
+			spec.Package.Namespaces = []health.PackageNamespaceFacet{{
+				Namespace: health.PackageNamespaceFormula, State: state, ExpectedReceipts: packageReceipts,
+				ObservedReceipts: observed, MissingReceipts: missing, UnresolvedReceipts: unresolved, Complete: complete,
+			}}
 		}
 	}
 

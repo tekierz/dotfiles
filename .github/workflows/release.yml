@@ -64,7 +64,7 @@ jobs:
       - name: Build a draft release with archives and SBOMs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: goreleaser release --clean
+        run: goreleaser release --clean --release-notes "docs/release-notes-${GITHUB_REF_NAME}.md"
 
       - name: Verify exact release contents
         env:

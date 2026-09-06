@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
@@ -32,6 +33,10 @@ func NewOpenCodeTool() *OpenCodeTool {
 func (t *OpenCodeTool) IsInstalled() bool { return directInstallationDetected(t) }
 func (t *OpenCodeTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	return binaryAvailable("opencode")
+}
+
+func (t *OpenCodeTool) InstallationDirectAlternatives(DirectInstallationObservation) []health.DirectAlternative {
+	return recipeBinaryHealth("opencode")
 }
 
 func (t *OpenCodeTool) Install(pkg.PackageManager) error {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/safefile"
@@ -72,6 +73,10 @@ func (t *ClaudeCodeTool) IsInstalled() bool {
 func (t *ClaudeCodeTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	_, err := exec.LookPath("claude")
 	return err == nil
+}
+
+func (t *ClaudeCodeTool) InstallationDirectAlternatives(DirectInstallationObservation) []health.DirectAlternative {
+	return recipeBinaryHealth("claude")
 }
 
 // PackageMetadataIsAuthoritative tells dashboard planning that package receipt

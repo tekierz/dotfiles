@@ -3,9 +3,12 @@ package tools
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
@@ -22,6 +25,34 @@ func recipeBackedInstallError(toolID string) error {
 func binaryAvailable(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+func recipeBinaryHealth(name string) []health.DirectAlternative {
+	alternative := health.DirectAlternative{Kind: health.DirectSourceBinary, Identifiers: []string{name}, State: health.ComponentUnknown}
+	_, err := exec.LookPath(name)
+	if err == nil {
+		alternative.State = health.ComponentPresent
+	} else if errors.Is(err, exec.ErrNotFound) {
+		// LookPath collapses inaccessible and non-executable candidates into
+		// ErrNotFound. Absence needs a separate check of every absolute search
+		// candidate; a dangling symlink must retain uncertainty too.
+		alternative.State = health.ComponentMissing
+		for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
+			if !filepath.IsAbs(directory) {
+				alternative.State = health.ComponentUnknown
+				break
+			}
+			if _, err := os.Lstat(filepath.Join(directory, name)); !errors.Is(err, os.ErrNotExist) { // #nosec G703 -- Intentional read-only PATH metadata probe for a fixed tool basename; no file contents are read.
+				alternative.State = health.ComponentUnknown
+				break
+			}
+		}
+	}
+	if alternative.State == health.ComponentUnknown {
+		alternative.DiagnosticCode = health.DiagnosticProbeFailed
+		alternative.DiagnosticSummary = "binary lookup could not establish presence or absence"
+	}
+	return []health.DirectAlternative{alternative}
 }
 
 func npmCLIInstallRecipe(
