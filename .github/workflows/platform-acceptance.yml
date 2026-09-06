@@ -1,0 +1,54 @@
+name: Disposable Platform Acceptance
+
+on:
+  push:
+    branches: [release-remediation, "integration/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debian:
+    name: Debian 13 real package acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build exact source acceptance binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/debian-inputs" "$RUNNER_TEMP/debian-evidence"
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/debian-inputs/dotfiles" ./cmd/dotfiles
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/debian-inputs/platformqa" ./internal/platformqa/cmd
+          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/debian-inputs/tools.test" ./internal/tools
+          cp scripts/platform-acceptance-debian.sh "$RUNNER_TEMP/debian-inputs/run.sh"
+          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/debian-evidence/source-sha.txt"
+      - name: Run disposable Debian package transactions
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Docker Hub library/debian trixie-slim linux/amd64 manifest, verified 2026-09-05.
+          image='debian@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f'
+          printf '%s\n' "$image" > "$RUNNER_TEMP/debian-evidence/image.txt"
+          docker run --rm --platform linux/amd64 --pids-limit 256 \
+            --env CI=true --env GITHUB_ACTIONS=true --env DOTFILES_PLATFORM_ACCEPTANCE=1 \
+            --mount "type=bind,src=$RUNNER_TEMP/debian-inputs,dst=/inputs,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/debian-evidence,dst=/evidence" \
+            "$image" /bin/bash /inputs/run.sh 2>&1 | tee "$RUNNER_TEMP/debian-evidence/bootstrap.log"
+          grep -Fx 'DOTFILES_DEBIAN_PLATFORM_EXECUTED cases=8 update=no-op' "$RUNNER_TEMP/debian-evidence/result.txt"
+      - name: Upload synthetic acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: debian-platform-${{ github.sha }}
+          path: ${{ runner.temp }}/debian-evidence
+          retention-days: 7
+          if-no-files-found: error
