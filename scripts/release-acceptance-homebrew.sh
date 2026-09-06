@@ -133,7 +133,13 @@ brew install --build-from-source "$trial_name"
 record_version old 2.0.1
 old_binary_hash=$(shasum -a 256 "$trial_cellar/2.0.1/bin/dotfiles" | awk '{print $1}')
 write_formula "$RELEASE_VERSION" "$candidate_url" "$candidate_hash"
+# A named outdated formula deliberately returns 1. Validate the expected
+# receipt/version payload separately so an operational failure cannot pass.
+set +e
 brew outdated --json=v2 "$trial_name" > "$trial_evidence/outdated.json"
+outdated_exit=$?
+set -e
+[[ $outdated_exit == 1 ]]
 ruby -rjson -e 'j=JSON.parse(File.read(ARGV[0])); abort "missing real upgrade" unless j.fetch("formulae").any? { |f| f.fetch("installed_versions").include?("2.0.1") && f.fetch("current_version") == ARGV[1] }' \
   "$trial_evidence/outdated.json" "$RELEASE_VERSION"
 brew upgrade --build-from-source "$trial_name"

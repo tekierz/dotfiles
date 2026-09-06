@@ -197,6 +197,7 @@ func verifyUpdate(ctx context.Context, manager acceptanceManager, requireUpgrade
 		return err
 	}
 	if requireUpgrade {
+		// #nosec G204 -- Fixed dpkg comparison; both operands are native receipts for the fixed fzf fixture, without a shell.
 		if manager.Name() != "apt" || exec.CommandContext(ctx, "/usr/bin/dpkg", "--compare-versions", before, "lt", after).Run() != nil {
 			return errors.New("expected a real version-increasing APT update")
 		}

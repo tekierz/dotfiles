@@ -9,7 +9,11 @@ fi
 # shellcheck source=/dev/null
 source /etc/os-release
 [[ $ID == arch ]]
-pacman -Syu --noconfirm --needed sudo ca-certificates zsh jq shadow util-linux
+# The minimal official image has no local signing secret. Initialize its
+# disposable keyring before package hooks refresh Arch's trusted keys.
+pacman-key --init
+pacman-key --populate archlinux
+pacman -Syu --noconfirm --needed sudo ca-certificates zsh jq shadow util-linux diffutils
 if pacman -Q fzf >/dev/null 2>&1; then
   echo 'fzf already installed; absent-package precondition failed' >&2
   exit 1

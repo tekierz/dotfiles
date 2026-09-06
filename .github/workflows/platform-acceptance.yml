@@ -103,3 +103,33 @@ jobs:
           path: ${{ runner.temp }}/dotfiles-homebrew-evidence
           retention-days: 7
           if-no-files-found: error
+
+  npm-startup:
+    name: Live npm installation and MCP startup
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.20.0
+      - name: Verify supported live npm and MCP routes
+        shell: bash
+        env:
+          RELEASE_VERSION: 3.0.0
+          DOTFILES_RELEASE_ACCEPTANCE: "1"
+        run: bash scripts/release-acceptance-npm.sh
+      - name: Upload synthetic npm and MCP evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: npm-startup-${{ github.sha }}
+          path: ${{ runner.temp }}/dotfiles-npm-evidence
+          retention-days: 7
+          if-no-files-found: error
