@@ -1,0 +1,24 @@
+ 1 󰒓 Manage   2 󰀄 Users   3 󰌌 Hotkeys   4 󰚰 Update   5 󰁯 Backups                
+ User Profiles            │                                                     
+──────────────────────────│ Select a user to view settings                      
+                          │                                                     
+ No user profiles.        │                                                     
+                          │                                                     
+                          │                                                     
+ Press 'n' to create one. │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                          │                                                     
+                                                                                
+ n:new  d:delete  s:save  r:refresh  Tab:switch pane  q:back                    
+                                                                                

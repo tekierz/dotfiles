@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "operation_id": "20260906T045212.564055174Z-1d2785c274b05c7f",
+  "plan_hash": "49ac5ae2a3eaeba70ca0ecbcde6724fe66b334fe7596765b21ce6cdc8a890fdc",
+  "started_at": "2026-09-06T04:52:12.564055174Z",
+  "finished_at": "2026-09-06T04:52:14.154292374Z",
+  "status": "succeeded",
+  "actions": [
+    {
+      "action_id": "install:fzf",
+      "status": "succeeded",
+      "summary": "installed and detected"
+    }
+  ],
+  "warnings": [
+    "package-only operation has no filesystem mutations; no filesystem rollback point was created"
+  ]
+}

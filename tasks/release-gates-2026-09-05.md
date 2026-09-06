@@ -1,5 +1,19 @@
 # Release gate remediation continuation
 
+## Latest owner-authorized completion
+
+The owner subsequently requested merging the repair and completing release preparation.
+Current decisions and execution: [release completion](../docs/release-completion-2026-09-05.html).
+Homebrew PR #1 merged at `bc3dd989`; main policy/security protections are enabled;
+v3.0.0 is selected and [promotion PR #6](https://github.com/tekierz/dotfiles/pull/6) is draft.
+Live acceptance discovered and repaired npm 11 duplicate configuration sources,
+the official Node executable-size limit, typed CLI absence detection and npm
+prerequisite receipt authority. At `7214af5`, all five hosted acceptance jobs pass:
+Homebrew clean install/upgrade/rollback, Debian amd64/ARM64 version transitions,
+Arch, and real Codex/Pi install plus MCP startup. CI and CodeQL findings pass.
+Physical owner/Pi and authenticated integration observations remain open. The record below describes
+the earlier review checkpoint, not the current merge/publication authority.
+
 Continue the user's accepted September integration plan from `4a4cf57`. Root owns Git; all delegated agents use Astra. Preserve original worktrees and recovery data. Main promotion, selecting a release version, publishing a tag/release and destructive owner-machine operations remain separate decisions.
 
 ## Execution order

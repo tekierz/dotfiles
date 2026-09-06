@@ -1,0 +1,87 @@
+--- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence (0.01s)
+    --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex (0.00s)
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/missing (0.00s)
+            recipe_backed_health_test.go:80: direct={State:unknown Authoritative:true Alternatives:[{Kind:legacy_detector Identifiers:[codex] State:unknown DiagnosticCode: DiagnosticSummary:}] DiagnosticCode: DiagnosticSummary:}, want authoritative missing
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/empty-path (0.00s)
+            recipe_backed_health_test.go:80: direct={State:unknown Authoritative:true Alternatives:[{Kind:legacy_detector Identifiers:[codex] State:unknown DiagnosticCode: DiagnosticSummary:}] DiagnosticCode: DiagnosticSummary:}, want authoritative missing
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/present (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[codex] State:present DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/non-executable (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[codex] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/dangling (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[codex] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/directory (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[codex] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/relative-path (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[codex] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/empty-entry (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[codex] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/codex/inaccessible (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[codex] State:unknown DiagnosticCode: DiagnosticSummary:}
+    --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi (0.00s)
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/missing (0.00s)
+            recipe_backed_health_test.go:80: direct={State:unknown Authoritative:true Alternatives:[{Kind:legacy_detector Identifiers:[pi] State:unknown DiagnosticCode: DiagnosticSummary:}] DiagnosticCode: DiagnosticSummary:}, want authoritative missing
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/empty-path (0.00s)
+            recipe_backed_health_test.go:80: direct={State:unknown Authoritative:true Alternatives:[{Kind:legacy_detector Identifiers:[pi] State:unknown DiagnosticCode: DiagnosticSummary:}] DiagnosticCode: DiagnosticSummary:}, want authoritative missing
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/present (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[pi] State:present DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/non-executable (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[pi] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/dangling (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[pi] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/directory (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[pi] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/relative-path (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[pi] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/empty-entry (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[pi] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/pi/inaccessible (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[pi] State:unknown DiagnosticCode: DiagnosticSummary:}
+    --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode (0.00s)
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/missing (0.00s)
+            recipe_backed_health_test.go:80: direct={State:unknown Authoritative:true Alternatives:[{Kind:legacy_detector Identifiers:[opencode] State:unknown DiagnosticCode: DiagnosticSummary:}] DiagnosticCode: DiagnosticSummary:}, want authoritative missing
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/empty-path (0.00s)
+            recipe_backed_health_test.go:80: direct={State:unknown Authoritative:true Alternatives:[{Kind:legacy_detector Identifiers:[opencode] State:unknown DiagnosticCode: DiagnosticSummary:}] DiagnosticCode: DiagnosticSummary:}, want authoritative missing
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/present (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[opencode] State:present DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/non-executable (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[opencode] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/dangling (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[opencode] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/directory (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[opencode] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/relative-path (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[opencode] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/empty-entry (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[opencode] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/opencode/inaccessible (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[opencode] State:unknown DiagnosticCode: DiagnosticSummary:}
+    --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code (0.00s)
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/missing (0.00s)
+            recipe_backed_health_test.go:80: direct={State:unknown Authoritative:true Alternatives:[{Kind:legacy_detector Identifiers:[claude-code] State:unknown DiagnosticCode: DiagnosticSummary:}] DiagnosticCode: DiagnosticSummary:}, want authoritative missing
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/empty-path (0.00s)
+            recipe_backed_health_test.go:80: direct={State:unknown Authoritative:true Alternatives:[{Kind:legacy_detector Identifiers:[claude-code] State:unknown DiagnosticCode: DiagnosticSummary:}] DiagnosticCode: DiagnosticSummary:}, want authoritative missing
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/present (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[claude-code] State:present DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/non-executable (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[claude-code] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/dangling (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[claude-code] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/directory (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[claude-code] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/relative-path (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[claude-code] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/empty-entry (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[claude-code] State:unknown DiagnosticCode: DiagnosticSummary:}
+        --- FAIL: TestRecipeBackedCLIHealthUsesTypedBinaryEvidence/claude-code/inaccessible (0.00s)
+            recipe_backed_health_test.go:84: recipe detector cannot consume alternative={Kind:legacy_detector Identifiers:[claude-code] State:unknown DiagnosticCode: DiagnosticSummary:}
+FAIL
+FAIL	github.com/tekierz/dotfiles/internal/tools	0.728s
+--- FAIL: TestRealNPMToolHealthReachesPublicInstallPhases (0.00s)
+    --- FAIL: TestRealNPMToolHealthReachesPublicInstallPhases/codex (0.00s)
+        recipe_health_integration_test.go:58: phase=prerequisite public status=blocked phase=<nil>
+    --- FAIL: TestRealNPMToolHealthReachesPublicInstallPhases/pi (0.00s)
+        recipe_health_integration_test.go:58: phase=prerequisite public status=blocked phase=<nil>
+FAIL
+FAIL	github.com/tekierz/dotfiles/internal/installplan	0.469s
+FAIL

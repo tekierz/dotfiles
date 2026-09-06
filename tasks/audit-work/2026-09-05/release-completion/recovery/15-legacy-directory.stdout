@@ -1,0 +1,5 @@
+Restoring backup: legacy-directory
+  Restored: .config/nvim
+  Removed: .config/generated
+
+Restore summary: 1 restored, 1 removed, 0 skipped, 0 warnings.

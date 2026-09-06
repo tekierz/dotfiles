@@ -57,3 +57,26 @@
   checks needed to keep the application testable; defer expanded adversarial, race, policy, and
   cross-platform matrices until the end-to-end feature path exists. Do not let per-slice release
   ceremony delay a build the user can install and exercise manually.
+
+- Read current implementation before declaring a feature blocked from historical todo prose.
+  The September integration implements phased npm authority even though older checklist
+  sections still describe the superseded temporary disable.
+- Pin GOTOOLCHAIN=go1.26.8 for release verification and candidate Homebrew builds;
+  the host default can be newer, and Homebrew superenv overrides ambient GOTOOLCHAIN.
+- Package-manager inventory commands can return nonzero for an expected state:
+  named `brew outdated` exits 1 when an upgrade exists. Capture its status and
+  validate the structured result before classifying the command as a failure.
+- Verify subprocess environment neutralization against the real tool as well as a native
+  stand-in. npm 11 rejects identical user/global config paths, even when both point
+  to the null device; mocks that only echo the environment cannot detect this.
+- Check executable-identity size limits against actual supported upstream binaries.
+  Official Node 24 standalone binaries exceed 64 MiB even though Homebrew split-library
+  launchers are smaller; keep a bounded real-size regression and cap-plus-one refusal.
+- A successful CodeQL workflow means analysis completed, not that its findings gate
+  passed. Inspect the separate CodeQL PR check and open branch alerts before promotion.
+
+- Live installation acceptance must bridge the real installation observer into public plan/apply. Synthetic authoritative receipt fixtures hid two failures: legacy boolean absence was unknown, and Node prerequisite receipts were incorrectly required to establish CLI presence. Give supported recipe-backed CLIs typed binary evidence and evaluate prerequisite receipts only in their matching manager namespace; never loosen generic product-presence authority.
+
+- Pinned Go 1.26.8 ignores linked-worktree `.git` files for embedded VCS metadata, even with `-buildvcs=true`. A clean ordinary local clone with a real `.git` directory restores exact `vcs.revision` and `vcs.modified=false`; use it for provenance-sensitive release rehearsals rather than weakening verification or changing product build flags.
+
+- Validate release-evidence links against Git’s tracked/indexed files, not only filesystem existence. Repository-wide log ignores can silently omit bounded synthetic test evidence; explicitly stage only the reviewed evidence files instead of changing global ignore rules.

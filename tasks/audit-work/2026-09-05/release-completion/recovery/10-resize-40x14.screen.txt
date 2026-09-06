@@ -1,0 +1,14 @@
+╭───────────────────────────────────────
+│ DETAILS                               
+│                                       
+│ Name: 2026-09-05_21-56-12             
+│ Date: 2026-09-05 21:56:12             
+│ Files: 8                              
+│ Size: 178 B                           
+│ Path:                                 
+│ /var/folders/nj/yy_m0fqn0h17kjf0nq779n
+╰───────────────────────────────────────
+                                        
+                                        
+up/down navigate • enter restore • d del
+                                        

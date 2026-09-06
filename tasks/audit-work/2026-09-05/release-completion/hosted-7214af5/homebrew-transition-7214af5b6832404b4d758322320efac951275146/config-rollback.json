@@ -1,0 +1,29 @@
+{
+  ".config/dotfiles/backups": {
+    "type": "directory",
+    "mode": 448
+  },
+  ".config/dotfiles/backups/recovery-fixture": {
+    "type": "directory",
+    "mode": 493
+  },
+  ".config/dotfiles/backups/recovery-fixture/sentinel": {
+    "type": "file",
+    "mode": 384,
+    "sha256": "22f918e2565c3cabffbdb2984fac6295af357ec00f7234114a7ea5ccf146a6a6"
+  },
+  ".config/ghostty": {
+    "type": "directory",
+    "mode": 493
+  },
+  ".config/ghostty/config": {
+    "type": "file",
+    "mode": 416,
+    "sha256": "2d560d12a91d3863e0b5c564c59da50ee65226bc2401db13a524c918019e083d"
+  },
+  ".zshrc": {
+    "type": "file",
+    "mode": 384,
+    "sha256": "9b21b2bcc808f2a05827379477cf9f6306a4667e5ab17bb572cd04ebe52d8f86"
+  }
+}

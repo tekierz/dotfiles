@@ -1,0 +1,22 @@
+
+WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
+
+Hit:1 http://deb.debian.org/debian trixie InRelease
+Hit:2 http://deb.debian.org/debian trixie-updates InRelease
+Hit:3 http://deb.debian.org/debian-security trixie-security InRelease
+Reading package lists...
+Building dependency tree...
+Reading state information...
+All packages are up to date.
+
+WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
+
+Reading package lists...
+Building dependency tree...
+Reading state information...
+fzf is already the newest version (0.60.3-1+b2).
+Summary:
+  Upgrading: 0, Installing: 0, Removing: 0, Not Upgrading: 0
+receipt status=install ok installed version=0.60.3-1+b2
+update evidence=no-op version=0.60.3-1+b2
+DOTFILES_DEBIAN_QA_EXECUTED mode=update

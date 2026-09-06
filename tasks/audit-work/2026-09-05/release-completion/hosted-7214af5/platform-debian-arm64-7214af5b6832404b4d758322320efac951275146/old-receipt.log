@@ -1,0 +1,2 @@
+receipt status=install ok installed version=0.38.0-1+b1
+DOTFILES_DEBIAN_QA_EXECUTED mode=receipt

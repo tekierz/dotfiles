@@ -1,0 +1,9 @@
+ok  	github.com/tekierz/dotfiles/internal/tools	0.632s
+--- FAIL: TestRealNPMToolHealthReachesPublicInstallPhases (0.00s)
+    --- FAIL: TestRealNPMToolHealthReachesPublicInstallPhases/codex (0.00s)
+        recipe_health_integration_test.go:48: phase=prerequisite failed: invalid install plan request
+    --- FAIL: TestRealNPMToolHealthReachesPublicInstallPhases/pi (0.00s)
+        recipe_health_integration_test.go:48: phase=prerequisite failed: invalid install plan request
+FAIL
+FAIL	github.com/tekierz/dotfiles/internal/installplan	0.392s
+FAIL

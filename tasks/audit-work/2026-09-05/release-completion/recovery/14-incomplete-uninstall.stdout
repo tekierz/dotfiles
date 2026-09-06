@@ -1,0 +1,43 @@
+Safe Dotfiles Uninstall
+=======================
+
+This will:
+  • Restore configuration files from latest backup (if available)
+  • Retain binaries, helpers, packages, and the dotfiles configuration directory
+  • Decline automatic deletion because ownership and anchored-removal safeguards are not implemented
+
+Checking for backups...
+Restoring backup: 2026-09-05_21-56-12
+  Restored: .config/ghostty/config
+  Restored: .config/nvim/init.lua
+  Restored: .config/yazi/keymap.toml
+  Restored: .config/yazi/theme.toml
+  Restored: .config/yazi/yazi.toml
+  Restored: .gitconfig
+  Restored: .tmux.conf
+
+Restore summary: 7 restored, 0 removed, 1 skipped, 0 warnings.
+
+Automatic deletion is disabled in this release.
+No binaries, helpers, packages, or dotfiles state directory were deleted by uninstall cleanup.
+
+Why: this build cannot yet prove artifact ownership and does not have anchored recursive removal.
+
+Remove the Homebrew-managed main binary with:
+  brew uninstall tekierz/tap/dotfiles
+
+Paths intentionally left untouched if present (verify ownership before manual removal):
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-669nn1s9/.config/dotfiles
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-669nn1s9/.local/bin/dotfiles
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-669nn1s9/.local/bin/dotfiles-tui
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-669nn1s9/.local/bin/dotfiles-setup
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-669nn1s9/.local/bin/hk
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-669nn1s9/.local/bin/caff
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-669nn1s9/.local/bin/sshh
+  • /usr/local/bin/dotfiles
+  • /usr/local/bin/dotfiles-tui
+  • /usr/local/bin/dotfiles-setup
+  • /usr/local/bin/hk
+  • /usr/local/bin/caff
+  • /usr/local/bin/sshh
+Package-managed tools and external helpers such as sshh were retained; use their owning package manager.

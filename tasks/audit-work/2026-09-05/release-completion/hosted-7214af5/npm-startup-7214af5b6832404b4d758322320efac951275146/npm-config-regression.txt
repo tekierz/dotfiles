@@ -1,0 +1,5 @@
+=== RUN   TestNPMExecutionIdentityInstalledNPMConfigNeutralization
+    npm_execution_identity_start_test.go:147: real npm version=11.19.0
+--- PASS: TestNPMExecutionIdentityInstalledNPMConfigNeutralization (0.67s)
+PASS
+ok  	github.com/tekierz/dotfiles/internal/pkg	0.683s

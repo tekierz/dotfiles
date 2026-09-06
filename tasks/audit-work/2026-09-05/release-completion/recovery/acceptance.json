@@ -1,0 +1,37 @@
+{
+  "result": "passed",
+  "binary_sha256": "bdc04989f982450a8a479671fc19d31265da2525745911b09674a54c16da94f8",
+  "platform": "Darwin arm64",
+  "checks": [
+    "TUI convenience backup captures eight real synthetic config files in manifest",
+    "TUI restore cancellation preserves all modified files",
+    "TUI confirmed restore recovers all eight bytes and POSIX modes; backup payload unchanged",
+    "TUI delete cancellation preserves full backup",
+    "Restore action remains visible at 40x14; Backups heading returns at 100x32 and 80x24",
+    "TUI Ctrl-C exits zero",
+    "CLI restores TUI-created backup: eight file bytes and modes",
+    "CLI uninstall restores latest backup and retains complete backup/config state",
+    "CLI reports partial failure for symlink destination; target and recovery data preserved",
+    "Incomplete backup makes uninstall fail; available recovery data and unrestorable live file survive",
+    "Legacy directory CLI restore recovers nested bytes/modes, removes extra descendants and absent-before directory"
+  ],
+  "isolation": "Private fresh HOME/XDG_CONFIG_HOME/XDG_STATE_HOME; empty PATH; synthetic config only",
+  "limits": [
+    "At 40x14 only Backups details/footer are visible; full listing/header are clipped",
+    "No owner account config or package mutations",
+    "No macOS VM/spare-Mac disk snapshot recovery; required owner install/apply gate remains unfulfilled",
+    "PTY emulation does not verify GUI-terminal font, mouse, animation or physical appearance",
+    "No ACL, xattr, file flags, hardlink topology or timestamps preservation claim",
+    "No Arch or Raspberry Pi runtime covered by this harness"
+  ],
+  "synthetic_home": "/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-669nn1s9",
+  "toolchain": "go1.26.8 darwin/arm64",
+  "source_revision": "7214af5b6832404b4d758322320efac951275146",
+  "source_dirty": "false",
+  "source_worktree": "/private/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-v3-clean-clone-8eiqaae_/source",
+  "verified_at_utc": "2026-09-06T04:56:21.350716+00:00",
+  "verification_commands": [
+    "GOTOOLCHAIN=go1.26.8 go build -buildvcs=true -o /tmp/dotfiles-release-recovery ./cmd/dotfiles (clean candidate clone)",
+    "/private/tmp/dotfiles-pty-qa-venv/bin/python tasks/audit-work/2026-09-05/release-completion/recovery/acceptance.py"
+  ]
+}

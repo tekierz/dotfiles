@@ -1,0 +1,160 @@
+ok  	github.com/tekierz/dotfiles/internal/backup	0.895s
+ok  	github.com/tekierz/dotfiles/internal/safefile	1.119s
+ok  	github.com/tekierz/dotfiles/internal/operation	1.723s
+--- FAIL: TestDoctorRepairPlanAcceptsOnlyProvenStaleCandidateWithoutHomebrew (0.29s)
+    doctor_repair_test.go:22: plan = {SchemaVersion:1 Action:none Eligible:false DecisionCode:ownership-unproven Summary:static Go metadata does not prove the official dotfiles command and module paths Candidate:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairPlanAcceptsOnlyProvenStaleCandidateWithoutHomebr478405992/001/.local/bin/dotfiles CandidateDigest:a78853ef9e053a1e4b18b8995771282cec0e0b33d3b5e6dfefd68a23439286b7 ModulePath: CommandPath: ModuleVersion: RunningExecutable:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/go-build1046343845/b154/dotfiles.test HomebrewManaged: QuarantinePath: ManifestPath: PlanHash:b9fce9d383f8ddd33e7b149cd213fda33ad976e55ba1859e95349ebb6bfd046b home:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairPlanAcceptsOnlyProvenStaleCandidateWithoutHomebr478405992/001 candidateRevision:{tracked:true exists:true device:16777234 inode:329162083 mode:448 links:1 uid:501 gid:20 size:13498621 modifiedNS:1788667080950861452 digest:[167 136 83 239 158 5 58 30 75 24 184 153 87 113 40 44 236 14 11 51 211 181 230 223 239 214 138 35 67 146 134 183]} candidateBytes:[207 250 237 254 12 0 0 1 0 0 0 0 2 0 0 0 15 0 0 0 152 7 0 0 4 0 32 0 0 0 0 0 25 0 0 0 72 0 0 0 95 95 80 65 71 69 90 69 82 79 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 136 1 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 192 173 0 0 0 0 0 0 0 0 0 0 0 0 0 0 192 173 0 0 0 0 0 7 0 0 0 5 0 0 0 4 0 0 0 0 0 0 0 95 95 116 101 120 116 0 0 0 0 0 0 0 0 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0  [long diagnostic truncated]
+--- FAIL: TestDoctorRepairRefusesRunningCandidate (0.27s)
+    doctor_repair_test.go:65: plan = {SchemaVersion:1 Action:none Eligible:false DecisionCode:ownership-unproven Summary:static Go metadata does not prove the official dotfiles command and module paths Candidate:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairRefusesRunningCandidate3371289516/001/.local/bin/dotfiles CandidateDigest:ec23ee6af66857517a92084311f053b1592ff84358687fab5851468d4bf2d31b ModulePath: CommandPath: ModuleVersion: RunningExecutable:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/go-build1046343845/b154/dotfiles.test HomebrewManaged: QuarantinePath: ManifestPath: PlanHash:44e9293a950ac86f07531a8ae9181af9eb1aec7d0413bad69c9c6ad8a8ab7e51 home:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairRefusesRunningCandidate3371289516/001 candidateRevision:{tracked:true exists:true device:16777234 inode:329161847 mode:493 links:2 uid:501 gid:20 size:13498594 modifiedNS:1788667080529153053 digest:[236 35 238 106 246 104 87 81 122 146 8 67 17 240 83 177 89 47 248 67 88 104 127 171 88 81 70 141 75 242 211 27]} candidateBytes:[207 250 237 254 12 0 0 1 0 0 0 0 2 0 0 0 15 0 0 0 152 7 0 0 4 0 32 0 0 0 0 0 25 0 0 0 72 0 0 0 95 95 80 65 71 69 90 69 82 79 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 136 1 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 192 173 0 0 0 0 0 0 0 0 0 0 0 0 0 0 192 173 0 0 0 0 0 7 0 0 0 5 0 0 0 4 0 0 0 0 0 0 0 95 95 116 101 120 116 0 0 0 0 0 0 0 0 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 16 0 0 1 0 0 0 100 135 89 0 0 0 0 0 0 16 0 0 [long diagnostic truncated]
+--- FAIL: TestDoctorRepairRefusesHomebrewOwnedCandidate (0.28s)
+    doctor_repair_test.go:87: plan = {SchemaVersion:1 Action:none Eligible:false DecisionCode:ownership-unproven Summary:static Go metadata does not prove the official dotfiles command and module paths Candidate:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairRefusesHomebrewOwnedCandidate3782998155/001/.local/bin/dotfiles CandidateDigest:a78853ef9e053a1e4b18b8995771282cec0e0b33d3b5e6dfefd68a23439286b7 ModulePath: CommandPath: ModuleVersion: RunningExecutable:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/go-build1046343845/b154/dotfiles.test HomebrewManaged: QuarantinePath: ManifestPath: PlanHash:3e2a92dd0bd064d2e18b7f1dbf0dacef994fec52e96ef3eece30c5ecadda8d54 home:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairRefusesHomebrewOwnedCandidate3782998155/001 candidateRevision:{tracked:true exists:true device:16777234 inode:329162108 mode:448 links:2 uid:501 gid:20 size:13498621 modifiedNS:1788667081596186544 digest:[167 136 83 239 158 5 58 30 75 24 184 153 87 113 40 44 236 14 11 51 211 181 230 223 239 214 138 35 67 146 134 183]} candidateBytes:[207 250 237 254 12 0 0 1 0 0 0 0 2 0 0 0 15 0 0 0 152 7 0 0 4 0 32 0 0 0 0 0 25 0 0 0 72 0 0 0 95 95 80 65 71 69 90 69 82 79 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 136 1 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 192 173 0 0 0 0 0 0 0 0 0 0 0 0 0 0 192 173 0 0 0 0 0 7 0 0 0 5 0 0 0 4 0 0 0 0 0 0 0 95 95 116 101 120 116 0 0 0 0 0 0 0 0 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 16 0 0 1 0 0 0 100 135 89 0 0  [long diagnostic truncated]
+--- FAIL: TestDoctorRepairRefusesOtherwiseUnownedHardlink (0.27s)
+    doctor_repair_test.go:99: plan = {SchemaVersion:1 Action:none Eligible:false DecisionCode:ownership-unproven Summary:static Go metadata does not prove the official dotfiles command and module paths Candidate:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairRefusesOtherwiseUnownedHardlink2409836669/001/.local/bin/dotfiles CandidateDigest:a78853ef9e053a1e4b18b8995771282cec0e0b33d3b5e6dfefd68a23439286b7 ModulePath: CommandPath: ModuleVersion: RunningExecutable:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/go-build1046343845/b154/dotfiles.test HomebrewManaged: QuarantinePath: ManifestPath: PlanHash:119e93b1fb2ccc5d8e745031551f226c80dcf2f2e15b76a1f4986458dcb3ac8c home:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairRefusesOtherwiseUnownedHardlink2409836669/001 candidateRevision:{tracked:true exists:true device:16777234 inode:329162119 mode:448 links:2 uid:501 gid:20 size:13498621 modifiedNS:1788667081883127863 digest:[167 136 83 239 158 5 58 30 75 24 184 153 87 113 40 44 236 14 11 51 211 181 230 223 239 214 138 35 67 146 134 183]} candidateBytes:[207 250 237 254 12 0 0 1 0 0 0 0 2 0 0 0 15 0 0 0 152 7 0 0 4 0 32 0 0 0 0 0 25 0 0 0 72 0 0 0 95 95 80 65 71 69 90 69 82 79 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 136 1 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 192 173 0 0 0 0 0 0 0 0 0 0 0 0 0 0 192 173 0 0 0 0 0 7 0 0 0 5 0 0 0 4 0 0 0 0 0 0 0 95 95 116 101 120 116 0 0 0 0 0 0 0 0 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 16 0 0 1 0 0 0 100 135 89  [long diagnostic truncated]
+--- FAIL: TestDoctorRepairRefusesSymlinkSwapAfterPreview (0.02s)
+    doctor_repair_test.go:117: apply error = doctor repair plan is not eligible for execution, want ErrSymlink
+--- FAIL: TestDoctorRepairRefusesContentChangeAfterPreview (0.02s)
+    doctor_repair_test.go:131: apply error = doctor repair plan is not eligible for execution, want state changed
+--- FAIL: TestDoctorRepairCancelLeavesCandidateUntouched (0.02s)
+    doctor_repair_test.go:149: output = Doctor Repair Plan
+        ==================
+        Action: none
+        Candidate: /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairCancelLeavesCandidateUntouched4284857162/001/.local/bin/dotfiles
+        Decision: ownership-unproven
+        Summary: static Go metadata does not prove the official dotfiles command and module paths
+        Plan hash: 273f56adb407002f3f02371a512fddeeb7bc4af99f19bfc095b85aa161cdda50
+        No repair is available; no files were changed.
+--- FAIL: TestDoctorRepairSuccessfullyCreatesReversiblePrivateQuarantine (0.02s)
+    doctor_repair_test.go:161: doctor repair plan is not eligible for execution
+--- FAIL: TestDoctorRepairRefusesManifestCollisionWithoutRemovingCandidate (0.02s)
+    doctor_repair_test.go:199: open : no such file or directory
+--- FAIL: TestDoctorRepairRefusesQuarantineCollisionAtCommitBoundary (0.02s)
+    doctor_repair_test.go:216: apply error = doctor repair plan is not eligible for execution, want ErrRevisionChanged
+--- FAIL: TestDoctorRepairRefusesManifestCollisionAtCommitBoundary (0.02s)
+    doctor_repair_test.go:233: apply error = doctor repair plan is not eligible for execution, want ErrRevisionChanged
+Error: --yes requires --plan-hash from a fresh preview
+Error: plan hash does not match current state; preview again before repair
+--- FAIL: TestDoctorRepairJSONPreviewIsDeterministicAndReadOnly (0.03s)
+    doctor_repair_test.go:281: preview = {SchemaVersion:1 Action:none Eligible:false DecisionCode:ownership-unproven Summary:static Go metadata does not prove the official dotfiles command and module paths Candidate:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairJSONPreviewIsDeterministicAndReadOnly3843153637/001/.local/bin/dotfiles CandidateDigest:a78853ef9e053a1e4b18b8995771282cec0e0b33d3b5e6dfefd68a23439286b7 ModulePath: CommandPath: ModuleVersion: RunningExecutable:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/go-build1046343845/b154/dotfiles.test HomebrewManaged: QuarantinePath: ManifestPath: PlanHash:b642f93293d0585dc80802a873fc80a945b0fe707f018618f3b25711f9d293ca home: candidateRevision:{tracked:false exists:false device:0 inode:0 mode:0 links:0 uid:0 gid:0 size:0 modifiedNS:0 digest:[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]} candidateBytes:[] quarantineRel: manifestRel:}
+--- FAIL: TestDoctorRepairBoundsHomebrewProbe (0.27s)
+    doctor_repair_test.go:297: timed-out Homebrew probe should behave as unavailable: {SchemaVersion:1 Action:none Eligible:false DecisionCode:ownership-unproven Summary:static Go metadata does not prove the official dotfiles command and module paths Candidate:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairBoundsHomebrewProbe3515197134/001/.local/bin/dotfiles CandidateDigest:a78853ef9e053a1e4b18b8995771282cec0e0b33d3b5e6dfefd68a23439286b7 ModulePath: CommandPath: ModuleVersion: RunningExecutable:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/go-build1046343845/b154/dotfiles.test HomebrewManaged: QuarantinePath: ManifestPath: PlanHash:d7c5c2adb43a779b2c1b20aa5fbd21392e61e42c8f0e14581ccd9cfa87f402d7 home:/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestDoctorRepairBoundsHomebrewProbe3515197134/001 candidateRevision:{tracked:true exists:true device:16777234 inode:329162180 mode:448 links:1 uid:501 gid:20 size:13498621 modifiedNS:1788667082416635921 digest:[167 136 83 239 158 5 58 30 75 24 184 153 87 113 40 44 236 14 11 51 211 181 230 223 239 214 138 35 67 146 134 183]} candidateBytes:[207 250 237 254 12 0 0 1 0 0 0 0 2 0 0 0 15 0 0 0 152 7 0 0 4 0 32 0 0 0 0 0 25 0 0 0 72 0 0 0 95 95 80 65 71 69 90 69 82 79 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 136 1 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 192 173 0 0 0 0 0 0 0 0 0 0 0 0 0 0 192 173 0 0 0 0 0 7 0 0 0 5 0 0 0 4 0 0 0 0 0 0 0 95 95 116 101 120 116 0 0 0 0 0 0 0 0 0 0 95 95 84 69 88 84 0 0 0 0 0 0 0 0 0 0 0 1 [long diagnostic truncated]
+Safe Dotfiles Uninstall
+=======================
+
+This will:
+  • Restore configuration files from latest backup (if available)
+  • Retain binaries, helpers, packages, and the dotfiles configuration directory
+  • Decline automatic deletion because ownership and anchored-removal safeguards are not implemented
+
+Checking for backups...
+Restoring backup: 2026-07-04_12-00-00
+  Warning: Skipping .zshrc - write: file does not exist: snapshot descendant ".zshrc"
+
+Restore summary: 0 restored, 0 removed, 1 skipped, 0 warnings.
+Restore incomplete: 1 backup entries could not be restored
+
+Restore did not complete successfully; keeping configuration directory so backups are preserved.
+Your backups remain at: /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsNotClean3763822386/001/.config/dotfiles/backups
+Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.
+
+Automatic deletion is disabled in this release.
+No binaries, helpers, packages, or dotfiles state directory were deleted by uninstall cleanup.
+
+Why: this build cannot yet prove artifact ownership and does not have anchored recursive removal.
+
+Remove the Homebrew-managed main binary with:
+  brew uninstall tekierz/tap/dotfiles
+
+Paths intentionally left untouched if present (verify ownership before manual removal):
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsNotClean3763822386/001/.config/dotfiles
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsNotClean3763822386/001/.local/bin/dotfiles
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsNotClean3763822386/001/.local/bin/dotfiles-tui
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsNotClean3763822386/001/.local/bin/dotfiles-setup
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsNotClean3763822386/001/.local/bin/hk
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsNotClean3763822386/001/.local/bin/caff
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsNotClean3763822386/001/.local/bin/sshh
+  • /usr/local/bin/dotfiles
+  • /usr/local/bin/dotfiles-tui
+  • /usr/local/bin/dotfiles-setup
+  • /usr/local/bin/hk
+  • /usr/local/bin/caff
+  • /usr/local/bin/sshh
+Package-managed tools and external helpers such as sshh were retained; use their owning package manager.
+Safe Dotfiles Uninstall
+=======================
+
+This will:
+  • Restore configuration files from latest backup (if available)
+  • Retain binaries, helpers, packages, and the dotfiles configuration directory
+  • Decline automatic deletion because ownership and anchored-removal safeguards are not implemented
+
+Checking for backups...
+Restoring backup: 2026-07-04_12-30-00
+  Restored: .zshrc
+  Warning: Skipping .tmux.conf - write: file does not exist: snapshot descendant ".tmux.conf"
+
+Restore summary: 1 restored, 0 removed, 1 skipped, 0 warnings.
+Restore incomplete: 1 backup entries could not be restored
+
+Restore did not complete successfully; keeping configuration directory so backups are preserved.
+Your backups remain at: /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsPartial3923983228/001/.config/dotfiles/backups
+Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.
+
+Automatic deletion is disabled in this release.
+No binaries, helpers, packages, or dotfiles state directory were deleted by uninstall cleanup.
+
+Why: this build cannot yet prove artifact ownership and does not have anchored recursive removal.
+
+Remove the Homebrew-managed main binary with:
+  brew uninstall tekierz/tap/dotfiles
+
+Paths intentionally left untouched if present (verify ownership before manual removal):
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsPartial3923983228/001/.config/dotfiles
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsPartial3923983228/001/.local/bin/dotfiles
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsPartial3923983228/001/.local/bin/dotfiles-tui
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsPartial3923983228/001/.local/bin/dotfiles-setup
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsPartial3923983228/001/.local/bin/hk
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsPartial3923983228/001/.local/bin/caff
+  • /var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/TestUninstallPreservesBackupWhenRestoreIsPartial3923983228/001/.local/bin/sshh
+  • /usr/local/bin/dotfiles
+  • /usr/local/bin/dotfiles-tui
+  • /usr/local/bin/dotfiles-setup
+  • /usr/local/bin/hk
+  • /usr/local/bin/caff
+  • /usr/local/bin/sshh
+Package-managed tools and external helpers such as sshh were retained; use their owning package manager.
+Available themes:
+    catppuccin-mocha
+    catppuccin-latte
+    catppuccin-frappe
+    catppuccin-macchiato
+    dracula
+    gruvbox-dark
+    gruvbox-light
+    nord
+    tokyo-night
+    solarized-dark
+    solarized-light
+    monokai
+    rose-pine
+    everforest
+    one-dark
+    neon-seapunk
+Available themes:
+  * catppuccin-mocha (current)
+    catppuccin-latte
+    catppuccin-frappe
+    catppuccin-macchiato
+    dracula
+    gruvbox-dark
+    gruvbox-light
+    nord
+    tokyo-night
+    solarized-dark
+    solarized-light
+    monokai
+    rose-pine
+    everforest
+    one-dark
+    neon-seapunk
+FAIL
+FAIL	github.com/tekierz/dotfiles/cmd/dotfiles	4.660s
+FAIL

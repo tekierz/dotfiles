@@ -1,0 +1,9 @@
+=== RUN   TestExecutableIdentitySizeLimitIsInclusive
+    executable_identity_test.go:586: exactly 128 MiB executable was rejected: executable identity: target too large
+--- FAIL: TestExecutableIdentitySizeLimitIsInclusive (0.00s)
+=== RUN   TestExecutableIdentityAcceptsCurrentNodeSizedExecutable
+    executable_identity_test.go:607: current Node-sized executable rejected: executable identity: target too large
+--- FAIL: TestExecutableIdentityAcceptsCurrentNodeSizedExecutable (0.00s)
+FAIL
+FAIL	github.com/tekierz/dotfiles/internal/pkg	0.535s
+FAIL

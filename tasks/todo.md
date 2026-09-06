@@ -22,6 +22,20 @@ Plan: [readable release guide](release-gates-2026-09-05.html) and [execution rec
 - [x] Exercise isolated interactive TUI and backup recovery flows; record hardware limits.
 - [x] Update the human-readable guide and remaining promotion decisions.
 
+## Release completion — active owner request
+
+Spec and decision record: [release completion](../docs/release-completion-2026-09-05.html).
+
+- [x] Merge tested Homebrew repair PR #1; public merge `bc3dd989` passes hosted acceptance.
+- [x] Require fresh Release Gate and CodeQL findings checks on main, including administrators; enable secret scanning/push protection, private vulnerability reporting, and Dependabot security updates.
+- [x] Select v3.0.0 for the installer retirement and ownership/recovery migration boundary.
+- [x] Run real candidate Homebrew clean install, v2.0.1 upgrade, and package rollback at `7214af5`.
+- [x] Run real Debian version transitions, native Linux ARM64, and Arch acceptance at `7214af5`.
+- [x] Verify live supported Codex/Pi npm installation/startup and MCP handshake at `7214af5`; authenticated integrations remain separate.
+- [ ] Complete owner terminal/font/mouse, tested whole-disk snapshot recovery, and actual Raspberry Pi observations.
+- [x] Prepare draft promotion PR #6 and authored v3.0.0 release notes wired to the existing workflow.
+- [ ] Obtain remaining hardware/owner/authentication evidence, promote main, publish through existing tagged release workflow, and verify the updated tap.
+
 ## Human-readable HTML audit guide — 2026-09-05
 
 - [x] Define the guide around the completed audit, its branch distinctions, and evidence limits.

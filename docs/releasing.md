@@ -52,23 +52,61 @@ hardware test matrix, and Homebrew install/upgrade/rollback trial must also pass
 
 ## Remaining distribution gates
 
-- The external `tekierz/homebrew-tap` is a hard tag gate. As verified on
-  2026-07-16, its `Formula/dotfiles.rb` still targets v2.0.1 and unconditionally
-  unlinks `dotfiles-tui` and `dotfiles-setup` executables by basename during
-  install. Remove that unowned deletion, update the formula from the published
-  archive checksum, correct its stale feature/command documentation, and test a
-  clean install plus an upgrade from the last supported version.
-- The repository's current owner settings do not yet provide a complete public
-  release boundary. Require the stable `Release Gate` check with strict
-  up-to-date branches, enable private vulnerability reporting, secret scanning
-  and push protection, and enable the dependency graph plus Dependabot security
-  updates before publishing.
+- The ownership-only `tekierz/homebrew-tap` repair merged on 2026-09-05 as
+  `bc3dd989` and passed post-merge hosted acceptance. It still distributes v2.0.1.
+  Candidate `7214af5` passed clean install, v2.0.1 upgrade and exact older-package
+  rollback in hosted macOS acceptance. After publication update its immutable
+  source/checksum. Candidate formula builds must explicitly set
+  `ENV["GOTOOLCHAIN"] = "go1.26.8"` because Homebrew's build environment otherwise
+  selects its installed Go version.
+- Main now requires GitHub Actions' stable `Release Gate` and GitHub Advanced Security's
+  `CodeQL` findings check with strict freshness
+  and administrator enforcement. Private vulnerability reporting, secret scanning,
+  push protection, dependency graph/alerts, and Dependabot security updates are
+  enabled and verified. Preserve those controls during promotion.
+- Owner terminal/font/mouse, whole-disk snapshot recovery, physical Raspberry Pi
+  and authenticated integration acceptance remain required observations. Hosted
+  Linux ARM64 userspace and synthetic-home recovery do not certify those gates.
 - GitHub provenance is configured, but Apple Developer ID signing/notarization is
   not possible until release credentials and an ownership policy are provisioned.
   Do not describe standalone macOS archives as notarized before that gate exists.
 - Keep the retired Bash installer absent from source, packaging, CI, and active
   installation docs. `TestLegacyInstallerIsNotDistributed` enforces the local
   distribution invariant.
+
+## Prepared v3.0.0 publication sequence
+
+The current owner request authorizes publication. Draft promotion PR #6 remains
+open because physical Pi, owner terminal, tested whole-disk recovery and
+authenticated integration observations are unavailable. Record those results
+against the candidate before proceeding.
+
+1. Complete the remaining acceptance and check the final PR head against current
+   main. Require fresh Release Gate and CodeQL findings checks and all disposable
+   platform acceptance jobs. Mark PR #6 ready and merge its exact reviewed head.
+2. Dispatch `platform-acceptance.yml` with `--ref main` and wait for all five jobs
+   on the promoted commit. The push trigger covers integration branches, so a
+   main promotion needs this explicit dispatch. Recheck main's exact commit.
+3. Create and push only `v3.0.0` at that tested main commit. The existing Release
+   workflow checks the exact tag, uses
+   [authored notes](release-notes-v3.0.0.md), and publishes only after CI,
+   checksums and GitHub provenance succeed. Future tags require their own
+   `docs/release-notes-vVERSION.md`; a missing file fails the release build.
+4. Download the published five archives and five SBOMs, verify the complete
+   checksum manifest and GitHub attestations, and check the actual binaries'
+   reported version. Inspect the published notes and asset inventory.
+5. Update the tap formula to version 3.0.0 and the precise immutable source URL
+   selected for that release. Hash those exact downloaded bytes: GitHub's tag
+   tarball and GoReleaser's custom source archive have different content and
+   interchangeable hashes must not be assumed. Preserve the merged ownership
+   repair and explicit Go toolchain setting. Run and review the tap's hosted
+   formula tests and actual install/upgrade/rollback before merging its update.
+
+The local clean-clone rehearsal at `7214af5` verified four platform binaries,
+five archives, five SPDX documents, all ten checksums, licenses, source contents,
+and `vcs.modified=false`. It is unpublished evidence. Go 1.26.8 omits VCS build
+metadata from linked worktrees with a `.git` pointer file; use an ordinary clean
+clone for this provenance-sensitive rehearsal.
 
 ## September toolchain baseline
 

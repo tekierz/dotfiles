@@ -1,0 +1,130 @@
+{
+  "result": "passed",
+  "rehearsal_only": true,
+  "source_commit": "7214af5b6832404b4d758322320efac951275146",
+  "version": "3.0.0-rehearsal",
+  "artifact_root": "/private/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-v3-clean-clone-8eiqaae_/dist",
+  "archives": [
+    {
+      "platform": "darwin/amd64",
+      "archive": "dotfiles_3.0.0-rehearsal_darwin_amd64.tar.gz",
+      "binary_sha256": "313bd95b7795be357c02349ce40c3649356b260adf4cf2d7b059e727fb0370dd",
+      "go_version": "go1.26.8",
+      "vcs_revision": "7214af5b6832404b4d758322320efac951275146",
+      "vcs_modified": false,
+      "license_contents": "exact source match"
+    },
+    {
+      "platform": "darwin/arm64",
+      "archive": "dotfiles_3.0.0-rehearsal_darwin_arm64.tar.gz",
+      "binary_sha256": "f5236ca5e84cf231deb7b6f62f6968af815ee0cbf259cdfcc4de857a5537a1e2",
+      "go_version": "go1.26.8",
+      "vcs_revision": "7214af5b6832404b4d758322320efac951275146",
+      "vcs_modified": false,
+      "license_contents": "exact source match",
+      "runtime_version_output": "dotfiles version 3.0.0-rehearsal",
+      "runtime_exit": 0
+    },
+    {
+      "platform": "linux/amd64",
+      "archive": "dotfiles_3.0.0-rehearsal_linux_amd64.tar.gz",
+      "binary_sha256": "665252917b3431c844c1c425918745a74fdd2d0f9f75449d61151a1698a8fac5",
+      "go_version": "go1.26.8",
+      "vcs_revision": "7214af5b6832404b4d758322320efac951275146",
+      "vcs_modified": false,
+      "license_contents": "exact source match"
+    },
+    {
+      "platform": "linux/arm64",
+      "archive": "dotfiles_3.0.0-rehearsal_linux_arm64.tar.gz",
+      "binary_sha256": "7af3b9839cfd5704525f84361bde8d00e5c2720b7120bed30112bc5810e16397",
+      "go_version": "go1.26.8",
+      "vcs_revision": "7214af5b6832404b4d758322320efac951275146",
+      "vcs_modified": false,
+      "license_contents": "exact source match"
+    }
+  ],
+  "source_archive": {
+    "file": "dotfiles_3.0.0-rehearsal_source.tar.gz",
+    "sha256": "a9ffd1fc60a1a9f68bd71f9654fdb81a09a61bb2d452f5a07cbdc10d6e8a6432",
+    "pax_commit": "7214af5b6832404b4d758322320efac951275146",
+    "product_files_byte_matched_to_workspace": 405,
+    "product_manifest_sha256": "73d68a78512ca52d69c7b563477b724ef524d053dbc10df0c746cfed731b7161"
+  },
+  "sboms": [
+    {
+      "file": "dotfiles_3.0.0-rehearsal_darwin_amd64.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 23,
+      "sha256": "647b35dfc7bf225746e76804f85feb6ae60be3c23b18886c5477fe714928b388"
+    },
+    {
+      "file": "dotfiles_3.0.0-rehearsal_darwin_arm64.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 23,
+      "sha256": "a4487768757cfa2c132f952e5c67f9c19b032e6e77de55090c540f931f1887b4"
+    },
+    {
+      "file": "dotfiles_3.0.0-rehearsal_linux_amd64.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 23,
+      "sha256": "0ba82be2c88366bafe99c96a1f144ca0938dffb9d9b009b79291450f3ed3e96b"
+    },
+    {
+      "file": "dotfiles_3.0.0-rehearsal_linux_arm64.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 23,
+      "sha256": "08d5cff2e858801f5e87b70a398da0c62045520800686526fefd655c3e7f2963"
+    },
+    {
+      "file": "dotfiles_3.0.0-rehearsal_source.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 49,
+      "sha256": "6098dedcd5fa87e6ac65b2c0f7601e552b9d9a7534e5c7add552a8d1c0a97ada"
+    }
+  ],
+  "all_ten_checksums_verified": {
+    "dotfiles_3.0.0-rehearsal_darwin_amd64.tar.gz": "eb6b8d857eed101aeee545e4a88fdf087fed58de41903c23c54d7431671452b5",
+    "dotfiles_3.0.0-rehearsal_darwin_amd64.tar.gz.sbom.json": "647b35dfc7bf225746e76804f85feb6ae60be3c23b18886c5477fe714928b388",
+    "dotfiles_3.0.0-rehearsal_darwin_arm64.tar.gz": "63d42ce101590f32635c135465cf178e6c0848c5519252a4103496e30b1830a3",
+    "dotfiles_3.0.0-rehearsal_darwin_arm64.tar.gz.sbom.json": "a4487768757cfa2c132f952e5c67f9c19b032e6e77de55090c540f931f1887b4",
+    "dotfiles_3.0.0-rehearsal_linux_amd64.tar.gz": "512bea07db82342c7186ae8be0a265e4258b7a41f993b0459ea760fce31288ae",
+    "dotfiles_3.0.0-rehearsal_linux_amd64.tar.gz.sbom.json": "0ba82be2c88366bafe99c96a1f144ca0938dffb9d9b009b79291450f3ed3e96b",
+    "dotfiles_3.0.0-rehearsal_linux_arm64.tar.gz": "071ccf98c9c6f46132b2a38cd26891f487312a78773c494d496fd401738c7631",
+    "dotfiles_3.0.0-rehearsal_linux_arm64.tar.gz.sbom.json": "08d5cff2e858801f5e87b70a398da0c62045520800686526fefd655c3e7f2963",
+    "dotfiles_3.0.0-rehearsal_source.tar.gz": "a9ffd1fc60a1a9f68bd71f9654fdb81a09a61bb2d452f5a07cbdc10d6e8a6432",
+    "dotfiles_3.0.0-rehearsal_source.tar.gz.sbom.json": "6098dedcd5fa87e6ac65b2c0f7601e552b9d9a7534e5c7add552a8d1c0a97ada"
+  },
+  "licenses": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSES/Apache-2.0.txt",
+    "LICENSES/Go-PATENTS.txt",
+    "LICENSES/MIT.txt",
+    "LICENSES/pflag-BSD-3-Clause.txt",
+    "LICENSES/x-sys-BSD-3-Clause.txt"
+  ],
+  "checks": [
+    "Four expected OS/architecture archives plus source",
+    "Five nonempty SPDX-2.3 documents with unique package IDs",
+    "All ten archive/SBOM checksums match checksum manifest",
+    "Every runtime archive has exact source license/notices and README bytes",
+    "All four archived binaries have executable mode, correct GOOS/GOARCH, Go 1.26.8, expected VCS revision",
+    "Extracted Darwin arm64 binary runs version and reports 3.0.0-rehearsal",
+    "Source archive PAX commit matches metadata and binary VCS revision; cmd/internal/go.mod/go.sum byte-match workspace",
+    "All four binaries prove vcs.modified=false"
+  ],
+  "limits": [
+    "Snapshot rehearsal only; no release was published",
+    "Darwin amd64 and both Linux binaries were inspected but not executed here",
+    "SPDX structural/content checks only; no external full-schema validation or package license legal audit",
+    "Published release checksums, signatures/attestations, Homebrew install/upgrade still require actual release verification"
+  ],
+  "clean_checkout_status": "empty git status --porcelain before and after independent verification",
+  "authored_release_notes": {
+    "file": "docs/release-notes-v3.0.0.md",
+    "source_archive_bytes_match": true,
+    "sha256": "df8d237cb0cb78b0db84283ed8390feacfc6227de9f62970c05c6380bcb5838d",
+    "tag_specific_workflow_wiring": true
+  }
+}

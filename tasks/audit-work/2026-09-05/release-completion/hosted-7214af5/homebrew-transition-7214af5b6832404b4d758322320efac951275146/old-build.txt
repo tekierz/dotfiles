@@ -1,0 +1,29 @@
+/opt/homebrew/bin/dotfiles: go1.27.1
+	path	github.com/tekierz/dotfiles/cmd/dotfiles
+	mod	github.com/tekierz/dotfiles	(devel)	
+	dep	github.com/aymanbagabas/go-osc52/v2	v2.0.1	h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
+	dep	github.com/charmbracelet/bubbletea	v1.3.10	h1:otUDHWMMzQSB0Pkc87rm691KZ3SWa4KUlvF9nRvCICw=
+	dep	github.com/charmbracelet/colorprofile	v0.2.3-0.20250311203215-f60798e515dc	h1:4pZI35227imm7yK2bGPcfpFEmuY1gc2YSTShr4iJBfs=
+	dep	github.com/charmbracelet/lipgloss	v1.1.0	h1:vYXsiLHVkK7fp74RkV7b2kq9+zDLoEU4MZoFqR/noCY=
+	dep	github.com/charmbracelet/x/ansi	v0.10.1	h1:rL3Koar5XvX0pHGfovN03f5cxLbCF2YvLeyz7D2jVDQ=
+	dep	github.com/charmbracelet/x/cellbuf	v0.0.13-0.20250311204145-2c3ea96c31dd	h1:vy0GVL4jeHEwG5YOXDmi86oYw2yuYUGqz6a8sLwg0X8=
+	dep	github.com/charmbracelet/x/term	v0.2.1	h1:AQeHeLZ1OqSXhrAWpYUtZyX1T3zVxfpZuEQMIQaGIAQ=
+	dep	github.com/lucasb-eyer/go-colorful	v1.2.0	h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
+	dep	github.com/mattn/go-isatty	v0.0.20	h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
+	dep	github.com/mattn/go-runewidth	v0.0.16	h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
+	dep	github.com/muesli/ansi	v0.0.0-20230316100256-276c6243b2f6	h1:ZK8zHtRHOkbHy6Mmr5D264iyp3TiX5OmNcI5cIARiQI=
+	dep	github.com/muesli/cancelreader	v0.2.2	h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=
+	dep	github.com/muesli/termenv	v0.16.0	h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
+	dep	github.com/rivo/uniseg	v0.4.7	h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
+	dep	github.com/spf13/cobra	v1.10.2	h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
+	dep	github.com/spf13/pflag	v1.0.9	h1:9exaQaMOCwffKiiiYk6/BndUBv+iRViNW+4lEMi0PvY=
+	dep	github.com/xo/terminfo	v0.0.0-20220910002029-abceb7e1c41e	h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=
+	dep	golang.org/x/sys	v0.36.0	h1:KVRy2GtZBrk1cBYA7MKu5bEZFxQk4NIDV6RLVcC8o0k=
+	build	-buildmode=exe
+	build	-compiler=gc
+	build	-trimpath=true
+	build	DefaultGODEBUG=cryptocustomrand=1,tlssecpmlkem=0,tracebacklabels=0,urlstrictcolons=0,x509sslcertoverrideplatform=0
+	build	CGO_ENABLED=1
+	build	GOARCH=arm64
+	build	GOOS=darwin
+	build	GOARM64=v8.0

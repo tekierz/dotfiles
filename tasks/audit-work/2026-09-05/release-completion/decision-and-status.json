@@ -1,0 +1,57 @@
+{
+  "selected_release": "v3.0.0",
+  "published": false,
+  "homebrew_repair": {
+    "pr": "https://github.com/tekierz/homebrew-tap/pull/1",
+    "merge": "bc3dd9890d1b6d86950bf3ebfd7a364c0c188932",
+    "post_merge_run": "https://github.com/tekierz/homebrew-tap/actions/runs/34010249733",
+    "conclusion": "success",
+    "distributed_version": "2.0.1"
+  },
+  "policy": {
+    "strict": true,
+    "enforce_admins": true,
+    "private_vulnerability_reporting": true,
+    "secret_scanning": true,
+    "secret_scanning_push_protection": true,
+    "dependabot_security_updates": true,
+    "required_checks": [
+      {
+        "context": "Release Gate",
+        "app_id": 15368
+      },
+      {
+        "context": "CodeQL",
+        "app_id": 57789
+      }
+    ]
+  },
+  "owner_terminal": {
+    "status": "blocked",
+    "reason": "Computer Use runtime: not allowed to use com.mitchellh.ghostty for safety reasons"
+  },
+  "hardware": {
+    "local_vm_runtime": "unavailable",
+    "self_hosted_runners": 0,
+    "raspberry_pi": "no host supplied"
+  },
+  "local_go_tests": {
+    "toolchain": "go1.26.8",
+    "command": "go test ./...",
+    "exit": 0
+  },
+  "candidate_commit": "7214af5b6832404b4d758322320efac951275146",
+  "promotion_pr": "https://github.com/tekierz/dotfiles/pull/6",
+  "promotion_status": "draft; required hardware, recovery and authentication evidence unavailable",
+  "publication_authorized": true,
+  "main_promoted": false,
+  "acceptance": {
+    "hosted_run": "https://github.com/tekierz/dotfiles/actions/runs/34012560320",
+    "all_five_jobs": "passed",
+    "ci": "passed",
+    "codeql_findings": "passed; zero open branch alerts",
+    "synthetic_recovery_checks": 11,
+    "packaging": "passed; ordinary clean clone; vcs.modified=false",
+    "authenticated_integrations": "not tested"
+  }
+}

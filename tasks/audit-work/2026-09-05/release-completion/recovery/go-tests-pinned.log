@@ -1,0 +1,4 @@
+ok  	github.com/tekierz/dotfiles/internal/backup	1.112s
+ok  	github.com/tekierz/dotfiles/internal/safefile	0.518s
+ok  	github.com/tekierz/dotfiles/internal/operation	1.926s
+ok  	github.com/tekierz/dotfiles/cmd/dotfiles	6.917s
