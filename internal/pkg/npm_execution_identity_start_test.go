@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -85,7 +87,7 @@ func TestNPMExecutionIdentityStartStreamingUsesAcceptedChainAndSanitizedEnvironm
 			t.Fatalf("sanitized environment retained %q: %q", forbidden, lines)
 		}
 	}
-	for _, neutral := range []string{"NPM_CONFIG_USERCONFIG=/dev/null", "NPM_CONFIG_GLOBALCONFIG=/dev/null"} {
+	for _, neutral := range []string{"NPM_CONFIG_USERCONFIG=/dev/null", "NPM_CONFIG_GLOBALCONFIG=/dev/null/dotfiles-global-npmrc"} {
 		if countExactNPMLine(lines, neutral) != 1 {
 			t.Fatalf("neutral config %q count != 1: %q", neutral, lines)
 		}
@@ -95,6 +97,57 @@ func TestNPMExecutionIdentityStartStreamingUsesAcceptedChainAndSanitizedEnvironm
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("hostile PATH or literal argument executed: %v", err)
+	}
+}
+
+// Opt-in acceptance invokes only installed npm's version/config readers. It
+// catches real config-loader behavior that the native argument fixture cannot.
+func TestNPMExecutionIdentityInstalledNPMConfigNeutralization(t *testing.T) {
+	if os.Getenv("DOTFILES_REAL_NPM_TEST") != "1" {
+		t.Skip("requires explicit installed npm acceptance")
+	}
+	npmPath, err := exec.LookPath("npm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := pkg.ObserveNPMExecutionIdentity(npmPath, nodePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	hostileConfig := filepath.Join(home, ".npmrc")
+	if err := os.WriteFile(hostileConfig, []byte("registry=http://127.0.0.1:9/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("NPM_CONFIG_USERCONFIG", hostileConfig)
+	t.Setenv("NPM_CONFIG_GLOBALCONFIG", hostileConfig)
+	t.Setenv("NPM_CONFIG_REGISTRY", "http://127.0.0.1:9/")
+	for _, args := range [][]string{{"--version"}, {"config", "get", "registry"}} {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		stream, err := identity.StartStreaming(ctx, args...)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		lines, err := collectNPMStream(stream.Output(), stream.Done())
+		cancel()
+		if err != nil {
+			t.Fatalf("installed npm %v failed: %v; output=%q", args, err, lines)
+		}
+		output := strings.TrimSpace(strings.Join(lines, "\n"))
+		if args[0] == "--version" {
+			if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(output) {
+				t.Fatalf("unexpected installed npm version: %q", output)
+			}
+			t.Logf("real npm version=%s", output)
+		} else if output != "https://registry.npmjs.org/" {
+			t.Fatalf("hostile config influenced npm registry: %q", output)
+		}
 	}
 }
 

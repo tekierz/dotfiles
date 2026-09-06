@@ -155,6 +155,9 @@ write_formula 2.0.1 "$old_url" "$old_hash"
 brew link "$trial_name"
 record_version rollback 2.0.1
 [[ $(shasum -a 256 "$trial_prefix/bin/dotfiles" | awk '{print $1}') == "$old_binary_hash" ]]
+# Uninstall removes formula trust even when another keg survives. Restore trust
+# only for this exact fixture formula before Homebrew's isolated test subprocess.
+brew trust --formula "$trial_name"
 brew test "$trial_name"
 brew uninstall "$trial_name"
 preserved final-uninstall

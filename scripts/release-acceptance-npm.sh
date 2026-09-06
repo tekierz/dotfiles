@@ -38,7 +38,7 @@ run_trial() {
     XDG_STATE_HOME="$trial_home/.local/state" XDG_CACHE_HOME="$trial_home/.cache" \
     TMPDIR="$trial_home/tmp" PATH="$trial_path" LANG=en_US.UTF-8 CI=true \
     HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_AUTOREMOVE=1 HOMEBREW_NO_ANALYTICS=1 \
-    NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null "$@"
+    NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null/dotfiles-global-npmrc "$@"
 }
 [[ $(run_trial npm prefix -g) == "$trial_runtime" ]]
 run_trial node -e 'const [major,minor]=process.versions.node.split(".").map(Number); if(major<22 || (major===22 && minor<19)) process.exit(1)'
@@ -60,6 +60,10 @@ grep -F 'go1.26.8' "$trial_evidence/candidate-build.txt"
 grep -F "vcs.revision=$GITHUB_SHA" "$trial_evidence/candidate-build.txt"
 shasum -a 256 "$trial_bin" > "$trial_evidence/candidate.sha256"
 printf '%s\n' "$GITHUB_SHA" > "$trial_evidence/candidate-commit.txt"
+(cd "$GITHUB_WORKSPACE" && DOTFILES_REAL_NPM_TEST=1 GOTOOLCHAIN=go1.26.8 \
+  go test ./internal/pkg -run '^TestNPMExecutionIdentityInstalledNPMConfigNeutralization$' -count=1 -v) \
+  > "$trial_evidence/npm-config-regression.txt"
+grep -F -- '--- PASS: TestNPMExecutionIdentityInstalledNPMConfigNeutralization ' "$trial_evidence/npm-config-regression.txt"
 cd "$trial_home"
 : > "$trial_evidence/reviewed-plans.jsonl"
 for tool in codex pi; do

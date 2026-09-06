@@ -325,7 +325,10 @@ func npmExecutionEnvironment(inherited []string) ([]string, bool) {
 		seen[folded] = struct{}{}
 		result = append(result, entry)
 	}
-	return append(result, "NPM_CONFIG_USERCONFIG=/dev/null", "NPM_CONFIG_GLOBALCONFIG=/dev/null", "PWD=/"), true
+	// npm rejects two config layers with the same source path. A child of the
+	// null device cannot exist: ENOTDIR intentionally gives npm an empty optional
+	// global config under a distinct source key, without trusting a writable path.
+	return append(result, "NPM_CONFIG_USERCONFIG=/dev/null", "NPM_CONFIG_GLOBALCONFIG=/dev/null/dotfiles-global-npmrc", "PWD=/"), true
 }
 
 func npmExecutionEnvironmentForbidden(key string) bool {
