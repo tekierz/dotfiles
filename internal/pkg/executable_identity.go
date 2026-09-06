@@ -19,7 +19,9 @@ const (
 	CurrentExecutableIdentitySchemaVersion = 1
 
 	// MaxExecutableIdentityBytes is the inclusive observation size limit.
-	MaxExecutableIdentityBytes int64 = 64 << 20
+	// Official Node 24.20.0 binaries for supported platforms reach 126,458,664
+	// bytes. A fixed 128 MiB ceiling admits them while hashing still uses 32 KiB.
+	MaxExecutableIdentityBytes int64 = 128 << 20
 
 	// MaxExecutableIdentityPathBytes is the inclusive path byte limit.
 	MaxExecutableIdentityPathBytes = 4096

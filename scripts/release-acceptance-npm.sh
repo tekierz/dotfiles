@@ -26,6 +26,7 @@ mkdir -p "$trial_runtime/bin" "$trial_runtime/lib/node_modules" "$trial_home/tmp
 trial_node=$(node -p 'process.execPath')
 trial_npm=$(node -e 'console.log(require("fs").realpathSync(process.argv[1]))' "$(command -v npm)")
 trial_npm_root=$(dirname "$(dirname "$trial_npm")")
+trial_go=$(command -v go)
 [[ -f $trial_npm_root/package.json && $(basename "$trial_npm") == npm-cli.js ]]
 cp "$trial_node" "$trial_runtime/bin/node"
 cp -R "$trial_npm_root" "$trial_runtime/lib/node_modules/npm"
@@ -46,6 +47,8 @@ run_trial node --version > "$trial_evidence/node-version.txt"
 run_trial npm --version > "$trial_evidence/npm-version.txt"
 printf '%s\n' "$trial_runtime" > "$trial_evidence/npm-prefix.txt"
 shasum -a 256 "$trial_runtime/bin/node" "$trial_runtime/lib/node_modules/npm/bin/npm-cli.js" > "$trial_evidence/runtime.sha256"
+stat -f '%N size=%z mode=%Sp' "$trial_node" "$trial_npm" \
+  "$trial_runtime/bin/node" "$trial_runtime/lib/node_modules/npm/bin/npm-cli.js" > "$trial_evidence/runtime-metadata.txt"
 for tool in codex pi; do
   # shellcheck disable=SC2016 # The child shell receives the tool as positional input.
   if run_trial /bin/bash -c 'command -v "$1"' _ "$tool"; then
@@ -60,8 +63,8 @@ grep -F 'go1.26.8' "$trial_evidence/candidate-build.txt"
 grep -F "vcs.revision=$GITHUB_SHA" "$trial_evidence/candidate-build.txt"
 shasum -a 256 "$trial_bin" > "$trial_evidence/candidate.sha256"
 printf '%s\n' "$GITHUB_SHA" > "$trial_evidence/candidate-commit.txt"
-(cd "$GITHUB_WORKSPACE" && DOTFILES_REAL_NPM_TEST=1 GOTOOLCHAIN=go1.26.8 \
-  go test ./internal/pkg -run '^TestNPMExecutionIdentityInstalledNPMConfigNeutralization$' -count=1 -v) \
+(cd "$GITHUB_WORKSPACE" && DOTFILES_REAL_NPM_TEST=1 GOTOOLCHAIN=go1.26.8 PATH="$trial_path" \
+  "$trial_go" test ./internal/pkg -run '^TestNPMExecutionIdentityInstalledNPMConfigNeutralization$' -count=1 -v) \
   > "$trial_evidence/npm-config-regression.txt"
 grep -F -- '--- PASS: TestNPMExecutionIdentityInstalledNPMConfigNeutralization ' "$trial_evidence/npm-config-regression.txt"
 cd "$trial_home"

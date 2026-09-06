@@ -564,7 +564,7 @@ func TestExecutableIdentityEveryFailureIsZeroAndPrivate(t *testing.T) {
 }
 
 func TestExecutableIdentitySizeLimitIsInclusive(t *testing.T) {
-	const maxExecutableSize = 64 << 20
+	const maxExecutableSize = 128 << 20
 	writeSparseExecutable := func(t *testing.T, size int64) string {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "manager")
@@ -583,10 +583,37 @@ func TestExecutableIdentitySizeLimitIsInclusive(t *testing.T) {
 	}
 
 	if _, err := ObserveExecutableIdentity(writeSparseExecutable(t, maxExecutableSize)); err != nil {
-		t.Fatalf("exactly 64 MiB executable was rejected: %v", err)
+		t.Fatalf("exactly 128 MiB executable was rejected: %v", err)
 	}
 	if _, err := ObserveExecutableIdentity(writeSparseExecutable(t, maxExecutableSize+1)); err == nil {
-		t.Fatal("executable larger than 64 MiB was accepted")
+		t.Fatal("executable larger than 128 MiB was accepted")
+	}
+}
+
+func TestExecutableIdentityAcceptsCurrentNodeSizedExecutable(t *testing.T) {
+	// The largest Node 24.20.0 executable among supported Darwin/Linux amd64
+	// and arm64 archives is linux-x64. Sparse extension avoids a fixture-sized
+	// allocation while exercising the actual bounded hashing path.
+	const nodeExecutableBytes = 126458664
+	path := filepath.Join(t.TempDir(), "node")
+	if err := os.WriteFile(path, []byte{0x7f, 'E', 'L', 'F'}, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, nodeExecutableBytes); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := ObserveExecutableIdentity(path)
+	if err != nil {
+		t.Fatalf("current Node-sized executable rejected: %v", err)
+	}
+	if err := identity.Revalidate(); err != nil {
+		t.Fatalf("unchanged Node-sized executable rejected: %v", err)
+	}
+	if err := os.Truncate(path, MaxExecutableIdentityBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	if err := identity.Revalidate(); err == nil {
+		t.Fatal("Node-sized executable grown beyond the bound was accepted")
 	}
 }
 

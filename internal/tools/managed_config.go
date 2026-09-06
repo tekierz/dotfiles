@@ -76,8 +76,7 @@ func mergeManagedConfigSection(existing, managed []byte, startMarker, endMarker,
 
 	switch {
 	case len(starts) == 1 && len(ends) == 1 && starts[0].start < ends[0].start:
-		merged := make([]byte, 0, len(existing)-((ends[0].end)-(starts[0].start))+len(managed))
-		merged = append(merged, existing[:starts[0].start]...)
+		merged := append([]byte(nil), existing[:starts[0].start]...)
 		merged = append(merged, managed...)
 		merged = append(merged, existing[ends[0].end:]...)
 		return merged, false, nil
@@ -95,8 +94,7 @@ func mergeManagedConfigSection(existing, managed []byte, startMarker, endMarker,
 	} else if bytes.HasSuffix(existing, []byte("\n")) {
 		separator = []byte("\n")
 	}
-	merged := make([]byte, 0, len(existing)+len(separator)+len(managed))
-	merged = append(merged, existing...)
+	merged := append([]byte(nil), existing...)
 	merged = append(merged, separator...)
 	merged = append(merged, managed...)
 	return merged, true, nil
