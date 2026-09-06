@@ -1,0 +1,95 @@
+{
+  "status": "pass",
+  "source_commit": "f7ff93feddbdf616b9b44784ba95a90159b7d0be",
+  "snapshot_version": "0.0.1-next",
+  "release_published": false,
+  "build_log": "/tmp/dotfiles-sept-verification/accepted-package.log",
+  "checks": {
+    "binary_archives": 4,
+    "source_archives": 1,
+    "spdx_sboms": 5,
+    "sha256_entries_verified": 10,
+    "safe_paths_and_modes": true,
+    "retired_shell_products_absent": true
+  },
+  "artifacts": [
+    {
+      "name": "dotfiles_0.0.1-next_darwin_amd64.tar.gz",
+      "sha256": "ca9e508d4dcb5ceff34237589d49889e56fbfd54ce28a42e2b68a700f927733f",
+      "members": 9,
+      "binary_format": "Mach-O 64-bit",
+      "licenses_and_notices_match_source": true,
+      "sbom": {
+        "name": "dotfiles_0.0.1-next_darwin_amd64.tar.gz.sbom.json",
+        "spdx_version": "SPDX-2.3",
+        "packages": 23
+      },
+      "symlinks": []
+    },
+    {
+      "name": "dotfiles_0.0.1-next_darwin_arm64.tar.gz",
+      "sha256": "c1049d45fd92c82bda850684c79499e821fd5989d46cbea368f9ccd12e24d4da",
+      "members": 9,
+      "binary_format": "Mach-O 64-bit",
+      "licenses_and_notices_match_source": true,
+      "sbom": {
+        "name": "dotfiles_0.0.1-next_darwin_arm64.tar.gz.sbom.json",
+        "spdx_version": "SPDX-2.3",
+        "packages": 23
+      },
+      "symlinks": []
+    },
+    {
+      "name": "dotfiles_0.0.1-next_linux_amd64.tar.gz",
+      "sha256": "d5de03242a92e77ddda1f6cd759c4fda362328d121b5d47f41866c5c6c67eed9",
+      "members": 9,
+      "binary_format": "ELF 64-bit",
+      "licenses_and_notices_match_source": true,
+      "sbom": {
+        "name": "dotfiles_0.0.1-next_linux_amd64.tar.gz.sbom.json",
+        "spdx_version": "SPDX-2.3",
+        "packages": 23
+      },
+      "symlinks": []
+    },
+    {
+      "name": "dotfiles_0.0.1-next_linux_arm64.tar.gz",
+      "sha256": "79ad1450db19a1eb7d5b7c579092329b2ffb12c9f45ad0b4133284798386656e",
+      "members": 9,
+      "binary_format": "ELF 64-bit",
+      "licenses_and_notices_match_source": true,
+      "sbom": {
+        "name": "dotfiles_0.0.1-next_linux_arm64.tar.gz.sbom.json",
+        "spdx_version": "SPDX-2.3",
+        "packages": 23
+      },
+      "symlinks": []
+    },
+    {
+      "name": "dotfiles_0.0.1-next_source.tar.gz",
+      "sha256": "62a83c73327f35629baf2f1c845c6382102a239bb66c9307532842e69fddfb20",
+      "members": 551,
+      "binary_format": null,
+      "licenses_and_notices_match_source": true,
+      "sbom": {
+        "name": "dotfiles_0.0.1-next_source.tar.gz.sbom.json",
+        "spdx_version": "SPDX-2.3",
+        "packages": 44
+      },
+      "symlinks": [
+        {
+          "path": "dotfiles-0.0.1-next/AGENTS.md",
+          "target": "CLAUDE.md",
+          "mode": "0o777"
+        }
+      ]
+    }
+  ],
+  "failures": [],
+  "limits": [
+    "Snapshot packaging rehearsal, not a published release or signed attestation verification.",
+    "SPDX documents parsed and required identity/package fields checked; no full external SPDX schema validation or dependency-license audit.",
+    "No binaries executed, package installs, owner mutations, or Linux runtime checks performed by this verifier; root owns CLI smoke.",
+    "Source AGENTS.md is a relative symlink to CLAUDE.md with conventional symlink mode 0777; no escaping link or setid member found."
+  ]
+}

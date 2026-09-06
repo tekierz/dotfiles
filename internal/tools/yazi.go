@@ -1,12 +1,17 @@
 package tools
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // YaziConfig holds Yazi configuration settings
@@ -19,6 +24,20 @@ type YaziConfig struct {
 	SortReverse bool   // reverse sort direction
 	LineMode    string // "size", "permissions", "mtime", "none"
 	ScrollOff   int    // items kept visible above/below cursor
+}
+
+// IsInstalled recognizes direct/manual Yazi installs as well as package
+// receipts. This keeps unsupported Debian/Pi package planning separate from an
+// external binary that the dashboard may still configure.
+func (t *YaziTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *YaziTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	if _, err := exec.LookPath("yazi"); err == nil {
+		return true
+	}
+	return false
 }
 
 // YaziTool represents the Yazi file manager
@@ -56,6 +75,12 @@ func NewYaziTool() *YaziTool {
 
 // GenerateYaziConfig builds the yazi.toml content
 func GenerateYaziConfig(cfg YaziConfig, theme string) string {
+	return generateCurrentYaziMain(cfg, theme)
+}
+
+// generateHistoricalFullYaziConfig reproduces the former product-owned full
+// yazi.toml bytes for exact historical recognition only.
+func generateHistoricalFullYaziConfig(cfg YaziConfig, theme string) string {
 	var sb strings.Builder
 
 	// Header
@@ -63,26 +88,29 @@ func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("# Theme: %s\n\n", theme))
 
 	// Manager settings
-	sb.WriteString("[manager]\n")
+	sb.WriteString("[mgr]\n")
 	sb.WriteString("ratio = [1, 4, 3]\n")
 	sb.WriteString(fmt.Sprintf("sort_by = \"%s\"\n", yaziSortBy(cfg.SortBy)))
 	sb.WriteString("sort_sensitive = false\n")
 	sb.WriteString(fmt.Sprintf("sort_reverse = %t\n", cfg.SortReverse))
 	sb.WriteString("sort_dir_first = true\n")
-	sb.WriteString(fmt.Sprintf("linemode = \"%s\"\n", cfg.LineMode))
+	sb.WriteString(fmt.Sprintf("linemode = \"%s\"\n", yaziLineMode(cfg.LineMode)))
 	sb.WriteString(fmt.Sprintf("scrolloff = %d\n", cfg.ScrollOff))
 	sb.WriteString(fmt.Sprintf("show_hidden = %t\n", cfg.ShowHidden))
 	sb.WriteString("show_symlink = true\n\n")
 
 	// Preview settings
 	sb.WriteString("[preview]\n")
+	sb.WriteString(fmt.Sprintf("# Preview mode: %s\n", yaziPreviewMode(cfg.PreviewMode)))
+	sb.WriteString("# yazi has no single preview toggle; image_delay controls eager image rendering,\n")
+	sb.WriteString("# and PreviewMode=never disables previewer plugins in the [plugin] section below.\n")
+	sb.WriteString(fmt.Sprintf("image_delay = %d\n", yaziPreviewImageDelay(cfg.PreviewMode)))
 	sb.WriteString("tab_size = 2\n")
 	sb.WriteString("max_width = 600\n")
 	sb.WriteString("max_height = 900\n")
 	sb.WriteString("cache_dir = \"\"\n")
 	sb.WriteString("image_filter = \"triangle\"\n")
 	sb.WriteString("image_quality = 75\n")
-	sb.WriteString("sixel_fraction = 15\n")
 	sb.WriteString("ueberzug_scale = 1\n")
 	sb.WriteString("ueberzug_offset = [0, 0, 0, 0]\n\n")
 
@@ -100,11 +128,33 @@ func GenerateYaziConfig(cfg YaziConfig, theme string) string {
 	sb.WriteString("[log]\n")
 	sb.WriteString("enabled = false\n")
 
+	if yaziPreviewMode(cfg.PreviewMode) == "never" {
+		sb.WriteString("\n[plugin]\n")
+		sb.WriteString("# PreviewMode=never disables yazi's previewer plugins with a schema-valid override.\n")
+		sb.WriteString("previewers = []\n")
+	}
+
 	return sb.String()
 }
 
+func yaziPreviewMode(mode string) string {
+	switch mode {
+	case "always", "never":
+		return mode
+	default:
+		return "auto"
+	}
+}
+
+func yaziPreviewImageDelay(mode string) int {
+	if yaziPreviewMode(mode) == "always" {
+		return 0
+	}
+	return 30
+}
+
 // yaziSortBy maps the Manage UI's sort vocabulary onto the values yazi's
-// [manager] sort_by accepts. yazi understands alphabetical/natural/size/mtime
+// [mgr] sort_by accepts. yazi understands alphabetical/natural/size/mtime
 // (among others); the UI's "modified" is yazi's "mtime". Unrecognized values fall
 // back to "natural" so the written file is always a value yazi accepts.
 func yaziSortBy(sortBy string) string {
@@ -118,8 +168,30 @@ func yaziSortBy(sortBy string) string {
 	}
 }
 
+// yaziLineMode validates the value written to [mgr] linemode. yazi accepts
+// none/size/btime/ctime/mtime/permissions/owner; unrecognized values fall back
+// to "size" so the written file is always a value yazi accepts.
+func yaziLineMode(lineMode string) string {
+	switch lineMode {
+	case "none", "size", "btime", "ctime", "mtime", "permissions", "owner":
+		return lineMode
+	default:
+		return "none"
+	}
+}
+
 // GenerateYaziKeymap builds the keymap.toml content
 func GenerateYaziKeymap(cfg YaziConfig, theme string) string {
+	style := "vim"
+	if cfg.Keymap == "emacs" {
+		style = "emacs"
+	}
+	return generateCurrentYaziKeymap(style)
+}
+
+// generateHistoricalFullYaziKeymap reproduces the former destructive full
+// keymap bytes for exact historical recognition only.
+func generateHistoricalFullYaziKeymap(cfg YaziConfig, theme string) string {
 	var sb strings.Builder
 
 	// Header
@@ -127,7 +199,7 @@ func GenerateYaziKeymap(cfg YaziConfig, theme string) string {
 	sb.WriteString(fmt.Sprintf("# Keymap style: %s\n\n", cfg.Keymap))
 
 	// Manager keymaps (common)
-	sb.WriteString("[manager]\n")
+	sb.WriteString("[mgr]\n")
 	sb.WriteString("keymap = [\n")
 
 	// Navigation keys depend on keymap style
@@ -145,8 +217,8 @@ func GenerateYaziKeymap(cfg YaziConfig, theme string) string {
 		sb.WriteString("  { on = \"<C-n>\", run = \"arrow 1\", desc = \"Move down\" },\n")
 		sb.WriteString("  { on = \"<C-b>\", run = \"leave\", desc = \"Go to parent\" },\n")
 		sb.WriteString("  { on = \"<C-f>\", run = \"enter\", desc = \"Enter directory\" },\n")
-		sb.WriteString("  { on = \"<M-<>\", run = \"arrow -99999999\", desc = \"Go to top\" },\n")
-		sb.WriteString("  { on = \"<M->>\", run = \"arrow 99999999\", desc = \"Go to bottom\" },\n")
+		sb.WriteString("  { on = \"g\", run = \"arrow -99999999\", desc = \"Go to top\" },\n")
+		sb.WriteString("  { on = \"G\", run = \"arrow 99999999\", desc = \"Go to bottom\" },\n")
 	}
 
 	// Common keys
@@ -172,24 +244,364 @@ func GenerateYaziKeymap(cfg YaziConfig, theme string) string {
 
 // WriteYaziConfig writes all Yazi config files to disk
 func WriteYaziConfig(cfg YaziConfig, theme string) error {
+	_, err := WriteYaziConfigTracked(cfg, theme)
+	return err
+}
+
+func WriteYaziConfigTracked(cfg YaziConfig, theme string) ([]MutationEvidence, error) {
+	return writeYaziConfigWithWriters(cfg, theme, writeYaziCurrentConfigTracked, writeYaziCurrentConfigTracked)
+}
+
+func WriteYaziConfigAtAuthoritiesTracked(cfg YaziConfig, theme string, yaziAccepted safefile.Revision, yaziParents *safefile.ParentChain, keymapAccepted safefile.Revision, keymapParents *safefile.ParentChain, themeAccepted safefile.Revision, themeParents *safefile.ParentChain, locker operation.Locker) ([]MutationEvidence, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	configDir := filepath.Join(home, ".config", "yazi")
+	paths := YaziConfigPaths{
+		Origin: YaziConfigOriginDefault, Dir: configDir,
+		Main: filepath.Join(configDir, YaziFileMain), Keymap: filepath.Join(configDir, YaziFileKeymap), Theme: filepath.Join(configDir, YaziFileTheme),
+		trustedRoot: filepath.Clean(home),
+	}
+	return WriteYaziConfigAtResolvedAuthoritiesTracked(cfg, theme, paths, yaziAccepted, yaziParents, keymapAccepted, keymapParents, themeAccepted, themeParents, locker)
+}
+
+type yaziResolvedAuthorityTarget struct {
+	kind     YaziFileKind
+	path     string
+	rel      string
+	accepted safefile.Revision
+	parents  *safefile.ParentChain
+	content  []byte
+}
+
+// WriteYaziConfigAtResolvedAuthoritiesTracked commits to the immutable path
+// set accepted by a plan. It deliberately never re-runs environment discovery.
+func WriteYaziConfigAtResolvedAuthoritiesTracked(cfg YaziConfig, theme string, paths YaziConfigPaths, mainAccepted safefile.Revision, mainParents *safefile.ParentChain, keymapAccepted safefile.Revision, keymapParents *safefile.ParentChain, themeAccepted safefile.Revision, themeParents *safefile.ParentChain, locker operation.Locker) ([]MutationEvidence, error) {
+	targets, err := resolvedYaziAuthorityTargets(cfg, theme, paths, mainAccepted, mainParents, keymapAccepted, keymapParents, themeAccepted, themeParents, locker)
+	if err != nil {
+		return nil, err
+	}
+	for _, target := range targets {
+		if err := preflightResolvedYaziAuthority(paths.trustedRoot, target, locker); err != nil {
+			return nil, fmt.Errorf("preflight accepted Yazi config set: %w", err)
+		}
 	}
 
-	configDir := filepath.Join(home, ".config", "yazi")
+	var results, committed []MutationEvidence
+	for _, target := range targets {
+		evidence, writeErr := writeResolvedYaziAuthority(paths.trustedRoot, target, locker)
+		if writeErr != nil {
+			if evidence.Revision.Tracked() && evidence.Revision != target.accepted {
+				committed = append(committed, evidence)
+			}
+			return nil, partialMutationError(writeErr, committed)
+		}
+		results = append(results, evidence)
+		if evidence.Revision != target.accepted {
+			committed = append(committed, evidence)
+		}
+	}
+	return results, nil
+}
 
-	// Write yazi.toml
-	yaziContent := GenerateYaziConfig(cfg, theme)
-	if err := writeToolConfig(filepath.Join(configDir, "yazi.toml"), []byte(yaziContent)); err != nil {
+// WriteYaziFileAtResolvedAuthorityTracked commits one Yazi file to the frozen
+// path and namespace authority accepted by a plan. It never resolves paths
+// from the live environment and never reads or writes either sibling.
+func WriteYaziFileAtResolvedAuthorityTracked(kind YaziFileKind, cfg YaziConfig, theme string, paths YaziConfigPaths, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (MutationEvidence, error) {
+	resolved, err := validateResolvedYaziPathSet(paths)
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	path, ok := resolved[kind]
+	if !ok {
+		return MutationEvidence{}, fmt.Errorf("%w: unknown resolved Yazi file kind %q", ErrUnmanagedConfig, kind)
+	}
+	var content []byte
+	switch kind {
+	case YaziFileKindMain:
+		content = []byte(GenerateYaziConfig(cfg, theme))
+	case YaziFileKindKeymap:
+		content = []byte(GenerateYaziKeymap(cfg, theme))
+	case YaziFileKindTheme:
+		content = []byte(GenerateYaziTheme(theme))
+	}
+	target := yaziResolvedAuthorityTarget{kind: kind, path: path.path, rel: path.rel, accepted: accepted, parents: parents, content: content}
+	if err := validateResolvedYaziAuthorityTarget(target, locker); err != nil {
+		return MutationEvidence{}, err
+	}
+	if err := preflightResolvedYaziAuthority(paths.trustedRoot, target, locker); err != nil {
+		return MutationEvidence{}, fmt.Errorf("preflight accepted Yazi %s: %w", kind, err)
+	}
+	evidence, err := writeResolvedYaziAuthority(paths.trustedRoot, target, locker)
+	if err == nil {
+		return evidence, nil
+	}
+	if evidence.Revision.Tracked() && evidence.Revision != accepted {
+		return MutationEvidence{}, partialMutationError(err, []MutationEvidence{evidence})
+	}
+	return MutationEvidence{}, err
+}
+
+type yaziResolvedPath struct {
+	path string
+	rel  string
+}
+
+func validateResolvedYaziPathSet(paths YaziConfigPaths) (map[YaziFileKind]yaziResolvedPath, error) {
+	if paths.trustedRoot == "" {
+		return nil, fmt.Errorf("%w: active Yazi config directory %s is external/outside frozen HOME and read-only", ErrUnmanagedConfig, paths.Dir)
+	}
+	dir := filepath.Clean(paths.Dir)
+	if !filepath.IsAbs(dir) || yaziPathHasUnsafeCharacters(dir) || !pathWithinHome(paths.trustedRoot, dir) {
+		return nil, fmt.Errorf("%w: active Yazi config directory %s is outside frozen HOME and read-only", ErrUnmanagedConfig, paths.Dir)
+	}
+	actual := map[YaziFileKind]string{YaziFileKindMain: paths.Main, YaziFileKindKeymap: paths.Keymap, YaziFileKindTheme: paths.Theme}
+	expected := map[YaziFileKind]string{
+		YaziFileKindMain: filepath.Join(dir, YaziFileMain), YaziFileKindKeymap: filepath.Join(dir, YaziFileKeymap), YaziFileKindTheme: filepath.Join(dir, YaziFileTheme),
+	}
+	resolved := make(map[YaziFileKind]yaziResolvedPath, len(actual))
+	for _, kind := range []YaziFileKind{YaziFileKindMain, YaziFileKindKeymap, YaziFileKindTheme} {
+		path := actual[kind]
+		if filepath.Clean(path) != expected[kind] {
+			return nil, fmt.Errorf("%w: resolved Yazi %s target is not the exact sibling under %s", ErrUnmanagedConfig, kind, dir)
+		}
+		rel, ok := relativePathBelow(paths.trustedRoot, path)
+		if !ok {
+			return nil, fmt.Errorf("%w: resolved Yazi target %s is outside frozen HOME and read-only", ErrUnmanagedConfig, path)
+		}
+		resolved[kind] = yaziResolvedPath{path: path, rel: rel}
+	}
+	return resolved, nil
+}
+
+func resolvedYaziAuthorityTargets(cfg YaziConfig, theme string, paths YaziConfigPaths, mainAccepted safefile.Revision, mainParents *safefile.ParentChain, keymapAccepted safefile.Revision, keymapParents *safefile.ParentChain, themeAccepted safefile.Revision, themeParents *safefile.ParentChain, locker operation.Locker) ([]yaziResolvedAuthorityTarget, error) {
+	resolved, err := validateResolvedYaziPathSet(paths)
+	if err != nil {
+		return nil, err
+	}
+	targets := []yaziResolvedAuthorityTarget{
+		{kind: YaziFileKindMain, path: resolved[YaziFileKindMain].path, rel: resolved[YaziFileKindMain].rel, accepted: mainAccepted, parents: mainParents, content: []byte(GenerateYaziConfig(cfg, theme))},
+		{kind: YaziFileKindKeymap, path: resolved[YaziFileKindKeymap].path, rel: resolved[YaziFileKindKeymap].rel, accepted: keymapAccepted, parents: keymapParents, content: []byte(GenerateYaziKeymap(cfg, theme))},
+		{kind: YaziFileKindTheme, path: resolved[YaziFileKindTheme].path, rel: resolved[YaziFileKindTheme].rel, accepted: themeAccepted, parents: themeParents, content: []byte(GenerateYaziTheme(theme))},
+	}
+	for i := range targets {
+		target := &targets[i]
+		if err := validateResolvedYaziAuthorityTarget(*target, locker); err != nil {
+			return nil, err
+		}
+	}
+	return targets, nil
+}
+
+func validateResolvedYaziAuthorityTarget(target yaziResolvedAuthorityTarget, locker operation.Locker) error {
+	if locker == nil {
+		return fmt.Errorf("%w: accepted Yazi writer locker is unavailable", safefile.ErrParentChanged)
+	}
+	if !target.accepted.Tracked() {
+		return fmt.Errorf("%w: accepted revision for %s is untracked", safefile.ErrRevisionChanged, target.path)
+	}
+	if !target.parents.Tracked() {
+		return fmt.Errorf("%w: accepted parent chain for %s is incomplete", safefile.ErrParentChanged, target.path)
+	}
+	desired := inspectYaziContentObservation(target.kind, target.path, target.content)
+	if desired.Ownership != YaziOwnershipExactCurrent {
+		return fmt.Errorf("invalid current Yazi replacement: %w", yaziOwnershipError(desired))
+	}
+	return nil
+}
+
+func preflightResolvedYaziAuthority(root string, target yaziResolvedAuthorityTarget, locker operation.Locker) error {
+	return withResolvedYaziAuthorityLock(root, target, locker, func(content []byte, current safefile.Revision) error {
+		if current != target.accepted {
+			return fmt.Errorf("%w: Yazi config %s changed after plan acceptance", safefile.ErrRevisionChanged, target.rel)
+		}
+		return validateResolvedYaziOwnership(target, content, current)
+	})
+}
+
+func writeResolvedYaziAuthority(root string, target yaziResolvedAuthorityTarget, locker operation.Locker) (MutationEvidence, error) {
+	var evidence MutationEvidence
+	err := withResolvedYaziAuthorityLock(root, target, locker, func(existing []byte, current safefile.Revision) error {
+		if current != target.accepted {
+			return fmt.Errorf("%w: Yazi config %s changed after plan acceptance", safefile.ErrRevisionChanged, target.rel)
+		}
+		if err := validateResolvedYaziOwnership(target, existing, current); err != nil {
+			return err
+		}
+		if current.Exists() && bytes.Equal(existing, target.content) {
+			evidence = MutationEvidence{Path: target.path, Revision: current, Parents: target.parents}
+			return nil
+		}
+		committed, err := replaceToolConfigAtRevisionNoCreateAuthorizedTracked(root, target.rel, target.accepted, target.parents, target.content)
+		if err == nil {
+			evidence = MutationEvidence{Path: target.path, Revision: committed, Parents: target.parents}
+		}
+		return err
+	})
+	return evidence, err
+}
+
+func validateResolvedYaziOwnership(target yaziResolvedAuthorityTarget, content []byte, current safefile.Revision) error {
+	if !current.Exists() {
+		return nil
+	}
+	if current.LinkCount() != 1 {
+		return fmt.Errorf("%w: %s has hardlink link count %d", ErrUnmanagedConfig, filepath.Base(target.path), current.LinkCount())
+	}
+	observation := inspectYaziContentObservation(target.kind, target.path, content)
+	if observation.Ownership != YaziOwnershipExactCurrent {
+		return yaziOwnershipError(observation)
+	}
+	return nil
+}
+
+func withResolvedYaziAuthorityLock(root string, target yaziResolvedAuthorityTarget, locker operation.Locker, inspect func([]byte, safefile.Revision) error) (returnErr error) {
+	release, err := locker("tool-config", target.path)
+	if err != nil {
+		return fmt.Errorf("failed to lock generated config %s: %w", target.path, err)
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("failed to unlock generated config %s: %w", target.path, releaseErr))
+		}
+	}()
+	content, current, err := safefile.ReadWithinAuthorized(root, target.rel, target.parents)
+	if err != nil {
 		return err
 	}
+	return inspect(content, current)
+}
+
+func writeYaziConfigWithWriters(cfg YaziConfig, theme string, writeWhole, writeTheme func(string, []byte) (MutationEvidence, error)) ([]MutationEvidence, error) {
+	paths, err := ResolveYaziConfigPaths()
+	if err != nil {
+		return nil, fmt.Errorf("resolve Yazi config paths: %w", err)
+	}
+	if paths.trustedRoot == "" {
+		return nil, fmt.Errorf("%w: active Yazi config directory %s is external/outside HOME and read-only", ErrUnmanagedConfig, paths.Dir)
+	}
+	yaziPath, keymapPath, themePath := paths.Main, paths.Keymap, paths.Theme
+	if err := preflightYaziOwnershipSet(importYaziConfigAtPaths(paths)); err != nil {
+		return nil, fmt.Errorf("preflight Yazi config set: %w", err)
+	}
+
+	// Write yazi.toml
+	var committed []MutationEvidence
+	yaziContent := GenerateYaziConfig(cfg, theme)
+	evidence, err := writeWhole(yaziPath, []byte(yaziContent))
+	if err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	committed = append(committed, evidence)
 
 	// Write keymap.toml
 	keymapContent := GenerateYaziKeymap(cfg, theme)
-	if err := writeToolConfig(filepath.Join(configDir, "keymap.toml"), []byte(keymapContent)); err != nil {
-		return err
+	evidence, err = writeWhole(keymapPath, []byte(keymapContent))
+	if err != nil {
+		return nil, partialMutationError(err, committed)
 	}
+	committed = append(committed, evidence)
 
+	// Write theme.toml
+	themeContent := GenerateYaziTheme(theme)
+	evidence, err = writeTheme(themePath, []byte(themeContent))
+	if err != nil {
+		return nil, partialMutationError(err, committed)
+	}
+	return append(committed, evidence), nil
+}
+
+func preflightYaziOwnershipSet(imported YaziConfigImport) error {
+	for _, observation := range []YaziFileObservation{imported.Main, imported.Keymap, imported.Theme} {
+		if observation.Ownership == YaziOwnershipMissing || observation.Ownership == YaziOwnershipExactCurrent {
+			continue
+		}
+		return yaziOwnershipError(observation)
+	}
 	return nil
+}
+
+func yaziOwnershipError(observation YaziFileObservation) error {
+	reason := observation.Error
+	if reason == "" {
+		reason = observation.ReadOnlyReason
+	}
+	if reason == "" {
+		reason = "ownership is read-only"
+	}
+	return fmt.Errorf("%w: %s has %s ownership: %s", ErrUnmanagedConfig, filepath.Base(observation.Path), observation.Ownership, reason)
+}
+
+func writeYaziCurrentConfigTracked(path string, content []byte) (MutationEvidence, error) {
+	kind, err := yaziFileKindForPath(path)
+	if err != nil {
+		return MutationEvidence{}, err
+	}
+	desired := inspectYaziContentObservation(kind, path, content)
+	if desired.Ownership != YaziOwnershipExactCurrent {
+		return MutationEvidence{}, fmt.Errorf("invalid current Yazi replacement: %w", yaziOwnershipError(desired))
+	}
+	var evidence MutationEvidence
+	err = withToolConfigLock(path, func(root, rel string) error {
+		existing, revision, readErr := readToolConfig(root, rel)
+		if readErr != nil {
+			return readErr
+		}
+		if revision.Exists() {
+			current := inspectYaziContentObservation(kind, path, existing)
+			if current.Ownership != YaziOwnershipExactCurrent {
+				return yaziOwnershipError(current)
+			}
+			if bytes.Equal(existing, content) {
+				evidence = MutationEvidence{Path: path, Revision: revision}
+				return nil
+			}
+		}
+		committed, replaceErr := replaceToolConfigAtRevisionTracked(root, rel, revision, content)
+		if replaceErr == nil {
+			evidence = MutationEvidence{Path: path, Revision: committed}
+		}
+		return replaceErr
+	})
+	return evidence, err
+}
+
+func yaziFileKindForPath(path string) (YaziFileKind, error) {
+	switch filepath.Base(path) {
+	case YaziFileMain:
+		return YaziFileKindMain, nil
+	case YaziFileKeymap:
+		return YaziFileKindKeymap, nil
+	case YaziFileTheme:
+		return YaziFileKindTheme, nil
+	default:
+		return "", fmt.Errorf("unknown Yazi config target %s", path)
+	}
+}
+
+// IsLegacyGeneratedYaziThemeConfig reports whether path carries the one exact
+// pre-ownership Yazi theme header that the writer can safely migrate. It is
+// read-only and uses the same no-follow observer as config adoption.
+func IsLegacyGeneratedYaziThemeConfig(path string) (bool, error) {
+	content, exists, err := readNativeConfig(path)
+	if err != nil || !exists {
+		return false, err
+	}
+	return hasLegacyGeneratedYaziThemeHeader(content), nil
+}
+
+func hasLegacyGeneratedYaziThemeHeader(content []byte) bool {
+	line := content
+	if newline := bytes.IndexByte(line, '\n'); newline >= 0 {
+		line = line[:newline]
+	}
+	line = bytes.TrimSuffix(line, []byte("\r"))
+	const prefix = "# Theme: "
+	const suffix = " (generated by dotfiles)"
+	if !bytes.HasPrefix(line, []byte(prefix)) || !bytes.HasSuffix(line, []byte(suffix)) {
+		return false
+	}
+	_, known := yaziThemePalettes[string(line[len(prefix):len(line)-len(suffix)])]
+	return known
 }

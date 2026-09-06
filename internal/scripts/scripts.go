@@ -111,10 +111,11 @@ const CaffScript = `#!/usr/bin/env bash
 # world-writable /tmp. This avoids the predictable-path / stale-PID hazard
 # where another user (or a reused PID after a reboot) could cause us to kill
 # an arbitrary process.
-RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/caff"
 mkdir -p "$RUNTIME_DIR" 2>/dev/null
 chmod 700 "$RUNTIME_DIR" 2>/dev/null
 PIDFILE="$RUNTIME_DIR/caffeine.pid"
+LOCKFILE="$RUNTIME_DIR/caffeine.lock"
 
 # read_pid prints the stored PID only if it is a plausible numeric value.
 read_pid() {
@@ -154,6 +155,46 @@ start() {
         return 0
     fi
 
+    # Atomically claim a start lock so concurrent 'caff on' invocations cannot
+    # each pass the status check above and spawn their own inhibitor (only the
+    # last PID would be recorded, orphaning the rest). 'set -o noclobber' makes
+    # '>' an atomic O_EXCL create, so exactly one caller wins the race; losers
+    # must not spawn a second inhibitor and simply exit here.
+    if ! (set -o noclobber; umask 077; echo $$ > "$LOCKFILE") 2>/dev/null; then
+        # Lock already exists. Reclaim it only if the previous holder died
+        # mid-start without releasing; otherwise another starter is active.
+        local holder
+        holder=$(cat "$LOCKFILE" 2>/dev/null)
+        if [[ "$holder" =~ ^[0-9]+$ ]] && kill -0 "$holder" 2>/dev/null; then
+            echo "☕ Caffeine is already running"
+            return 0
+        fi
+        # Reclaim a stale lock without a rm-then-recreate race: a blind
+        # 'rm -f' could delete a FRESH lock that a concurrent starter created
+        # between our read and the removal, letting both starters proceed and
+        # spawn duplicate inhibitors. Remove the lock only if it STILL holds the
+        # exact dead PID we observed; then re-create atomically. If it changed
+        # (another starter won), skip the remove so the noclobber create below
+        # fails and we back off.
+        if [[ "$(cat "$LOCKFILE" 2>/dev/null)" == "$holder" ]]; then
+            rm -f "$LOCKFILE" 2>/dev/null
+        fi
+        if ! (set -o noclobber; umask 077; echo $$ > "$LOCKFILE") 2>/dev/null; then
+            echo "☕ Caffeine is already running"
+            return 0
+        fi
+    fi
+    # Release the start lock on exit; it only guards the brief critical section
+    # below, not the lifetime of the inhibitor.
+    trap 'rm -f "$LOCKFILE" 2>/dev/null' EXIT
+
+    # Re-check under the lock in case a starter finished between the initial
+    # status check and acquiring the lock.
+    if status > /dev/null 2>&1; then
+        echo "☕ Caffeine is already running"
+        return 0
+    fi
+
     if [[ "$OSTYPE" == "darwin"* ]]; then
         caffeinate -di &
     else
@@ -163,8 +204,23 @@ start() {
             --mode=block \
             sleep infinity &
     fi
+    local newpid=$!
 
-    (umask 077; echo $! > "$PIDFILE")
+    # Wait for the child to finish exec-ing into caffeinate/systemd-inhibit
+    # before publishing its PID. If we wrote the pidfile during the brief
+    # fork/exec window, a concurrent 'caff status' could see a not-yet-
+    # recognizable process, judge the pidfile stale, delete it, and reopen the
+    # race the lock just closed. We still hold the start lock here, so no other
+    # 'caff on' can spawn while we wait.
+    local i=0
+    while ! is_caffeine "$newpid"; do
+        kill -0 "$newpid" 2>/dev/null || break
+        i=$((i + 1))
+        [ "$i" -ge 100 ] && break
+        sleep 0.02
+    done
+
+    (umask 077; echo "$newpid" > "$PIDFILE")
     echo "☕ Caffeine: ON - system will stay awake"
 }
 
@@ -218,11 +274,79 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo -e "${RED}✗${NC} Config file not found: ${CYAN}$CONFIG_FILE${NC}"
+trim_field() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
+valid_name() {
+    [[ ${#1} -ge 1 && ${#1} -le 64 && "$1" =~ ^[[:alnum:]][[:alnum:]_.\ -]*$ ]]
+}
+
+valid_destination() {
+    [[ ${#1} -ge 1 && ${#1} -le 253 && "$1" != -* &&
+       "$1" =~ ^([[:alnum:]_.-]+@)?([[:alnum:]][[:alnum:].-]*|\[[0-9A-Fa-f:]+\])$ ]]
+}
+
+valid_port() {
+    [[ "$1" =~ ^[0-9]{1,5}$ ]] || return 1
+    local value=$((10#$1))
+    (( value >= 1 && value <= 65535 ))
+}
+
+validate_entry() {
+    valid_name "$1" && valid_destination "$2" && valid_port "$3"
+}
+
+show_help() {
+    echo "Usage: sshh [command|number]"
+    echo "  (none)    Show menu"
+    echo "  <num>     Connect to host #"
+    echo "  list      Show hosts"
+    echo "  edit      Edit config"
+    echo "  add       Add host"
+}
+
+case "${1:-}" in
+    help|-h|--help)
+        show_help
+        exit 0
+        ;;
+    add)
+        shift
+        if [[ $# -lt 2 || $# -gt 3 ]]; then
+            echo "Usage: sshh add \"Name\" \"user@host\" [port]" >&2
+            exit 1
+        fi
+        name="$1"
+        host="$2"
+        port="${3:-22}"
+        if ! validate_entry "$name" "$host" "$port"; then
+            echo -e "${RED}✗${NC} Invalid name, destination, or port" >&2
+            exit 1
+        fi
+        if [[ ! -e "$CONFIG_FILE" ]]; then
+            (umask 077; set -o noclobber; : > "$CONFIG_FILE") 2>/dev/null || {
+                echo -e "${RED}✗${NC} Could not create config: $CONFIG_FILE" >&2
+                exit 1
+            }
+            chmod 600 "$CONFIG_FILE" || exit 1
+        elif [[ ! -f "$CONFIG_FILE" || -L "$CONFIG_FILE" ]]; then
+            echo -e "${RED}✗${NC} Config must be a regular file" >&2
+            exit 1
+        fi
+        printf '%s | %s | %s\n' "$name" "$host" "$port" >> "$CONFIG_FILE" || exit 1
+        echo -e "${GREEN}✓${NC} Added: ${CYAN}$name${NC} → ${GREEN}$host${NC}"
+        exit 0
+        ;;
+esac
+
+if [[ ! -f "$CONFIG_FILE" || -L "$CONFIG_FILE" ]]; then
+    echo -e "${RED}✗${NC} Config file not found or unsafe: ${CYAN}$CONFIG_FILE${NC}"
     echo ""
-    echo "Create it with format: name | user@host | port (port optional)"
-    echo -e "Example: ${CYAN}Work Server${NC} | ${GREEN}admin@192.168.1.100${NC}"
+    echo "Create it with: sshh add \"Name\" \"user@host\" [port]"
     exit 1
 fi
 
@@ -230,15 +354,17 @@ declare -a NAMES CONNECTIONS PORTS
 
 while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-    IFS='|' read -ra PARTS <<< "$line"
-    name=$(echo "${PARTS[0]}" | xargs)
-    conn=$(echo "${PARTS[1]}" | xargs)
-    port=$(echo "${PARTS[2]:-22}" | xargs)
-    if [[ -n "$name" && -n "$conn" ]]; then
-        NAMES+=("$name")
-        CONNECTIONS+=("$conn")
-        PORTS+=("$port")
+    IFS='|' read -r raw_name raw_conn raw_port extra <<< "$line"
+    name=$(trim_field "$raw_name")
+    conn=$(trim_field "$raw_conn")
+    port=$(trim_field "${raw_port:-22}")
+    if [[ -n "$extra" ]] || ! validate_entry "$name" "$conn" "$port"; then
+        echo -e "${YELLOW}⚠${NC} Skipping invalid host entry" >&2
+        continue
     fi
+    NAMES+=("$name")
+    CONNECTIONS+=("$conn")
+    PORTS+=("$port")
 done < "$CONFIG_FILE"
 
 if [[ ${#NAMES[@]} -eq 0 ]]; then
@@ -270,30 +396,14 @@ if [[ -n "$1" ]]; then
         idx=$(($1 - 1))
         if [[ $idx -ge 0 && $idx -lt ${#NAMES[@]} ]]; then
             echo -e "${GREEN}▶${NC} Connecting to ${CYAN}${NAMES[$idx]}${NC}..."
-            [[ "${PORTS[$idx]}" != "22" ]] && exec ssh -p "${PORTS[$idx]}" "${CONNECTIONS[$idx]}"
-            exec ssh "${CONNECTIONS[$idx]}"
+            [[ "${PORTS[$idx]}" != "22" ]] && exec ssh -p "${PORTS[$idx]}" -- "${CONNECTIONS[$idx]}"
+            exec ssh -- "${CONNECTIONS[$idx]}"
         fi
         echo -e "${RED}✗${NC} Invalid selection: $1" && exit 1
     elif [[ "$1" == "list" || "$1" == "-l" ]]; then
         show_menu && exit 0
     elif [[ "$1" == "edit" || "$1" == "-e" ]]; then
         ${EDITOR:-nvim} "$CONFIG_FILE" && exit 0
-    elif [[ "$1" == "add" ]]; then
-        shift
-        if [[ $# -ge 2 ]]; then
-            echo "$1 | $2 | ${3:-22}" >> "$CONFIG_FILE"
-            echo -e "${GREEN}✓${NC} Added: ${CYAN}$1${NC} → ${GREEN}$2${NC}"
-            exit 0
-        fi
-        echo "Usage: sshh add \"Name\" \"user@host\" [port]" && exit 1
-    elif [[ "$1" == "help" || "$1" == "-h" ]]; then
-        echo "Usage: sshh [command|number]"
-        echo "  (none)    Show menu"
-        echo "  <num>     Connect to host #"
-        echo "  list      Show hosts"
-        echo "  edit      Edit config"
-        echo "  add       Add host"
-        exit 0
     fi
     echo -e "${RED}✗${NC} Unknown: $1" && exit 1
 fi
@@ -306,8 +416,8 @@ if [[ "$choice" =~ ^[0-9]+$ ]]; then
     idx=$((choice - 1))
     if [[ $idx -ge 0 && $idx -lt ${#NAMES[@]} ]]; then
         echo -e "\n${GREEN}▶${NC} Connecting to ${CYAN}${NAMES[$idx]}${NC}...\n"
-        [[ "${PORTS[$idx]}" != "22" ]] && exec ssh -p "${PORTS[$idx]}" "${CONNECTIONS[$idx]}"
-        exec ssh "${CONNECTIONS[$idx]}"
+        [[ "${PORTS[$idx]}" != "22" ]] && exec ssh -p "${PORTS[$idx]}" -- "${CONNECTIONS[$idx]}"
+        exec ssh -- "${CONNECTIONS[$idx]}"
     fi
 fi
 echo -e "${RED}✗${NC} Invalid selection" && exit 1

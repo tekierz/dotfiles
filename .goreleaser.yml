@@ -1,0 +1,98 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/goreleaser/goreleaser/v2.17.0/www/docs/static/schema.json
+version: 2
+
+project_name: dotfiles
+
+builds:
+  - id: dotfiles
+    main: ./cmd/dotfiles
+    binary: dotfiles
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -mod=readonly
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -buildid= -X main.version={{ .Version }}
+
+archives:
+  - id: release-archives
+    ids:
+      - dotfiles
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    wrap_in_directory: true
+    builds_info:
+      owner: root
+      group: root
+      mode: 0755
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: README.md
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: THIRD_PARTY_NOTICES.md
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSES/*
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+  prefix_template: "{{ .ProjectName }}-{{ .Version }}/"
+
+checksum:
+  name_template: "{{ .ProjectName }}_artifact_checksums.txt"
+  algorithm: sha256
+
+sboms:
+  - id: archive-sboms
+    artifacts: archive
+  - id: source-sbom
+    artifacts: source
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+
+release:
+  prerelease: auto
+  draft: true
+  replace_existing_draft: true
+
+report_sizes: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"

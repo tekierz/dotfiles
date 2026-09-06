@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "operation_id": "20260906T045252.986427000Z-18f26a422a4d56d3",
+  "plan_hash": "a7a27beb1f8c07eaa0bf5bf199958e3714c39f35f8bd90519c9badf296885ea9",
+  "started_at": "2026-09-06T04:52:52.986427Z",
+  "finished_at": "2026-09-06T04:52:57.213766Z",
+  "status": "succeeded",
+  "actions": [
+    {
+      "action_id": "install:codex",
+      "status": "succeeded",
+      "summary": "installed and detected"
+    }
+  ],
+  "warnings": [
+    "package-only operation has no filesystem mutations; no filesystem rollback point was created"
+  ]
+}

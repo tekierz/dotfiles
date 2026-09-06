@@ -5,8 +5,9 @@ TUI implementation using Bubble Tea (Elm architecture: Model-Update-View).
 Every screen is a `ScreenHandler` (defined in `screen.go`) implemented in package
 `ui` in a `screen_*.go` file. There is no longer a `ui/screens/` subpackage; the
 ScreenHandler/ScreenManager migration is complete and is the live dispatch.
-`App.Update` delegates to the `ScreenManager` after handling the two global
-messages (`uiTickMsg`, `installCacheDoneMsg`); `App.View` delegates to
+`App.Update` delegates to the `ScreenManager` after global tick/cache handling
+and App-owned Updates, Backups and Users result reduction. Request generations
+reject stale and duplicate results even after tab navigation. `App.View` delegates to
 `ScreenManager.View()`. The old giant `App.Update`/`App.View` switches and the
 `handleWizardKey`/`handleManagementKey`/`handleKey`/`handleMouse` dispatch are
 gone, along with the files `input_deepdive.go`, `input_wizard.go`,
@@ -56,13 +57,16 @@ const (
     ScreenWelcome
     ScreenThemePicker
     ScreenNavPicker
-    // ... 33 total screens
+    // ... remaining screens
 )
 ```
 
 Each constant maps to a `ScreenHandler` via the `ScreenFactory` built in
 `screen_factory.go`. Navigate by returning `NavigateTo(ScreenName)` from a
 handler's `Update`; the `ScreenManager` runs the target handler's `Init()`.
+Startup is separate: `NewApp` and pre-Init `SetStartScreen` prepare only;
+`App.Init` initializes the final handler exactly once and retains its command.
+Do not call handler Init from View or discard its asynchronous command.
 
 ## Adding a New Screen
 
@@ -125,8 +129,9 @@ Long-running operations use Bubble Tea's message-based async pattern:
 `loadInstallCacheCmd()` and `startInstallCacheLoad()` are defined in `cache.go`;
 `installCacheDoneMsg` is defined in `messages.go`. The state fields
 (`installCacheLoading`, `manageInstalledReady`, `manageInstalled`) live on `App`,
-and `installCacheDoneMsg` is one of the two messages `App.Update` handles
-globally (in `app.go`) before delegating to the `ScreenManager`.
+and `App.Update` handles `installCacheDoneMsg` globally (in `app.go`) before
+delegating to the `ScreenManager`. App-owned request reducers also handle
+Updates, Backups and Users results before screen dispatch.
 
 ```go
 // State fields in App

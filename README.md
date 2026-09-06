@@ -1,8 +1,18 @@
 # dotfiles
 
+[![CI](https://github.com/tekierz/dotfiles/actions/workflows/ci.yml/badge.svg)](https://github.com/tekierz/dotfiles/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tekierz/dotfiles?display_name=tag&sort=semver)](https://github.com/tekierz/dotfiles/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A cross-platform terminal environment management platform with **16 customizable themes**.
 
-Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. Features an interactive TUI for installation and configuration, or use CLI commands directly. A separate native Windows installer (`bin/dotfiles-setup.ps1`, PowerShell) is also available.
+Sets up a consistent, beautiful terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. Features an interactive TUI for installation and configuration, or use CLI commands directly.
+
+> [!IMPORTANT]
+> This application installs packages and changes user configuration files.
+> Review the generated plan before applying it, run the application as your
+> normal user rather than through `sudo`, and keep an independent machine
+> backup.
 
 ## Quick Start
 
@@ -23,6 +33,8 @@ make build
 ./bin/dotfiles
 ```
 
+`make build` creates `./bin/dotfiles` locally; the compiled binary is a build artifact and is not shipped in the repository.
+
 ## Commands
 
 | Command | Description |
@@ -32,7 +44,12 @@ make build
 | `dotfiles manage` | Configure installed tools |
 | `dotfiles hotkeys` | View keybindings cheatsheet |
 | `dotfiles update` | Check for package updates |
-| `dotfiles status` | Show current configuration |
+| `dotfiles status [--json]` | Show current configuration, or versioned installation health JSON |
+| `dotfiles plan --json --tool <id>...` | Print a deterministic, read-only installation plan for explicit tools |
+| `dotfiles apply --yes --plan-hash <hash> --tool <id>...` | Freshly replan and apply the exact reviewed install-only authority |
+| `dotfiles support --json` | Print one bounded, redacted support document to stdout for review |
+| `dotfiles doctor [--json]` | Diagnose which build is running, PATH collisions, Homebrew ownership, and stale legacy binaries |
+| `dotfiles doctor repair [--json]` | Preview or quarantine one ownership-proven stale `~/.local/bin/dotfiles` entry |
 | `dotfiles theme list` | List available themes |
 | `dotfiles theme set <name>` | Set theme (run `dotfiles install` to apply) |
 | `dotfiles config <tool>` | Configure a specific tool |
@@ -40,8 +57,58 @@ make build
 | `dotfiles users` | List all user profiles |
 | `dotfiles backups` | List configuration backups |
 | `dotfiles restore [name]` | Restore a backup (opens TUI picker if no name) |
-| `dotfiles version` | Show version information |
-| `dotfiles uninstall` | Remove dotfiles and restore original config |
+| `dotfiles version` / `dotfiles --version` | Show version information |
+| `dotfiles uninstall` | Restore backups and show conservative manual uninstall guidance; automatic deletion is disabled |
+
+`dotfiles plan --json` never infers dashboard defaults. Repeat `--tool` for each
+requested registry ID. Ready and no-change plans exit 0; blocked or missing
+intent exits 2 with one JSON object. To apply a ready plan, repeat the exact
+tool set and pass its `plan_hash` with explicit `--yes`. Apply collects a fresh
+snapshot and proceeds only if the complete private authority hash still
+matches; it never reads plan JSON or infers defaults. This v1 path installs or
+repairs reviewed packages only and does not write application configuration.
+
+### Review support output before sharing
+
+`dotfiles support --json` prints one redacted JSON document to stdout. It does
+not create an archive or file, and it does not upload, transmit, or attach the
+output. The document contains bounded build facts, the public installation
+health document, reduced executable-provenance findings, and up to 20 recent
+operation summaries. It omits usernames, hostnames, paths, environment values,
+credentials, config contents, logs, raw errors, operation IDs, plan hashes, and
+exact activity timestamps.
+
+Inspect the document before deciding whether to save or share it:
+
+```bash
+dotfiles support --json | less
+```
+
+A complete document exits 0. A partial document still writes valid JSON and
+exits 2; invalid syntax also exits 2 but writes no JSON. Projection or output
+failure exits 1 with only a generic error. `doctor --json`, raw operation
+journals, configuration files, and logs are diagnostic/private inputs and are
+not designed as share-safe artifacts.
+
+### Diagnosing stale local builds
+
+If `dotfiles` behaves differently across terminals or appears to be missing newer features, run:
+
+```bash
+dotfiles doctor
+dotfiles doctor --json
+```
+
+Doctor reports the executable currently running, every `dotfiles` match reachable through `PATH`, static version/build hints, Homebrew's managed executable, and stale `dotfiles-tui` or `dotfiles-setup` candidates. It is read-only and does not execute discovered `dotfiles` binaries or modify files. JSON output uses a stable schema and omits timestamps so repeated runs against unchanged state are deterministic, but raw Doctor JSON is not the reviewed support-sharing format.
+
+If Doctor finds the exact historical `~/.local/bin/dotfiles` shadow, run
+`dotfiles doctor repair --json` to preview a deterministic repair plan. Repair
+is offered only when embedded Go metadata proves project ownership and the
+candidate differs from the running and Homebrew-managed executables. Interactive
+repair requires typing `quarantine`; automation requires both `--yes` and the
+fresh `--plan-hash`. The original bytes and permission mode are retained in a
+private quarantine with a recovery manifest. Legacy binary names remain
+diagnostic-only.
 
 ## What It Installs & Configures
 
@@ -80,28 +147,15 @@ make build
 |-----|-------------|
 | **Rectangle** | Window snapping & management |
 | **Raycast** | Spotlight replacement with superpowers |
-| **Stats** | System monitor in menu bar |
-| **AltTab** | Windows-style alt-tab switcher |
-| **MonitorControl** | Control external monitor brightness |
-| **Mos** | Smooth scrolling for external mouse |
-| **Karabiner-Elements** | Keyboard customization |
 | **IINA** | Modern video player |
-| **The Unarchiver** | Archive extraction |
 | **AppCleaner** | Clean app uninstallation |
-| **mas** | Mac App Store CLI |
-| **trash** | Move files to trash from CLI |
 
 ### Raspberry Pi Support
 
-Optimized configurations for different Pi models:
-
-| Model | Flag | Notes |
-|-------|------|-------|
-| **Pi 5** | `--raspi5` | Full toolset, all features |
-| **Pi 4** | `--raspi` | Full toolset |
-| **Pi Zero 2** | `--raspizero2` | Lightweight (skips yazi, btop) |
-
-Raspberry Pi installs via apt + manual builds for modern tools not in repos.
+The Go application detects Debian-family Raspberry Pi systems through the same
+platform layer used for Debian and Ubuntu. Systems with less than 1 GiB of memory
+automatically omit tools marked as heavy. Package availability still varies by
+architecture, so review the immutable install plan before applying it.
 
 ## Features
 
@@ -146,6 +200,7 @@ dotfiles theme set dracula  # Set theme to Dracula
 dotfiles theme set nord     # Set theme to Nord
 dotfiles theme list         # Show all themes
 dotfiles status             # Show current settings
+dotfiles status --json      # Print deterministic, redacted installation health JSON v1
 ```
 
 > Setting a theme saves it to your config; run `dotfiles install` to apply it across all tools.
@@ -156,7 +211,6 @@ Themes apply consistently across:
 - fzf fuzzy finder
 - Yazi file manager
 - Git diffs (delta)
-- Bat syntax highlighting
 
 ### Navigation Styles
 
@@ -168,7 +222,7 @@ Choose between two navigation styles:
 |------|------------|
 | Zsh | `Ctrl-a/e` start/end, `Alt-b/f` word nav, `Ctrl-x Ctrl-e` edit in nvim |
 | Tmux | Arrow keys for pane navigation, `Alt-Arrow` without prefix |
-| Yazi | Arrow keys, `Ctrl-c/x/v` copy/cut/paste, `F2` rename |
+| Yazi | Yazi defaults plus prepended `Ctrl-p/n` movement, `Ctrl-b/f` leave/enter, and `Space` selection |
 | Nvim | Arrow keys work alongside standard vim keys |
 
 #### Vim Style
@@ -177,7 +231,7 @@ Choose between two navigation styles:
 |------|------------|
 | Zsh | `Esc` for normal mode, `hjkl` navigation, `Ctrl-e` edit in nvim |
 | Tmux | `hjkl` pane navigation, `Alt-hjkl` without prefix |
-| Yazi | `hjkl` navigation, `y/x/p` yank/cut/paste, `r` rename |
+| Yazi | Yazi's built-in default bindings; dotfiles writes only its compatibility/style header |
 | Nvim | Full vim keybindings |
 
 ### Multi-User Support
@@ -193,7 +247,8 @@ dotfiles users                 # List all user profiles
 
 ### Backup & Restore
 
-All existing configs are backed up before modification. Fully reversible installation:
+Accepted installation changes require a plan-scoped rollback backup before
+mutation. Convenience backups can also be listed and restored directly:
 
 ```bash
 dotfiles backups              # List available backups
@@ -201,7 +256,17 @@ dotfiles restore              # Open backup picker (TUI)
 dotfiles restore 20240102_143052  # Restore specific backup
 ```
 
-Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
+User-created convenience backups are stored in
+`${XDG_CONFIG_HOME:-~/.config}/dotfiles/backups/` with timestamps. Mandatory plan rollback points
+live in the private operation-state backup area and are validated internally;
+they are not presented as ordinary user-managed backup sessions.
+
+Run `dotfiles` directly as the target user, never through `sudo`. Backup capture
+refuses symlinks, foreign-owned files/directories, and group/world-writable
+source or destination ancestors. Current backups preserve regular-file bytes,
+directory structure, and POSIX owner/group/other `rwx` bits. They do not
+preserve ACLs, extended attributes, file flags, hard-link topology, or
+timestamps; keep an independent machine backup when those attributes matter.
 
 ### Custom Utilities
 
@@ -212,7 +277,12 @@ Backups are stored in `~/.config/dotfiles/backups/` with timestamps.
 | `caff` | Toggle system sleep (like Caffeine) |
 | `y` | Yazi file manager (cd on exit) |
 
-`sshh` (Quick SSH connection manager) is installed from its own Homebrew tap ([github.com/tekierz/sshh](https://github.com/tekierz/sshh)), not bundled or managed by dotfiles.
+`sshh` (Quick SSH connection manager) is a small helper maintained and
+distributed as part of this repository. It is installed to
+`~/.local/bin/sshh` by default; it is not fetched from, or guaranteed to be
+command-compatible with, the separate `tekierz/sshh` repository or Homebrew
+formula. The fail-closed uninstall command retains helpers until ownership
+manifests and anchored removal are implemented.
 
 ### Shell Aliases
 
@@ -245,29 +315,28 @@ After running, configs are placed in:
 | File | Purpose |
 |------|---------|
 | `~/.zshrc` | Zsh configuration |
-| `~/.tmux.conf` | Tmux configuration |
-| `~/.config/ghostty/config` | Ghostty terminal |
-| `~/.config/yazi/` | Yazi file manager |
-| `~/.config/bat/config` | Bat configuration |
-| `~/.gitconfig` | Git with delta |
-| `~/.config/dotfiles/settings` | Theme, navigation, and active user |
-| `~/.config/dotfiles/users/` | User profile settings |
+| `~/.tmux.conf` or `${XDG_CONFIG_HOME:-~/.config}/tmux/tmux.conf` | Active Tmux configuration; existing native settings are preserved outside a managed block |
+| `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` (and legacy `config`) | Ghostty XDG candidates; the reviewed plan freezes the active candidate before writing its managed block |
+| `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` (and legacy `config`) | Higher-precedence macOS candidates; the last existing candidate in Ghostty's source order becomes the frozen target |
+| `${YAZI_CONFIG_HOME}` when set and absolute; else `${XDG_CONFIG_HOME}/yazi` when XDG is set and absolute; else `~/.config/yazi/` | Exact Yazi directory frozen by the reviewed plan; set relative overrides fail closed |
+| `~/.gitconfig` | Native Git configuration, preserved with one bounded managed include |
+| `~/.config/dotfiles/git/config` | Product-owned Git/delta settings loaded by that include |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/global.json` | Versioned global theme, navigation, active-user, animation, and backup preferences |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/tools/manage.json` | Versioned dashboard settings state used by Manage |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/users/` | User profile settings |
 | `~/.sshh` | SSH hosts for sshh |
 
-## Legacy Bash Script
+Git and Ghostty preserve native content outside their bounded managed sections.
+Recovery is provided by the reviewed operation backup; writers do not create
+ambiguous sibling `*.dotfiles.bak` files.
 
-The original bash setup script is still available for direct installation:
+## Migrating from `dotfiles-setup`
 
-```bash
-# Quick install via curl
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash
-
-# With all macOS apps
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --macos-apps
-
-# Raspberry Pi
-curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-setup | bash -s -- --raspi
-```
+The former Bash installer has been retired and removed from active distribution.
+It is unsupported, is not installed by `make install`, and must not be executed
+from historical raw URLs. Existing users should install the Go application, run
+`dotfiles doctor`, and follow the conservative migration guidance in
+[docs/legacy-migration.md](docs/legacy-migration.md).
 
 ## Post-Install
 
@@ -281,14 +350,65 @@ curl -fsSL https://raw.githubusercontent.com/tekierz/dotfiles/main/bin/dotfiles-
 
 ## Requirements
 
-- **macOS**: Homebrew (installed automatically)
+- **macOS**: Homebrew
 - **Arch Linux**: pacman, paru (for AUR)
 - **Debian/Ubuntu**: apt (some tools need Homebrew)
+- **Build from source**: Go version declared in [`go.mod`](go.mod)
+
+Windows is not supported. Package and architecture availability is determined
+by upstream package managers and can differ between distributions and releases.
+
+## Privacy and Network Access
+
+The `dotfiles` application has no telemetry service, user account, or automatic
+support upload. Its configuration, operation journals, backups, and diagnostic
+data remain on the local machine unless you explicitly copy or share them.
+
+Install and update operations invoke third-party package managers and tools such
+as Homebrew, apt, pacman, Git, and npm. Those subprocesses may contact their own
+upstream services and are governed by their respective privacy and security
+policies. Review an installation plan before approving it.
+
+Only `dotfiles support --json` is designed as a bounded, redacted
+support-sharing projection. Always inspect even that output before sharing it.
+Raw logs, configuration, operation journals, backups, and `doctor --json` can
+contain private diagnostic information.
+
+## Security and Support
+
+For security vulnerabilities, follow the private reporting process in
+[SECURITY.md](SECURITY.md). Please do not disclose suspected vulnerabilities in
+a public issue.
+
+For reproducible defects and feature requests, use
+[GitHub Issues](https://github.com/tekierz/dotfiles/issues). Community support is
+provided on a best-effort basis; this project does not include a service-level
+agreement or commercial support commitment.
+
+## Limitations
+
+- The application targets macOS, Arch-family Linux, Debian-family Linux, and
+  Raspberry Pi systems; other operating systems and distributions are
+  unsupported.
+- Package availability and third-party behavior are outside this project's
+  control.
+- Rollback preserves the documented regular-file and POSIX-mode subset, not
+  every filesystem attribute. See [Backup & Restore](#backup--restore).
+- The application does not manage or sanitize credentials belonging to package
+  managers, Git hosts, npm, MCP servers, or installed tools.
+- Theme and product names belong to their respective owners. Their inclusion
+  identifies compatibility or inspiration and does not imply endorsement.
+
+## Contributing
+
+Bug reports, focused feature proposals, documentation improvements, and code
+contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and follow
+the [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+Copyright (c) 2025-2026 Pratik (tekierz). Released under the
+[MIT License](LICENSE).
 
-## Related
-
-- [sshh](https://github.com/tekierz/sshh) - Quick SSH connection manager
+Compiled releases include third-party open-source components under their own
+licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

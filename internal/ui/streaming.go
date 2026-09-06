@@ -1,12 +1,11 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
-	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -58,6 +57,7 @@ func (a *App) handleUpdateStartMsg(msg updateStartMsg) tea.Cmd {
 	a.clearInstallLogs()
 	a.updateRunning = true
 	a.installLogAutoScroll = true // Follow output live while the update runs.
+	operation.Trace(operation.TraceUpdate, operation.TraceRunning, operation.TraceCounts{Attempted: len(msg.packages)})
 	if msg.all {
 		return a.streamingUpdateAllCmd()
 	}
@@ -71,7 +71,7 @@ func (a *App) handleUpdateSudoRequiredMsg(msg updateSudoRequiredMsg) tea.Cmd {
 		if err != nil {
 			return updateRunDoneMsg{err: err}
 		}
-		return updateStartMsg{packages: msg.packages, all: msg.all}
+		return updateStartMsg(msg)
 	})
 }
 
@@ -98,6 +98,7 @@ func (a *App) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
 	a.updateRunning = false
 	a.installLogAutoScroll = false // Allow user to scroll through logs.
 	if err != nil {
+		operation.Trace(operation.TraceUpdate, operation.TraceFailed, operation.TraceCounts{Attempted: len(results), Failed: 1})
 		a.updateStatus = fmt.Sprintf("Update failed: %v", err)
 		return nil
 	}
@@ -110,11 +111,22 @@ func (a *App) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
 			failures++
 		}
 	}
-	if failures > 0 {
+	outcome := operation.TraceSucceeded
+	if failures != 0 {
+		outcome = operation.TracePartial
+		if successes == 0 {
+			outcome = operation.TraceFailed
+		}
+	}
+	operation.Trace(operation.TraceUpdate, outcome, operation.TraceCounts{
+		Attempted: len(results), Succeeded: successes, Failed: failures,
+	})
+	switch {
+	case failures > 0:
 		a.updateStatus = fmt.Sprintf("Updated %d, failed %d", successes, failures)
-	} else if successes > 0 {
+	case successes > 0:
 		a.updateStatus = fmt.Sprintf("Updated %d package(s) ✓", successes)
-	} else {
+	default:
 		a.updateStatus = "Update complete ✓"
 	}
 	// A successful update changes installed versions (and possibly install
@@ -129,86 +141,5 @@ func (a *App) finishUpdate(results []pkg.UpdateResult, err error) tea.Cmd {
 	a.updateSelected = make(map[int]bool)
 	a.updateCheckDone = false
 	a.updateChecking = true
-	return checkUpdatesCmd()
-}
-
-// --- Manage (single-tool install) streaming --------------------------------
-
-// handleManageSudoRequiredMsg prompts for sudo, then continues into the
-// streaming install. The continuation yields manageStartInstallMsg.
-func (a *App) handleManageSudoRequiredMsg(msg manageSudoRequiredMsg) tea.Cmd {
-	return tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
-		if err != nil {
-			return manageInstallDoneMsg{toolID: msg.toolID, err: err}
-		}
-		return manageStartInstallMsg{toolID: msg.toolID}
-	})
-}
-
-// handleManageStartInstallMsg starts the streaming install (sudo already cached).
-//
-// The cancelable context and its cancel handle are created HERE, on the main
-// loop, before spawning the install command (FIX 3). This is the only place
-// that's safe to set a.streamCancel without a data race: the worker goroutine
-// the Cmd spawns must not touch App fields. Registering a.streamCancel lets
-// teardownStream() cancel the context on Ctrl+C / q, which (via
-// exec.CommandContext) kills the orphaned `sudo apt/pacman install ...`
-// subprocess instead of leaking it to init. The Linux sudo keep-alive is started
-// here too, mirroring the wizard/update paths, and torn down on completion.
-func (a *App) handleManageStartInstallMsg(msg manageStartInstallMsg) tea.Cmd {
-	a.clearInstallLogs()
-	a.manageInstalling = true
-	a.manageInstallID = msg.toolID
-
-	ctx, cancel := context.WithCancel(context.Background())
-	a.streamCancel = cancel
-	// Keep the (often-expiring) sudo timestamp fresh during a long install, the
-	// same as the wizard/update paths. No-op on macOS / when sudo isn't cached;
-	// stopped by teardownStream on completion or cancel (C16).
-	if runner.NeedsSudo() && runner.CheckSudoCached() {
-		a.sudoKeepAliveStop = startSudoKeepAlive(refreshSudo)
-	}
-
-	return a.streamingInstallToolCmd(ctx, msg.toolID)
-}
-
-// handleManageInstallWithLogsMsg finalizes a manage install that carried its
-// collected logs. On success it invalidates and reloads the install-status
-// cache so the Manage screen reflects the new install. Survives navigation.
-func (a *App) handleManageInstallWithLogsMsg(msg manageInstallWithLogsMsg) tea.Cmd {
-	a.manageInstalling = false
-	a.manageInstallID = ""
-	a.installLogAutoScroll = false
-	a.teardownStream()
-	for _, line := range msg.logs {
-		a.appendInstallLog(line)
-	}
-	if msg.err != nil {
-		a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
-		return nil
-	}
-	a.manageStatus = "Installed successfully ✓"
-	// Refresh the install-status cache, then reload it so the Manage screen
-	// reflects the newly installed tool immediately. The registry's own cache is
-	// invalidated too so IsInstalled() re-checks (Phase B + C10 fix).
-	tools.GetRegistry().InvalidateCache()
-	a.manageInstalledReady = false
-	return a.startInstallCacheLoad()
-}
-
-// handleManageInstallDoneMsg finalizes the non-streaming manage install path
-// (retained for compatibility). Survives navigation.
-func (a *App) handleManageInstallDoneMsg(msg manageInstallDoneMsg) tea.Cmd {
-	a.manageInstalling = false
-	a.manageInstallID = ""
-	a.teardownStream()
-	if msg.err != nil {
-		a.manageStatus = fmt.Sprintf("Install failed: %v", msg.err)
-		a.manageInstalledReady = false
-		return a.startInstallCacheLoad()
-	}
-	a.manageStatus = "Installed ✓"
-	tools.GetRegistry().InvalidateCache()
-	a.manageInstalledReady = false
-	return a.startInstallCacheLoad()
+	return a.startAsync(asyncUpdates, checkUpdatesCmd())
 }

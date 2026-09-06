@@ -1,0 +1,16 @@
+{
+  "artifact": "tasks/codebase-git-audit-2026-09-05.html",
+  "worktree_rows": 6,
+  "viewports_checked": [
+    1440,
+    768,
+    390,
+    320
+  ],
+  "narrow_viewport_width": 320,
+  "narrow_document_width": 305,
+  "duplicate_ids": false,
+  "missing_local_links": [],
+  "visual_review": "desktop screenshot inspected; mobile dimensions verified",
+  "original_interactive_audit": "prior 18-finding verification retained in output/playwright/audit-guide-verification.json"
+}

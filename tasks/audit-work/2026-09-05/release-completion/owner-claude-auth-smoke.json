@@ -1,0 +1,31 @@
+{
+  "scope": "Existing Claude installation authentication and one-word model response; not candidate installation, Pi authentication, or authenticated MCP acceptance",
+  "version": "2.1.263",
+  "cli_invocations": 2,
+  "prior_attempt": "JSON returned as array; initial harness expected object; response was not preserved and no success is attributed to that attempt",
+  "http_request_count": "not observed",
+  "cwd": "empty private temporary directory",
+  "tools": "disabled",
+  "customizations": "disabled except admin-managed policy",
+  "session_persistence": false,
+  "credentials_copied": false,
+  "exit_code": 0,
+  "stderr_bytes": 0,
+  "stdout_bytes": 9284,
+  "result": "passed",
+  "is_error": false,
+  "response_matches_OK": true,
+  "subtype": "success",
+  "models": [
+    "claude-haiku-4-5-20251001",
+    "claude-fable-5-1"
+  ],
+  "num_turns": 1,
+  "reported_attempt_cost_usd": 0.038885,
+  "total_cost_usd": "not observed for initial attempt",
+  "output_envelope": "array",
+  "elapsed_seconds": 4.223,
+  "observed_tool_calls": 0,
+  "initialization_tools_count": 0,
+  "initialization_mcp_servers_count": 0
+}

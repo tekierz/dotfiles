@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -220,59 +221,13 @@ func drainCmd(cmd tea.Cmd) []tea.Msg {
 	return []tea.Msg{msg}
 }
 
-// TestStreamingMsgSurvivesNavigation pins down the durable fix for cluster A:
-// the terminal/streaming install & update async messages must be fully
+// TestStreamingMsgSurvivesNavigation pins down the durable update fix:
+// terminal update async messages must be fully
 // processed (running flags reset, cache refresh requested) even when a
 // DIFFERENT screen is active when the message arrives. Before the fix these
 // messages were handled ONLY by the originating screen's Update, so navigating
 // away dropped them, stranded the running flag, and orphaned the worker.
 func TestStreamingMsgSurvivesNavigation(t *testing.T) {
-	t.Run("manageInstallWithLogsMsg resets flag from another screen", func(t *testing.T) {
-		app := NewApp(true)
-		// Simulate an install started on Manage, then the user navigated to the
-		// main menu (a different screen) before the terminal message arrives.
-		app.screenMgr.Navigate(ScreenMainMenu)
-		app.manageInstalling = true
-		app.manageInstallID = "btop"
-		app.manageInstalledReady = true
-
-		_, cmd := app.Update(manageInstallWithLogsMsg{toolID: "btop", logs: []string{"done"}})
-
-		if app.manageInstalling {
-			t.Error("manageInstalling still true after terminal msg delivered to another screen")
-		}
-		if app.manageInstalledReady {
-			t.Error("manageInstalledReady not reset; install-status cache would stay stale")
-		}
-		// A successful install must kick a fresh cache load.
-		if cmd == nil {
-			t.Fatal("expected a cache-refresh command after successful install, got nil")
-		}
-		if !app.installCacheLoading {
-			t.Error("expected installCacheLoading=true (cache refresh kicked)")
-		}
-	})
-
-	t.Run("manageInstallDoneMsg resets flag from another screen", func(t *testing.T) {
-		app := NewApp(true)
-		app.screenMgr.Navigate(ScreenMainMenu)
-		app.manageInstalling = true
-		app.manageInstallID = "btop"
-		app.manageInstalledReady = true
-
-		app.Update(manageInstallDoneMsg{toolID: "btop"})
-
-		if app.manageInstalling {
-			t.Error("manageInstalling still true after manageInstallDoneMsg on another screen")
-		}
-		if app.manageInstallID != "" {
-			t.Error("manageInstallID not cleared")
-		}
-		if app.manageInstalledReady {
-			t.Error("manageInstalledReady not reset")
-		}
-	})
-
 	t.Run("updateStreamMsg done resets updateRunning from another screen", func(t *testing.T) {
 		app := NewApp(true)
 		app.screenMgr.Navigate(ScreenMainMenu)
@@ -318,14 +273,6 @@ func TestStreamingMsgSurvivesNavigation(t *testing.T) {
 // would drop the terminal message, strand the running flag, and orphan the
 // subprocess. Navigation must be a no-op while the op is running.
 func TestNavBlockedWhileStreaming(t *testing.T) {
-	t.Run("manage keyboard tab-nav is a no-op while installing", func(t *testing.T) {
-		ctx := newGoldenContext(t)
-		ctx.app.manageInstalling = true
-		s := NewManageScreen(ctx)
-		if _, cmd := s.Update(keyMsg("2")); cmd != nil {
-			t.Error("manage tab-nav while installing returned a command; want nil (no navigation)")
-		}
-	})
 	t.Run("update mouse tab-click is a no-op while running", func(t *testing.T) {
 		ctx := newGoldenContext(t)
 		ctx.app.updateRunning = true
@@ -334,5 +281,89 @@ func TestNavBlockedWhileStreaming(t *testing.T) {
 		if _, cmd := s.Update(click); cmd != nil {
 			t.Error("update tab-click while running returned a command; want nil (no navigation)")
 		}
+	})
+}
+
+const hostilePackageOutput = "pwned \x1b]0;title\x07\x1b[2Jrm -rf\x1b]52;c;BASE64\x07"
+
+func assertNoControlChars(t *testing.T, got string) {
+	t.Helper()
+
+	if strings.ContainsRune(got, '\x1b') {
+		t.Fatalf("stored log contains ESC byte: %q", got)
+	}
+	for _, r := range got {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			t.Fatalf("stored log contains control character %U: %q", r, got)
+		}
+	}
+}
+
+func assertVisibleLogTextSurvives(t *testing.T, got string) {
+	t.Helper()
+
+	for _, want := range []string{"pwned", "rm -rf"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sanitized log missing visible text %q: %q", want, got)
+		}
+	}
+}
+
+func TestAppendInstallLogSanitizesAtIngestion(t *testing.T) {
+	ctx := newGoldenContext(t)
+
+	ctx.app.appendInstallLog(hostilePackageOutput)
+
+	if len(ctx.app.installLogs) != 1 {
+		t.Fatalf("installLogs length = %d, want 1", len(ctx.app.installLogs))
+	}
+	got := ctx.app.installLogs[0]
+	assertNoControlChars(t, got)
+	assertVisibleLogTextSurvives(t, got)
+}
+
+func TestUpdateScreenLogRenderUsesSanitizedInstallLogs(t *testing.T) {
+	ctx := newGoldenContext(t)
+	ctx.app.appendInstallLog(hostilePackageOutput)
+
+	out := NewUpdateScreen(ctx).View(100, 30)
+
+	assertVisibleLogTextSurvives(t, out)
+	for _, bad := range []string{"\x1b]0;", "\x1b[2J", "\x1b]52;"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("update log render leaked injected escape sequence %q in output: %q", bad, out)
+		}
+	}
+}
+
+func TestProgressInstallOutputSanitizesAtIngestion(t *testing.T) {
+	t.Run("installOutputMsg", func(t *testing.T) {
+		ctx := newGoldenContext(t)
+		screen := NewProgressScreen(ctx)
+
+		screen.Update(installOutputMsg{
+			line: runner.OutputLine{Text: hostilePackageOutput, Type: runner.OutputStep},
+		})
+
+		if len(ctx.app.installOutput) != 1 {
+			t.Fatalf("installOutput length = %d, want 1", len(ctx.app.installOutput))
+		}
+		got := ctx.app.installOutput[0]
+		assertNoControlChars(t, got)
+		assertVisibleLogTextSurvives(t, got)
+	})
+
+	t.Run("installEventMsg", func(t *testing.T) {
+		ctx := newGoldenContext(t)
+		screen := NewProgressScreen(ctx)
+
+		screen.Update(installEventMsg{line: hostilePackageOutput})
+
+		if len(ctx.app.installOutput) != 1 {
+			t.Fatalf("installOutput length = %d, want 1", len(ctx.app.installOutput))
+		}
+		got := ctx.app.installOutput[0]
+		assertNoControlChars(t, got)
+		assertVisibleLogTextSurvives(t, got)
 	})
 }

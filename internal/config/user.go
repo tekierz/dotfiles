@@ -2,13 +2,18 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/tekierz/dotfiles/internal/operation"
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 // UserProfile represents a user configuration profile
@@ -79,14 +84,17 @@ func LoadUserProfile(name string) (*UserProfile, error) {
 	if err := ValidateUsername(name); err != nil {
 		return nil, err
 	}
+	if ConfigDir() == "" {
+		return nil, ErrNoConfigDir
+	}
 
 	path := filepath.Join(UsersDir(), name+".json")
-	data, err := os.ReadFile(path)
+	data, revision, err := readProductConfigJSON(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("user %q does not exist", name)
-		}
 		return nil, fmt.Errorf("failed to read user profile: %w", err)
+	}
+	if !revision.Exists() {
+		return nil, fmt.Errorf("user %q does not exist", name)
 	}
 
 	var profile UserProfile
@@ -97,61 +105,121 @@ func LoadUserProfile(name string) (*UserProfile, error) {
 	return &profile, nil
 }
 
-// SaveUserProfile saves a user profile to disk
-func SaveUserProfile(profile *UserProfile) error {
-	if err := ValidateUsername(profile.Name); err != nil {
-		return err
-	}
+// ErrUserExists reports that create-only profile persistence found an existing file.
+var ErrUserExists = errors.New("user profile already exists")
 
-	if err := EnsureDirs(); err != nil {
-		return err
-	}
+var userProfileSaveMu sync.Mutex
 
-	// Update timestamp
-	profile.UpdatedAt = time.Now().Format(time.RFC3339)
-	if profile.CreatedAt == "" {
-		profile.CreatedAt = profile.UpdatedAt
-	}
-
-	path := filepath.Join(UsersDir(), profile.Name+".json")
-	data, err := json.MarshalIndent(profile, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal user profile: %w", err)
-	}
-
-	if err := writeFileAtomic(path, data, 0600); err != nil {
-		return fmt.Errorf("failed to write user profile: %w", err)
-	}
-
-	return nil
-}
-
-// DeleteUserProfile removes a user profile from disk
-func DeleteUserProfile(name string) error {
+// withUserProfileLock shares one private lock protocol across create/save/delete.
+// The in-process lock also serializes namespace bootstrap for first-time saves.
+func withUserProfileLock(name string, mutate func(root, rel string) error) (returnErr error) {
+	userProfileSaveMu.Lock()
+	defer userProfileSaveMu.Unlock()
 	if err := ValidateUsername(name); err != nil {
 		return err
 	}
-
-	if !UserExists(name) {
-		return fmt.Errorf("user %q does not exist", name)
+	if ConfigDir() == "" {
+		return ErrNoConfigDir
 	}
-
 	path := filepath.Join(UsersDir(), name+".json")
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("failed to delete user profile: %w", err)
+	if err := ensureConfiguredXDGRoot(path); err != nil {
+		return err
 	}
+	root, rel, err := anchoredFilePath(path)
+	if err != nil {
+		return fmt.Errorf("resolve user profile path: %w", err)
+	}
+	release, err := operation.DefaultLocker("user-profile", path)
+	if err != nil {
+		return fmt.Errorf("lock user profile: %w", err)
+	}
+	defer func() {
+		if err := release(); err != nil {
+			if returnErr == nil {
+				returnErr = &safefile.CommittedError{Operation: "release user profile lock", Err: err}
+			} else {
+				returnErr = errors.Join(returnErr, err)
+			}
+		}
+	}()
+	return mutate(root, rel)
+}
 
-	return nil
+// SaveUserProfile saves a profile, retaining the explicit Save/upsert behavior.
+func SaveUserProfile(profile *UserProfile) error {
+	return saveUserProfile(profile, false)
+}
+
+// CreateUserProfile creates a profile only while its destination remains absent.
+// Cooperating creators and explicit saves share the private per-profile lock.
+func CreateUserProfile(profile *UserProfile) error {
+	return saveUserProfile(profile, true)
+}
+
+func saveUserProfile(profile *UserProfile, createOnly bool) error {
+	if profile == nil {
+		return fmt.Errorf("user profile is nil")
+	}
+	return withUserProfileLock(profile.Name, func(root, rel string) error {
+		var revision safefile.Revision
+		var parents *safefile.ParentChain
+		if createOnly {
+			if err := safefile.EnsureDirectoryWithin(root, filepath.ToSlash(filepath.Dir(rel)), 0o700); err != nil {
+				return err
+			}
+			_, observed, chain, err := safefile.ObserveFileWithinLimit(root, rel, maxProductConfigJSONBytes)
+			if err != nil {
+				return fmt.Errorf("inspect user profile: %w", err)
+			}
+			if observed.Exists() {
+				return fmt.Errorf("user %q: %w", profile.Name, ErrUserExists)
+			}
+			revision, parents = observed, chain
+		}
+		profile.UpdatedAt = time.Now().Format(time.RFC3339)
+		if profile.CreatedAt == "" {
+			profile.CreatedAt = profile.UpdatedAt
+		}
+		data, err := json.MarshalIndent(profile, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal user profile: %w", err)
+		}
+		if createOnly {
+			_, err = safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, rel, revision, parents, data, 0o600)
+		} else {
+			err = safefile.ReplaceWithin(root, rel, data, 0o600)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to write user profile: %w", err)
+		}
+		return nil
+	})
+}
+
+// DeleteUserProfile removes a user profile under the same mutation lock.
+func DeleteUserProfile(name string) error {
+	return withUserProfileLock(name, func(root, rel string) error {
+		if err := safefile.RemoveWithin(root, rel); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("user %q does not exist", name)
+			}
+			return fmt.Errorf("failed to delete user profile: %w", err)
+		}
+		return nil
+	})
 }
 
 // ListUserProfiles returns all user profile names, sorted alphabetically
 func ListUserProfiles() ([]string, error) {
-	if err := EnsureDirs(); err != nil {
-		return nil, err
+	if ConfigDir() == "" {
+		return nil, ErrNoConfigDir
 	}
 
 	entries, err := os.ReadDir(UsersDir())
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
 		return nil, fmt.Errorf("failed to read users directory: %w", err)
 	}
 

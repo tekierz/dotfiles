@@ -1,6 +1,8 @@
 package pkg
 
 import (
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -52,6 +54,41 @@ func TestDedupByNameAndInstalledBy(t *testing.T) {
 	}
 	if !hasPacman || !hasAur {
 		t.Errorf("expected 'yay' to retain both pacman and aur sources, got %v", sources)
+	}
+}
+
+func TestCheckAllUpdates_ReturnsPartialResultsAndManagerErrors(t *testing.T) {
+	originalAllManagers := allManagers
+	t.Cleanup(func() {
+		allManagers = originalAllManagers
+	})
+
+	working := NewMockPackageManager()
+	working.ManagerName = "apt"
+	working.OutdatedPkgs = []Package{
+		{Name: "zsh", InstalledBy: "apt", Outdated: true},
+	}
+
+	failing := NewMockPackageManager()
+	failing.ManagerName = "brew"
+	failing.CheckOutdatedErr = errors.New("outdated query failed")
+
+	allManagers = func() []PackageManager {
+		return []PackageManager{failing, working}
+	}
+
+	packages, err := CheckAllUpdates()
+	if err == nil {
+		t.Fatal("CheckAllUpdates error = nil, want manager failure")
+	}
+	if !strings.Contains(err.Error(), "brew: outdated query failed") {
+		t.Fatalf("CheckAllUpdates error = %q, want manager name and wrapped error", err)
+	}
+	if len(packages) != 1 {
+		t.Fatalf("CheckAllUpdates returned %d packages, want partial successful result: %+v", len(packages), packages)
+	}
+	if packages[0].Name != "zsh" || packages[0].InstalledBy != "apt" {
+		t.Fatalf("partial package = %+v, want zsh from apt", packages[0])
 	}
 }
 

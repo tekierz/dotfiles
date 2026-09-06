@@ -1,358 +1,253 @@
 # Tools Reference
 
-This document lists all tools installed by the legacy `dotfiles-setup` bash script (`bin/dotfiles-setup`), organized by platform. Tools marked with **[Default]** are installed automatically; those marked with **[Optional]** require user confirmation or flags.
-
-> **Scope note:** Most sections below describe the **legacy bash script** tool set. The current **Go TUI** manages tools from its own registry (`internal/tools/`, 30 registered tools) which differs from this list. Some tools here (`fastfetch`, `tlrc`, `ncdu`, `duf`, `dust`, `bandwhich`, `gping`, `doggo`, `trippy`, `macmon`) are installed **only by the legacy bash script** and are not part of the Go TUI registry. Conversely, several tools managed by the Go TUI are documented in the new [Go TUI Tool Registry](#go-tui-tool-registry) section near the end.
-
----
-
-## Core Tools (All Platforms)
-
-These tools form the foundation of the terminal environment and are installed on all supported platforms.
-
-### Shell & Prompt
-
-| Tool | Description |
-|------|-------------|
-| **zsh** | Modern shell with better scripting, completion, and plugin support. Replaces bash as the default interactive shell. |
-| **zsh-syntax-highlighting** | Highlights commands as you type—green for valid commands, red for errors. Catches typos before you hit Enter. |
-| **zsh-autosuggestions** | Shows ghost text predictions based on your command history. Press `→` or `Ctrl-f` to accept. |
-| **powerlevel10k** | Fast, highly customizable prompt theme with git status, execution time, and context indicators. |
-
-### File Navigation & Management
-
-| Tool | Description |
-|------|-------------|
-| **eza** | Modern replacement for `ls` with colors, icons, git status integration, and tree view. Aliased to `ls`, `ll`, `la`, `lt`. |
-| **yazi** | Terminal file manager with vim-like navigation, image previews, and bulk operations. Use `y` or `yazi` to launch; `q` exits to current directory. |
-| **zoxide** | Smarter `cd` that learns your habits. Type `cd proj` to jump to `/home/user/projects` if you've been there before. |
-| **fzf** | Fuzzy finder for files, history, and more. `Ctrl-r` for history search, `Ctrl-t` for file search, `Alt-c` for directory jump. |
-
-### Text & Code
-
-| Tool | Description |
-|------|-------------|
-| **neovim** | Modern vim with better defaults, Lua configuration, and async plugin support. Configured with Kickstart.nvim for a sensible starting point. |
-| **bat** | `cat` replacement with syntax highlighting, line numbers, and git integration. Themed to match your selected color scheme. |
-| **ripgrep** | Blazingly fast `grep` replacement that respects `.gitignore`. Used by fzf and many editor plugins. |
-| **fd** | Fast, user-friendly `find` replacement. Simpler syntax: `fd pattern` instead of `find . -name '*pattern*'`. |
-| **git-delta** | Beautiful git diffs with syntax highlighting, line numbers, and side-by-side view. Automatically configured in `.gitconfig`. |
-
-### Terminal & Multiplexing
-
-| Tool | Description |
-|------|-------------|
-| **tmux** | Terminal multiplexer for persistent sessions, split panes, and window management. Essential for remote work—sessions survive disconnects. |
-| **Ghostty** | Modern, GPU-accelerated terminal emulator with excellent font rendering. Configured with your selected theme and transparent background. |
-
-### System & Utilities
-
-| Tool | Description |
-|------|-------------|
-| **btop** | Beautiful system monitor showing CPU, memory, disks, network, and processes. Much nicer than `top` or `htop`. |
-| **fastfetch** | Fast system information display showing OS, kernel, packages, memory, and more. Runs on shell startup. |
-| **tlrc** | Rust client for tldr pages—simplified, practical man pages with examples. `tldr tar` is much friendlier than `man tar`. |
-
-### Disk Analysis
-
-| Tool | Description |
-|------|-------------|
-| **ncdu** | Interactive disk usage analyzer with ncurses interface. Navigate directories, delete files, see what's eating space. Aliased to `diskuse`. |
-| **duf** | Modern `df` replacement with colorful output showing disk usage per mount. Aliased to `df`. |
-| **dust** | Intuitive `du` replacement written in Rust. Shows directory sizes with visual bars. Aliased to `du`. |
-
-### Network Analysis
-
-| Tool | Description |
-|------|-------------|
-| **bandwhich** | Real-time bandwidth utilization by process and connection. See exactly what's using your network. Run with `bandwidth` or `sudo bandwhich`. |
-| **gping** | Ping with a live graph showing latency over time. Great for monitoring connection quality. Aliased to `ping`. |
-| **doggo** | Modern DNS client (better `dig`). Clean output, supports DNS-over-TLS/HTTPS. Aliased to `dig`. |
-| **trippy** | Network diagnostic tool combining traceroute and ping. Visual display of network path with latency per hop. Use `trace` or `trip`. |
-
-### Clipboard (Platform-Specific)
-
-| Tool | Platform | Description |
-|------|----------|-------------|
-| **pbcopy/pbpaste** | macOS | Built-in clipboard commands. No installation needed. |
-| **wl-clipboard** | Linux (Wayland) | Provides `wl-copy` and `wl-paste` for Wayland sessions (GNOME, KDE Plasma on Wayland). |
-| **xclip** | Linux (X11) | Clipboard access for X11 sessions. Fallback for older systems or X11-based desktops. |
-
-> **Note:** tmux is configured to auto-detect which clipboard tool is available and use it for mouse selection copy and middle-click paste.
-
-### Custom Utilities
-
-These small scripts are installed to `~/.local/bin/`:
-
-| Tool | Description |
-|------|-------------|
-| **hk** | Hotkey reference cheatsheet. Displays keybindings for tmux, zsh, yazi, fzf, and other tools in a nicely formatted table. |
-| **caff** | Caffeine toggle to prevent system sleep. `caff on` keeps your machine awake; `caff off` restores normal behavior. Works on both macOS and Linux. |
-| **sshh** | Quick SSH connection manager. Store frequently-used hosts in `~/.sshh` and connect with `sshh 1` or via interactive menu. |
-| **dotfiles** | Theme and user management CLI. Switch themes with `dotfiles theme set dracula`, manage user profiles with `dotfiles --Username` (e.g. `dotfiles --Pratik`). |
-
-### Fonts
-
-| Font | Description |
-|------|-------------|
-| **JetBrains Mono Nerd Font** | Primary monospace font with programming ligatures and complete icon coverage for file managers and prompts. |
-| **Iosevka Nerd Font** | Alternative narrow font option, useful for fitting more content on screen. |
-
----
-
-## macOS
-
-### Default Tools
-
-All [Core Tools](#core-tools-all-platforms) plus:
-
-| Tool | Description |
-|------|-------------|
-| **Homebrew** | Package manager for macOS. Installed automatically if not present. Used to install all other tools. |
-| **macmon** | macOS system monitor showing CPU, GPU, memory, and thermals. Like btop but with Apple Silicon-specific metrics. |
-
-### Optional: Quality-of-Life Apps
-
-Install with `--macos-apps` flag or answer "yes" when prompted.
-
-#### Always Installed (when opting in)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| **Rectangle** | [Optional] | Window snapping and management. `Ctrl-Opt-←/→` for half-screen, `Ctrl-Opt-↑` for maximize. Free alternative to Magnet. |
-| **Raycast** | [Optional] | Spotlight replacement with clipboard history, snippets, window management, and extensible commands. |
-| **Stats** | [Optional] | Menu bar system monitor showing CPU, memory, disk, network, and battery with customizable widgets. |
-
-#### Individually Prompted
-
-These are prompted one-by-one unless using `--macos-apps -y`:
-
-| Tool | Type | Description |
-|------|------|-------------|
-| **AltTab** | [Optional] | Windows-style `Alt-Tab` with window previews. Shows all windows, not just apps. |
-| **MonitorControl** | [Optional] | Control external monitor brightness and volume using keyboard keys or menu bar. |
-| **Mos** | [Optional] | Smooth scrolling for external mice. Makes scroll wheels feel like trackpad. |
-| **Karabiner-Elements** | [Optional] | Powerful keyboard customization. Remap keys, create complex modifications, fix non-Mac keyboards. |
-| **IINA** | [Optional] | Modern video player built on mpv. Clean interface, good codec support, Picture-in-Picture. |
-| **The Unarchiver** | [Optional] | Extract any archive format. Handles zip, rar, 7z, tar, and dozens more. |
-| **AppCleaner** | [Optional] | Thorough app uninstaller that removes preferences, caches, and support files. |
-| **mas** | [Optional] | Mac App Store CLI. Install and update App Store apps from terminal. |
-| **trash** | [Optional] | Move files to Trash from command line instead of permanent deletion. |
-| **switchaudio-osx** | [Optional] | Switch audio input/output devices from command line. |
-
-> **Legacy only:** `mas`, `trash`, and `switchaudio-osx` are installed only by the legacy bash script. They are **not** offered in the Go TUI macOS app picker, which lists only: Rectangle, Raycast, Stats, AltTab, MonitorControl, Mos, Karabiner-Elements, IINA, The Unarchiver, and AppCleaner.
-
----
-
-## Arch Linux
-
-### Default Tools
-
-All [Core Tools](#core-tools-all-platforms) plus:
-
-| Tool | Source | Description |
-|------|--------|-------------|
-| **pacman-contrib** | [Default] | Pacman utilities including `paccache` for cleaning old packages. Auto-enabled timer keeps cache from growing indefinitely. |
-| **Ghostty** | AUR | Installed from AUR via `paru` if available. |
-| **ncdu, duf, bandwhich, gping** | [Default] | Disk and network tools from official repos. |
-| **dust, dog, trippy** | AUR | Additional analysis tools from AUR (requires `paru`). |
-
-### Requirements
-
-- **pacman**: System package manager (included with Arch)
-- **paru**: AUR helper for installing community packages (required for Ghostty, dust, dog, trippy)
-
----
-
-## Debian / Ubuntu
-
-### Default Tools
-
-| Tool | Status | Description |
-|------|--------|-------------|
-| **zsh** | [Default] | Shell |
-| **tmux** | [Default] | Terminal multiplexer |
-| **neovim** | [Default] | Editor |
-| **fzf** | [Default] | Fuzzy finder |
-| **bat** | [Default] | Syntax-highlighted cat (may be `batcat` on older versions) |
-| **ripgrep** | [Default] | Fast grep |
-| **fd-find** | [Default] | Fast find (binary may be `fdfind`) |
-| **btop** | [Default] | System monitor |
-| **ncdu** | [Default] | Interactive disk usage analyzer |
-| **duf** | [Default] | Modern df replacement (Ubuntu 22.04+) |
-
-### Limitations
-
-Some tools require manual installation or Homebrew on Linux:
-
-| Tool | Notes |
-|------|-------|
-| **eza** | Not in default repos; may need Homebrew or cargo |
-| **yazi** | Requires cargo or manual binary install |
-| **zoxide** | Installed via curl script |
-| **git-delta** | May need Homebrew |
-| **Ghostty** | Manual installation required |
-| **dust, bandwhich, gping, doggo, trippy** | Network tools require cargo or Homebrew |
-
----
-
-## Raspberry Pi
-
-Optimized configurations for different Pi models with resource-appropriate tool selection.
-
-### All Models (Default)
-
-| Tool | Description |
-|------|-------------|
-| **zsh** | Shell |
-| **tmux** | Terminal multiplexer |
-| **neovim** | Editor |
-| **fzf** | Fuzzy finder |
-| **bat** | Syntax-highlighted cat |
-| **ripgrep** | Fast grep |
-| **fd-find** | Fast find |
-| **git, curl, wget** | Basic utilities |
-| **htop** | Lightweight system monitor |
-| **zoxide** | Smart cd (installed via script) |
-
-### Pi 4 / Pi 5 (Additional)
-
-| Tool | Description |
-|------|-------------|
-| **btop** | Full system monitor (needs more RAM than htop) |
-| **eza** | Modern ls replacement |
-| **yazi** | Terminal file manager (requires cargo build) |
-
-### Pi Zero 2 W (Lightweight Mode)
-
-Uses `--raspizero2` flag. Skips resource-heavy tools:
-
-| Skipped | Reason |
-|---------|--------|
-| **yazi** | Too memory-intensive for 512MB RAM |
-| **btop** | Uses htop instead |
-| **eza** | Uses standard ls |
-
----
-
-## Desktop Environment Shortcuts
-
-The installer automatically configures desktop environment shortcuts to free up `Super+C/V/1-9` for Ghostty, making the Cmd key behave like macOS.
-
-### KDE Plasma
-
-| Original Shortcut | Action | Changed To |
-|-------------------|--------|------------|
-| `Super+V` | Show Clipboard Items | `Alt+V` |
-| `Super+1-9` | Activate Task Manager Entry | Disabled |
-
-### GNOME
-
-| Original Shortcut | Action | Changed To |
-|-------------------|--------|------------|
-| `Super+1-9` | Switch to Application | Disabled |
-
-### XFCE
-
-Any `Super+1-9` shortcuts are removed to avoid conflicts.
-
-### LXDE / LXQt / Headless
-
-No changes needed—these environments don't typically bind `Super+key` combinations.
-
-> **Note:** Log out/in after installation for DE shortcut changes to take full effect.
-
----
-
-## Installation Flags Reference (Legacy bash script)
-
-These flags apply to the **legacy `dotfiles-setup` bash script only**. They are not recognized by the Go binary (see the [Go CLI](#go-cli-subcommands--flags) section below).
-
-| Flag | Description |
-|------|-------------|
-| `--macos-apps` | Install all optional macOS quality-of-life apps without prompting |
-| `--raspi` | Raspberry Pi mode (auto-detects model) |
-| `--raspi5` | Force Raspberry Pi 5 optimizations |
-| `--raspizero2` | Lightweight mode for Pi Zero 2 W |
-| `--theme <name>` | Set initial theme (default: catppuccin-mocha) |
-| `--emacs` | Use emacs/Mac-style navigation (default) |
-| `--vim` | Use vim-style navigation |
-| `-y, --yes` | Skip all confirmation prompts |
-
----
-
-## Go CLI Subcommands & Flags
-
-The current **Go binary** (`dotfiles`) uses subcommands rather than the legacy flags above. Run `dotfiles` with no arguments to launch the TUI main menu.
+The supported `dotfiles` product is the Go application. Its runtime registry in
+`internal/tools/registry.go` is the source of truth for available tools; the
+dashboard filters that registry by operating system, package availability, and
+low-memory constraints before it builds an install plan.
+
+The retired `dotfiles-setup` Bash product had a different tool list and behavior.
+It is no longer distributed or supported. See [Legacy installer migration](legacy-migration.md)
+if an older machine still resolves that command.
+
+## Registered tools
+
+The registry currently contains 36 tools. Availability is determined from each
+tool's platform package metadata; seeing a tool here does not promise that every
+package manager or CPU architecture provides it.
+
+### Shell, terminal, editor, and file management
+
+| Tool | Dashboard role |
+|------|----------------|
+| Zsh | Interactive shell configuration |
+| Ghostty | Terminal configuration and keybindings |
+| tmux | Multiplexer configuration and keybindings |
+| Neovim | Editor installation and configuration |
+| Yazi | Terminal file manager configuration |
+
+### Git and command-line utilities
+
+| Tool | Dashboard role |
+|------|----------------|
+| Git | Git defaults and bounded delta/difftastic integration |
+| Git Delta | Syntax-highlighted Git diffs |
+| LazyGit | Terminal Git interface with bounded, ownership-safe global presets |
+| LazyDocker | Terminal Docker interface |
+| fzf | Fuzzy finding and shell integration |
+| bat | Syntax-highlighted file viewing |
+| eza | Directory listing |
+| zoxide | Directory jumping |
+| ripgrep | Recursive text search |
+| fd | File search |
+| btop | Resource monitoring |
+| Glow | Markdown rendering |
+| fswatch | File-change monitoring |
+
+### Services and integrations
+
+| Tool | Dashboard role |
+|------|----------------|
+| Claude Code | AI coding CLI and user-scope MCP configuration |
+| Codex | macOS install-only OpenAI coding CLI; version-pinned npm recipe |
+| OpenCode | Install-only coding agent; Homebrew tap or Arch package recipe |
+| Pi | macOS install-only coding agent; version-pinned npm recipe with lifecycle scripts disabled |
+| Tailscale | Mesh VPN client |
+| Sunshine | Game-streaming host |
+| Moonlight | Game-streaming client |
+
+These integrations are not equivalent in completeness. Review the dashboard's
+capability and health information, the exact install plan, and any authentication
+or service setup required by the vendor before applying changes.
+
+### Graphical applications
+
+| Tool | Dashboard role |
+|------|----------------|
+| Zen Browser | Browser installation |
+| Cursor | Desktop editor installation |
+| LM Studio | Local model application installation |
+| OBS Studio | Recording and streaming application installation |
+| Rectangle | macOS window management |
+| Raycast | macOS launcher |
+| IINA | macOS media player |
+| AppCleaner | macOS application removal utility |
+| T3 Code | macOS install-only coding-agent frontend; exact Homebrew cask action |
+
+The Cursor desktop application is distinct from Cursor Agent CLI. Codex,
+OpenCode, and Pi are now available as opt-in, install-only integrations through
+the reviewed installer plan; the dashboard shows their exact source, arguments,
+detector, authentication expectation, and risk before execution. Their settings
+are not yet managed. T3 Code is available on macOS through the narrow reviewed
+Homebrew-cask action. Automatic installation for Cursor Agent and Hermes remains
+gated because both require a verified-artifact design for mutable vendor scripts.
+
+Cursor Agent is discoverable as an observation-only integration. Its current
+installation status is `verified artifact support pending`, so the dashboard
+offers no automatic install and does not claim ownership of Cursor credentials
+or configuration.
+
+Hermes Agent is discoverable as an observation-only integration. Its current
+installation status is `verified artifact and architecture support pending`, so
+the dashboard offers no automatic install and does not claim installed state, configuration, credentials, platform support, or architecture support.
+
+Codex and Pi are currently offered only on macOS. Stock Linux global-npm
+permissions and Pi's Node 22.19+ requirement need an explicit user-owned runtime
+and PATH contract before those platforms can be advertised safely.
+
+## CLI commands
+
+Run `dotfiles` with no arguments to launch the TUI.
 
 | Command | Description |
 |---------|-------------|
-| `dotfiles install` | Launch the TUI installer |
-| `dotfiles manage` | Launch the TUI management screen |
-| `dotfiles update [check]` | Check for / apply tool updates |
-| `dotfiles theme set <name>` | Set theme directly (`dotfiles theme list` lists themes; bare `dotfiles theme` opens the picker) |
-| `dotfiles config <tool>` | Configure a specific tool |
-| `dotfiles status` | Print status (CLI) |
-| `dotfiles backups` | List backups |
-| `dotfiles restore [backup-name]` | Restore a backup |
-| `dotfiles hotkeys [--tool <name>]` | View hotkeys |
-| `dotfiles user add <name> [--theme <t>] [--nav <emacs\|vim>] [--keyboard <macos\|linux>]` | Create a user profile |
-| `dotfiles user delete <name> [--force]` | Delete a user profile |
+| `dotfiles install` | Launch the installation wizard |
+| `dotfiles manage` | Open the installed-tool dashboard |
+| `dotfiles update [check]` | Check for or apply tool updates |
+| `dotfiles config <tool>` | Open configuration for one tool |
+| `dotfiles hotkeys [--tool <name>]` | View keybindings |
+| `dotfiles status [--json]` | Print current product configuration, or installation health JSON v1 |
+| `dotfiles plan --json --tool <id>...` | Print a deterministic install-only plan with no inferred defaults |
+| `dotfiles apply --yes --plan-hash <hash> --tool <id>...` | Freshly replan and apply only an exact matching reviewed package plan |
+| `dotfiles support --json` | Print one bounded, redacted support document to stdout for review |
+| `dotfiles doctor [--json]` | Diagnose executable provenance and PATH collisions |
+| `dotfiles doctor repair [--json]` | Preview a stale user-local binary repair; confirmation is required to apply |
+| `dotfiles theme list` | List themes |
+| `dotfiles theme set <name>` | Select the product theme |
+| `dotfiles backups` | List product backups |
+| `dotfiles restore [backup-name]` | Restore a product backup |
+| `dotfiles user add <name>` | Create a user profile |
+| `dotfiles user delete <name>` | Delete a user profile |
 | `dotfiles users` | List user profiles |
-| `dotfiles --<Username>` | Quick-switch to an existing user profile (e.g. `dotfiles --Pratik`) |
-| `dotfiles uninstall [--keep-config] [--keep-binaries] [--no-restore] [--force]` | Remove dotfiles and restore config |
-| `dotfiles version` | Print version |
+| `dotfiles version` / `dotfiles --version` | Print build version |
+| `dotfiles uninstall` | Restore backups and print conservative manual removal guidance |
 
-Global flag: `--skip-intro` skips the intro animation.
+`dotfiles doctor` is read-only. It reports the running executable, ordered
+`PATH` matches, static build metadata, Homebrew ownership hints, and stale legacy
+binary names without executing or deleting discovered binaries.
 
----
+`dotfiles doctor repair` is a separate, fail-closed mutation path limited to
+`~/.local/bin/dotfiles`. It refuses symlinks, hardlinks, unknown builds, the
+running executable, and Homebrew-owned or byte-identical candidates. A preview
+is bound to a SHA-256 plan hash; noninteractive apply requires `--yes` and
+`--plan-hash <hash>`. Successful repair preserves the exact binary as mode 0600
+and records its original mode plus restore guidance in a private manifest.
+`dotfiles-tui` and `dotfiles-setup` are never changed by this command.
 
-## Go TUI Tool Registry
+### Support JSON
 
-The Go TUI manages tools from its own registry (`internal/tools/`). In addition to the cross-platform CLI tools shared with the legacy list (zsh, tmux, neovim, yazi, git, git-delta, fzf, bat, eza, zoxide, ripgrep, fd, btop), it registers the following tools that are **not** covered by the legacy bash script sections above.
+`dotfiles support --json` emits exactly one newline-terminated JSON document to
+stdout. Version 1 has no human mode, archive format, `--output` flag, automatic
+attachment, or upload path. The command does not create a support directory or
+file. Redirecting stdout is an explicit user choice made after or alongside
+review; the application itself does not save the document.
 
-### CLI Tools (Go TUI)
+The public document collects only these bounded facts:
 
-| Tool | Description | Packages |
-|------|-------------|----------|
-| **LazyGit** | Simple terminal UI for Git commands. | `lazygit` (all platforms) |
-| **LazyDocker** | Simple terminal UI for Docker. Resource-heavy; skipped on low-memory systems (e.g. Pi Zero 2). | `lazydocker` (all platforms) |
-| **Glow** | Render markdown on the CLI. | `glow` (all platforms) |
-| **fswatch** | Cross-platform file change monitor. | `fswatch` (all platforms) |
-| **Tailscale** | Mesh VPN for secure networking. | `tailscale` (all platforms) |
-| **Sunshine** | Self-hosted game streaming server. | `sunshine` (all platforms) |
-| **Moonlight** | Open-source game streaming client. | `moonlight` (macOS), `moonlight-qt` (Arch, Debian) |
-| **Claude Code** | AI-powered coding assistant. Installed via npm (`@anthropic-ai/claude-code`); requires `node` (macOS) or `nodejs`+`npm` (Arch, Debian). Has a dedicated MCP configuration screen in the TUI. | `node` (macOS), `nodejs`, `npm` (Arch, Debian) |
+- sanitized product/Go/OS/architecture metadata and a clean/modified/unavailable
+  VCS state, without a revision;
+- the existing validated, redacted `dotfiles.status` installation-health
+  document;
+- executable ownership as `homebrew` or `unverified`, PATH/legacy counts,
+  Homebrew presence, and allowlisted severity/code finding pairs; and
+- at most 20 recent operation summaries containing status, aggregate action
+  counts, backup-recorded state, bounded rollback counts, and duration.
 
-### GUI Applications (Go TUI)
+It omits usernames, hostnames, HOME/XDG/PATH values, executable and backup
+paths, symlink targets, environment and command output, config contents,
+credentials and tokens, raw errors, logs, operation IDs, plan hashes, journal
+filenames, exact timestamps, and private state digests. Config, service, and
+authentication capabilities are explicitly `not_collected`.
 
-| Tool | Description | Packages |
-|------|-------------|----------|
-| **Zen Browser** | Privacy-focused browser based on Firefox. | `zen-browser` (macOS), `zen-browser-bin` (Arch); no Debian package |
-| **Cursor** | AI-first code editor. | `cursor` (macOS), `cursor-bin` (Arch); no Debian package |
-| **LM Studio** | Local LLM runner. | `lm-studio` (macOS, Arch); no Debian package |
-| **OBS Studio** | Streaming and recording software. | `obs` (macOS), `obs-studio` (Arch, Debian) |
-
-> The Go TUI also registers the macOS-only apps Rectangle, Raycast, IINA, and AppCleaner (see the [macOS Quality-of-Life Apps](#optional-quality-of-life-apps) section).
-
----
-
-## Post-Install Configuration
-
-After installation, these files contain your tool configurations:
-
-| File | Purpose |
+| Exit | Streams |
 |------|---------|
-| `~/.zshrc` | Zsh configuration with aliases, functions, and plugin loading |
-| `~/.tmux.conf` | Tmux configuration with theme and keybindings |
-| `~/.config/ghostty/config` | Terminal emulator settings |
-| `~/.config/yazi/` | File manager configuration |
-| `~/.config/bat/config` | Bat theme settings |
-| `~/.config/btop/btop.conf` | btop resource monitor settings (Go TUI) |
-| `~/.config/lazygit/config.yml` | LazyGit configuration (Go TUI) |
-| `~/.config/lazydocker/config.yml` | LazyDocker configuration (Go TUI) |
-| `~/.config/glow/glow.yml` | Glow markdown renderer settings (Go TUI) |
-| `~/.claude.json` | Claude Code user-scope MCP servers (Go TUI; only the `mcpServers` key is managed) |
-| `~/.gitconfig` | Git configuration with delta |
-| `~/.config/dotfiles/settings` | Current theme, navigation style, and active user |
-| `~/.sshh` | SSH hosts for quick connect |
+| `0` | One complete JSON document on stdout; stderr is empty |
+| `2` | One partial but valid JSON document on stdout; stderr is empty |
+| `2` | Invalid syntax or missing `--json`: stdout is empty and stderr is `invalid support request` |
+| `1` | Projection, size, or write failure: no valid success document and stderr is only `support collection failed` |
+
+Always inspect the support document before sharing it. `doctor --json`, private
+operation journals, configuration files, and logs are not share-safe artifacts;
+do not attach them as substitutes for `support --json`.
+
+`dotfiles apply` accepts no plan document or profile input. It canonicalizes the
+explicit repeated tools, collects a fresh installation snapshot, and requires
+the exact private-authority hash printed by a matching ready `plan --json` run.
+Drift and no-change outcomes exit 2 before installation mutation. Successful
+v1 actions are package-only, journaled operations; because they do not mutate
+managed files, the journal explicitly records that no filesystem rollback point
+was created.
+
+## Managed configuration locations
+
+Paths can vary by platform and native application precedence. The operation plan
+shown before apply is authoritative for a particular machine.
+
+| Path | Purpose |
+|------|---------|
+| `~/.zshrc` | Zsh integration |
+| `~/.tmux.conf` or `${XDG_CONFIG_HOME:-~/.config}/tmux/tmux.conf` | Active native tmux config preserved outside one bounded managed section |
+| `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` (and legacy `config`) | Ghostty XDG candidates; the reviewed plan freezes the active candidate before mutation |
+| `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` (and legacy `config`) | Higher-precedence macOS candidates; the last existing source in Ghostty's order is the frozen target |
+| `${YAZI_CONFIG_HOME}` when set and absolute; else `${XDG_CONFIG_HOME}/yazi` when XDG is set and absolute; else `~/.config/yazi/` | Exact Yazi directory frozen by the reviewed plan; set relative overrides fail closed |
+| `~/.config/bat/config` | bat settings |
+| `~/.config/btop/btop.conf` | btop settings |
+| Active LazyGit `config.yml` selected by `CONFIG_DIR`, XDG, or platform user-config precedence | LazyGit settings; the reviewed plan shows the exact writable target |
+| `~/.config/lazydocker/config.yml` | LazyDocker settings |
+| Active `glow.{yaml,yml}` under `GLOW_CONFIG_HOME`, `XDG_CONFIG_HOME/glow`, or Glow's platform user-config directory | Glow settings; the first Viper-compatible source wins |
+| `~/.claude.json` | Claude Code user-scope MCP servers |
+| `~/.gitconfig` | Native Git configuration with a bounded managed include |
+| `~/.config/dotfiles/git/config` | Product-owned Git and diff settings |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/global.json` | Versioned global theme, navigation, active-user, animation, and backup preferences |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/tools/manage.json` | Versioned dashboard settings state used by Manage |
+| `${XDG_CONFIG_HOME:-~/.config}/dotfiles/users/` | Product user profiles |
+| `~/.sshh` | SSH host entries used by `sshh` |
+
+Git and Ghostty adoption preserves existing native content inside bounded
+managed sections. Recovery comes from the reviewed operation backup; writers do
+not create or overwrite ambiguous sibling `*.dotfiles.bak` files.
+
+Yazi management is pinned to the v26.5.6 configuration schema. `yazi.toml`,
+`keymap.toml`, and `theme.toml` are classified independently: a missing file or
+the exact current product form is writable, while native, malformed, or exact
+historical content remains read-only with its reason exposed. Vim mode preserves
+Yazi's default keymap and writes only the product compatibility/style header;
+Emacs mode prepends five bounded navigation/selection bindings without replacing
+upstream defaults. The installer reviews and writes all three files as separate
+actions. Standalone Yazi saves review only main and keymap, while Manage reviews
+only the affected main/keymap file or files. Ordinary standalone and Manage
+saves never synthesize or rewrite `theme.toml`.
+
+Glow management is pinned to Glow v2.1.2. It exposes `style`, `mouse`, `pager`,
+`width`, `all`, `showLineNumbers`, and `preserveNewLines` in one trailing managed
+YAML block while preserving unknown flat scalar settings byte-for-byte. Adoption
+rejects complex, duplicate, malformed, or unsupported YAML and blocks when a
+higher-precedence non-YAML source or environment setting override is active.
+The eight built-in styles are writable. Existing custom style strings are
+imported and displayed read-only; choose a built-in before saving other Glow
+changes. Width `0` is Glow's automatic mode (maximum 120, fallback 80).
+
+LazyGit management is pinned to LazyGit v0.62.1 (`f2788e4`) and deliberately
+models four global concepts: side-panel width fraction, mouse events, one of two
+color presets, and the builtin-or-Delta pager preset. The Delta pager may be
+selected only when Git Delta is selected in the installer or already installed
+for Manage and standalone saves. Product-generated files are managed as exact
+whole files; arbitrary native YAML and custom color or pager shapes are imported
+for display but remain read-only.
+
+LazyGit target discovery follows upstream precedence:
+
+1. `LG_CONFIG_FILE` source chains are observed and hydrated read-only; this
+   release does not rewrite a chain of configuration files.
+2. `CONFIG_DIR`, when set to an absolute path, is the exact config directory.
+3. `XDG_CONFIG_HOME/lazygit/config.yml` is used when XDG is explicitly set.
+4. Without overrides, macOS uses
+   `~/Library/Application Support/lazygit/config.yml`; Unix uses
+   `~/.config/lazygit/config.yml`.
+
+The historical `jesseduffield/lazygit/config.yml` fallback can still be read for
+native hydration, but it is intentionally read-only; migrate it to the modern
+directory before dashboard writes. Relative overrides and active targets outside
+the user's home directory fail closed. Repository-local `.git/lazygit.yml` or a
+parent `.lazygit.yml` can override global values, so the dashboard discloses that
+its four settings are global defaults rather than guaranteed per-repository
+effective values.

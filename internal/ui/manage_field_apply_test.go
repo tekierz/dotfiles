@@ -50,7 +50,7 @@ type manageFieldRoundTrip struct {
 // manageAppliedRoundTrips is the round-trip proof table: every Manage field
 // classified as APPLIED (i.e. NOT in manageNotAppliedFields) must have an entry
 // here, keyed "toolID/fieldKey". Running the entry through the real scoped Manage
-// save path (manageConfigToDeepDive -> changedManageTools -> applyChangedManageTools)
+// legacy direct-generator mapping path (manageConfigToDeepDive -> changedManageTools)
 // and finding `want` in `file` proves the field is wired end-to-end:
 // struct -> manageConfigToDeepDive -> toolDeepDiveFields (so the scoped diff
 // detects it) -> generator (so the file actually changes). The guardrail test
@@ -58,17 +58,19 @@ type manageFieldRoundTrip struct {
 // round-trip.
 var manageAppliedRoundTrips = map[string]manageFieldRoundTrip{
 	// Ghostty
-	"ghostty/font_family":   {func(mc *ManageConfig) { mc.GhosttyFontFamily = "Fira Code" }, ".config/ghostty/config", "Fira Code"},
-	"ghostty/font_size":     {func(mc *ManageConfig) { mc.GhosttyFontSize = 21 }, ".config/ghostty/config", "font-size = 21"},
-	"ghostty/opacity":       {func(mc *ManageConfig) { mc.GhosttyOpacity = 80 }, ".config/ghostty/config", "background-opacity = 0.80"},
-	"ghostty/blur":          {func(mc *ManageConfig) { mc.GhosttyBlurRadius = 12 }, ".config/ghostty/config", "background-blur-radius = 12"},
-	"ghostty/cursor":        {func(mc *ManageConfig) { mc.GhosstyCursorStyle = "bar" }, ".config/ghostty/config", "cursor-style = bar"},
-	"ghostty/scrollback":    {func(mc *ManageConfig) { mc.GhosttyScrollbackLines = 12345 }, ".config/ghostty/config", "scrollback-limit = 12345"},
-	"ghostty/decor":         {func(mc *ManageConfig) { mc.GhosttyWindowDecorations = false }, ".config/ghostty/config", "window-decoration = false"},
-	"ghostty/confirm_close": {func(mc *ManageConfig) { mc.GhosttyConfirmClose = false }, ".config/ghostty/config", "confirm-close-surface = false"},
+	"ghostty/font_family":   {func(mc *ManageConfig) { mc.GhosttyFontFamily = "Fira Code" }, ".config/ghostty/config.ghostty", "Fira Code"},
+	"ghostty/font_size":     {func(mc *ManageConfig) { mc.GhosttyFontSize = 21 }, ".config/ghostty/config.ghostty", "font-size = 21"},
+	"ghostty/opacity":       {func(mc *ManageConfig) { mc.GhosttyOpacity = 80 }, ".config/ghostty/config.ghostty", "background-opacity = 0.80"},
+	"ghostty/blur":          {func(mc *ManageConfig) { mc.GhosttyBlurRadius = 12 }, ".config/ghostty/config.ghostty", "background-blur = 12"},
+	"ghostty/cursor":        {func(mc *ManageConfig) { mc.GhosstyCursorStyle = "bar" }, ".config/ghostty/config.ghostty", "cursor-style = bar"},
+	"ghostty/scrollback":    {func(mc *ManageConfig) { mc.GhosttyScrollbackLines = 12345 }, ".config/ghostty/config.ghostty", "scrollback-limit = 12345"},
+	"ghostty/decor":         {func(mc *ManageConfig) { mc.GhosttyWindowDecorations = false }, ".config/ghostty/config.ghostty", "window-decoration = false"},
+	"ghostty/confirm_close": {func(mc *ManageConfig) { mc.GhosttyConfirmClose = false }, ".config/ghostty/config.ghostty", "confirm-close-surface = false"},
+	"ghostty/tab_bindings":  {func(mc *ManageConfig) { mc.GhosttyTabBindings = "ctrl" }, ".config/ghostty/config.ghostty", "keybind = ctrl+t=new_tab"},
 
 	// Tmux
 	"tmux/prefix":            {func(mc *ManageConfig) { mc.TmuxPrefix = "C-b" }, ".tmux.conf", "set -g prefix C-b"},
+	"tmux/split_binds":       {func(mc *ManageConfig) { mc.TmuxSplitBinds = "pipes" }, ".tmux.conf", "bind | split-window -h"},
 	"tmux/base":              {func(mc *ManageConfig) { mc.TmuxBaseIndex = 0 }, ".tmux.conf", "set -g base-index 0"},
 	"tmux/mouse":             {func(mc *ManageConfig) { mc.TmuxMouseMode = false }, ".tmux.conf", "set -g mouse off"},
 	"tmux/status_pos":        {func(mc *ManageConfig) { mc.TmuxStatusPosition = "top" }, ".tmux.conf", "set -g status-position top"},
@@ -106,20 +108,28 @@ var manageAppliedRoundTrips = map[string]manageFieldRoundTrip{
 	"neovim/undo":    {func(mc *ManageConfig) { mc.NeovimUndoFile = false }, ".config/nvim/lua/custom/options.lua", "vim.opt.undofile = false"},
 
 	// Git
-	"git/branch":       {func(mc *ManageConfig) { mc.GitDefaultBranch = "develop" }, ".gitconfig", "defaultBranch = develop"},
-	"git/setup_remote": {func(mc *ManageConfig) { mc.GitAutoSetupRemote = false }, ".gitconfig", "autoSetupRemote = false"},
-	"git/rebase":       {func(mc *ManageConfig) { mc.GitPullRebase = false }, ".gitconfig", "rebase = false"},
-	"git/diff":         {func(mc *ManageConfig) { mc.GitDiffTool = "difftastic" }, ".gitconfig", "external = difft"},
-	"git/merge":        {func(mc *ManageConfig) { mc.GitMergeTool = "meld" }, ".gitconfig", "tool = meld"},
-	"git/creds":        {func(mc *ManageConfig) { mc.GitCredentialHelper = "store" }, ".gitconfig", "helper = store"},
-	"git/sign":         {func(mc *ManageConfig) { mc.GitSignCommits = true }, ".gitconfig", "gpgsign = true"},
+	"git/branch":       {func(mc *ManageConfig) { mc.GitDefaultBranch = "develop" }, ".config/dotfiles/git/config", "defaultBranch = develop"},
+	"git/setup_remote": {func(mc *ManageConfig) { mc.GitAutoSetupRemote = false }, ".config/dotfiles/git/config", "autoSetupRemote = false"},
+	"git/rebase":       {func(mc *ManageConfig) { mc.GitPullRebase = false }, ".config/dotfiles/git/config", "rebase = false"},
+	"git/diff":         {func(mc *ManageConfig) { mc.GitDiffTool = "difftastic" }, ".config/dotfiles/git/config", "external = difft"},
+	"git/merge":        {func(mc *ManageConfig) { mc.GitMergeTool = "meld" }, ".config/dotfiles/git/config", "tool = meld"},
+	"git/creds":        {func(mc *ManageConfig) { mc.GitCredentialHelper = "store" }, ".config/dotfiles/git/config", "helper = store"},
+	"git/sign":         {func(mc *ManageConfig) { mc.GitSignCommits = true }, ".config/dotfiles/git/config", "gpgsign = true"},
+	"git/delta_side":   {func(mc *ManageConfig) { mc.GitDeltaSideBySide = false }, ".config/dotfiles/git/config", "side-by-side = false"},
+	"git/alias_st":     {func(mc *ManageConfig) { mc.GitAliasStatus = false }, ".config/dotfiles/git/config", "Generated by dotfiles"},
+	"git/alias_co":     {func(mc *ManageConfig) { mc.GitAliasCheckout = false }, ".config/dotfiles/git/config", "Generated by dotfiles"},
+	"git/alias_br":     {func(mc *ManageConfig) { mc.GitAliasBranch = false }, ".config/dotfiles/git/config", "Generated by dotfiles"},
+	"git/alias_ci":     {func(mc *ManageConfig) { mc.GitAliasCommit = false }, ".config/dotfiles/git/config", "Generated by dotfiles"},
+	"git/alias_lg":     {func(mc *ManageConfig) { mc.GitAliasLogGraph = false }, ".config/dotfiles/git/config", "Generated by dotfiles"},
 
 	// Yazi
-	"yazi/hidden":    {func(mc *ManageConfig) { mc.YaziShowHidden = true }, ".config/yazi/yazi.toml", "show_hidden = true"},
-	"yazi/sort_by":   {func(mc *ManageConfig) { mc.YaziSortBy = "modified" }, ".config/yazi/yazi.toml", "sort_by = \"mtime\""},
-	"yazi/sort_rev":  {func(mc *ManageConfig) { mc.YaziSortReverse = true }, ".config/yazi/yazi.toml", "sort_reverse = true"},
-	"yazi/linemode":  {func(mc *ManageConfig) { mc.YaziLineMode = "permissions" }, ".config/yazi/yazi.toml", "linemode = \"permissions\""},
-	"yazi/scrolloff": {func(mc *ManageConfig) { mc.YaziScrollOff = 9 }, ".config/yazi/yazi.toml", "scrolloff = 9"},
+	"yazi/keymap":       {func(mc *ManageConfig) { mc.YaziKeymap = "emacs" }, ".config/yazi/keymap.toml", `on = "<C-p>"`},
+	"yazi/hidden":       {func(mc *ManageConfig) { mc.YaziShowHidden = true }, ".config/yazi/yazi.toml", "show_hidden = true"},
+	"yazi/preview_mode": {func(mc *ManageConfig) { mc.YaziPreviewMode = "never" }, ".config/yazi/yazi.toml", "previewers = []"},
+	"yazi/sort_by":      {func(mc *ManageConfig) { mc.YaziSortBy = "modified" }, ".config/yazi/yazi.toml", "sort_by = \"mtime\""},
+	"yazi/sort_rev":     {func(mc *ManageConfig) { mc.YaziSortReverse = true }, ".config/yazi/yazi.toml", "sort_reverse = true"},
+	"yazi/linemode":     {func(mc *ManageConfig) { mc.YaziLineMode = "permissions" }, ".config/yazi/yazi.toml", "linemode = \"permissions\""},
+	"yazi/scrolloff":    {func(mc *ManageConfig) { mc.YaziScrollOff = 9 }, ".config/yazi/yazi.toml", "scrolloff = 9"},
 
 	// FZF
 	"fzf/opts":           {func(mc *ManageConfig) { mc.FzfDefaultOpts = "--cycle" }, ".config/fzf/fzf.zsh", "--cycle"},
@@ -130,10 +140,10 @@ var manageAppliedRoundTrips = map[string]manageFieldRoundTrip{
 	"fzf/preview_window": {func(mc *ManageConfig) { mc.FzfPreviewWindow = "up:50%" }, ".config/fzf/fzf.zsh", "--preview-window=up:50%"},
 
 	// LazyGit
-	"lazygit/side":      {func(mc *ManageConfig) { mc.LazyGitSideBySide = false }, ".config/lazygit/config.yml", "Generated by dotfiles"},
-	"lazygit/paging":    {func(mc *ManageConfig) { mc.LazyGitPaging = "never" }, ".config/lazygit/config.yml", "pager: cat"},
-	"lazygit/mouse":     {func(mc *ManageConfig) { mc.LazyGitMouseMode = false }, ".config/lazygit/config.yml", "mouseEvents: false"},
-	"lazygit/gui_theme": {func(mc *ManageConfig) { mc.LazyGitGuiTheme = "light" }, ".config/lazygit/config.yml", "selectedLineBgColor"},
+	"lazygit/side_fraction": {func(mc *ManageConfig) { mc.LazyGitSidePanelWidth = "0.42" }, lazyGitTestRelPath(), "sidePanelWidth: 0.42"},
+	"lazygit/pager_preset":  {func(mc *ManageConfig) { mc.LazyGitPagerPreset = "delta" }, lazyGitTestRelPath(), "pager: delta --dark --paging=never"},
+	"lazygit/mouse":         {func(mc *ManageConfig) { mc.LazyGitMouseEvents = false }, lazyGitTestRelPath(), "mouseEvents: false"},
+	"lazygit/color_preset":  {func(mc *ManageConfig) { mc.LazyGitColorPreset = "light-high-contrast" }, lazyGitTestRelPath(), "activeBorderColor: [blue, bold]"},
 
 	// Btop
 	"btop/theme": {func(mc *ManageConfig) { mc.BtopTheme = "nord" }, ".config/btop/btop.conf", "color_theme = \"nord\""},
@@ -144,10 +154,13 @@ var manageAppliedRoundTrips = map[string]manageFieldRoundTrip{
 	"btop/boxes": {func(mc *ManageConfig) { mc.BtopShownBoxes = "cpu mem" }, ".config/btop/btop.conf", "shown_boxes = \"cpu mem\""},
 
 	// Glow
-	"glow/style": {func(mc *ManageConfig) { mc.GlowStyle = "light" }, ".config/glow/glow.yml", "style: \"light\""},
-	"glow/pager": {func(mc *ManageConfig) { mc.GlowPager = "never" }, ".config/glow/glow.yml", "pager: false"},
-	"glow/width": {func(mc *ManageConfig) { mc.GlowWidth = 123 }, ".config/glow/glow.yml", "width: 123"},
-	"glow/mouse": {func(mc *ManageConfig) { mc.GlowMouse = false }, ".config/glow/glow.yml", "mouse: false"},
+	"glow/style":             {func(mc *ManageConfig) { mc.GlowStyle = "light" }, glowTestRelPath(), "style: \"light\""},
+	"glow/pager":             {func(mc *ManageConfig) { mc.GlowPager = "auto" }, glowTestRelPath(), "pager: true"},
+	"glow/width":             {func(mc *ManageConfig) { mc.GlowWidth = 123 }, glowTestRelPath(), "width: 123"},
+	"glow/mouse":             {func(mc *ManageConfig) { mc.GlowMouse = true }, glowTestRelPath(), "mouse: true"},
+	"glow/all":               {func(mc *ManageConfig) { mc.GlowAll = true }, glowTestRelPath(), "all: true"},
+	"glow/line_numbers":      {func(mc *ManageConfig) { mc.GlowShowLineNumbers = true }, glowTestRelPath(), "showLineNumbers: true"},
+	"glow/preserve_newlines": {func(mc *ManageConfig) { mc.GlowPreserveNewLines = true }, glowTestRelPath(), "preserveNewLines: true"},
 }
 
 // TestManageFieldsAllClassified is the completeness half of the guardrail: every

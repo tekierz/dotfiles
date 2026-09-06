@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "review_date": "2026-09-05",
+  "run_completed_at_utc": "2026-09-06T03:07:09Z",
+  "source_sha": "739f82f457672fffed6504bee8577498cc6cb8a7",
+  "run": {
+    "id": 34008157813,
+    "url": "https://github.com/tekierz/dotfiles/actions/runs/34008157813",
+    "conclusion": "success"
+  },
+  "artifact": {
+    "id": 9981614353,
+    "name": "debian-platform-739f82f457672fffed6504bee8577498cc6cb8a7",
+    "declared_digest": "sha256:98549d233fd3c6dcbce63a669bfe49e589fced87b7ffded8f5fb24b5170842df",
+    "expires_at": "2026-09-13T03:07:07Z"
+  },
+  "platform": {
+    "userspace": "Debian GNU/Linux13 (trixie)",
+    "debian_version_full": "13.6",
+    "architecture": "amd64",
+    "host": "GitHub-hosted ubuntu-24.04 VM",
+    "kernel": "6.17.0-1022-azure",
+    "container_image": "debian@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f",
+    "apt": "3.0.3"
+  },
+  "package": {
+    "name": "fzf",
+    "version": "0.60.3-1+b2"
+  },
+  "recorded_binary_sha256": {
+    "dotfiles": "4453f7195e4f0ef364ad5aab36b45a24f4c3dfe8328c8196428ed4a5abbaae50",
+    "platformqa": "7cf954452a04db6cfd679f6ab548d6d50e4218aa22ab9055e2102e26e8b224bf",
+    "tools.test": "215fdf78a0ea2d942e3214a9acd509553264f29d3bf2168a5a07edacb10d932f"
+  },
+  "execution_marker": "DOTFILES_DEBIAN_PLATFORM_EXECUTED cases=8 update=no-op",
+  "cases": [
+    {
+      "id": "wrong_hash",
+      "result": "pass",
+      "evidence": "empty stdout; exact changed-plan stderr; exit2 and absent receipt asserted by successful bootstrap"
+    },
+    {
+      "id": "cli_plan_apply",
+      "result": "pass",
+      "evidence": "one ready APT/fzf action; exact hash success line; empty public stderr; succeeded journal"
+    },
+    {
+      "id": "installed_receipt",
+      "result": "pass",
+      "evidence": "native dpkg and individual/batch product receipt agree"
+    },
+    {
+      "id": "held_receipt",
+      "result": "pass",
+      "evidence": "hold ok installed remains healthy; bootstrap confirms hold unchanged before explicit unhold"
+    },
+    {
+      "id": "targeted_update",
+      "result": "pass",
+      "evidence": "production APT index then install phases; version unchanged; zero upgrade/install/remove"
+    },
+    {
+      "id": "no_changes",
+      "result": "pass",
+      "evidence": "follow-up no_changes, absent plan_hash, apply not_available"
+    },
+    {
+      "id": "stale_apply",
+      "result": "pass",
+      "evidence": "empty stdout; exact not-ready stderr; exit2 asserted by successful bootstrap"
+    },
+    {
+      "id": "installed_fzf_config",
+      "result": "pass",
+      "evidence": "exact installed-fzf test PASS0.01s; no skip"
+    }
+  ],
+  "additional_assertions": [
+    "one succeeded package-only journal binds reviewed hash; no backup/rollback fabricated",
+    "private journal source mode0600 asserted by bootstrap; synthetic copy uploaded",
+    "configuration tree remains empty; shell sentinel checksum verified unchanged"
+  ],
+  "verification_method": "Downloaded artifacts checked independently against exact marker, JSON structure, stream content and phase order. Exit codes, source modes and intermediate absent/hold state rely on fail-fast assertions in the successful exact-commit bootstrap; raw exit-code files and intermediate inventories were not emitted.",
+  "same_commit_ci": {
+    "conclusion": "success",
+    "headSha": "739f82f457672fffed6504bee8577498cc6cb8a7",
+    "jobs": [
+      {
+        "conclusion": "success",
+        "name": "Build (macos-latest)"
+      },
+      {
+        "conclusion": "success",
+        "name": "Security"
+      },
+      {
+        "conclusion": "success",
+        "name": "Test (macos-latest)"
+      },
+      {
+        "conclusion": "success",
+        "name": "Lint"
+      },
+      {
+        "conclusion": "success",
+        "name": "Build (ubuntu-latest)"
+      },
+      {
+        "conclusion": "success",
+        "name": "Test (ubuntu-latest)"
+      },
+      {
+        "conclusion": "success",
+        "name": "Release Gate"
+      },
+      {
+        "conclusion": "success",
+        "name": "Test"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/tekierz/dotfiles/actions/runs/34008157778"
+  },
+  "remaining_scope": [
+    "Arch/pacman and Darwin/Homebrew real transactions",
+    "controlled version-changing upgrade and UpdateAllStreaming real transaction",
+    "real cancellation, sudo-denial and interrupted-package recovery",
+    "Debian native kernel, Linux arm64 and Raspberry Pi hardware",
+    "TUI mouse/fonts/colors and physical terminal rendering",
+    "casks, service/network/GPU behavior, npm phases/authentication",
+    "owner snapshot restore and external Homebrew publication"
+  ],
+  "sanitization": "Synthetic CI results only; raw operation ID, user paths, hostname, journal and raw logs omitted."
+}

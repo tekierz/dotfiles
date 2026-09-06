@@ -7,34 +7,17 @@ import (
 	"testing"
 )
 
-// withTempHome points HOME at a fresh temp dir (and clears XDG_CONFIG_HOME) so
-// both config.ConfigDir() and the tools.Write*Config generators (which use
-// os.UserHomeDir / $HOME) land their output inside the temp dir. It restores
-// the previous environment on cleanup.
+// withTempHome points HOME at a fresh temp dir and clears XDG config/state
+// overrides so configuration and private operation-state fixtures cannot read
+// or write the host environment. It restores the previous environment on
+// cleanup.
 func withTempHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	origHome, hadHome := os.LookupEnv("HOME")
-	origXDG, hadXDG := os.LookupEnv("XDG_CONFIG_HOME")
-
-	if err := os.Setenv("HOME", dir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	_ = os.Unsetenv("XDG_CONFIG_HOME")
-
-	t.Cleanup(func() {
-		if hadHome {
-			os.Setenv("HOME", origHome)
-		} else {
-			os.Unsetenv("HOME")
-		}
-		if hadXDG {
-			os.Setenv("XDG_CONFIG_HOME", origXDG)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	})
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
 
 	return dir
 }
@@ -63,7 +46,7 @@ func TestApplyManageConfigWritesGeneratedFiles(t *testing.T) {
 	}
 
 	// Ghostty
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config.ghostty")
 	ghostty := readFileOrFail(t, ghosttyPath)
 	if !strings.Contains(ghostty, "font-size = 21") {
 		t.Errorf("ghostty config missing font-size 21:\n%s", ghostty)
@@ -73,7 +56,7 @@ func TestApplyManageConfigWritesGeneratedFiles(t *testing.T) {
 	}
 
 	// Git
-	gitPath := filepath.Join(home, ".gitconfig")
+	gitPath := filepath.Join(home, ".config", "dotfiles", "git", "config")
 	git := readFileOrFail(t, gitPath)
 	if !strings.Contains(git, "defaultBranch = develop") && !strings.Contains(git, "develop") {
 		t.Errorf("gitconfig missing develop default branch:\n%s", git)

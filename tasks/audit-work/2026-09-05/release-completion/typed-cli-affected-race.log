@@ -1,0 +1,3 @@
+ok  	github.com/tekierz/dotfiles/internal/tools	6.933s
+ok  	github.com/tekierz/dotfiles/internal/installplan	2.779s
+ok  	github.com/tekierz/dotfiles/internal/installapply	3.480s

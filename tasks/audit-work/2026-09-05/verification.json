@@ -1,0 +1,18 @@
+{
+  "build-pinned": "0",
+  "cross-darwin-amd64": "0",
+  "cross-darwin-arm64": "0",
+  "cross-linux-amd64": "0",
+  "cross-linux-arm64": "0",
+  "govulncheck-pinned": "3",
+  "lint-pinned": "0",
+  "module-tidy-pinned": "0",
+  "race-pinned": "1",
+  "race-unsandboxed": "0",
+  "runner-unsandboxed": "0",
+  "staticcheck-pinned": "0",
+  "tests-pinned-repeat": "1",
+  "tests-unsandboxed": "0",
+  "vet-pinned": "0",
+  "toolchain": "Go 1.25.6 darwin/arm64; scanner v1.1.4; golangci-lint v2.5.0; Staticcheck v0.7.0"
+}

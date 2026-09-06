@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"sort"
 	"sync"
 
@@ -8,7 +9,7 @@ import (
 )
 
 // Global singleton registry with sync.Once for thread-safe lazy initialization.
-// This avoids creating new registries and registering all 30 tools each time
+// This avoids creating new registries and registering all 34 tools each time
 // NewRegistry() would otherwise be called (15+ times across the codebase).
 var (
 	globalRegistry     *Registry
@@ -24,6 +25,7 @@ type Registry struct {
 	installedCache map[string]bool
 	cachePopulated bool
 	cacheMu        sync.RWMutex
+	populateMu     sync.Mutex
 }
 
 // GetRegistry returns the global singleton registry.
@@ -66,6 +68,11 @@ func NewRegistry() *Registry {
 	r.Register(NewBtopTool())
 	r.Register(NewGlowTool())
 	r.Register(NewClaudeCodeTool())
+	r.Register(NewCodexTool())
+	r.Register(NewCursorAgentTool())
+	r.Register(NewHermesAgentTool())
+	r.Register(NewPiTool())
+	r.Register(NewOpenCodeTool())
 	r.Register(NewTailscaleTool())
 	r.Register(NewSunshineTool())
 	r.Register(NewMoonlightTool())
@@ -83,6 +90,7 @@ func NewRegistry() *Registry {
 	r.Register(NewRaycastTool())
 	r.Register(NewIINATool())
 	r.Register(NewAppCleanerTool())
+	r.Register(NewT3CodeTool())
 
 	return r
 }
@@ -126,17 +134,35 @@ func (r *Registry) ByCategory(cat Category) []Tool {
 
 // ensureCache populates the installed cache if not already done
 func (r *Registry) ensureCache() {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
+	r.ensureCacheWith(context.Background(), pkg.DetectManager(), pkg.DetectPlatform())
+}
 
+func (r *Registry) ensureCacheWith(ctx context.Context, mgr pkg.PackageManager, platform pkg.Platform) {
+	r.cacheMu.RLock()
 	if r.cachePopulated {
+		r.cacheMu.RUnlock()
 		return
 	}
+	r.cacheMu.RUnlock()
 
-	for _, t := range r.tools {
-		r.installedCache[t.ID()] = t.IsInstalled()
+	// Serialize the expensive observation without holding cacheMu. Readers keep
+	// seeing the previous immutable snapshot while one caller populates, and a
+	// second check prevents concurrent callers from issuing duplicate batches.
+	r.populateMu.Lock()
+	defer r.populateMu.Unlock()
+	r.cacheMu.RLock()
+	if r.cachePopulated {
+		r.cacheMu.RUnlock()
+		return
 	}
+	r.cacheMu.RUnlock()
+
+	snapshot := ObserveInstallations(ctx, r.All(), mgr, platform)
+
+	r.cacheMu.Lock()
+	r.installedCache = snapshot
 	r.cachePopulated = true
+	r.cacheMu.Unlock()
 }
 
 // isInstalledCached returns cached installation status for a tool
@@ -148,16 +174,19 @@ func (r *Registry) isInstalledCached(id string) bool {
 
 // RefreshCache invalidates and repopulates the installed cache
 func (r *Registry) RefreshCache() {
+	r.populateMu.Lock()
+	defer r.populateMu.Unlock()
+	snapshot := ObserveInstallations(context.Background(), r.All(), pkg.DetectManager(), pkg.DetectPlatform())
 	r.cacheMu.Lock()
-	r.cachePopulated = false
-	r.installedCache = make(map[string]bool)
+	r.installedCache = snapshot
+	r.cachePopulated = true
 	r.cacheMu.Unlock()
-
-	r.ensureCache()
 }
 
 // InvalidateCache clears the cache without repopulating
 func (r *Registry) InvalidateCache() {
+	r.populateMu.Lock()
+	defer r.populateMu.Unlock()
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 	r.cachePopulated = false

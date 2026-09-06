@@ -13,8 +13,8 @@ import (
 // only the field layout (View) and value adjustment (adjust) are
 // screen-specific.
 //
-// Fields: 0=theme (option), 1=update interval (stepper), 2=show CPU temp
-// (toggle), 3=graph type (option).
+// Fields: 0=theme, 1=update interval, 2=show CPU temp, 3=graph type,
+// 4=temperature scale, 5=visible panels.
 type configBtopScreen struct {
 	configFieldNav
 }
@@ -23,7 +23,7 @@ type configBtopScreen struct {
 func NewConfigBtopScreen(ctx *ScreenContext) *configBtopScreen {
 	s := &configBtopScreen{}
 	s.id = ScreenConfigBtop
-	s.maxField = func(*App) int { return 3 }
+	s.maxField = func(*App) int { return 5 }
 	s.adjust = btopAdjust
 	s.SetContext(ctx)
 	return s
@@ -51,6 +51,12 @@ func btopAdjust(a *App, key string, fwd bool) {
 		case 3:
 			opts := []string{"braille", "block", "tty"}
 			cfg.BtopGraphType = cycleOption(opts, cfg.BtopGraphType, fwd)
+		case 4:
+			opts := []string{"celsius", "fahrenheit"}
+			cfg.BtopTempScale = cycleOption(opts, cfg.BtopTempScale, fwd)
+		case 5:
+			opts := []string{"cpu mem net proc", "cpu mem net", "cpu mem"}
+			cfg.BtopShownBoxes = cycleOption(opts, cfg.BtopShownBoxes, fwd)
 		}
 	case " ":
 		if a.configFieldIndex == 2 {
@@ -107,6 +113,28 @@ func (s *configBtopScreen) View(width, height int) string {
 		[]string{"Braille", "Block", "TTY"},
 		cfg.BtopGraphType,
 		a.configFieldIndex == 3,
+	))
+	rec.write("\n\n")
+
+	// Temperature scale
+	rec.field(4)
+	rec.write(renderFieldLabel("Temperature Scale", a.configFieldIndex == 4))
+	rec.write(renderOptionSelector(
+		[]string{"celsius", "fahrenheit"},
+		[]string{"Celsius", "Fahrenheit"},
+		cfg.BtopTempScale,
+		a.configFieldIndex == 4,
+	))
+	rec.write("\n\n")
+
+	// Visible panels
+	rec.field(5)
+	rec.write(renderFieldLabel("Visible Panels", a.configFieldIndex == 5))
+	rec.write(renderOptionSelector(
+		[]string{"cpu mem net proc", "cpu mem net", "cpu mem"},
+		[]string{"All", "CPU + Mem + Net", "CPU + Mem"},
+		cfg.BtopShownBoxes,
+		a.configFieldIndex == 5,
 	))
 
 	box := configBoxStyle.Width(rec.boxWidth).Render(rec.String())

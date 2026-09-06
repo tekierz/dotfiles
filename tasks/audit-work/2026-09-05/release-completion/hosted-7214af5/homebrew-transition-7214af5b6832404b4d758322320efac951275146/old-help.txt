@@ -1,0 +1,34 @@
+Dotfiles is a unified terminal environment management platform.
+
+It provides installation, configuration, and updates for your terminal
+tools including zsh, tmux, neovim, yazi, ghostty, and more.
+
+Quick user switch:
+  dotfiles --<Username>    Switch to user profile (e.g., dotfiles --Pratik)
+
+Usage:
+  dotfiles [flags]
+  dotfiles [command]
+
+Available Commands:
+  backups     List available backups
+  completion  Generate the autocompletion script for the specified shell
+  config      Configure a specific tool
+  help        Help about any command
+  hotkeys     View hotkey reference
+  install     Launch installation wizard
+  manage      Manage tool configurations
+  restore     Restore from a backup
+  status      Show current configuration status
+  theme       View or change theme
+  uninstall   Remove dotfiles and restore original configuration
+  update      Check and install package updates
+  user        Switch to or manage user profile
+  users       List all user profiles
+  version     Show version information
+
+Flags:
+  -h, --help         help for dotfiles
+      --skip-intro   Skip intro animation
+
+Use "dotfiles [command] --help" for more information about a command.

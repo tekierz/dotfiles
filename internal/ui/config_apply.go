@@ -2,46 +2,93 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
-// applyStandaloneConfigCmd persists the edits from a `dotfiles config <tool>`
-// session to the real config files and then quits (C27). It writes ONLY the tool
-// whose config screen was opened — NOT every generator — so a single-tool config
-// session can never clobber the other tools' config files with compiled-in
-// defaults (the data-loss regression FIX 1 closes). The opened tool is derived
-// from a.startScreen via the authoritative screen<->tool mapping.
+// applyStandaloneConfigWorker builds the tea.Cmd that performs the standalone
+// legacy scoped write used by direct compatibility tests. Production standalone
+// saves use the reviewed transaction in standalone_config_transaction.go. The
+// config data is DEEP-SNAPSHOTTED here — on the UI goroutine,
+// before the Cmd is returned — so the closure the tea runtime later runs on a
+// worker goroutine reads only fully-owned data and never touches a.deepDiveConfig.
 //
-// A failed apply is surfaced on stderr (instead of being silently swallowed) so a
-// failed `config <tool>` save is observable; the app is quitting so there is no
-// screen left to render the error to.
-func (a *App) applyStandaloneConfigCmd() tea.Cmd {
-	return tea.Sequence(
-		func() tea.Msg {
-			if errs := a.applyStandaloneConfig(); len(errs) > 0 {
-				fmt.Fprintf(os.Stderr, "dotfiles: failed to apply config: %v\n", errs[0])
-			}
-			return nil
-		},
-		tea.Quit,
-	)
+// The helper remains as a concurrency regression harness: tests may keep
+// mutating a.deepDiveConfig while its Cmd runs. snapshotDeepDiveConfig clones
+// every reference field so the worker owns its input. Live standalone saves do
+// not call this helper; they use the reviewed transaction kernel.
+func (a *App) applyStandaloneConfigWorker() tea.Cmd {
+	startScreen := a.startScreen
+	snapshot := snapshotDeepDiveConfig(a.deepDiveConfig)
+	theme := a.theme
+	return func() tea.Msg {
+		if errs := applyStandaloneSnapshot(startScreen, snapshot, theme); len(errs) > 0 {
+			fmt.Fprintf(os.Stderr, "dotfiles: failed to apply config: %v\n", errs[0])
+		}
+		return nil
+	}
 }
 
-// applyStandaloneConfig writes ONLY the config file for the tool whose screen was
-// opened standalone (a.startScreen), using the current in-memory deepDiveConfig.
-// It returns any generator error(s). Splitting this out from the Cmd keeps it
-// directly testable (no tea.Quit) and is the single scoped-write entry point for
-// the standalone path.
+// applyStandaloneConfig is a direct compatibility-test helper for the legacy
+// scoped generator. Live standalone CLI saves use the reviewed transaction.
 func (a *App) applyStandaloneConfig() []error {
-	toolID, ok := toolIDForScreen(a.startScreen)
+	return applyStandaloneSnapshot(a.startScreen, snapshotDeepDiveConfig(a.deepDiveConfig), a.theme)
+}
+
+// applyStandaloneSnapshot writes ONLY the opened tool's config file from an
+// already-owned DeepDiveConfig snapshot. It is pure (no App or goroutine-shared
+// state), so compatibility tests may call it synchronously or through
+// applyStandaloneConfigWorker without aliasing editor state. It is not a live
+// CLI dispatch path. An unknown/non-config startScreen is a no-op returning nil.
+func applyStandaloneSnapshot(startScreen Screen, cfg DeepDiveConfig, theme string) []error {
+	toolID, ok := toolIDForScreen(startScreen)
 	if !ok {
 		// Not a per-tool config screen; nothing scoped to write.
 		return nil
 	}
-	return applyOneToolConfig(toolID, *a.deepDiveConfig, a.theme)
+	// Every mutating entry point must first prove that global.json is readable by
+	// this binary. Proceeding with a malformed or future-schema global config can
+	// create a partially updated environment whose settings no longer agree.
+	if _, err := config.LoadGlobalConfig(); err != nil {
+		return []error{fmt.Errorf("failed to validate global config before applying %s: %w", toolID, err)}
+	}
+	return applyOneToolConfig(toolID, cfg, theme)
+}
+
+// snapshotDeepDiveConfig returns a value copy of *cfg whose every map and slice
+// field is freshly allocated (a deep copy). A plain `*cfg` is only a SHALLOW copy:
+// its reference-type fields (ClaudeCodeMCPs, CLITools, ZshAliases, …) keep ALIASING
+// the live maps that the still-open `dotfiles config <tool>` screen mutates on the
+// UI goroutine. Passing that shallow copy to a worker goroutine makes the worker
+// read a map the UI goroutine is concurrently writing — a fatal concurrent map
+// read/write. Deep-copying here, on the UI goroutine before the worker starts,
+// hands the worker fully-owned data.
+//
+// This is the DeepDiveConfig analogue of the immutable reviewed Manage snapshot
+// takes: ManageConfig is flat so a shallow copy suffices there, whereas
+// DeepDiveConfig owns reference types and needs the per-field clone below. maps/
+// slices.Clone preserve nil, so gating checks like applyClaudeCodeConfig's
+// len(ClaudeCodeMCPs) == 0 behave identically on the snapshot.
+func snapshotDeepDiveConfig(cfg *DeepDiveConfig) DeepDiveConfig {
+	snap := *cfg
+	snap.ZshPlugins = slices.Clone(cfg.ZshPlugins)
+	snap.NeovimLSPs = slices.Clone(cfg.NeovimLSPs)
+	snap.NeovimPlugins = slices.Clone(cfg.NeovimPlugins)
+	snap.GitAliases = slices.Clone(cfg.GitAliases)
+	snap.ZshAliases = maps.Clone(cfg.ZshAliases)
+	snap.MacApps = maps.Clone(cfg.MacApps)
+	snap.Utilities = maps.Clone(cfg.Utilities)
+	snap.CLITools = maps.Clone(cfg.CLITools)
+	snap.GUIApps = maps.Clone(cfg.GUIApps)
+	snap.CLIUtilities = maps.Clone(cfg.CLIUtilities)
+	snap.ClaudeCodeMCPs = maps.Clone(cfg.ClaudeCodeMCPs)
+	return snap
 }
 
 // config_apply.go is the SINGLE place that turns the TUI's in-memory config into
@@ -50,14 +97,10 @@ func (a *App) applyStandaloneConfig() []error {
 // config struct (the config-apply generators here AND the install worker in
 // installation.go) calls the same builder, so the mapping cannot drift.
 //
-// The per-tool generators live once in toolConfigGenerators; the standalone
-// `dotfiles config <tool>` editor (C27) and the Manage editor's save (C12) both
-// call applyOneToolConfig — Manage via applyChangedManageTools over the changed
-// tools — to write ONLY the relevant tool(s) so a save can never clobber the
-// others with defaults (FIX 1). The install worker uses the builders directly
-// with its install-only writers (SetupTPM / WriteNeovimConfig do the clones), so
-// only the WRITE action differs between install and config-apply; the
-// TRANSLATION is shared.
+// Production Manage, standalone saves, and the install worker use their
+// authority-aware writers directly while sharing the same *ConfigFrom
+// translation builders below. applyOneToolConfig remains only for direct
+// compatibility and mapping tests.
 
 // ghosttyConfigFrom is the single mapping of DeepDiveConfig to tools.GhosttyConfig,
 // shared by the config-apply generator and the install worker.
@@ -177,10 +220,10 @@ func fzfConfigFrom(cfg DeepDiveConfig) tools.FzfConfig {
 // lazygitConfigFrom is the single mapping of DeepDiveConfig to tools.LazyGitConfig.
 func lazygitConfigFrom(cfg DeepDiveConfig) tools.LazyGitConfig {
 	return tools.LazyGitConfig{
-		SideBySide: cfg.LazyGitSideBySide,
-		MouseMode:  cfg.LazyGitMouseMode,
-		Theme:      cfg.LazyGitTheme,
-		Paging:     cfg.LazyGitPaging,
+		SidePanelWidth: cfg.LazyGitSidePanelWidth,
+		MouseEvents:    cfg.LazyGitMouseEvents,
+		ColorPreset:    cfg.LazyGitColorPreset,
+		PagerPreset:    cfg.LazyGitPagerPreset,
 	}
 }
 
@@ -199,19 +242,22 @@ func btopConfigFrom(cfg DeepDiveConfig) tools.BtopConfig {
 // glowConfigFrom is the single mapping of DeepDiveConfig to tools.GlowConfig.
 func glowConfigFrom(cfg DeepDiveConfig) tools.GlowConfig {
 	return tools.GlowConfig{
-		Pager: cfg.GlowPager,
-		Style: cfg.GlowStyle,
-		Width: cfg.GlowWidth,
-		Mouse: cfg.GlowMouse,
+		Pager:            cfg.GlowPager,
+		Style:            cfg.GlowStyle,
+		Width:            cfg.GlowWidth,
+		Mouse:            cfg.GlowMouse,
+		All:              cfg.GlowAll,
+		ShowLineNumbers:  cfg.GlowShowLineNumbers,
+		PreserveNewLines: cfg.GlowPreserveNewLines,
 	}
 }
 
 // toolConfigGenerators maps a tool ID to the function that writes that one tool's
 // config file from a DeepDiveConfig, using the shared *ConfigFrom builder for the
-// translation. It is the SINGLE source of the generator invocations:
-// applyOneToolConfig runs exactly one entry (standalone `dotfiles config <tool>`,
-// and Manage save via applyChangedManageTools), so those paths can never drift.
-// Keys match the tool IDs in toolConfigScreens.
+// translation. applyOneToolConfig runs exactly one entry for Manage saves and
+// direct compatibility tests. Production standalone saves use the reviewed
+// authority dispatch in standalone_config_transaction.go. Keys match the tool
+// IDs in toolConfigScreens.
 //
 // claude-code is intentionally omitted here because its generator only runs when
 // MCP servers are configured; applyOneToolConfig handles that gated case
@@ -228,6 +274,13 @@ var toolConfigGenerators = map[string]func(cfg DeepDiveConfig, theme string) err
 		return tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), theme)
 	},
 	"tmux": func(cfg DeepDiveConfig, theme string) error {
+		imported, err := tools.ImportTmuxConfig()
+		if err != nil {
+			return fmt.Errorf("validate native tmux config: %w", err)
+		}
+		if len(imported.Warnings) != 0 {
+			return fmt.Errorf("validate native tmux config: %s", strings.Join(imported.Warnings, "; "))
+		}
 		return tools.WriteTmuxConfig(tmuxConfigFrom(cfg), theme)
 	},
 	"zsh": func(cfg DeepDiveConfig, theme string) error {
@@ -265,12 +318,9 @@ func applyClaudeCodeConfig(cfg DeepDiveConfig) error {
 	return tools.NewClaudeCodeTool().ApplyConfigWithMCPs(cfg.ClaudeCodeMCPs)
 }
 
-// applyOneToolConfig writes ONLY the named tool's config file from a
-// DeepDiveConfig. It is the single scoped writer used by the standalone
-// `dotfiles config <tool>` exit and, one tool at a time via
-// applyChangedManageTools, by the Manage save — so editing one tool's settings can
-// never overwrite another tool's config file with defaults (FIX 1). An unknown
-// toolID (no generator) is a no-op returning nil.
+// applyOneToolConfig writes ONLY the named tool's config for Manage and direct
+// compatibility tests. Live standalone saves use the reviewed transaction and
+// cannot reach this legacy dispatcher. An unknown toolID is a no-op here.
 func applyOneToolConfig(toolID string, cfg DeepDiveConfig, theme string) []error {
 	if toolID == "claude-code" {
 		if err := applyClaudeCodeConfig(cfg); err != nil {
@@ -307,11 +357,8 @@ func tmuxPrefixToGenerator(prefix string) string {
 	}
 }
 
-// glowPagerToGenerator maps the Manage UI's pager vocabulary onto the values
-// GenerateGlowConfig understands ("auto"/"less" -> pager on, "never" -> off).
-// The Manage options include "more" and "none" which the generator does not
-// recognize; map them to the closest supported value so the written file is
-// never wrong (C26).
+// glowPagerToGenerator canonicalizes prototype-era persisted labels. Current
+// Manage options are only auto (enabled) and never (disabled).
 func glowPagerToGenerator(pager string) string {
 	switch pager {
 	case "none":
@@ -358,9 +405,11 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.GhosttyScrollbackLines = mc.GhosttyScrollbackLines
 	dd.GhosttyWindowDecorations = mc.GhosttyWindowDecorations
 	dd.GhosttyConfirmClose = mc.GhosttyConfirmClose
+	dd.GhosttyTabBindings = mc.GhosttyTabBindings
 
 	// Tmux (prefix vocabulary reconciled for the generator).
 	dd.TmuxPrefix = tmuxPrefixToGenerator(mc.TmuxPrefix)
+	dd.TmuxSplitBinds = mc.TmuxSplitBinds
 	dd.TmuxMouseMode = mc.TmuxMouseMode
 	dd.TmuxStatusBar = mc.TmuxStatusPosition
 	dd.TmuxHistoryLimit = mc.TmuxHistoryLimit
@@ -405,9 +454,28 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.GitDiffTool = mc.GitDiffTool
 	dd.GitAutoSetupRemote = mc.GitAutoSetupRemote
 	dd.GitMergeTool = mc.GitMergeTool
+	dd.GitDeltaSideBySide = mc.GitDeltaSideBySide
+	dd.GitAliases = nil
+	if mc.GitAliasStatus {
+		dd.GitAliases = append(dd.GitAliases, "st")
+	}
+	if mc.GitAliasCheckout {
+		dd.GitAliases = append(dd.GitAliases, "co")
+	}
+	if mc.GitAliasBranch {
+		dd.GitAliases = append(dd.GitAliases, "br")
+	}
+	if mc.GitAliasCommit {
+		dd.GitAliases = append(dd.GitAliases, "ci")
+	}
+	if mc.GitAliasLogGraph {
+		dd.GitAliases = append(dd.GitAliases, "lg")
+	}
 
 	// Yazi
+	dd.YaziKeymap = mc.YaziKeymap
 	dd.YaziShowHidden = mc.YaziShowHidden
+	dd.YaziPreviewMode = mc.YaziPreviewMode
 	dd.YaziSortBy = mc.YaziSortBy
 	dd.YaziSortReverse = mc.YaziSortReverse
 	dd.YaziLineMode = mc.YaziLineMode
@@ -422,10 +490,10 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.FzfPreviewWindow = mc.FzfPreviewWindow
 
 	// LazyGit
-	dd.LazyGitSideBySide = mc.LazyGitSideBySide
-	dd.LazyGitMouseMode = mc.LazyGitMouseMode
-	dd.LazyGitTheme = mc.LazyGitGuiTheme
-	dd.LazyGitPaging = mc.LazyGitPaging
+	dd.LazyGitSidePanelWidth = mc.LazyGitSidePanelWidth
+	dd.LazyGitMouseEvents = mc.LazyGitMouseEvents
+	dd.LazyGitColorPreset = mc.LazyGitColorPreset
+	dd.LazyGitPagerPreset = mc.LazyGitPagerPreset
 
 	// LazyDocker: NO generator/config file exists for lazydocker (see
 	// manageNotAppliedFields). Its Manage fields are intentionally not applied; the
@@ -445,6 +513,9 @@ func manageConfigToDeepDive(mc *ManageConfig) DeepDiveConfig {
 	dd.GlowPager = glowPagerToGenerator(mc.GlowPager)
 	dd.GlowWidth = mc.GlowWidth
 	dd.GlowMouse = mc.GlowMouse
+	dd.GlowAll = mc.GlowAll
+	dd.GlowShowLineNumbers = mc.GlowShowLineNumbers
+	dd.GlowPreserveNewLines = mc.GlowPreserveNewLines
 
 	// Claude Code MCP servers: translate the flat bools into the map the
 	// generator consumes (keys must match config.AllMCPServers()).

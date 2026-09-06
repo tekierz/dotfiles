@@ -1,0 +1,87 @@
+package ui
+import (
+ "testing"
+ "fmt"
+ "strings"
+ "os"
+ "path/filepath"
+ tea "github.com/charmbracelet/bubbletea"
+ "github.com/charmbracelet/lipgloss"
+ "github.com/tekierz/dotfiles/internal/config"
+ "github.com/tekierz/dotfiles/internal/pkg"
+)
+func TestAuditDroppedUpdateResult(t *testing.T) {
+ a:=NewApp(true)
+ a.screenMgr.Navigate(ScreenUpdate)
+ a.Update(NavigateMsg{To:ScreenMainMenu})
+ a.Update(updateCheckDoneMsg{updates:[]pkg.Package{{Name:"tmux"}}})
+ cmd:=a.screenMgr.Navigate(ScreenUpdate)
+ t.Logf("after reentry checking=%v done=%v results=%d retry=%v",a.updateChecking,a.updateCheckDone,len(a.updateResults),cmd!=nil)
+ if a.updateChecking || !a.updateCheckDone || len(a.updateResults)!=1 {t.Error("completed update query was lost after navigating away")}
+}
+func TestAuditBackupConfirmationTarget(t *testing.T) {
+ a:=NewApp(true); a.backupsLoaded=true
+ a.backups=[]BackupEntry{{Name:"reviewed-A"},{Name:"unreviewed-B"}}
+ a.screenMgr.Navigate(ScreenBackups)
+ a.Update(tea.KeyMsg{Type:tea.KeyEnter})
+ a.Update(tea.MouseMsg{Button:tea.MouseButtonWheelDown})
+ _,cmd:=a.Update(tea.KeyMsg{Type:tea.KeyRunes,Runes:[]rune{'y'}})
+ done:=cmd().(backupRestoreDoneMsg)
+ t.Logf("prompt=%q executed=%q validation-error=%v",a.backupStatus,done.name,done.err)
+ if done.name!="reviewed-A" {t.Error("confirmation executes different backup from displayed prompt")}
+}
+func TestAuditCreateExistingUser(t *testing.T) {
+ withTempHome(t)
+ profile:=config.DefaultUserProfile("Alice"); profile.Theme="dracula"; profile.NavStyle="vim"
+ if err:=config.SaveUserProfile(profile);err!=nil {t.Fatal(err)}
+ a:=NewApp(true); a.screenMgr.Navigate(ScreenUsers)
+ a.usersCreating=true; a.usersNewName="Alice"
+ _,cmd:=a.Update(tea.KeyMsg{Type:tea.KeyEnter})
+ if cmd!=nil {done:=cmd().(userSavedMsg); if done.err!=nil {t.Fatal(done.err)}}
+ after,err:=config.LoadUserProfile("Alice"); if err!=nil {t.Fatal(err)}
+ t.Logf("existing profile before=dracula/vim after=%s/%s",after.Theme,after.NavStyle)
+ if after.Theme!="dracula" || after.NavStyle!="vim" {t.Error("New User silently overwrites existing profile")}
+}
+func TestAuditThemeSaveFailureQuits(t *testing.T) {
+ withTempHome(t)
+ a:=NewApp(true); a.themeStandalone=true; a.theme="dracula"
+ a.screenMgr.Navigate(ScreenThemePicker)
+ if err:=os.MkdirAll(config.ConfigDir(),0700);err!=nil {t.Fatal(err)}
+ if err:=os.WriteFile(filepath.Join(config.ConfigDir(),"global.json"),[]byte("{invalid"),0600);err!=nil {t.Fatal(err)}
+ _,cmd:=a.Update(tea.KeyMsg{Type:tea.KeyEnter})
+ if a.themeStatus=="" {t.Fatal("fixture did not provoke a save error")}
+ t.Logf("save error=%q command=%T",a.themeStatus,cmd())
+ if _,ok:=cmd().(tea.QuitMsg);ok {t.Error("save failure exits instead of displaying error")}
+}
+func TestAuditUpdateListViewport(t *testing.T) {
+ a:=NewApp(true); a.updateCheckDone=true
+ for i:=0;i<35;i++ {a.updateResults=append(a.updateResults,pkg.Package{Name:fmt.Sprintf("tool-%02d",i),CurrentVersion:"1",LatestVersion:"2"})}
+ a.screenMgr.Navigate(ScreenUpdate)
+ a.Update(tea.WindowSizeMsg{Width:80,Height:24})
+ rendered:=a.View()
+ t.Logf("rendered width=%d height=%d terminal=80x24 lines=%d",lipgloss.Width(rendered),lipgloss.Height(rendered),len(strings.Split(rendered,"\n")))
+ if lipgloss.Height(rendered)>24 {t.Error("update list overflows terminal without a scrolling viewport")}
+}
+
+func TestAuditUserSwitchInMemorySettings(t *testing.T) {
+ withTempHome(t)
+ cfg:=config.DefaultGlobalConfig(); if err:=config.SaveGlobalConfig(cfg);err!=nil {t.Fatal(err)}
+ profile:=config.DefaultUserProfile("Alice");profile.Theme="dracula";profile.NavStyle="vim"
+ if err:=config.SaveUserProfile(profile);err!=nil {t.Fatal(err)}
+ a:=NewApp(true);a.screenMgr.Navigate(ScreenUsers)
+ done:=switchUserCmd("Alice")();a.Update(done)
+ persisted,err:=config.LoadGlobalConfig();if err!=nil {t.Fatal(err)}
+ t.Logf("persisted=%s/%s app=%s/%s context=%s/%s",persisted.Theme,persisted.NavStyle,a.theme,a.navStyle,a.screenMgr.Context().Theme,a.screenMgr.Context().NavStyle)
+ if a.theme!=profile.Theme || a.navStyle!=profile.NavStyle {t.Error("successful user switch does not update active app settings")}
+}
+func TestAuditBackupRunningAllowsMouseNavigation(t *testing.T) {
+ a:=NewApp(true);a.backupsLoaded=true;a.screenMgr.Navigate(ScreenBackups);a.backupRunning=true
+ s:=a.screenMgr.Current().(*backupsScreen)
+ _,cmd:=s.Update(tea.MouseMsg{X:1,Y:0,Button:tea.MouseButtonLeft,Action:tea.MouseActionPress})
+ if cmd==nil {return}
+ for _,sub:=range cmd().(tea.BatchMsg) {if msg,ok:=sub().(NavigateMsg);ok {a.Update(msg)}}
+ a.Update(backupRestoreDoneMsg{name:"backup",count:1})
+ a.screenMgr.Navigate(ScreenBackups)
+ t.Logf("after finishing away and reentry: backupRunning=%v status=%q",a.backupRunning,a.backupStatus)
+ if a.backupRunning {t.Error("mouse navigation during backup drops completion and blocks future backup actions")}
+}

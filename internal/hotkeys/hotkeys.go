@@ -92,7 +92,6 @@ func Categories(navStyle string) []Category {
 		tmuxNav = "Alt-Arrow"
 		zshTitle = "Zsh (emacs/Mac-style)"
 		yaziNav = "Arrow keys"
-		yaziHidden = "Ctrl-h"
 		nvimNav = "Arrow keys"
 	}
 
@@ -143,7 +142,6 @@ func Categories(navStyle string) []Category {
 				mk("zsh", "Ctrl-r", "Search command history"),
 				mk("zsh", "Ctrl-t", "Fuzzy find files (fzf)"),
 				mk("zsh", "Alt-c", "Fuzzy cd to directory"),
-				mk("zsh", "Ctrl-g", "Fuzzy find git files"),
 				mk("zsh", "Tab", "Autocomplete"),
 				mk("zsh", "Ctrl-w", "Delete word backwards"),
 			},
@@ -306,7 +304,7 @@ func Categories(navStyle string) []Category {
 			Icon: "󰈙",
 			Items: []Item{
 				mk("glow", "glow README.md", "Render markdown file"),
-				mk("glow", "glow -p", "Use pager"),
+				mk("glow", "glow -p README.md", "Render a file with the configured pager"),
 				mk("glow", "glow -s dark", "Dark style"),
 				mk("glow", "j/k", "Scroll up/down"),
 				mk("glow", "q", "Quit"),

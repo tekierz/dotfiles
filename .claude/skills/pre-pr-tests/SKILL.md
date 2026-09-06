@@ -21,21 +21,19 @@ These repos are interconnected and may need updates together:
 
 ### Integration Flow
 ```
-PRIMARY (current): Go TUI binary `dotfiles`
-homebrew-tap/Formula/dotfiles.rb ──> installs Go binary via: brew install tekierz/tap/dotfiles
-
-LEGACY: dotfiles-setup (bash script, curl | bash)
-    └── on macOS installs sshh via: brew install tekierz/tap/sshh
-                                    │
-homebrew-tap/Formula/sshh.rb ───────┘
-    └── SHA256 hash points to: github.com/tekierz/sshh/archive/refs/tags/v*.tar.gz
+dotfiles: homebrew-tap/Formula/dotfiles.rb -> Go `dotfiles` binary
+sshh:     homebrew-tap/Formula/sshh.rb     -> independent `sshh` utility
 ```
+
+Both formulas must use immutable release sources and verified SHA256 hashes.
 
 ---
 
 ## Automatic Tests (Run These First)
 
-Copy and run this test script:
+Copy and run this test script. It requires `golangci-lint`, `staticcheck`,
+`govulncheck`, and `shellcheck` on `PATH`; CI pins the authoritative tool
+versions in `.github/workflows/ci.yml`.
 
 > These local checks mirror the GitHub Actions CI workflow (`.github/workflows/ci.yml`, which runs lint/security/test/build jobs). Install the pre-commit hooks once with `bash scripts/install-hooks.sh` so `gofmt`/`go vet` run automatically before each commit.
 
@@ -44,29 +42,49 @@ Copy and run this test script:
 set -e
 echo "=== PRE-PR AUTOMATED TESTS ==="
 
-# 1. Build Check
-echo -e "\n[1/9] Building..."
+# 1. Module integrity
+echo -e "\n[1/15] Verifying module downloads..."
+go mod verify
+echo "GO MOD VERIFY: PASS"
+
+# 2. Module-file cleanliness
+echo -e "\n[2/15] Checking go mod tidy diff..."
+go mod tidy -diff
+echo "GO MOD TIDY: PASS"
+
+# 3. Build Check
+echo -e "\n[3/15] Building..."
 make clean && make build
 echo "BUILD: PASS"
 
-# 2. Go Vet
-echo -e "\n[2/9] Running go vet..."
+# 4. Go Vet
+echo -e "\n[4/15] Running go vet..."
 go vet ./...
 echo "GO VET: PASS"
 
-# 3. Lint (golangci-lint via make lint; matches CI lint job)
-echo -e "\n[3/9] Running golangci-lint..."
+# 5. Lint (golangci-lint via make lint; matches CI lint job)
+echo -e "\n[5/15] Running golangci-lint..."
 make lint
 echo "LINT: PASS"
 
-# 4. Unit Tests
-echo -e "\n[4/9] Running go test..."
+# 6. Staticcheck
+echo -e "\n[6/15] Running staticcheck..."
+staticcheck ./...
+echo "STATICCHECK: PASS"
+
+# 7. Unit Tests
+echo -e "\n[7/15] Running go test..."
 go test ./...
 echo "GO TEST: PASS"
 
-# 5. Format Check
-echo -e "\n[5/9] Checking gofmt..."
-UNFORMATTED=$(gofmt -l ./internal ./cmd 2>/dev/null)
+# 8. Race Tests (blocking in CI on both Ubuntu and macOS)
+echo -e "\n[8/15] Running race tests..."
+go test -race ./...
+echo "GO TEST RACE: PASS"
+
+# 9. Format Check
+echo -e "\n[9/15] Checking gofmt..."
+UNFORMATTED=$(gofmt -l . 2>/dev/null)
 if [ -n "$UNFORMATTED" ]; then
     echo "GOFMT: FAIL - Unformatted files:"
     echo "$UNFORMATTED"
@@ -74,42 +92,49 @@ if [ -n "$UNFORMATTED" ]; then
 fi
 echo "GOFMT: PASS"
 
-# 6. Security: Check for hardcoded secrets
-echo -e "\n[6/9] Security scan..."
-if grep -rn "password\s*=\s*[\"']" --include="*.go" ./internal ./cmd 2>/dev/null | grep -v "Password string"; then
+# 10. Known Go vulnerabilities
+echo -e "\n[10/15] Running govulncheck..."
+govulncheck ./...
+echo "GOVULNCHECK: PASS"
+
+# 11. Shell analysis (repository-maintained development scripts)
+echo -e "\n[11/15] Running shellcheck..."
+shellcheck scripts/install-hooks.sh
+echo "SHELLCHECK: PASS"
+
+# 12. Security: Check for hardcoded secrets
+echo -e "\n[12/15] Security scan..."
+if grep -RInE "password[[:space:]]*=[[:space:]]*[\"']" --include="*.go" ./internal ./cmd 2>/dev/null | grep -v "Password string"; then
     echo "SECURITY: WARNING - Potential hardcoded password found"
 fi
-if grep -rn "api_key\s*=\s*[\"']" --include="*.go" ./internal ./cmd 2>/dev/null; then
+if grep -RInE "api_key[[:space:]]*=[[:space:]]*[\"']" --include="*.go" ./internal ./cmd 2>/dev/null; then
     echo "SECURITY: WARNING - Potential hardcoded API key found"
 fi
 echo "SECURITY: PASS (manual review recommended)"
 
-# 7. CLI Commands Test
-echo -e "\n[7/9] Testing CLI commands..."
-./bin/dotfiles --help > /dev/null && echo "  --help: OK"
-./bin/dotfiles status > /dev/null 2>&1 && echo "  status: OK"
-./bin/dotfiles backups > /dev/null 2>&1 && echo "  backups: OK"
-./bin/dotfiles theme list > /dev/null 2>&1 && echo "  theme list: OK"
+# 13. CLI Commands Test
+echo -e "\n[13/15] Testing CLI commands..."
+./bin/dotfiles --help > /dev/null
+echo "  --help: OK"
+./bin/dotfiles status > /dev/null 2>&1
+echo "  status: OK"
+./bin/dotfiles backups > /dev/null 2>&1
+echo "  backups: OK"
+./bin/dotfiles theme list > /dev/null 2>&1
+echo "  theme list: OK"
 echo "CLI COMMANDS: PASS"
 
-# 8. Binary Size Check
-echo -e "\n[8/9] Binary size..."
-SIZE=$(ls -lh ./bin/dotfiles | awk '{print $5}')
+# 14. Binary Size Check
+echo -e "\n[14/15] Binary size..."
+SIZE=$(du -h ./bin/dotfiles | awk '{print $1}')
 echo "  Binary size: $SIZE"
 echo "BINARY SIZE: INFO"
 
-# 9. Startup Time
-echo -e "\n[9/9] Startup time..."
-START=$(date +%s%N)
-timeout 2 ./bin/dotfiles --help > /dev/null 2>&1 || true
-END=$(date +%s%N)
-ELAPSED=$(( (END - START) / 1000000 ))
-echo "  Startup: ${ELAPSED}ms"
-if [ "$ELAPSED" -gt 500 ]; then
-    echo "STARTUP TIME: WARNING - Slow startup (>500ms)"
-else
-    echo "STARTUP TIME: PASS"
-fi
+# 15. Startup Time (Bash TIMEFORMAT works on both macOS and Linux)
+echo -e "\n[15/15] Startup time..."
+TIMEFORMAT='  Startup: %3R seconds'
+time ./bin/dotfiles --help > /dev/null
+echo "STARTUP TIME: INFO"
 
 echo -e "\n=== AUTOMATED TESTS COMPLETE ==="
 ```
@@ -291,10 +316,10 @@ Run this from `~/Desktop/Projects/`:
 ```bash
 #!/bin/bash
 echo "=== CROSS-REPO COMPATIBILITY CHECK ==="
-cd ~/Desktop/Projects
+cd ~/Desktop/Projects || exit 1
 
 # 1. Check all repos exist
-echo -e "\n[1/6] Checking repositories..."
+echo -e "\n[1/5] Checking repositories..."
 for repo in dotfiles sshh homebrew-tap; do
     if [ -d "$repo" ]; then
         echo "  $repo: EXISTS"
@@ -305,7 +330,7 @@ for repo in dotfiles sshh homebrew-tap; do
 done
 
 # 2. Check git status of all repos
-echo -e "\n[2/6] Git status..."
+echo -e "\n[2/5] Git status..."
 for repo in dotfiles sshh homebrew-tap; do
     DIRTY=$(git -C $repo status --porcelain 2>/dev/null | wc -l)
     BRANCH=$(git -C $repo branch --show-current 2>/dev/null)
@@ -317,37 +342,24 @@ for repo in dotfiles sshh homebrew-tap; do
 done
 
 # 3. Version check
-echo -e "\n[3/6] Version numbers..."
-DOTFILES_VER=$(grep -m1 'VERSION=' dotfiles/bin/dotfiles-setup 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+echo -e "\n[3/5] Version numbers..."
 SSHH_VER=$(grep -m1 'VERSION=' sshh/bin/sshh 2>/dev/null | cut -d'"' -f2 || echo "unknown")
 # Primary distribution: the Go-binary 'dotfiles' formula (brew install dotfiles)
 TAP_DOTFILES_VER=$(grep -m1 'version' homebrew-tap/Formula/dotfiles.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-# Legacy bash-script formula (if still present in the tap)
-TAP_DOTFILES_SETUP_VER=$(grep -m1 'version' homebrew-tap/Formula/dotfiles-setup.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "n/a")
 TAP_SSHH_VER=$(grep -m1 'version' homebrew-tap/Formula/sshh.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-echo "  dotfiles script: v$DOTFILES_VER"
 echo "  sshh script: v$SSHH_VER"
 echo "  homebrew-tap dotfiles (Go binary) formula: v$TAP_DOTFILES_VER"
-echo "  homebrew-tap dotfiles-setup (legacy) formula: v$TAP_DOTFILES_SETUP_VER"
 echo "  homebrew-tap sshh formula: v$TAP_SSHH_VER"
 
-# 4. Check sshh installation reference in dotfiles
-echo -e "\n[4/6] Integration references..."
-if grep -q "tekierz/tap/sshh" dotfiles/bin/dotfiles-setup 2>/dev/null; then
-    echo "  dotfiles -> sshh tap reference: FOUND"
-else
-    echo "  dotfiles -> sshh tap reference: MISSING"
-fi
-
-# 5. Check SHA256 hashes are present (can't verify without release)
-echo -e "\n[5/6] Homebrew formula SHA256 hashes..."
+# 4. Check SHA256 hashes are present (can't verify without release)
+echo -e "\n[4/5] Homebrew formula SHA256 hashes..."
 DOTFILES_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/dotfiles.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
 SSHH_SHA=$(grep -m1 'sha256' homebrew-tap/Formula/sshh.rb 2>/dev/null | grep -oE '[a-f0-9]{64}' || echo "missing")
 echo "  dotfiles (Go binary): ${DOTFILES_SHA:0:16}..."
 echo "  sshh: ${SSHH_SHA:0:16}..."
 
-# 6. Check for breaking changes in sshh config format
-echo -e "\n[6/6] sshh config format compatibility..."
+# 5. Check for breaking changes in sshh config format
+echo -e "\n[5/5] sshh config format compatibility..."
 if grep -q "pipe-delimited" sshh/README.md 2>/dev/null || grep -q '|' sshh/bin/sshh 2>/dev/null; then
     echo "  Config format: pipe-delimited (Name|user@host|port|key)"
 fi
@@ -359,7 +371,6 @@ echo -e "\n=== CROSS-REPO CHECK COMPLETE ==="
 
 **When updating dotfiles:**
 
-- [ ] Check if sshh installation command changed
 - [ ] Verify `brew install tekierz/tap/sshh` still works
 - [ ] Check DeepDive utilities screen includes sshh toggle
 - [ ] Verify sshh appears in `dotfiles status` output
@@ -373,22 +384,23 @@ echo -e "\n=== CROSS-REPO CHECK COMPLETE ==="
 
 **When updating homebrew-tap:**
 
-After pushing changes to dotfiles or sshh:
+After publishing a tagged dotfiles or sshh release:
 
 ```bash
-# 1. Get new SHA256 for dotfiles-setup
-curl -sL https://github.com/tekierz/dotfiles/archive/refs/tags/v1.0.1.tar.gz | sha256sum
+# 1. Get the primary Go-binary formula SHA256 for the release tag
+DOTFILES_TAG=vX.Y.Z
+curl -sL "https://github.com/tekierz/dotfiles/archive/refs/tags/${DOTFILES_TAG}.tar.gz" | shasum -a 256
 
 # 2. Get new SHA256 for sshh
-curl -sL https://github.com/tekierz/sshh/archive/refs/tags/v1.1.0.tar.gz | sha256sum
+SSHH_TAG=vX.Y.Z
+curl -sL "https://github.com/tekierz/sshh/archive/refs/tags/${SSHH_TAG}.tar.gz" | shasum -a 256
 
 # 3. Update formulas in homebrew-tap
 # Edit: ~/Desktop/Projects/homebrew-tap/Formula/dotfiles.rb       # primary Go-binary formula
-# Edit: ~/Desktop/Projects/homebrew-tap/Formula/dotfiles-setup.rb # legacy bash-script formula (if still present)
 # Edit: ~/Desktop/Projects/homebrew-tap/Formula/sshh.rb
 
 # 4. Commit and push
-cd ~/Desktop/Projects/homebrew-tap
+cd ~/Desktop/Projects/homebrew-tap || exit 1
 git add -A && git commit -m "Update SHA256 for [package] v[version]"
 git push
 ```
@@ -399,8 +411,6 @@ git push
 |-------------|-----------------|
 | sshh version bump | `sshh/bin/sshh`, `homebrew-tap/Formula/sshh.rb` |
 | dotfiles version bump (Go binary) | `homebrew-tap/Formula/dotfiles.rb` (primary, `brew install dotfiles`) |
-| dotfiles version bump (legacy bash) | `dotfiles/bin/dotfiles-setup`, `homebrew-tap/Formula/dotfiles-setup.rb` (legacy `curl \| bash`) |
-| sshh install method | `dotfiles/bin/dotfiles-setup` (grep for "sshh") |
 | Tool registry | `dotfiles/internal/tools/registry.go`, `dotfiles/internal/ui/deepdive.go` |
 
 ### Breaking Change Detection
@@ -410,7 +420,7 @@ Watch for these breaking changes:
 | Component | Breaking Change | Impact |
 |-----------|-----------------|--------|
 | sshh config format | Change from pipe-delimited | Users lose saved hosts |
-| sshh CLI flags | Changed/removed flags | dotfiles install scripts break |
+| sshh CLI flags | Changed/removed flags | `dotfiles` utility workflows may break |
 | Homebrew formula URL | Changed repo structure | `brew install` fails |
 | dotfiles utilities | Removed sshh reference | sshh not installed on macOS |
 
@@ -421,8 +431,11 @@ Watch for these breaking changes:
 Before creating PR:
 
 - [ ] All automated tests pass
+- [ ] `go mod verify` and `go mod tidy -diff` pass
 - [ ] `make lint` (golangci-lint) passes
-- [ ] `go test ./...` passes
+- [ ] `staticcheck ./...` passes with no allowlist
+- [ ] `go test ./...` and `go test -race ./...` pass
+- [ ] `govulncheck ./...` and `shellcheck scripts/install-hooks.sh` pass
 - [ ] Pre-commit hooks installed (`bash scripts/install-hooks.sh`)
 - [ ] CI workflow (`.github/workflows/ci.yml`) is green on the branch
 - [ ] Manual TUI tests pass
@@ -458,21 +471,28 @@ make build
 ./bin/dotfiles --help
 
 # Static Analysis
+go mod verify
+go mod tidy -diff
 go vet ./...
-gofmt -l ./internal ./cmd
+gofmt -l .
+golangci-lint run
+staticcheck ./...
+go test ./...
+go test -race ./...
+govulncheck ./...
+shellcheck scripts/install-hooks.sh
 
 # Security Grep
 grep -rn "password" --include="*.go" ./internal ./cmd
 grep -rn "exec.Command" --include="*.go" ./internal ./cmd
 
 # Cross-Repo Commands (run from ~/Desktop/Projects/)
-cd ~/Desktop/Projects
+cd ~/Desktop/Projects || exit 1
 git -C dotfiles status
 git -C sshh status
 git -C homebrew-tap status
 
-# Check versions
-grep VERSION dotfiles/bin/dotfiles-setup
+# Check versions (the primary Go binary version is tag-derived)
 grep VERSION sshh/bin/sshh
 grep version homebrew-tap/Formula/*.rb
 

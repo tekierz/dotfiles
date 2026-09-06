@@ -28,6 +28,7 @@ var cliUtilityItems = []struct {
 	{"fd", "fd", "Fast find replacement"},
 	{"delta", "delta", "Beautiful git diffs"},
 	{"fswatch", "fswatch", "File system watcher"},
+	{"tailscale", "tailscale", "Mesh VPN for secure networking"},
 }
 
 // NewConfigCLIUtilitiesScreen creates a new CLI utilities config screen handler.
@@ -58,9 +59,9 @@ func (s *configCLIUtilitiesScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) 
 // View renders the CLI utilities selection screen.
 func (s *configCLIUtilitiesScreen) View(width, height int) string {
 	a := s.App()
-
-	// Ensure install status is cached.
-	a.ensureInstallCache()
+	if a.installCacheLoading {
+		return installStatusLoadingView(a, width, height)
+	}
 
 	title := renderConfigTitle("󰘳", "CLI Utilities", "Essential command-line replacements")
 

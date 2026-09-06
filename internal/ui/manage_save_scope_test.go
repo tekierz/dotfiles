@@ -1,11 +1,26 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/tekierz/dotfiles/internal/config"
 )
+
+// applyChangedManageTools is retained in test code only to exercise the old
+// direct generators and their mapping/no-clone guarantees. Production Manage
+// saves use the reviewed authority-aware transaction executor.
+func applyChangedManageTools(toolIDs []string, cfg DeepDiveConfig, theme string) []error {
+	var errs []error
+	for _, id := range toolIDs {
+		errs = append(errs, applyOneToolConfig(id, cfg, theme)...)
+	}
+	return errs
+}
 
 // TestManageSaveScopedToChangedTool is the data-loss regression guard for P1-A2:
 // saving the Manage editor after changing ONE tool's setting must rewrite ONLY
@@ -41,7 +56,7 @@ func TestManageSaveScopedToChangedTool(t *testing.T) {
 	}
 
 	// Ghostty's own config MUST have been written.
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config.ghostty")
 	if _, err := os.Stat(ghosttyPath); err != nil {
 		t.Errorf("ghostty config not written by scoped Manage save: %v", err)
 	}
@@ -58,6 +73,23 @@ func TestManageSaveScopedToChangedTool(t *testing.T) {
 	}
 }
 
+func TestManageSaveDoesNotPersistPreferenceWhenNativeApplyFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("GIT_CONFIG_GLOBAL", "relative/unsafe")
+	app := NewApp(true)
+	app.manageConfig.GitDefaultBranch = "develop"
+
+	plan, err := buildManageSavePlan(app, time.Now())
+	if err != nil || plan == nil || !plan.plan.hasBlocked() {
+		t.Fatalf("Manage plan blocked=%v err=%v, want unsafe native target blocked", plan != nil && plan.plan.hasBlocked(), err)
+	}
+	if _, err := os.Lstat(filepath.Join(config.ToolsDir(), "manage.json")); !os.IsNotExist(err) {
+		t.Fatalf("failed native apply persisted manage preference: %v", err)
+	}
+}
+
 // TestManageSaveNoChangeWritesNothing verifies that saving with no tool-field
 // change (and no theme change) writes no tool config files at all.
 func TestManageSaveNoChangeWritesNothing(t *testing.T) {
@@ -70,17 +102,54 @@ func TestManageSaveNoChangeWritesNothing(t *testing.T) {
 	}
 }
 
-// TestManageSaveThemeChangeReappliesAll verifies the documented cross-cutting
-// rule: a theme change re-applies every tool (generated colors depend on theme),
-// even if no per-tool field changed.
-func TestManageSaveThemeChangeReappliesAll(t *testing.T) {
+// TestManageSaveThemeChangeDoesNotRegenerateTools guards the ownership boundary:
+// selecting a theme records desired state but must not create or rewrite configs
+// for tools the user did not explicitly edit in this Manage transaction.
+func TestManageSaveThemeChangeDoesNotRegenerateTools(t *testing.T) {
 	baseline := NewManageConfig()
 	current := NewManageConfig()
 
 	changed := changedManageTools(baseline, current, "catppuccin-mocha", "nord")
-	// All generator tools (and claude-code) should be in the set on a theme change.
-	if len(changed) < len(manageGeneratorToolOrder) {
-		t.Fatalf("theme change should re-apply all tools; got %v", changed)
+	if len(changed) != 0 {
+		t.Fatalf("theme-only change scheduled tool regeneration: %v", changed)
+	}
+}
+
+func TestManageSaveThemeChangeCreatesNoToolConfigs(t *testing.T) {
+	home := withTempHome(t)
+	app := NewApp(true)
+	app.theme = "nord"
+
+	plan, err := buildManageSavePlan(app, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := executeManageSavePlanResult(context.Background(), plan, defaultManageSaveRuntime())
+	if result.err != nil || !result.applied {
+		t.Fatalf("save result = %+v", result)
+	}
+
+	for _, rel := range []string{
+		".config/ghostty/config.ghostty",
+		".tmux.conf",
+		".zshrc",
+		".gitconfig",
+		".config/yazi/yazi.toml",
+		".config/fzf/fzf.zsh",
+		lazyGitTestRelPath(),
+		".config/btop/btop.conf",
+	} {
+		if _, err := os.Lstat(filepath.Join(home, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("theme-only save created %s: %v", rel, err)
+		}
+	}
+
+	global, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("load persisted global config: %v", err)
+	}
+	if global.Theme != "nord" {
+		t.Fatalf("persisted theme = %q, want nord", global.Theme)
 	}
 }
 

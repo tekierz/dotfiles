@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-05",
+  "remote": "https://github.com/tekierz/dotfiles",
+  "archive_refs": 97,
+  "exact_remote_matches": 97,
+  "gitleaks_version": "8.30.1",
+  "gitleaks_history_commits": 695,
+  "gitleaks_findings": 0,
+  "scan_scope": "git --log-opts=--all using release-preparation narrow fixture allowlist; generated untracked binaries kept private",
+  "force_push": false
+}

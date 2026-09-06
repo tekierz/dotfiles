@@ -2,17 +2,21 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/health"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
@@ -71,6 +75,8 @@ const (
 	ScreenConfigBtop
 	ScreenConfigGlow
 	ScreenConfigClaudeCode
+	ScreenConfigSaveConfirm
+	ScreenManageSaveConfirm
 )
 
 // Available themes
@@ -107,24 +113,91 @@ func (a *App) syncThemeIndex() {
 	}
 }
 
+// syncSharedSettings keeps every screen's read view aligned with App settings.
+func (a *App) syncSharedSettings() {
+	a.syncThemeIndex()
+	if a.screenMgr != nil {
+		ctx := a.screenMgr.Context()
+		ctx.Theme, ctx.NavStyle, ctx.AnimationsEnabled = a.theme, a.navStyle, a.animationsEnabled
+	}
+}
+
+// invalidateSettingsReviews drops unexecuted authority bound to earlier choices.
+// Running operations retain the immutable plan/continuation they already own.
+func (a *App) invalidateSettingsReviews() {
+	if !a.installRunning {
+		a.invalidatePendingInstallPlan()
+		a.deepDiveContinuation = nil
+		a.installReviewTools = nil
+	}
+	if !a.manageSaveRunning {
+		a.pendingManageSavePlan = nil
+		a.manageSavePlanErr = nil
+	}
+	if !a.standaloneConfigRunning {
+		a.standaloneConfigPlan = nil
+		a.standaloneConfigErr = nil
+	}
+}
+
+func (a *App) adoptProfileSettings(settings *config.GlobalConfig) tea.Cmd {
+	wasEnabled := a.animationsEnabled
+	a.theme, a.navStyle, a.animationsEnabled = settings.Theme, settings.NavStyle, !settings.DisableAnimations
+	a.syncSharedSettings()
+	a.invalidateSettingsReviews()
+	a.hotkeysActiveUser, a.hotkeysActiveUserCached = settings.ActiveUser, true
+	// Invalidate old read generations before allowing another screen to enter.
+	a.asyncRequests[asyncUpdates].generation++
+	a.asyncRequests[asyncUpdates].pending = false
+	a.updateChecking, a.updateCheckDone = false, false
+	a.updateResults, a.updateError = nil, nil
+	a.updateIndex = 0
+	a.updateSelected = make(map[int]bool)
+	tools.GetRegistry().InvalidateCache()
+	var commands []tea.Cmd
+	if !a.installRunning {
+		commands = append(commands, a.beginInstallationSnapshotLoad(defaultInstallationSnapshotCacheRuntime()))
+	} else {
+		// Do not let a cache refresh erase an executing plan; its completion owns
+		// the next refresh. Reject any old observation in the meantime.
+		a.installationSnapshotGeneration++
+		a.installationSnapshotReady, a.installationSnapshotLoading = false, false
+		a.installationSnapshotTerminal = false
+		a.installationSnapshotStale = a.installationSnapshot.Digest() != ""
+		a.installCacheLoading, a.manageInstalledReady = false, false
+	}
+	if a.currentScreenIs(ScreenUpdate) && !a.updateRunning {
+		a.updateChecking = true
+		commands = append(commands, a.startAsync(asyncUpdates, checkUpdatesCmd()))
+	}
+	if a.animationsEnabled && !wasEnabled {
+		commands = append(commands, tickUI())
+	}
+	return tea.Batch(commands...)
+}
+
 // persistTheme saves the currently selected theme to the global config, so a
 // standalone "Change theme" from the main menu actually sticks across runs.
 // On failure it records a brief human-readable message in themeStatus that the
 // view layer can surface to the user instead of silently discarding the error.
-func (a *App) persistTheme() {
+func (a *App) persistTheme() error {
 	g, err := config.LoadGlobalConfig()
-	if err != nil || g == nil {
-		if err != nil {
-			a.themeStatus = "Failed to save theme: " + err.Error()
-		}
-		return
+	if err == nil && g == nil {
+		err = errors.New("global settings unavailable")
+	}
+	if err != nil {
+		a.themeStatus = "Failed to save theme: " + err.Error()
+		return err
 	}
 	g.Theme = a.theme
 	if err := config.SaveGlobalConfig(g); err != nil {
 		a.themeStatus = "Failed to save theme: " + err.Error()
-		return
+		return err
 	}
 	a.themeStatus = ""
+	a.syncSharedSettings()
+	a.invalidateSettingsReviews()
+	return nil
 }
 
 // snapshotManageBaseline records the current Manage config + theme as the
@@ -156,12 +229,15 @@ func (a *App) revertThemeToSaved() {
 
 // App is the main application model
 type App struct {
-	screen        Screen
-	startScreen   Screen // Initial screen to show (for CLI routing)
-	skipIntro     bool
-	width         int
-	height        int
-	animationDone bool
+	asyncRequests [5]asyncRequest
+
+	screen             Screen
+	startScreen        Screen // Initial screen to show (for CLI routing)
+	startupInitialized bool
+	skipIntro          bool
+	width              int
+	height             int
+	animationDone      bool
 
 	// Screen manager for migrated screens (nil during transition)
 	screenMgr *ScreenManager
@@ -171,12 +247,9 @@ type App struct {
 	screenFactory *Factory
 
 	// Animation state
-	animFrame        int
-	postIntroScreen  Screen // where to land after the intro animation
-	uiFrame          int    // global animation frame counter (manager widgets, spinners, etc.)
-	manageInstalling bool
-	manageInstallID  string
-
+	animFrame       int
+	postIntroScreen Screen // where to land after the intro animation
+	uiFrame         int    // global animation frame counter (manager widgets, spinners, etc.)
 	// User selections
 	themeIndex int
 	theme      string
@@ -215,15 +288,25 @@ type App struct {
 	// install wizard). In that mode there is no later install step to apply the
 	// edits, so the config screen's back() persists the edits to the real config
 	// files itself and quits, instead of returning to the deep-dive menu (C27).
-	configStandalone bool
-	macAppIndex      int // Currently focused app in macOS screen
-	utilityIndex     int // Currently focused utility
-	cliToolIndex     int // Currently focused CLI tool
-	guiAppIndex      int // Currently focused GUI app
-	cliUtilityIndex  int // Currently focused CLI utility (bat, eza, etc.)
+	configStandalone               bool
+	standaloneConfigPlan           *installPlan
+	standaloneConfigErr            error
+	standaloneConfigStatus         string
+	standaloneConfigWarning        string
+	standaloneConfigRunning        bool
+	standaloneConfigDone           bool
+	standaloneConfigManualRecovery bool
+	macAppIndex                    int // Currently focused app in macOS screen
+	utilityIndex                   int // Currently focused utility
+	cliToolIndex                   int // Currently focused CLI tool
+	guiAppIndex                    int // Currently focused GUI app
+	cliUtilityIndex                int // Currently focused CLI utility (bat, eza, etc.)
 
 	// Management state (detailed config)
 	manageConfig *ManageConfig
+	// nativeConfigState records current Git/Ghostty source and field provenance.
+	// Native values seed defaults only before manage.json has ever been saved.
+	nativeConfigState NativeManageConfigState
 	// manageConfigBaseline is a snapshot of manageConfig + theme as last loaded or
 	// last successfully saved. The Manage save diffs the live config against this
 	// to apply ONLY the tools the user actually changed, so editing one tool can
@@ -232,28 +315,62 @@ type App struct {
 	manageConfigBaselineTheme string
 	managePane                int // 0 = tools pane, 1 = settings pane (ScreenManage)
 	// Cached install status for tools to avoid running package-manager checks every render.
-	manageInstalled      map[string]bool
-	manageInstalledReady bool
-	installCacheLoading  bool // Currently loading cache asynchronously
+	manageInstalled                     map[string]bool
+	manageInstalledReady                bool
+	installCacheLoading                 bool // Currently loading cache asynchronously
+	installationSnapshot                health.InstallationSnapshot
+	installationSnapshotManagerIdentity pkg.ExecutableIdentity
+	installationSnapshotGeneration      uint64
+	installationSnapshotReady           bool
+	installationSnapshotLoading         bool
+	installationSnapshotStale           bool
+	installationSnapshotTerminal        bool
+	installationSnapshotError           string
+	installationSnapshotUtilities       map[string]bool
+	installationSnapshotCosmetic        map[string]bool
+	// Manage metadata sources are injectable for deterministic tests. Once a
+	// typed snapshot exists, its platform and observations are authoritative and
+	// manageDetectPlatform must not be called.
+	manageToolSource     func() []tools.Tool
+	manageDetectPlatform func() pkg.Platform
 	// Manage screen scrolling
 	manageToolsScroll  int
 	manageFieldsScroll int
 	// Inline editing state (used by ScreenManage)
-	manageEditing      bool
-	manageEditValue    string
-	manageEditCursor   int
-	manageEditField    *string
-	manageEditFieldKey string // human label for the field being edited
-	manageStatus       string // transient status line (save result, etc.)
+	manageEditing         bool
+	manageEditValue       string
+	manageEditCursor      int
+	manageEditField       *string
+	manageEditNumber      *int
+	manageEditValidate    func(string) error
+	manageEditMin         int
+	manageEditMax         int
+	manageEditFieldKey    string // human label for the field being edited
+	manageStatus          string // transient status line (save result, etc.)
+	pendingManageSavePlan *manageSavePlan
+	manageSavePlanErr     error
+	manageSaveScroll      int
+	manageSaveRunning     bool
+	manageSaveDone        bool
+	manageSaveManual      bool
+	manageSaveWarning     string
 
 	// Installation state
-	installStep         int
-	installPlannedSteps int // total step-increments the worker will emit (set before worker starts)
-	installOutput       []string
-	installRunning      bool
-	installComplete     bool
-	installEvents       chan installEventMsg // streamed progress from the install worker goroutine
-	updateStream        chan updateStreamMsg // streamed progress from the update worker goroutine
+	installStep          int
+	installPlannedSteps  int // total step-increments the worker will emit (set before worker starts)
+	installOutput        []string
+	installRunning       bool
+	installComplete      bool
+	installOutcome       installationOutcome
+	installSummaryFacts  installationSummaryFacts
+	pendingInstallPlan   *installPlan
+	installReviewTools   []string // explicit package-only intent retained across a required fresh phase review
+	deepDiveContinuation *deepDiveContinuation
+	installPlanError     error
+	lastOperationID      string
+	installPlanScroll    int
+	installEvents        chan installEventMsg // streamed progress from the install worker goroutine
+	updateStream         chan updateStreamMsg // streamed progress from the update worker goroutine
 	// streamCancel cancels the context driving the currently-running install or
 	// update worker (and the underlying StreamingCmd). It is retained on the App
 	// so navigate-away / Ctrl+C can tear the subprocess + worker goroutines down
@@ -297,6 +414,11 @@ type App struct {
 	themeStatus          string
 	hotkeysFavorites     *config.HotkeysConfig // User hotkey favorites config
 	hotkeysFavoritesOnly bool                  // Filter to show only favorites
+	// hotkeysStatus holds a transient error message from the last favorite
+	// toggle / alias save (empty on success). The hotkeys footer surfaces it so a
+	// persistence failure is not silently swallowed (the star/alias would appear
+	// set but never reach disk).
+	hotkeysStatus string
 	// Per-App active-username cache for the hotkeys screen. Refreshed once per
 	// event/frame via refreshHotkeysCurrentUser so that per-row lookups within
 	// a single frame don't re-read global.json from disk.
@@ -314,7 +436,10 @@ type App struct {
 	backupsLoading      bool
 	backupConfirmMode   bool
 	backupConfirmType   string // "restore" or "delete"
+	backupConfirmName   string
+	backupConfirmEntry  backup.CatalogEntry
 	backupStatus        string // Status message for backup operations
+	backupStatusWarning bool   // successful operation completed with caveats
 	backupRunning       bool   // Currently running a backup operation
 	backupError         error  // Error from backup operation
 
@@ -390,11 +515,11 @@ func (a *App) postIntroTransition() tea.Cmd {
 	target := a.postIntroScreen
 
 	var async tea.Cmd
-	switch target {
+	switch target { //nolint:exhaustive // Only destinations with on-enter async work need cases.
 	case ScreenUpdate:
 		if !a.updateChecking && !a.updateCheckDone {
 			a.updateChecking = true
-			async = checkUpdatesCmd()
+			async = a.startAsync(asyncUpdates, checkUpdatesCmd())
 		}
 	case ScreenManage, ScreenHotkeys:
 		async = a.startInstallCacheLoad()
@@ -428,6 +553,8 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		updateSelected:       make(map[int]bool),
 		installLogs:          make([]string, 0, 500),
 		installLogAutoScroll: true,
+		manageToolSource:     func() []tools.Tool { return tools.GetRegistry().All() },
+		manageDetectPlatform: pkg.DetectPlatform,
 	}
 
 	// Best-effort: load persisted global settings (theme + nav) if available.
@@ -448,9 +575,16 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 	SetTheme(app.theme)
 
 	// Best-effort: load persisted management settings for deep-dive manager UI.
+	// A proven existing manage.json always outranks imported native values.
+	managePreferences := inspectManagePreferencePresence()
 	if cfg, err := config.LoadToolConfig("manage", NewManageConfig); err == nil && cfg != nil {
 		app.manageConfig = cfg
 	}
+	app.nativeConfigState = observeNativeManageConfig(app.manageConfig, managePreferences, app.theme)
+	// The installer and Manage dashboard must share one hydrated desired model;
+	// otherwise the wizard would write compiled defaults over imported values.
+	hydrated := manageConfigToDeepDive(app.manageConfig)
+	app.deepDiveConfig = &hydrated
 
 	// Snapshot the loaded Manage config + theme as the save baseline so the Manage
 	// save can scope its config-file writes to only the tools the user changes.
@@ -476,7 +610,7 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		app.hotkeysFavorites = &config.HotkeysConfig{Users: make(map[string]*config.UserHotkeys)}
 	}
 
-	if skipIntro {
+	if skipIntro || !app.animationsEnabled {
 		app.screen = ScreenWelcome
 		app.animationDone = true
 	} else {
@@ -489,32 +623,29 @@ func NewApp(skipIntro bool, opts ...AppOption) *App {
 		opt(app)
 	}
 
-	// Every live screen is a migrated ScreenHandler, so the ScreenManager is
-	// mandatory. Wire it and eagerly enter managed mode on the start screen so
-	// the first rendered frame (which Bubble Tea draws before Init's command is
-	// processed) is never blank.
+	// Prepare the first render without invoking a handler's Init. CLI routing
+	// may still change, and App.Init must retain the selected handler's command.
+	if app.screen == ScreenAnimation && (app.skipIntro || !app.animationsEnabled) {
+		app.screen, app.animationDone = app.postIntroScreen, true
+	}
 	app.initScreenManager()
-	app.screenMgr.Navigate(app.screen)
+	app.screenMgr.prepare(app.screen)
 
 	return app
 }
 
 // Init initializes the application
 func (a *App) Init() tea.Cmd {
-	cmds := []tea.Cmd{}
-	// Drive the start screen through the ScreenManager so the screen's Init()
-	// runs. The intro animation (animationScreen.Init) issues tickAnimation();
-	// the Update screen (updateScreen.Init) kicks
-	// the update check; the Progress screen (progressScreen.Init) triggers the
-	// install. App.Init therefore must NOT duplicate those, or they would
-	// double-fire.
-	cmds = append(cmds, NavigateTo(a.screen))
+	if a.startupInitialized {
+		return nil
+	}
+	a.startupInitialized = true
+	// Initialize the already-renderable final CLI destination before preload,
+	// so Manage's own load guard avoids a duplicate installation query.
+	cmds := []tea.Cmd{a.screenMgr.initCurrent()}
 	if a.animationsEnabled {
 		cmds = append(cmds, tickUI())
 	}
-	// Preload install cache immediately on startup for faster Deep Dive/Manage transitions.
-	// By loading during the intro animation, the cache is ready when the user
-	// navigates to those screens.
 	if cmd := a.startInstallCacheLoad(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -524,13 +655,25 @@ func (a *App) Init() tea.Cmd {
 // checkSudoAndUpdateCmd checks if sudo is needed and either prompts or starts update
 func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
 	return func() tea.Msg {
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return updateRunDoneMsg{err: fmt.Errorf("no package manager detected")}
+		needsSudo := false
+		seen := make(map[pkg.ExecutionProvider]bool)
+		for _, update := range packages {
+			provider := update.ExecutionProvider()
+			if provider == "" {
+				return updateRunDoneMsg{err: fmt.Errorf("package %q has no accepted update provider", update.Name)}
+			}
+			if seen[provider] {
+				continue
+			}
+			seen[provider] = true
+			manager := pkg.ManagerForExecutionProvider(provider)
+			if manager == nil {
+				return updateRunDoneMsg{err: fmt.Errorf("update provider %q is unavailable or ambiguous", provider)}
+			}
+			needsSudo = needsSudo || manager.NeedsSudo()
 		}
 
-		// Check if sudo is needed and not cached
-		if mgr.NeedsSudo() && !runner.CheckSudoCached() {
+		if needsSudo && !runner.CheckSudoCached() {
 			return updateSudoRequiredMsg{packages: packages, all: all}
 		}
 
@@ -543,35 +686,17 @@ func checkSudoAndUpdateCmd(packages []pkg.Package, all bool) tea.Cmd {
 func loadBackupsCmd() tea.Cmd {
 	return func() tea.Msg {
 		backupDir := filepath.Join(config.ConfigDir(), "backups")
-		entries, err := os.ReadDir(backupDir)
+		entries, err := backup.ListCatalog(backupDir)
 		if err != nil {
-			if os.IsNotExist(err) {
-				return backupsLoadedMsg{backups: []BackupEntry{}}
-			}
 			return backupsLoadedMsg{err: err}
 		}
 
-		var backups []BackupEntry
+		backups := make([]BackupEntry, 0, len(entries))
 		for _, entry := range entries {
-			if entry.IsDir() {
-				info, _ := entry.Info()
-				path := filepath.Join(backupDir, entry.Name())
-				count := countBackupFiles(path)
-				size := calcDirSize(path)
-
-				timestamp := time.Time{}
-				if info != nil {
-					timestamp = info.ModTime()
-				}
-
-				backups = append(backups, BackupEntry{
-					Name:      entry.Name(),
-					Timestamp: timestamp,
-					FileCount: count,
-					Size:      size,
-					Path:      path,
-				})
-			}
+			backups = append(backups, BackupEntry{
+				Name: entry.Name, Timestamp: entry.Timestamp, FileCount: entry.FileCount,
+				Size: entry.Size, Path: entry.Path, Catalog: entry,
+			})
 		}
 
 		// Sort by timestamp descending (newest first)
@@ -581,20 +706,6 @@ func loadBackupsCmd() tea.Cmd {
 
 		return backupsLoadedMsg{backups: backups}
 	}
-}
-
-// countBackupFiles counts backed-up dotfiles in a backup directory.
-// The manifest (backup.ManifestName) is metadata, not a backed-up dotfile, so
-// it is excluded so the displayed count matches what restore will actually write.
-func countBackupFiles(path string) int {
-	count := 0
-	_ = filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
-		if info != nil && !info.IsDir() && info.Name() != backup.ManifestName {
-			count++
-		}
-		return nil
-	})
-	return count
 }
 
 // makeUniqueBackupDir returns a path inside backupsDir that does not yet exist,
@@ -614,18 +725,6 @@ func makeUniqueBackupDir(backupsDir, baseName string) string {
 	}
 }
 
-// calcDirSize calculates the total size of files in a directory
-func calcDirSize(path string) int64 {
-	var size int64
-	_ = filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
-		if info != nil && !info.IsDir() {
-			size += info.Size()
-		}
-		return nil
-	})
-	return size
-}
-
 // formatBytes formats a byte count into a human-readable string
 func formatBytes(bytes int64) string {
 	const unit = 1024
@@ -643,36 +742,76 @@ func formatBytes(bytes int64) string {
 // restoreBackupCmd restores files from a backup. The path mapping, traversal
 // guard, and mode preservation are shared with the CLI via the
 // internal/backup package so the two paths cannot diverge.
-func restoreBackupCmd(b BackupEntry) tea.Cmd {
+func restoreBackupCmd(name string, entry backup.CatalogEntry) tea.Cmd {
 	return func() tea.Msg {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return backupRestoreDoneMsg{name: b.Name, err: err}
+			traceRestoreResult(backup.RestoreResult{}, err)
+			return backupRestoreDoneMsg{name: name, err: err}
 		}
 
-		result, err := backup.Restore(b.Path, home)
+		result, err := backup.RestoreCatalogEntry(entry, home)
+		traceRestoreResult(result, err)
 		if err != nil {
-			return backupRestoreDoneMsg{name: b.Name, err: err}
+			return backupRestoreDoneMsg{name: name, err: err}
 		}
 
 		// Surface skipped files (path-traversal rejection, write-through-symlink
 		// refusal, read/mkdir errors) instead of discarding them. A restore where
 		// every file is skipped must NOT report green success (C3); mirrors the
 		// CLI, which prints each skipped reason.
+		details := make([]string, 0, len(result.Restored)+len(result.Removed)+len(result.Skipped)+len(result.Warnings))
+		for _, relPath := range result.Restored {
+			details = append(details, "restored "+relPath)
+		}
+		for _, relPath := range result.Removed {
+			details = append(details, "removed "+relPath)
+		}
+		for item, reason := range result.Skipped {
+			details = append(details, fmt.Sprintf("skipped %s: %s", item, reason))
+		}
+		for item, warning := range result.Warnings {
+			details = append(details, fmt.Sprintf("warning %s: %s", item, warning))
+		}
+		sort.Strings(details)
+
 		return backupRestoreDoneMsg{
-			name:    b.Name,
-			count:   result.Count(),
-			skipped: len(result.Skipped),
-			err:     nil,
+			name:     name,
+			count:    result.Count(),
+			removed:  len(result.Removed),
+			skipped:  len(result.Skipped),
+			warnings: len(result.Warnings),
+			details:  details,
+			err:      nil,
 		}
 	}
 }
 
+func traceRestoreResult(result backup.RestoreResult, err error) {
+	outcome := operation.TraceSucceeded
+	if err != nil {
+		outcome = operation.TraceFailed
+	} else if len(result.Skipped) > 0 || len(result.Warnings) > 0 {
+		outcome = operation.TracePartial
+	}
+	failed := 0
+	if err != nil {
+		failed = 1
+	}
+	operation.Trace(operation.TraceRestore, outcome, operation.TraceCounts{
+		Attempted: result.Count() + len(result.Removed) + len(result.Skipped),
+		Succeeded: result.Count() + len(result.Removed),
+		Failed:    failed,
+		Skipped:   len(result.Skipped),
+		Warnings:  len(result.Warnings),
+	})
+}
+
 // deleteBackupCmd deletes a backup directory
-func deleteBackupCmd(b BackupEntry) tea.Cmd {
+func deleteBackupCmd(name string, entry backup.CatalogEntry) tea.Cmd {
 	return func() tea.Msg {
-		err := os.RemoveAll(b.Path)
-		return backupDeleteDoneMsg{name: b.Name, err: err}
+		err := backup.RemoveCatalogEntry(entry)
+		return backupDeleteDoneMsg{name: name, err: err}
 	}
 }
 
@@ -695,69 +834,167 @@ func createBackupCmd() tea.Cmd {
 		// backup.Create is the single source of truth for the capture loop and
 		// reports an honest result: an error when zero files were captured or
 		// the manifest write fails, instead of silently claiming success (C4).
-		if _, err := backup.Create(home, backupDir, defaultBackupFiles); err != nil {
+		files, omission, err := convenienceBackupFiles(home)
+		if err != nil {
+			return backupCreateDoneMsg{err: err}
+		}
+		if _, err := backup.Create(home, backupDir, files); err != nil {
 			return backupCreateDoneMsg{err: err}
 		}
 
-		// Run backup cleanup based on settings
-		cleanupBackups()
+		// Run backup cleanup based on settings. The backup itself succeeded, so a
+		// retention-cleanup failure must not be reported as a create failure (that
+		// would falsely claim no rollback point exists and skip the list refresh).
+		// Surface it as a note appended to the success status instead, so the
+		// stalled retention policy is visible rather than silently swallowed.
+		var warnings []string
+		if cerr := cleanupBackups(); cerr != nil {
+			warnings = append(warnings, fmt.Sprintf("retention cleanup failed: %v", cerr))
+		}
+		if omission != "" {
+			warnings = append(warnings, omission)
+		}
 
-		return backupCreateDoneMsg{name: backupName, err: nil}
+		return backupCreateDoneMsg{name: backupName, warning: strings.Join(warnings, "; "), err: nil}
 	}
 }
 
-// defaultBackupFiles is the fixed set of dotfiles captured by both the manual
-// "create backup" action and the pre-install auto-backup. Paths are relative
-// to the user's home directory.
+// defaultBackupFiles is the fixed non-Yazi inventory captured by both manual
+// and pre-install convenience backups. Yazi's three files are resolved at the
+// moment of capture because its active directory can come from XDG or
+// YAZI_CONFIG_HOME.
 var defaultBackupFiles = []string{
 	".zshrc",
 	".tmux.conf",
 	".config/nvim/init.lua",
 	".config/ghostty/config",
-	".config/yazi/yazi.toml",
 	".gitconfig",
 }
 
-// cleanupBackups removes old backups based on global config settings
-func cleanupBackups() {
+func convenienceBackupFiles(home string) ([]string, string, error) {
+	home = filepath.Clean(home)
+	if !filepath.IsAbs(home) {
+		return nil, "", fmt.Errorf("convenience backup HOME must be absolute")
+	}
+	files := append([]string(nil), defaultBackupFiles...)
+	paths, err := tools.ResolveYaziConfigPaths()
+	if err != nil {
+		// An invalid override must not disable backup of unrelated dotfiles.
+		return files, "Yazi configs omitted: " + sanitizeLogLine(err.Error()), nil
+	}
+	seen := make(map[string]bool, len(files)+3)
+	for _, file := range files {
+		seen[filepath.Clean(file)] = true
+	}
+	for _, path := range []string{paths.Main, paths.Keymap, paths.Theme} {
+		rel, ok := lexicalConvenienceBackupRelativePath(home, path)
+		if !ok {
+			return files, "Yazi configs omitted: active config is outside HOME", nil
+		}
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		files = append(files, rel)
+	}
+	return files, "", nil
+}
+
+func lexicalConvenienceBackupRelativePath(home, path string) (string, bool) {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return "", false
+	}
+	rel, err := filepath.Rel(home, path)
+	if err != nil || rel == "." || !backup.IsRestorePathSafe(home, rel) {
+		return "", false
+	}
+	cleanRel := filepath.Clean(rel)
+	if filepath.Clean(filepath.Join(home, cleanRel)) != path {
+		return "", false
+	}
+	return cleanRel, true
+}
+
+// cleanupBackups removes old backups based on global config settings. It returns
+// an aggregated error naming every backup it failed to remove: ignoring those
+// Exact authorized removal failures are aggregated so one unremovable backup
+// does not block pruning the rest and callers can surface stalled retention.
+func cleanupBackups() error {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
-		return
+		return err
 	}
 
 	backupsDir := filepath.Join(config.ConfigDir(), "backups")
-	entries, err := os.ReadDir(backupsDir)
+	entries, err := backup.ListCatalog(backupsDir)
 	if err != nil {
-		return
+		return err
 	}
+	return cleanupBackupCatalog(entries, cfg, nil)
+}
 
-	type backupInfo struct {
-		name    string
-		modTime time.Time
+func cleanupBackupsWithState(state *operation.StateAuthority) error {
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return err
 	}
+	var cleanupErrs []error
+	convenience, err := backup.ListCatalog(filepath.Join(config.ConfigDir(), "backups"))
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("list convenience backups: %w", err))
+	} else if err := cleanupBackupCatalog(convenience, cfg, nil); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if state == nil {
+		return errors.Join(cleanupErrs...)
+	}
+	journal, err := operation.DefaultJournalWithAuthority(state)
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+		return errors.Join(cleanupErrs...)
+	}
+	terminal, err := journal.TerminalBackupPaths()
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("list terminal operation backups: %w", err))
+		return errors.Join(cleanupErrs...)
+	}
+	stateBackups, err := operation.StateSubdirectory("backups")
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+		return errors.Join(cleanupErrs...)
+	}
+	planEntries, err := backup.ListCatalog(stateBackups)
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("list plan backups: %w", err))
+	} else if err := cleanupBackupCatalog(planEntries, cfg, terminal); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	return errors.Join(cleanupErrs...)
+}
 
-	var backups []backupInfo
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+func cleanupBackupCatalog(entries []backup.CatalogEntry, cfg *config.GlobalConfig, eligible map[string]struct{}) error {
+	if cfg == nil {
+		return fmt.Errorf("backup retention config is unavailable")
+	}
+	if eligible != nil {
+		filtered := entries[:0]
+		for _, entry := range entries {
+			if _, ok := eligible[filepath.Clean(entry.Path)]; ok {
+				filtered = append(filtered, entry)
+			}
 		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		backups = append(backups, backupInfo{
-			name:    entry.Name(),
-			modTime: info.ModTime(),
-		})
+		entries = filtered
 	}
 
 	// Sort by modification time (newest first)
-	sort.Slice(backups, func(i, j int) bool {
-		return backups[i].modTime.After(backups[j].modTime)
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.After(entries[j].Timestamp)
 	})
 
 	now := time.Now()
-	for i, bk := range backups {
+	var removeErrs []error
+	for i, entry := range entries {
 		shouldDelete := false
 
 		// Delete if exceeds max count (and max count is set)
@@ -767,25 +1004,35 @@ func cleanupBackups() {
 
 		// Delete if exceeds max age (and max age is set)
 		if cfg.BackupMaxAgeDays > 0 {
-			age := now.Sub(bk.modTime)
+			age := now.Sub(entry.Timestamp)
 			if age > time.Duration(cfg.BackupMaxAgeDays)*24*time.Hour {
 				shouldDelete = true
 			}
 		}
 
 		if shouldDelete {
-			backupPath := filepath.Join(backupsDir, bk.name)
-			os.RemoveAll(backupPath)
+			if err := backup.RemoveCatalogEntry(entry); err != nil {
+				removeErrs = append(removeErrs, fmt.Errorf("%s: %w", entry.Name, err))
+			}
 		}
 	}
+
+	if len(removeErrs) > 0 {
+		return fmt.Errorf("failed to prune %d old backup(s): %w", len(removeErrs), errors.Join(removeErrs...))
+	}
+	return nil
 }
 
 // autoBackupResult reports what the pre-install auto-backup actually did so the
 // install worker can be honest with the user (C5). enabled is false when
 // auto-backup is turned off (no backup attempted, no warning).
 type autoBackupResult struct {
-	enabled bool // auto-backup is on in settings
-	count   int  // number of files actually captured
+	enabled    bool // auto-backup is on in settings
+	count      int  // number of files actually captured
+	backupDir  string
+	cleanupErr error  // non-fatal: retention cleanup after the backup failed
+	omission   string // non-fatal: optional active configs were outside authority
+	plan       *backup.PlanResult
 }
 
 // autoBackupIfEnabled creates a backup if auto-backup is enabled in settings.
@@ -820,19 +1067,211 @@ func autoBackupIfEnabled() (autoBackupResult, error) {
 	// backup.Create returns an error when zero files were captured or the
 	// manifest write fails, so a "success" here genuinely means a rollback
 	// point exists.
-	count, err := backup.Create(home, backupDir, defaultBackupFiles)
+	files, omission, inventoryErr := convenienceBackupFiles(home)
+	if inventoryErr != nil {
+		return autoBackupResult{enabled: true, backupDir: backupDir}, inventoryErr
+	}
+	count, err := backup.Create(home, backupDir, files)
 	if err != nil {
-		return autoBackupResult{enabled: true, count: count}, err
+		return autoBackupResult{enabled: true, count: count, backupDir: backupDir, omission: omission}, err
 	}
 
-	// Run cleanup after creating backup
-	cleanupBackups()
+	// Run cleanup after creating backup. A cleanup failure does not invalidate the
+	// backup we just captured, so it is recorded (not returned as a fatal error)
+	// and surfaced by the install worker as a warning line instead of being dropped.
+	cleanupErr := cleanupBackups()
 
-	return autoBackupResult{enabled: true, count: count}, nil
+	return autoBackupResult{enabled: true, count: count, backupDir: backupDir, cleanupErr: cleanupErr, omission: omission}, nil
+}
+
+// backupPlanTargets creates a mandatory rollback point for the exact accepted
+// mutation scope. Unlike the user's convenience auto-backup preference, this
+// safety boundary cannot be disabled. Missing targets are recorded explicitly
+// so rollback can remove files/directories created by the operation.
+func backupPlanTargets(targets []backup.Target) (autoBackupResult, error) {
+	return backupPlanTargetsWithState(nil, targets)
+}
+
+func backupPlanTargetsWithState(state *operation.StateAuthority, targets []backup.Target) (autoBackupResult, error) {
+	if len(targets) == 0 {
+		return autoBackupResult{}, fmt.Errorf("accepted plan has no rollback targets")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return autoBackupResult{enabled: true}, err
+	}
+	timestamp := time.Now().Format("2006-01-02_15-04-05") + "_plan"
+	backupsDir, err := operation.StateSubdirectory("backups")
+	if err != nil {
+		return autoBackupResult{enabled: true}, err
+	}
+	backupDir := makeUniqueBackupDir(backupsDir, timestamp)
+	var planResult backup.PlanResult
+	if state != nil {
+		planResult, err = backup.CreatePlanTrackedWithState(home, backupDir, targets, state)
+	} else {
+		planResult, err = backup.CreatePlanTracked(home, backupDir, targets)
+	}
+	if err != nil {
+		return autoBackupResult{enabled: true, count: planResult.Count, backupDir: backupDir}, err
+	}
+	var cleanupErr error
+	if state != nil {
+		cleanupErr = cleanupBackupsWithState(state)
+	} else {
+		cleanupErr = cleanupBackups()
+	}
+	return autoBackupResult{enabled: true, count: planResult.Count, backupDir: backupDir, cleanupErr: cleanupErr, plan: &planResult}, nil
+}
+
+func plannedBackupTargets(home string, files []string) ([]backup.Target, error) {
+	targets := make([]backup.Target, 0, len(files))
+	for _, rel := range files {
+		if filepath.IsAbs(rel) {
+			return nil, fmt.Errorf("rollback target outside HOME is unsupported: %s", rel)
+		}
+		kind := backup.TargetFile
+		if rel == ".config/nvim" || strings.HasPrefix(filepath.ToSlash(rel), ".tmux/plugins/") {
+			kind = backup.TargetDirectory
+		} else if info, statErr := os.Lstat(filepath.Join(home, filepath.FromSlash(rel))); statErr == nil && info.IsDir() {
+			kind = backup.TargetDirectory
+		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect rollback target %s: %w", rel, statErr)
+		}
+		targets = append(targets, backup.Target{RelPath: rel, Kind: kind})
+	}
+	return targets, nil
 }
 
 // Update handles messages
+// asyncChannel identifies App-owned work whose lifetime is independent of tabs.
+type asyncChannel uint8
+
+const (
+	asyncUpdates asyncChannel = iota
+	asyncBackups
+	asyncUsers
+	asyncBackupOperation
+	asyncUserOperation
+)
+
+type asyncRequest struct {
+	generation uint64
+	pending    bool
+}
+
+type appAsyncResult struct {
+	channel    asyncChannel
+	generation uint64
+	payload    tea.Msg
+}
+
+// startAsync allocates identity on the event loop; workers capture only values.
+// Read refreshes supersede earlier reads. Mutations are serialized per owner.
+func (a *App) startAsync(channel asyncChannel, cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	request := &a.asyncRequests[channel]
+	if channel >= asyncBackupOperation && request.pending {
+		return nil
+	}
+	if channel >= asyncBackupOperation {
+		a.invalidateAsyncRead(channel)
+	}
+	request.generation++
+	request.pending = true
+	generation := request.generation
+	return func() tea.Msg {
+		return appAsyncResult{channel: channel, generation: generation, payload: cmd()}
+	}
+}
+
+// A mutation invalidates reads both before it starts and when it terminates:
+// a refresh may have started during the operation on another tab.
+func (a *App) invalidateAsyncRead(operation asyncChannel) {
+	var read asyncChannel
+	switch operation { //nolint:exhaustive // Only mutation channels invalidate reads.
+	case asyncBackupOperation:
+		read = asyncBackups
+		a.backupsLoading, a.backupsLoaded = false, false
+	case asyncUserOperation:
+		read = asyncUsers
+		a.usersLoaded = false
+	default:
+		return
+	}
+	a.asyncRequests[read].generation++
+	a.asyncRequests[read].pending = false
+}
+
+func asyncResultChannel(msg tea.Msg) (asyncChannel, bool) {
+	switch msg.(type) {
+	case updateCheckDoneMsg:
+		return asyncUpdates, true
+	case backupsLoadedMsg:
+		return asyncBackups, true
+	case userLoadedMsg:
+		return asyncUsers, true
+	case backupRestoreDoneMsg, backupDeleteDoneMsg, backupCreateDoneMsg:
+		return asyncBackupOperation, true
+	case userSavedMsg, userDeletedMsg, userSwitchedMsg:
+		return asyncUserOperation, true
+	default:
+		return 0, false
+	}
+}
+
+// reduceAsyncResult uses the existing screen reducers without navigating or
+// calling Init. Follow-up reads therefore survive completion on another tab.
+func (a *App) reduceAsyncResult(msg tea.Msg) (tea.Cmd, bool) {
+	channel, known := asyncResultChannel(msg)
+	if result, ok := msg.(appAsyncResult); ok {
+		channel, known = asyncResultChannel(result.payload)
+		if !known || channel != result.channel {
+			return nil, true
+		}
+		request := &a.asyncRequests[channel]
+		if !request.pending || request.generation != result.generation {
+			return nil, true
+		}
+		request.pending = false
+		msg = result.payload
+	} else {
+		if !known {
+			return nil, false
+		}
+		// Untagged helper/legacy results cannot supersede a channel once live
+		// generation-bound work has started (including after it has completed).
+		if a.asyncRequests[channel].generation != 0 {
+			return nil, true
+		}
+	}
+	ctx := a.screenMgr.Context()
+	var handler ScreenHandler
+	switch channel {
+	case asyncUpdates:
+		handler = NewUpdateScreen(ctx)
+	case asyncBackups:
+		handler = NewBackupsScreen(ctx)
+	case asyncUsers:
+		handler = NewUsersScreen(ctx)
+	case asyncBackupOperation:
+		a.invalidateAsyncRead(asyncBackupOperation)
+		handler = NewBackupsScreen(ctx)
+	case asyncUserOperation:
+		a.invalidateAsyncRead(asyncUserOperation)
+		handler = NewUsersScreen(ctx)
+	}
+	_, cmd := handler.Update(msg)
+	return cmd, true
+}
+
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if cmd, handled := a.reduceAsyncResult(msg); handled {
+		return a, cmd
+	}
+
 	// Handle window resize for screen manager
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		a.width = wsm.Width
@@ -854,21 +1293,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tickUI()
 	}
 
-	// installCacheDoneMsg carries the result of the app-wide install-status cache,
-	// which is preloaded at startup and shared by the deep-dive/manage screens. It
-	// can complete while ANY screen is active, so apply it globally before
-	// delegating to the manager (managed screens would otherwise drop it and the
-	// cache would never mark ready).
-	if m, ok := msg.(installCacheDoneMsg); ok {
-		a.manageInstalled = m.installed
-		a.manageInstalledReady = true
-		a.installCacheLoading = false
+	// Installation snapshot results can complete while any screen is active, so
+	// apply the single generation-bound reducer before delegating to a screen.
+	if m, ok := msg.(installationSnapshotDoneMsg); ok {
+		a.applyInstallationSnapshotDone(m)
 		return a, nil
 	}
 
-	// Streaming/terminal async messages for the package-update and tool-install
-	// flows are handled GLOBALLY here, before delegating, exactly like
-	// installCacheDoneMsg above. Their re-arm/finalize/cache-refresh chain
+	// Streaming/terminal async messages for package updates are handled GLOBALLY
+	// here, before delegating, exactly like
+	// installationSnapshotDoneMsg above. Their re-arm/finalize/cache-refresh chain
 	// outlives the originating screen (the worker goroutine + package-manager
 	// subprocess do too), so handling them only in the originating screen's
 	// Update would drop the message when the user has navigated away — wedging
@@ -882,14 +1316,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleUpdateStartMsg(m)
 	case updateSudoRequiredMsg:
 		return a, a.handleUpdateSudoRequiredMsg(m)
-	case manageInstallWithLogsMsg:
-		return a, a.handleManageInstallWithLogsMsg(m)
-	case manageInstallDoneMsg:
-		return a, a.handleManageInstallDoneMsg(m)
-	case manageStartInstallMsg:
-		return a, a.handleManageStartInstallMsg(m)
-	case manageSudoRequiredMsg:
-		return a, a.handleManageSudoRequiredMsg(m)
 	}
 
 	// Every live screen is a migrated ScreenHandler, so the ScreenManager owns
@@ -900,9 +1326,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	//
 	// Note: the intro animation (tickMsg / animationDoneMsg),
 	// the install flow (installStartMsg / sudoRequiredMsg / sudoCachedMsg /
-	// installOutputMsg / installEventMsg / installDoneMsg / installLogMsg) and the
-	// Users async results (userLoadedMsg / userSavedMsg / userDeletedMsg /
-	// userSwitchedMsg) are all handled by their migrated ScreenHandlers via the
+	// installOutputMsg / installEventMsg / installDoneMsg) and the
+	// remaining screen-local results are handled by their ScreenHandlers via the
 	// ScreenManager, which delegates every non-navigation message to the active
 	// handler.
 	cmd, _ := a.screenMgr.Update(msg)
@@ -912,11 +1337,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the UI through the ScreenManager. Every live screen is a
 // migrated ScreenHandler, so the manager always renders the current screen.
 func (a *App) View() string {
-	// Defensive: if no navigation has landed yet (no current screen), navigate to
-	// the start screen so the first frame is never blank. NewApp already navigates
-	// at construction, so this is belt-and-suspenders.
+	// Rendering may prepare a missing handler, but must never start work whose
+	// command cannot be returned from View. App.Init owns startup initialization.
 	if a.screenMgr.Current() == nil {
-		a.screenMgr.Navigate(a.screen)
+		a.screenMgr.prepare(a.screen)
 	}
 	return a.screenMgr.View()
 }
@@ -924,16 +1348,23 @@ func (a *App) View() string {
 // execCommand wraps exec.Cmd to implement tea.ExecCommand
 type execCommand struct {
 	*exec.Cmd
+	cancel context.CancelFunc
 }
 
-func (e execCommand) SetStdin(r io.Reader)  { e.Cmd.Stdin = r }
-func (e execCommand) SetStdout(w io.Writer) { e.Cmd.Stdout = w }
-func (e execCommand) SetStderr(w io.Writer) { e.Cmd.Stderr = w }
+func (e execCommand) Run() error {
+	defer e.cancel()
+	return e.Cmd.Run()
+}
+
+func (e execCommand) SetStdin(r io.Reader)  { e.Stdin = r }
+func (e execCommand) SetStdout(w io.Writer) { e.Stdout = w }
+func (e execCommand) SetStderr(w io.Writer) { e.Stderr = w }
 
 // sudoPromptCmd returns a command that prompts for sudo credentials
 func sudoPromptCmd() tea.ExecCommand {
 	// Use a script that shows a nice message then prompts for sudo
-	cmd := exec.Command("bash", "-c", `
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // #nosec G118 -- ownership transfers to execCommand.cancel; Run defers cancellation.
+	cmd := exec.CommandContext(ctx, "bash", "-c", `
 		echo ""
 		echo "┌────────────────────────────────────────────┐"
 		echo "│  Installation requires administrator       │"
@@ -956,11 +1387,20 @@ func sudoPromptCmd() tea.ExecCommand {
 			exit 1
 		fi
 	`)
-	return execCommand{cmd}
+	return execCommand{Cmd: cmd, cancel: cancel}
 }
 
-// SetStartScreen sets the initial screen to display (for CLI routing)
+// SetStartScreen selects the initial CLI route before Init. Once running,
+// callers navigate through NavigateMsg instead.
 func (a *App) SetStartScreen(screen Screen) {
+	if a.startupInitialized {
+		return
+	}
+	defer func() {
+		if a.screenMgr != nil {
+			a.screenMgr.prepare(a.screen)
+		}
+	}()
 	a.startScreen = screen
 	// Always land on the requested screen after the intro.
 	a.postIntroScreen = screen
@@ -990,9 +1430,7 @@ func (a *App) SetStartScreen(screen Screen) {
 	// Within standalone mode, themeReturn==ScreenMainMenu distinguishes an
 	// in-TUI call (main menu "Theme") from a CLI call (constructor default
 	// ScreenWelcome), so we leave themeReturn unchanged here.
-	if screen == ScreenThemePicker {
-		a.themeStandalone = true
-	}
+	a.themeStandalone = screen == ScreenThemePicker
 
 	// Starting explicitly at the animation means "intro → welcome".
 	if screen == ScreenAnimation {
@@ -1118,11 +1556,13 @@ func buildScreenToolIDs() map[Screen][]string {
 	}
 
 	for _, t := range tools.GetRegistry().All() {
-		// Tools with dedicated screens (UIGroupNone with a configScreen set).
+		// Tools with dedicated screens. Claude Code also remains in the CLI Tools
+		// group as a non-navigable context row, so ConfigScreen is authoritative
+		// even when UIGroup is not None.
 		// Use the authoritative toolConfigScreens map (keyed by tool ID) rather
 		// than converting the raw int, so the Screen constant is named
 		// symbolically and stays correct if the iota is reordered.
-		if t.UIGroup() == tools.UIGroupNone && t.ConfigScreen() != 0 {
+		if t.ConfigScreen() != 0 {
 			if screen, ok := toolConfigScreens[t.ID()]; ok {
 				result[screen] = append(result[screen], t.ID())
 			}

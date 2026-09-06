@@ -38,9 +38,12 @@ func NewTailscaleTool() *TailscaleTool {
 // installed out-of-band (official installer, macOS app bundle) where the
 // package-manager check would miss it, so probe the CLI first.
 func (t *TailscaleTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *TailscaleTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("tailscale"); err == nil {
 		return true
 	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return false
 }

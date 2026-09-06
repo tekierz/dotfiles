@@ -1,10 +1,33 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+
+	"github.com/tekierz/dotfiles/internal/operation"
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
+
+var claudeConfigSaveMu sync.Mutex
+
+const (
+	context7MCPPackage           = "@upstash/context7-mcp@3.2.3"
+	taskMasterMCPPackage         = "task-master-ai@0.43.1"
+	githubMCPPackage             = "@modelcontextprotocol/server-github@2025.4.8"
+	supabaseMCPPackage           = "@supabase/mcp-server-supabase@0.8.3"
+	convexMCPPackage             = "convex@1.42.2"
+	puppeteerMCPPackage          = "@modelcontextprotocol/server-puppeteer@2025.5.12"
+	sequentialThinkingMCPPackage = "@modelcontextprotocol/server-sequential-thinking@2026.7.4"
+)
+
+// claudeConfigBeforeCommitHook is package-private test instrumentation for a
+// non-cooperating writer that replaces ~/.claude.json after the merge read.
+var claudeConfigBeforeCommitHook func(path string) error
 
 // ClaudeConfig represents the subset of Claude Code configuration this tool
 // owns: the user-scope MCP server map. It deliberately models ONLY mcpServers
@@ -27,37 +50,37 @@ func AllMCPServers() map[string]MCPServer {
 		"context7": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@upstash/context7-mcp"},
+			Args:    []string{"-y", context7MCPPackage},
 		},
 		"task-master": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "task-master-ai"},
+			Args:    []string{"-y", taskMasterMCPPackage},
 		},
 		"github": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@modelcontextprotocol/server-github"},
+			Args:    []string{"-y", githubMCPPackage},
 		},
 		"supabase": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@supabase/mcp-server-supabase"},
+			Args:    []string{"-y", supabaseMCPPackage},
 		},
 		"convex": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "convex@latest", "mcp", "start"},
+			Args:    []string{"-y", convexMCPPackage, "mcp", "start"},
 		},
 		"puppeteer": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@modelcontextprotocol/server-puppeteer"},
+			Args:    []string{"-y", puppeteerMCPPackage},
 		},
 		"sequential-thinking": {
 			Type:    "stdio",
 			Command: "npx",
-			Args:    []string{"-y", "@modelcontextprotocol/server-sequential-thinking"},
+			Args:    []string{"-y", sequentialThinkingMCPPackage},
 		},
 	}
 }
@@ -81,26 +104,33 @@ func LoadClaudeConfig() (*ClaudeConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	data, err := os.ReadFile(path)
+	root, rel, err := anchoredFilePath(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return &ClaudeConfig{MCPServers: make(map[string]MCPServer)}, nil
-		}
+		return nil, fmt.Errorf("resolve Claude config path: %w", err)
+	}
+
+	data, revision, err := safefile.ReadWithinLimit(root, rel, maxProductConfigJSONBytes)
+	if err != nil {
 		return nil, err
+	}
+	if !revision.Exists() {
+		return &ClaudeConfig{MCPServers: make(map[string]MCPServer)}, nil
 	}
 
 	// Decode into a generic map so we only read the mcpServers key and ignore
 	// (without discarding) everything else.
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
+	raw, err := decodeJSONObject(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse Claude config: %w", err)
 	}
 
 	cfg := &ClaudeConfig{MCPServers: make(map[string]MCPServer)}
 	if servers, ok := raw["mcpServers"]; ok {
+		if bytes.Equal(bytes.TrimSpace(servers), []byte("null")) {
+			return nil, errors.New("parse Claude config: mcpServers must not be null")
+		}
 		if err := json.Unmarshal(servers, &cfg.MCPServers); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse Claude config mcpServers: %w", err)
 		}
 		if cfg.MCPServers == nil {
 			cfg.MCPServers = make(map[string]MCPServer)
@@ -110,49 +140,160 @@ func LoadClaudeConfig() (*ClaudeConfig, error) {
 }
 
 // SaveClaudeConfig writes the MCP server map to ~/.claude.json using a
-// read-modify-write that preserves all other keys in the file. The existing
-// file is backed up to ~/.claude.json.bak before writing, and the write is
-// atomic (temp file + rename) so an interrupted save cannot truncate the file.
-func SaveClaudeConfig(cfg *ClaudeConfig) error {
+// read-modify-write that preserves all other keys in the file. The replacement
+// is atomic and revision-bound. The caller's reviewed backup/rollback workflow
+// owns recovery; this merge never overwrites an unowned ~/.claude.json.bak.
+func SaveClaudeConfig(cfg *ClaudeConfig) (returnErr error) {
+	_, err := SaveClaudeConfigTracked(cfg)
+	return err
+}
+
+func SaveClaudeConfigTracked(cfg *ClaudeConfig) (committedRevision safefile.Revision, returnErr error) {
+	return saveClaudeConfigAtRevisionTracked(cfg, nil, nil, operation.DefaultLocker, nil)
+}
+
+// SaveClaudeConfigAtRevisionTracked applies the merge only while the source
+// still matches a reviewed plan's exact accepted revision.
+func SaveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted safefile.Revision) (safefile.Revision, error) {
+	return saveClaudeConfigAtRevisionTracked(cfg, &accepted, nil, operation.DefaultLocker, nil)
+}
+
+// ApplyClaudeMCPSelectionAtRevisionTracked performs the accepted read,
+// preservation merge, MCP selection update, and CAS while one lock is held.
+// Custom MCP definitions not owned by this product remain untouched.
+func ApplyClaudeMCPSelectionAtRevisionTracked(enabled map[string]bool, accepted safefile.Revision) (safefile.Revision, error) {
+	selection := make(map[string]bool, len(enabled))
+	for name, value := range enabled {
+		selection[name] = value
+	}
+	return saveClaudeConfigAtRevisionTracked(nil, &accepted, nil, operation.DefaultLocker, selection)
+}
+
+func ApplyClaudeMCPSelectionAtAuthorityTracked(enabled map[string]bool, accepted safefile.Revision, parents *safefile.ParentChain) (safefile.Revision, error) {
+	return ApplyClaudeMCPSelectionAtBoundAuthorityTracked(enabled, accepted, parents, operation.DefaultLocker)
+}
+
+func ApplyClaudeMCPSelectionAtBoundAuthorityTracked(enabled map[string]bool, accepted safefile.Revision, parents *safefile.ParentChain, locker operation.Locker) (safefile.Revision, error) {
+	if !parents.Tracked() || locker == nil {
+		return safefile.Revision{}, fmt.Errorf("%w: Claude config authority is incomplete", safefile.ErrParentChanged)
+	}
+	selection := make(map[string]bool, len(enabled))
+	for name, value := range enabled {
+		selection[name] = value
+	}
+	return saveClaudeConfigAtRevisionTracked(nil, &accepted, parents, locker, selection)
+}
+
+func saveClaudeConfigAtRevisionTracked(cfg *ClaudeConfig, accepted *safefile.Revision, parents *safefile.ParentChain, locker operation.Locker, selection map[string]bool) (committedRevision safefile.Revision, returnErr error) {
+	if cfg == nil && selection == nil {
+		return safefile.Revision{}, errors.New("claude config is nil")
+	}
+	claudeConfigSaveMu.Lock()
+	defer claudeConfigSaveMu.Unlock()
+
 	path, err := claudeConfigPath()
 	if err != nil {
-		return err
+		return safefile.Revision{}, err
 	}
+	root, rel, err := anchoredFilePath(path)
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("resolve Claude config path: %w", err)
+	}
+	release, err := locker("claude-config", path)
+	if err != nil {
+		return safefile.Revision{}, fmt.Errorf("lock Claude config: %w", err)
+	}
+	anyCommit := false
+	defer func() {
+		if err := release(); err != nil {
+			releaseErr := fmt.Errorf("release Claude config lock: %w", err)
+			if anyCommit {
+				returnErr = &safefile.CommittedError{Operation: "release Claude config lock", Err: errors.Join(returnErr, releaseErr)}
+				return
+			}
+			returnErr = errors.Join(returnErr, releaseErr)
+		}
+	}()
 
 	// Read existing content into a generic map so unrelated keys (model,
 	// permissions, hooks, statusLine, projects, etc.) survive the round-trip.
 	raw := make(map[string]json.RawMessage)
-	existing, readErr := os.ReadFile(path)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return readErr
+	var existing []byte
+	var revision safefile.Revision
+	if accepted != nil && parents != nil {
+		existing, revision, err = safefile.ReadWithinAuthorizedLimit(root, rel, parents, maxProductConfigJSONBytes)
+	} else {
+		existing, revision, err = safefile.ReadWithinLimit(root, rel, maxProductConfigJSONBytes)
 	}
-	if readErr == nil {
-		if err := json.Unmarshal(existing, &raw); err != nil {
-			return err
+	if err != nil {
+		return safefile.Revision{}, err
+	}
+	if accepted != nil && revision != *accepted {
+		return safefile.Revision{}, fmt.Errorf("%w: Claude config changed after plan acceptance", safefile.ErrRevisionChanged)
+	}
+	if revision.Exists() {
+		raw, err = decodeJSONObject(existing)
+		if err != nil {
+			return safefile.Revision{}, fmt.Errorf("parse existing Claude config: %w", err)
 		}
-		if raw == nil {
-			raw = make(map[string]json.RawMessage)
-		}
-		// Back up the existing file before overwriting it.
-		if err := writeFileAtomic(path+".bak", existing, 0600); err != nil {
-			return err
+		if servers, ok := raw["mcpServers"]; ok && bytes.Equal(bytes.TrimSpace(servers), []byte("null")) {
+			return safefile.Revision{}, errors.New("parse existing Claude config: mcpServers must not be null")
 		}
 	}
 
-	// Set only the key we own.
-	servers := cfg.MCPServers
+	// Set only the key we own. Accepted selection updates derive their source
+	// map from the exact bytes read above, after authority was proven under lock.
+	var servers map[string]MCPServer
+	if selection != nil {
+		servers = make(map[string]MCPServer)
+		if encodedServers, ok := raw["mcpServers"]; ok {
+			if err := json.Unmarshal(encodedServers, &servers); err != nil {
+				return safefile.Revision{}, fmt.Errorf("parse existing Claude config mcpServers: %w", err)
+			}
+		}
+		for name, enabled := range selection {
+			if server, owned := AllMCPServers()[name]; owned && enabled {
+				servers[name] = server
+			} else if owned {
+				delete(servers, name)
+			}
+		}
+	} else {
+		servers = cfg.MCPServers
+	}
 	if servers == nil {
 		servers = make(map[string]MCPServer)
 	}
 	encoded, err := json.Marshal(servers)
 	if err != nil {
-		return err
+		return safefile.Revision{}, err
 	}
 	raw["mcpServers"] = encoded
 
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
-		return err
+		return safefile.Revision{}, err
 	}
-	return writeFileAtomic(path, data, 0600)
+	if claudeConfigBeforeCommitHook != nil {
+		if err := claudeConfigBeforeCommitHook(path); err != nil {
+			return safefile.Revision{}, fmt.Errorf("before Claude config commit: %w", err)
+		}
+	}
+	var finalRevision safefile.Revision
+	if accepted != nil && parents != nil {
+		finalRevision, err = safefile.ReplaceWithinRevisionNoCreateAuthorizedTracked(root, rel, revision, parents, data, 0600)
+	} else if accepted != nil {
+		finalRevision, err = safefile.ReplaceWithinRevisionNoCreateTracked(root, rel, revision, data, 0600)
+	} else {
+		finalRevision, err = safefile.ReplaceWithinRevisionTracked(root, rel, revision, data, 0600)
+	}
+	if err != nil {
+		var committed interface{ Committed() bool }
+		if errors.As(err, &committed) && committed.Committed() {
+			anyCommit = true
+		}
+		return safefile.Revision{}, err
+	}
+	anyCommit = true
+	return finalRevision, nil
 }

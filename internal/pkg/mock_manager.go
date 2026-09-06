@@ -9,6 +9,8 @@ import (
 
 // MockPackageManager is a test implementation of PackageManager.
 type MockPackageManager struct {
+	executableIdentity ExecutableIdentity
+
 	// Configuration
 	ManagerName      string
 	Available        bool
@@ -46,6 +48,32 @@ func (m *MockPackageManager) Name() string {
 // IsAvailable checks if this package manager is available.
 func (m *MockPackageManager) IsAvailable() bool {
 	return m.Available
+}
+
+// ExecutableIdentity returns the configured immutable identity without I/O.
+func (m *MockPackageManager) ExecutableIdentity() (ExecutableIdentity, bool) {
+	if m == nil || !validExecutableIdentity(m.executableIdentity) {
+		return ExecutableIdentity{}, false
+	}
+	return m.executableIdentity, true
+}
+
+// SetExecutableIdentity configures a valid identity while preserving the prior
+// identity when validation fails.
+func (m *MockPackageManager) SetExecutableIdentity(identity ExecutableIdentity) error {
+	if m == nil || !validExecutableIdentity(identity) {
+		return errExecutableIdentityInvalid
+	}
+	m.executableIdentity = identity
+	return nil
+}
+
+func (MockPackageManager) String() string {
+	return "mock_package_manager"
+}
+
+func (manager MockPackageManager) GoString() string {
+	return manager.String()
 }
 
 // Install installs packages.

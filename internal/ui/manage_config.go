@@ -1,19 +1,26 @@
 package ui
 
+const currentNativeImportSchemaVersion = 6
+
 // ManageConfig holds detailed management configuration for all tools
 type ManageConfig struct {
+	NativeImportSchemaVersion int
 	// Ghostty detailed settings
-	GhosttyFontFamily        string
-	GhosttyFontSize          int
-	GhosttyOpacity           int
-	GhosttyBlurRadius        int
-	GhosstyCursorStyle       string
+	GhosttyFontFamily  string
+	GhosttyFontSize    int
+	GhosttyOpacity     int
+	GhosttyBlurRadius  int
+	GhosstyCursorStyle string
+	// GhosttyScrollbackLines is retained as a serialized compatibility name;
+	// Ghostty interprets scrollback-limit as bytes, not terminal rows.
 	GhosttyScrollbackLines   int
 	GhosttyWindowDecorations bool
 	GhosttyConfirmClose      bool
+	GhosttyTabBindings       string
 
 	// Tmux detailed settings
 	TmuxPrefix           string
+	TmuxSplitBinds       string
 	TmuxBaseIndex        int
 	TmuxMouseMode        bool
 	TmuxStatusPosition   string
@@ -57,16 +64,24 @@ type ManageConfig struct {
 	GitMergeTool        string
 	GitCredentialHelper string
 	GitSignCommits      bool
+	GitDeltaSideBySide  bool
+	GitAliasStatus      bool
+	GitAliasCheckout    bool
+	GitAliasBranch      bool
+	GitAliasCommit      bool
+	GitAliasLogGraph    bool
 
 	// Yazi detailed settings
+	YaziKeymap      string
 	YaziShowHidden  bool
+	YaziPreviewMode string
 	YaziSortBy      string
 	YaziSortReverse bool
 	YaziLineMode    string
 	YaziScrollOff   int
 
 	// FZF detailed settings
-	FzfDefaultOpts   string
+	FzfDefaultOpts   string // additional fzf flags stored as inert data
 	FzfHeight        int
 	FzfLayout        string
 	FzfBorderStyle   string
@@ -74,10 +89,10 @@ type ManageConfig struct {
 	FzfPreviewWindow string
 
 	// LazyGit detailed settings
-	LazyGitSideBySide bool
-	LazyGitPaging     string
-	LazyGitMouseMode  bool
-	LazyGitGuiTheme   string
+	LazyGitSidePanelWidth string
+	LazyGitPagerPreset    string
+	LazyGitMouseEvents    bool
+	LazyGitColorPreset    string
 
 	// LazyDocker detailed settings
 	LazyDockerMouseMode bool
@@ -92,10 +107,13 @@ type ManageConfig struct {
 	BtopShownBoxes  string
 
 	// Glow detailed settings
-	GlowStyle string
-	GlowPager string
-	GlowWidth int
-	GlowMouse bool
+	GlowStyle            string
+	GlowPager            string
+	GlowWidth            int
+	GlowMouse            bool
+	GlowAll              bool
+	GlowShowLineNumbers  bool
+	GlowPreserveNewLines bool
 
 	// Claude Code MCP server settings
 	ClaudeCodeMCPContext7           bool
@@ -110,6 +128,7 @@ type ManageConfig struct {
 // NewManageConfig creates a new management config with defaults
 func NewManageConfig() *ManageConfig {
 	return &ManageConfig{
+		NativeImportSchemaVersion: currentNativeImportSchemaVersion,
 		// Ghostty
 		// Use the same default as NewDeepDiveConfig so the two config models do
 		// not disagree on the same setting (C13). "JetBrains Mono" is also the
@@ -119,12 +138,14 @@ func NewManageConfig() *ManageConfig {
 		GhosttyOpacity:           100,
 		GhosttyBlurRadius:        0,
 		GhosstyCursorStyle:       "block",
-		GhosttyScrollbackLines:   10000,
+		GhosttyScrollbackLines:   10_000_000,
 		GhosttyWindowDecorations: true,
 		GhosttyConfirmClose:      true,
+		GhosttyTabBindings:       "super",
 
 		// Tmux
 		TmuxPrefix:           "C-a",
+		TmuxSplitBinds:       "percent",
 		TmuxBaseIndex:        1,
 		TmuxMouseMode:        true,
 		TmuxStatusPosition:   "bottom",
@@ -171,12 +192,20 @@ func NewManageConfig() *ManageConfig {
 		// credentials to disk in plaintext the way "store" does.
 		GitCredentialHelper: "cache",
 		GitSignCommits:      false,
+		GitDeltaSideBySide:  true,
+		GitAliasStatus:      true,
+		GitAliasCheckout:    true,
+		GitAliasBranch:      true,
+		GitAliasCommit:      true,
+		GitAliasLogGraph:    true,
 
 		// Yazi
+		YaziKeymap:      "vim",
 		YaziShowHidden:  false,
+		YaziPreviewMode: "auto",
 		YaziSortBy:      "alphabetical",
 		YaziSortReverse: false,
-		YaziLineMode:    "size",
+		YaziLineMode:    "none",
 		YaziScrollOff:   5,
 
 		// FZF
@@ -188,10 +217,10 @@ func NewManageConfig() *ManageConfig {
 		FzfPreviewWindow: "right:50%",
 
 		// LazyGit
-		LazyGitSideBySide: true,
-		LazyGitPaging:     "delta",
-		LazyGitMouseMode:  true,
-		LazyGitGuiTheme:   "auto",
+		LazyGitSidePanelWidth: "0.3333",
+		LazyGitPagerPreset:    "builtin",
+		LazyGitMouseEvents:    true,
+		LazyGitColorPreset:    "standard",
 
 		// LazyDocker
 		LazyDockerMouseMode: true,
@@ -208,9 +237,10 @@ func NewManageConfig() *ManageConfig {
 		// Glow
 		// Match NewDeepDiveConfig's default of "auto" (C13).
 		GlowStyle: "auto",
-		GlowPager: "auto",
+		GlowPager: "never",
 		GlowWidth: 80,
-		GlowMouse: true,
+		GlowMouse: false,
+		GlowAll:   false,
 
 		// Claude Code MCPs (context7 enabled by default)
 		ClaudeCodeMCPContext7:           true,

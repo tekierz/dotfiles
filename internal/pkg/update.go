@@ -1,9 +1,12 @@
 package pkg
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 )
+
+var allManagers = AllManagers
 
 // UpdateResult represents the result of an update operation
 type UpdateResult struct {
@@ -15,22 +18,32 @@ type UpdateResult struct {
 // CheckAllUpdates checks for updates across all available package managers
 func CheckAllUpdates() ([]Package, error) {
 	var allPackages []Package
+	var managerErrs []error
 
-	managers := AllManagers()
+	managers := allManagers()
 	if len(managers) == 0 {
 		return nil, fmt.Errorf("no package managers available")
 	}
 
 	for _, mgr := range managers {
-		packages, err := mgr.CheckOutdated()
-		if err != nil {
-			// Log error but continue with other managers
+		provider := ExecutionProviderForManager(mgr)
+		if provider == "" {
+			managerErrs = append(managerErrs, fmt.Errorf("%s: unsupported update provider", mgr.Name()))
 			continue
 		}
-		allPackages = append(allPackages, packages...)
+		packages, err := mgr.CheckOutdated()
+		if err != nil {
+			// Keep checking other managers, but surface this failure to callers.
+			managerErrs = append(managerErrs, fmt.Errorf("%s: %w", mgr.Name(), err))
+			continue
+		}
+		for _, discovered := range packages {
+			discovered.provider = provider
+			allPackages = append(allPackages, discovered)
+		}
 	}
 
-	// Deduplicate exact duplicates only, keyed on Name+InstalledBy. This removes
+	// Deduplicate exact duplicates only, keyed on Name+InstalledBy+Provider. This removes
 	// the paru/pacman double-listing artifact without erasing a package's source
 	// manager: two records with the same name but different InstalledBy (e.g. a
 	// "pacman" vs an "aur" entry) are legitimately distinct and must both survive
@@ -38,7 +51,7 @@ func CheckAllUpdates() ([]Package, error) {
 	seen := make(map[string]bool)
 	var deduped []Package
 	for _, p := range allPackages {
-		key := p.Name + "\x00" + p.InstalledBy
+		key := p.Name + "\x00" + p.InstalledBy + "\x00" + string(p.ExecutionProvider())
 		if !seen[key] {
 			seen[key] = true
 			deduped = append(deduped, p)
@@ -46,18 +59,44 @@ func CheckAllUpdates() ([]Package, error) {
 	}
 	allPackages = deduped
 
-	// Sort by name for consistent display
+	// Sort by name, execution provider, then display provenance so same-named
+	// packages from multiple managers have a deterministic surface order.
 	sort.Slice(allPackages, func(i, j int) bool {
-		return allPackages[i].Name < allPackages[j].Name
+		if allPackages[i].Name != allPackages[j].Name {
+			return allPackages[i].Name < allPackages[j].Name
+		}
+		if allPackages[i].ExecutionProvider() != allPackages[j].ExecutionProvider() {
+			return allPackages[i].ExecutionProvider() < allPackages[j].ExecutionProvider()
+		}
+		return allPackages[i].InstalledBy < allPackages[j].InstalledBy
 	})
 
-	return allPackages, nil
+	return allPackages, errors.Join(managerErrs...)
 }
 
-// DotfilesPackages is the canonical dotfiles package allow-list using macOS/Arch
-// names. On Debian/Pi several packages use different names (e.g. fd -> fd-find);
-// use DotfilesDebianPackages for that platform and CheckDotfilesUpdates for
-// platform-aware filtering.
+// ExecutionProviders returns the accepted providers represented by packages in
+// deterministic order. Display provenance is intentionally not consulted.
+func ExecutionProviders(packages []Package) []ExecutionProvider {
+	seen := make(map[ExecutionProvider]struct{})
+	providers := make([]ExecutionProvider, 0)
+	for _, packageInfo := range packages {
+		provider := packageInfo.ExecutionProvider()
+		if provider == "" {
+			continue
+		}
+		if _, ok := seen[provider]; ok {
+			continue
+		}
+		seen[provider] = struct{}{}
+		providers = append(providers, provider)
+	}
+	sort.Slice(providers, func(i, j int) bool { return providers[i] < providers[j] })
+	return providers
+}
+
+// DotfilesPackages is retained for source compatibility with integrations that
+// used the former static updater inventory. Runtime product checks use the tool
+// registry's managed platform projection instead.
 var DotfilesPackages = []string{
 	// Core shell
 	"zsh",
@@ -91,11 +130,11 @@ var DotfilesPackages = []string{
 	"duf",
 	"dust",
 	"fswatch",
+	"dotfiles",
 }
 
-// DotfilesDebianPackages is the Debian/Pi variant of the allow-list, using the
-// stock Debian package names. Packages unavailable in stock repos are omitted
-// so the filter does not match phantom updates (glow, lazygit, lazydocker).
+// DotfilesDebianPackages is the retained Debian/Pi compatibility inventory.
+// Runtime product checks derive Debian names from the tool registry.
 var DotfilesDebianPackages = []string{
 	// Core shell
 	"zsh",
@@ -128,36 +167,64 @@ var DotfilesDebianPackages = []string{
 	// tlrc, duf, dust omitted: not in stock Debian repos
 }
 
-// CheckDotfilesUpdates checks for updates only for dotfiles-managed packages.
-// On Debian/Pi, Debian-specific package names (e.g., fd-find instead of fd)
-// are used for filtering so renamed packages are not silently dropped.
+// CheckDotfilesUpdates preserves the former public static-inventory behavior.
+// Product callers should pass the runtime registry projection to
+// CheckManagedUpdates.
 func CheckDotfilesUpdates() ([]Package, error) {
-	allUpdates, err := CheckAllUpdates()
-	if err != nil {
-		return nil, err
-	}
-
 	// Pick the allow-list appropriate for the current platform so that
 	// Debian-renamed packages (fd-find etc.) are recognised correctly.
 	var allowList []string
 	switch DetectPlatform() {
+	case PlatformMacOS, PlatformArch, PlatformUnknown:
+		allowList = DotfilesPackages
 	case PlatformDebian, PlatformPi:
 		allowList = DotfilesDebianPackages
-	default:
-		allowList = DotfilesPackages
 	}
 
-	dotfilesSet := make(map[string]bool, len(allowList))
-	for _, pkg := range allowList {
-		dotfilesSet[pkg] = true
-	}
+	return CheckManagedUpdates(allowList)
+}
 
-	var filtered []Package
-	for _, pkg := range allUpdates {
-		if dotfilesSet[pkg.Name] {
-			filtered = append(filtered, pkg)
+// CheckManagedUpdates checks all available providers and returns only packages
+// owned by the supplied runtime product projection.
+func CheckManagedUpdates(managedPackages []string) ([]Package, error) {
+	allUpdates, err := CheckAllUpdates()
+	return FilterManagedUpdates(allUpdates, managedPackages), err
+}
+
+// ManagerForExecutionProvider resolves retained discovery authority to the
+// exact available manager class that is allowed to execute an update. Display
+// provenance such as "aur" is intentionally never used for routing.
+func ManagerForExecutionProvider(provider ExecutionProvider) PackageManager {
+	if provider == "" {
+		return nil
+	}
+	var selected PackageManager
+	for _, manager := range allManagers() {
+		if ExecutionProviderForManager(manager) != provider {
+			continue
+		}
+		if selected != nil {
+			return nil
+		}
+		selected = manager
+	}
+	return selected
+}
+
+// FilterManagedUpdates is the pure managed-package filter shared by CLI and
+// TUI update checks. It preserves discovery order and provider authority.
+func FilterManagedUpdates(updates []Package, managedPackages []string) []Package {
+	managed := make(map[string]struct{}, len(managedPackages))
+	for _, name := range managedPackages {
+		if name != "" {
+			managed[name] = struct{}{}
 		}
 	}
-
-	return filtered, nil
+	filtered := make([]Package, 0, len(updates))
+	for _, update := range updates {
+		if _, ok := managed[update.Name]; ok {
+			filtered = append(filtered, update)
+		}
+	}
+	return filtered
 }

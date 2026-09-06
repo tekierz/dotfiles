@@ -1,0 +1,16 @@
+{
+  "scope": "Read-only bounded local resource discovery; no remote connections or owner configuration changes",
+  "ssh_config_files_parsed": 2,
+  "ssh_read_errors": 0,
+  "plausible_pi_or_disposable_lab_aliases": [],
+  "vm_runtime_apps_found": [],
+  "vm_runtime_commands_found": [],
+  "vm_images_in_standard_locations_or_bounded_common_folder_scan": [],
+  "directories_examined_in_bounded_vm_scan": 91,
+  "historical_change": "not established; current inventory only",
+  "limits": [
+    "Not an exhaustive whole-disk search",
+    "Generic SSH host names are not treated as disposable test targets",
+    "Actual Raspberry Pi and restorable Mac/VM acceptance remain incomplete"
+  ]
+}

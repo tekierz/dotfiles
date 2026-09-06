@@ -59,10 +59,10 @@ func ghosttyAdjust(a *App, key string, fwd bool) {
 		} else if cfg.GhosttyBlurRadius > 0 {
 			cfg.GhosttyBlurRadius -= 5
 		}
-	case 4: // Scrollback lines
-		opts := []string{"1000", "5000", "10000", "50000", "100000"}
+	case 4: // Scrollback byte limit
+		opts := []string{"1000000", "5000000", "10000000", "50000000", "100000000"}
 		current := fmt.Sprintf("%d", cfg.GhosttyScrollbackLines)
-		cfg.GhosttyScrollbackLines = atoi(cycleOption(opts, current, fwd), 10000)
+		cfg.GhosttyScrollbackLines = atoi(cycleOption(opts, current, fwd), 10000000)
 	case 5: // Cursor style
 		opts := []string{"block", "bar", "underline"}
 		cfg.GhosttyCursorStyle = cycleOption(opts, cfg.GhosttyCursorStyle, fwd)
@@ -101,7 +101,7 @@ func (s *configGhosttyScreen) View(width, height int) string {
 	rec.field(fieldIdx)
 	fontFocused := a.configFieldIndex == fieldIdx
 	rec.write(renderFieldLabel("Font Size", fontFocused))
-	rec.write(renderNumberControl(cfg.GhosttyFontSize, 8, 32, fontFocused))
+	rec.write(renderNumberControl(cfg.GhosttyFontSize, 32, fontFocused))
 	rec.write("\n\n")
 	fieldIdx++
 
@@ -121,10 +121,10 @@ func (s *configGhosttyScreen) View(width, height int) string {
 
 	rec.field(fieldIdx)
 	scrollFocused := a.configFieldIndex == fieldIdx
-	rec.write(renderFieldLabel("Scrollback Lines", scrollFocused))
+	rec.write(renderFieldLabel("Scrollback Bytes", scrollFocused))
 	rec.write(renderOptionSelector(
-		[]string{"1000", "5000", "10000", "50000", "100000"},
-		[]string{"1K", "5K", "10K", "50K", "100K"},
+		[]string{"1000000", "5000000", "10000000", "50000000", "100000000"},
+		[]string{"1 MB", "5 MB", "10 MB", "50 MB", "100 MB"},
 		fmt.Sprintf("%d", cfg.GhosttyScrollbackLines),
 		scrollFocused,
 	))

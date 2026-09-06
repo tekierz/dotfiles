@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/backup"
 )
 
 // backupsScreen is the migrated ScreenHandler for the Backups management screen.
@@ -21,11 +22,8 @@ import (
 // startTabTargetLoad / mainMenuScreen.selectItem), and Init() is idempotent, so
 // the list loads exactly once however the screen is entered.
 //
-// Async-in-handler: because the ScreenManager delegates every non-navigation
-// message to this handler while it is active, the backup async results are
-// handled here (not in App.Update): backupsLoadedMsg, backupRestoreDoneMsg,
-// backupDeleteDoneMsg, backupCreateDoneMsg. The delete/create handlers re-issue
-// loadBackupsCmd to refresh the list, keeping the async chain going.
+// App validates generation-bound completions globally and invokes these reducers
+// regardless of the active tab. Delete/create reducers retain the follow-up read.
 type backupsScreen struct {
 	BaseScreen
 }
@@ -48,7 +46,7 @@ func (s *backupsScreen) Init() tea.Cmd {
 	}
 	if !a.backupsLoading && !a.backupsLoaded {
 		a.backupsLoading = true
-		return loadBackupsCmd()
+		return a.startAsync(asyncBackups, loadBackupsCmd())
 	}
 	return nil
 }
@@ -70,7 +68,7 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
 
-	// --- Async results (delegated here while this screen is active) ---
+	// --- App routes accepted async results here even while another tab is active. ---
 	case backupsLoadedMsg:
 		a.backupsLoading = false
 		a.backupsLoaded = true
@@ -85,15 +83,36 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 	case backupRestoreDoneMsg:
 		a.backupRunning = false
-		a.backupConfirmMode = false
+		s.clearConfirmation()
+		a.backupStatusWarning = msg.err == nil && (msg.skipped > 0 || msg.warnings > 0)
 		switch {
 		case msg.err != nil:
-			a.backupStatus = fmt.Sprintf("Restore failed: %v", msg.err)
+			a.backupStatus = fmt.Sprintf("Restore failed for %s: %v", msg.name, msg.err)
+		case msg.count == 0 && msg.removed == 0 && msg.skipped > 0:
+			a.backupStatus = fmt.Sprintf("Restore skipped for %s: %d entries could not be restored", msg.name, msg.skipped)
+			if msg.warnings > 0 {
+				a.backupStatus += fmt.Sprintf(", %d warning(s)", msg.warnings)
+			}
+			if len(msg.details) > 0 {
+				a.backupStatus += ": " + strings.Join(firstStrings(msg.details, 3), "; ")
+			}
+		case msg.skipped > 0 && msg.warnings > 0:
+			a.backupStatus = fmt.Sprintf("Restore partial for %s: Restored %d files, %d removed, %d skipped, %d warning(s)", msg.name, msg.count, msg.removed, msg.skipped, msg.warnings)
+			if len(msg.details) > 0 {
+				a.backupStatus += ": " + strings.Join(firstStrings(msg.details, 3), "; ")
+			}
 		case msg.skipped > 0:
-			// Some (or all) files could not be restored. Report it as a warning,
-			// never as green success (C3). The "skipped" keyword drives the
-			// yellow style in the renderer below.
-			a.backupStatus = fmt.Sprintf("Restored %d files from %s, %d skipped", msg.count, msg.name, msg.skipped)
+			a.backupStatus = fmt.Sprintf("Restore partial for %s: Restored %d files, %d removed, %d skipped", msg.name, msg.count, msg.removed, msg.skipped)
+			if len(msg.details) > 0 {
+				a.backupStatus += ": " + strings.Join(firstStrings(msg.details, 3), "; ")
+			}
+		case msg.warnings > 0:
+			a.backupStatus = fmt.Sprintf("Restored %d files from %s with %d warning(s)", msg.count, msg.name, msg.warnings)
+			if len(msg.details) > 0 {
+				a.backupStatus += ": " + strings.Join(firstStrings(msg.details, 3), "; ")
+			}
+		case msg.removed > 0:
+			a.backupStatus = fmt.Sprintf("Restored %d files and removed %d from %s", msg.count, msg.removed, msg.name)
 		default:
 			a.backupStatus = fmt.Sprintf("Restored %d files from %s", msg.count, msg.name)
 		}
@@ -101,7 +120,8 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 	case backupDeleteDoneMsg:
 		a.backupRunning = false
-		a.backupConfirmMode = false
+		s.clearConfirmation()
+		a.backupStatusWarning = false
 		if msg.err != nil {
 			a.backupStatus = fmt.Sprintf("Delete failed: %v", msg.err)
 		} else {
@@ -113,20 +133,25 @@ func (s *backupsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// Refresh backup list (re-issue the load so the chain continues).
 			a.backupsLoaded = false
 			a.backupsLoading = true
-			return s, loadBackupsCmd()
+			return s, a.startAsync(asyncBackups, loadBackupsCmd())
 		}
 		return s, nil
 
 	case backupCreateDoneMsg:
 		a.backupRunning = false
+		a.backupStatusWarning = false
 		if msg.err != nil {
 			a.backupStatus = fmt.Sprintf("Backup failed: %v", msg.err)
 		} else {
 			a.backupStatus = fmt.Sprintf("Created backup: %s", msg.name)
+			if msg.warning != "" {
+				a.backupStatus += " • warning: " + msg.warning
+				a.backupStatusWarning = true
+			}
 			// Refresh backup list (re-issue the load so the chain continues).
 			a.backupsLoaded = false
 			a.backupsLoading = true
-			return s, loadBackupsCmd()
+			return s, a.startAsync(asyncBackups, loadBackupsCmd())
 		}
 		return s, nil
 	}
@@ -153,18 +178,21 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if a.backupConfirmMode {
 		switch key {
 		case "y", "Y":
-			if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
+			switch a.backupConfirmType {
+			case "restore":
 				a.backupRunning = true
-				backup := a.backups[a.backupIndex]
-				if a.backupConfirmType == "restore" {
-					return restoreBackupCmd(backup)
-				} else if a.backupConfirmType == "delete" {
-					return deleteBackupCmd(backup)
-				}
+				return a.startAsync(asyncBackupOperation, restoreBackupCmd(a.backupConfirmName, a.backupConfirmEntry))
+			case "delete":
+				a.backupRunning = true
+				return a.startAsync(asyncBackupOperation, deleteBackupCmd(a.backupConfirmName, a.backupConfirmEntry))
+			default:
+				a.backupStatusWarning = false
+				a.backupStatus = "Unknown backup confirmation action"
+				s.clearConfirmation()
 			}
-			a.backupConfirmMode = false
 		case "n", "N", "esc":
-			a.backupConfirmMode = false
+			s.clearConfirmation()
+			a.backupStatusWarning = false
 			a.backupStatus = ""
 		}
 		return nil
@@ -190,26 +218,36 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "enter": // Restore selected backup
 		if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
+			selected := a.backups[a.backupIndex]
 			a.backupConfirmMode = true
 			a.backupConfirmType = "restore"
-			a.backupStatus = fmt.Sprintf("Restore backup '%s'? (y/n)", a.backups[a.backupIndex].Name)
+			a.backupConfirmName = selected.Name
+			a.backupConfirmEntry = selected.Catalog
+			a.backupStatusWarning = false
+			a.backupStatus = fmt.Sprintf("Restore backup '%s'? (y/n)", selected.Name)
 		}
 	case "d", "D": // Delete selected backup
 		if len(a.backups) > 0 && a.backupIndex < len(a.backups) {
+			selected := a.backups[a.backupIndex]
 			a.backupConfirmMode = true
 			a.backupConfirmType = "delete"
-			a.backupStatus = fmt.Sprintf("Delete backup '%s'? (y/n)", a.backups[a.backupIndex].Name)
+			a.backupConfirmName = selected.Name
+			a.backupConfirmEntry = selected.Catalog
+			a.backupStatusWarning = false
+			a.backupStatus = fmt.Sprintf("Delete backup '%s'? (y/n)", selected.Name)
 		}
 	case "n", "N": // Create new backup
 		a.backupRunning = true
+		a.backupStatusWarning = false
 		a.backupStatus = "Creating backup..."
-		return createBackupCmd()
+		return a.startAsync(asyncBackupOperation, createBackupCmd())
 	case "r", "R": // Refresh backup list
 		a.backupsLoaded = false
 		a.backupsLoading = true
+		a.backupStatusWarning = false
 		a.backupStatus = ""
 		a.backupError = nil
-		return loadBackupsCmd()
+		return a.startAsync(asyncBackups, loadBackupsCmd())
 	case "esc":
 		// ScreenMainMenu is migrated; route through the ScreenManager.
 		return NavigateTo(ScreenMainMenu)
@@ -217,15 +255,26 @@ func (s *backupsScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func (s *backupsScreen) clearConfirmation() {
+	a := s.App()
+	a.backupConfirmMode = false
+	a.backupConfirmType = ""
+	a.backupConfirmName = ""
+	a.backupConfirmEntry = backup.CatalogEntry{}
+}
+
 // handleMouse handles mouse clicks on the backups screen.
 func (s *backupsScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	a := s.App()
+	if a.backupRunning || a.backupConfirmMode {
+		return nil
+	}
 	m := tea.MouseEvent(msg)
 
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the
 	// already-active tab (this screen).
 	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+		if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -233,7 +282,7 @@ func (s *backupsScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle mouse wheel scrolling for backup list
 	if m.IsWheel() && len(a.backups) > 0 {
 		delta := 0
-		switch m.Button {
+		switch m.Button { //nolint:exhaustive // Only vertical wheel actions are meaningful here.
 		case tea.MouseButtonWheelUp:
 			delta = -1
 		case tea.MouseButtonWheelDown:
@@ -326,15 +375,18 @@ func (s *backupsScreen) View(width, height int) string {
 	var statusLine string
 	if a.backupStatus != "" {
 		statusStyle := lipgloss.NewStyle().Foreground(ColorYellow)
-		if strings.Contains(a.backupStatus, "skipped") {
+		switch {
+		case a.backupStatusWarning:
+			statusStyle = lipgloss.NewStyle().Foreground(ColorYellow)
+		case strings.Contains(a.backupStatus, "skipped") || strings.Contains(a.backupStatus, "warning"):
 			// Partial/failed restore: keep the warning (yellow) style even though
 			// the message contains "Restored" (C3).
 			statusStyle = lipgloss.NewStyle().Foreground(ColorYellow)
-		} else if strings.Contains(a.backupStatus, "Restored") || strings.Contains(a.backupStatus, "Created") {
+		case strings.Contains(a.backupStatus, "Restored") || strings.Contains(a.backupStatus, "Created"):
 			statusStyle = lipgloss.NewStyle().Foreground(ColorGreen)
-		} else if strings.Contains(a.backupStatus, "failed") || strings.Contains(a.backupStatus, "Error") {
+		case strings.Contains(a.backupStatus, "failed") || strings.Contains(a.backupStatus, "Error"):
 			statusStyle = lipgloss.NewStyle().Foreground(ColorRed)
-		} else if a.backupConfirmMode {
+		case a.backupConfirmMode:
 			statusStyle = lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
 		}
 		statusLine = statusStyle.Render(a.backupStatus)
@@ -373,7 +425,7 @@ func (s *backupsScreen) View(width, height int) string {
 	innerTextW := maxInt(20, boxOuterW-4) // border(2) + paddingX(2)
 
 	// Backup list header
-	var backupLines []string
+	backupLines := make([]string, 0, len(a.backups)+2)
 	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
 	backupLines = append(backupLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-24s %-16s %6s %8s", "NAME", "DATE", "FILES", "SIZE")), innerTextW))
 	backupLines = append(backupLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-24s %-16s %6s %8s", strings.Repeat("-", 24), strings.Repeat("-", 16), strings.Repeat("-", 6), strings.Repeat("-", 8))), innerTextW))
@@ -452,11 +504,12 @@ func (s *backupsScreen) View(width, height int) string {
 
 	// Help text
 	var helpText string
-	if a.backupRunning {
+	switch {
+	case a.backupRunning:
 		helpText = "please wait..."
-	} else if a.backupConfirmMode {
+	case a.backupConfirmMode:
 		helpText = "y confirm • n cancel"
-	} else {
+	default:
 		helpText = "up/down navigate • enter restore • d delete • n new backup • r refresh • esc menu"
 	}
 	help := HelpStyle.Render(helpText)
@@ -477,4 +530,11 @@ func (s *backupsScreen) View(width, height int) string {
 	return lipgloss.Place(width, height,
 		lipgloss.Center, lipgloss.Top,
 		content)
+}
+
+func firstStrings(values []string, maxCount int) []string {
+	if len(values) <= maxCount {
+		return values
+	}
+	return values[:maxCount]
 }

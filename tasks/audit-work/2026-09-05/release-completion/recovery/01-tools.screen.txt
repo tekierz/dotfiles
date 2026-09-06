@@ -1,0 +1,24 @@
+1 Manage  2 Users  3 Hotkeys  4 Update  5 Backups                               
+                                                                                
+                                                                                
+TOOLS • SETTINGS via Tab                                                        
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+▸ [GLOBAL] Global • installed                                                   
+  [SYS] btop • status unknown                                                   
+  [SYS] Zsh • status unknown                                                    
+  [TERM] Ghostty • installed                                                    
+  [TERM] Tmux • status unknown                                                  
+  [EDIT] Cursor • installed                                                     
+  [EDIT] Neovim • status unknown                                                
+  [FILE] Yazi • status unknown                                                  
+  [DEV] Delta • status unknown                                                  
+  [DEV] Git • status unknown                                                    
+  [DEV] LazyDocker • status unknown                                             
+  [DEV] LazyGit • status unknown                                                
+                                                                                
+                                                                                
+                                                                                
+Tab settings • ↑↓ move • Enter settings • Esc back • q quit                     

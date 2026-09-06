@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "operation_id": "20260906T045259.416101000Z-3b102a05cc549ba0",
+  "plan_hash": "c3e23d84435d4ad843bce987fcf19553f1475b20063f87c6fe42d70c250f4986",
+  "started_at": "2026-09-06T04:52:59.416101Z",
+  "finished_at": "2026-09-06T04:53:05.895757Z",
+  "status": "succeeded",
+  "actions": [
+    {
+      "action_id": "install:pi",
+      "status": "succeeded",
+      "summary": "installed and detected"
+    }
+  ],
+  "warnings": [
+    "package-only operation has no filesystem mutations; no filesystem rollback point was created"
+  ]
+}

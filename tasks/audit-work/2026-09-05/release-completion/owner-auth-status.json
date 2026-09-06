@@ -1,0 +1,15 @@
+{
+  "scope": "Read-only status of pre-existing owner installations; not candidate installation or authenticated request acceptance",
+  "codex": {
+    "version": "0.153.4",
+    "status_exit": 0,
+    "reports_logged_in": true
+  },
+  "claude": {
+    "version": "2.1.263",
+    "status_exit": 0,
+    "loggedIn": true,
+    "authMethod": "claude.ai",
+    "apiProvider": "firstParty"
+  }
+}

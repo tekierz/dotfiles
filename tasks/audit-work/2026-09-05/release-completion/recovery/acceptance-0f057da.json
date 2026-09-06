@@ -1,0 +1,36 @@
+{
+  "result": "passed",
+  "binary_sha256": "e1aeab51f12ac2cee4baf1a28227e62f1165eaef71333943c241ae0d03df5379",
+  "platform": "Darwin arm64",
+  "checks": [
+    "TUI convenience backup captures eight real synthetic config files in manifest",
+    "TUI restore cancellation preserves all modified files",
+    "TUI confirmed restore recovers all eight bytes and POSIX modes; backup payload unchanged",
+    "TUI delete cancellation preserves full backup",
+    "Restore action remains visible at 40x14; Backups heading returns at 100x32 and 80x24",
+    "TUI Ctrl-C exits zero",
+    "CLI restores TUI-created backup: eight file bytes and modes",
+    "CLI uninstall restores latest backup and retains complete backup/config state",
+    "CLI reports partial failure for symlink destination; target and recovery data preserved",
+    "Incomplete backup makes uninstall fail; available recovery data and unrestorable live file survive",
+    "Legacy directory CLI restore recovers nested bytes/modes, removes extra descendants and absent-before directory"
+  ],
+  "isolation": "Private fresh HOME/XDG_CONFIG_HOME/XDG_STATE_HOME; empty PATH; synthetic config only",
+  "limits": [
+    "At 40x14 only Backups details/footer are visible; full listing/header are clipped",
+    "No owner account config or package mutations",
+    "No macOS VM/spare-Mac disk snapshot recovery; required owner install/apply gate remains unfulfilled",
+    "PTY emulation does not verify GUI-terminal font, mouse, animation or physical appearance",
+    "No ACL, xattr, file flags, hardlink topology or timestamps preservation claim",
+    "No Arch or Raspberry Pi runtime covered by this harness"
+  ],
+  "synthetic_home": "/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-recovery-acceptance-dubsqh0b",
+  "toolchain": "go1.26.8 darwin/arm64",
+  "verification_commands": [
+    "GOTOOLCHAIN=go1.26.8 go build -o /tmp/dotfiles-release-recovery ./cmd/dotfiles",
+    "GOTOOLCHAIN=go1.26.8 go test -count=1 ./internal/backup ./internal/safefile ./internal/operation ./cmd/dotfiles",
+    "/private/tmp/dotfiles-pty-qa-venv/bin/python tasks/audit-work/2026-09-05/release-completion/recovery/acceptance.py"
+  ],
+  "source_revision": "0f057da3c6a422b674e546f4e3da59001d539489",
+  "source_dirty": "true"
+}

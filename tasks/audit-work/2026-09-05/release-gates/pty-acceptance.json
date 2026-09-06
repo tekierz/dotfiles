@@ -1,0 +1,28 @@
+{
+  "source_commit": "4a4cf5759d9c278534728b2aed0cba58520eef2b",
+  "production_source_commit": "f7ff93feddbdf616b9b44784ba95a90159b7d0be",
+  "binary_sha256": "343cde28795173a2ce0d55efa052e27ea6167ccdcf27d1976592b4e22e671476",
+  "platform": "Darwin arm64",
+  "terminal": "PTY + pyte 0.8.2; xterm-256color; cursor/background query replies",
+  "result": "passed",
+  "checks": [
+    "Five management tabs render at 80x24",
+    "Create profile qauser",
+    "Duplicate profile rejected and original bytes unchanged",
+    "Switch active marker and persisted active_user agree",
+    "Create one backup containing synthetic .zshrc",
+    "Restore cancellation leaves modified .zshrc unchanged",
+    "Confirmed restore recovers original .zshrc bytes",
+    "Delete cancellation preserves backup manifest",
+    "Resize to 100x32 retains Backups screen",
+    "Ctrl-C exits with status 0"
+  ],
+  "exit_status": 0,
+  "isolation": "Fresh private temporary HOME and XDG_CONFIG_HOME; PATH contains only an empty temporary directory; no owner configuration or package changes",
+  "limits": [
+    "No package manager discovery/success exercised: Updates shows expected no-manager error",
+    "No real font, GUI terminal, mouse or hardware appearance claim",
+    "Profile settings use default values; non-default adoption remains covered by automated tests",
+    "Synthetic single-file backup; owner backup and platform recovery still outstanding"
+  ]
+}

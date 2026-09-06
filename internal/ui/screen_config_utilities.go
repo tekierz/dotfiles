@@ -38,7 +38,8 @@ func NewConfigUtilitiesScreen(ctx *ScreenContext) *configUtilitiesScreen {
 	s.setIndex = func(a *App, v int) { a.utilityIndex = v }
 	s.toggle = func(a *App, id string) {
 		// Don't allow toggling if already installed.
-		if !a.manageInstalled[id] {
+		installed, _ := a.installationUtilityInstalled(id)
+		if !installed {
 			a.deepDiveConfig.Utilities[id] = !a.deepDiveConfig.Utilities[id]
 		}
 	}
@@ -54,11 +55,11 @@ func (s *configUtilitiesScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // View renders the utilities selection screen.
 func (s *configUtilitiesScreen) View(width, height int) string {
 	a := s.App()
+	if a.installCacheLoading {
+		return installStatusLoadingView(a, width, height)
+	}
 
-	// Ensure install status is cached.
-	a.ensureInstallCache()
-
-	title := renderConfigTitle("", "Utilities", "Helper tools from tekierz/homebrew-tap")
+	title := renderConfigTitle("", "Utilities", "Bundled local helper scripts")
 
 	cfg := a.deepDiveConfig
 	rec := newFieldLayoutRecorder(a.deepDiveBoxWidth(60))
@@ -67,7 +68,7 @@ func (s *configUtilitiesScreen) View(width, height int) string {
 		rec.field(i)
 		focused := a.utilityIndex == i
 		enabled := cfg.Utilities[util.id]
-		installed := a.manageInstalled[util.id]
+		installed, _ := a.installationUtilityInstalled(util.id)
 
 		cursor := "  "
 		if focused && !installed {

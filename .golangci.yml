@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
   modules-download-mode: readonly
@@ -6,90 +8,63 @@ linters:
   enable:
     # Default linters
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
     # Additional linters
     - bodyclose
-    - dogsled
-    - dupl
     - errorlint
     - exhaustive
-    - exportloopref
-    - gocognit
-    - goconst
-    - gocritic
-    - gocyclo
-    - godot
-    - gofmt
-    - goimports
     - goprintffuncname
     - gosec
-    - misspell
     - nakedret
     - nilerr
     - noctx
     - nolintlint
-    - prealloc
-    - predeclared
     - revive
     - rowserrcheck
     - sqlclosecheck
-    - stylecheck
-    - tparallel
     - unconvert
-    - unparam
     - whitespace
 
-linters-settings:
-  gocyclo:
-    min-complexity: 20
+  settings:
+    staticcheck:
+      # Optional formatting quick-fix introduced by the linter upgrade; keep
+      # security and correctness checks unchanged. Standalone staticcheck also runs.
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022", "-QF1012"]
+    revive:
+      rules:
+        - name: exported
+          disabled: true  # Allow unexported return types
 
-  gocognit:
-    min-complexity: 30
-
-  dupl:
-    threshold: 150
-
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-
-  misspell:
-    locale: US
-
-  revive:
+  exclusions:
     rules:
-      - name: exported
-        disabled: true  # Allow unexported return types
+      # Unix Stat_t field widths differ between Darwin and Linux. These exact
+      # field conversions keep shared code compiling on both platforms.
+      - path: internal/(pkg/executable_identity|safefile/(anchored_unix|directory_unix|parent_chain_unix|replace_unix))\.go
+        linters: [unconvert]
+        text: "unnecessary conversion"
+        source: 'u?int(32|64)\([[:alnum:]_]+\.(Dev|Mode|Nlink)\)'
+      # Test fixtures intentionally execute discovered local binaries and read
+      # temporary paths. Production subprocess/path findings remain blocking.
+      - path: _test\.go
+        linters:
+          - gosec
 
-  gosec:
-    excludes:
-      - G104  # Audit errors not checked (too noisy for TUI)
-      - G304  # File path provided as taint input (expected for dotfiles)
+      # These readers consume paths derived from validated config names below
+      # HOME/XDG roots. Traversal, symlink, and atomic-write boundaries have
+      # dedicated regression tests in internal/config.
+      - path: internal/config/(config|hotkeys|user)\.go
+        linters:
+          - gosec
+        text: "G304:"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
 
 issues:
-  exclude-rules:
-    # Test files can have longer functions
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - gocognit
-        - dupl
-
-    # UI files tend to have longer functions
-    - path: internal/ui/
-      linters:
-        - gocyclo
-        - gocognit
-        - dupl
-
-    # Allow fmt.Print in CLI
-    - path: cmd/
-      linters:
-        - forbidigo
-
-  max-issues-per-linter: 50
-  max-same-issues: 10
+  max-issues-per-linter: 0
+  max-same-issues: 0

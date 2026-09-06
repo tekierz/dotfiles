@@ -1,0 +1,4 @@
+/Users/runner/hostedtoolcache/node/24.20.0/arm64/bin/node size=121911744 mode=-rwxr-xr-x
+/Users/runner/hostedtoolcache/node/24.20.0/arm64/lib/node_modules/npm/bin/npm-cli.js size=54 mode=-rwxr-xr-x
+/Users/runner/work/_temp/dotfiles-npm.kzV2e8/node/bin/node size=121911744 mode=-rwxr-xr-x
+/Users/runner/work/_temp/dotfiles-npm.kzV2e8/node/lib/node_modules/npm/bin/npm-cli.js size=54 mode=-rwxr-xr-x

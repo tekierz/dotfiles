@@ -59,6 +59,12 @@ func TestNormalizeNavStyle(t *testing.T) {
 	}
 }
 
+func TestGlowPagerExampleNamesAnInputFile(t *testing.T) {
+	if got := keysFor(t, Categories("emacs"), "glow", "Render a file with the configured pager"); got != "glow -p README.md" {
+		t.Fatalf("Glow pager example=%q", got)
+	}
+}
+
 func TestCategoriesStableSetAndCount(t *testing.T) {
 	t.Parallel()
 
@@ -110,7 +116,6 @@ func TestCategoriesNavStyleBindingsFlip(t *testing.T) {
 	}{
 		{"tmux", "Navigate panes", "Alt-h/j/k/l", "Alt-Arrow"},
 		{"yazi", "Navigate", "h/j/k/l", "Arrow keys"},
-		{"yazi", "Toggle hidden files", ".", "Ctrl-h"},
 		{"neovim", "Navigate", "h/j/k/l", "Arrow keys"},
 	}
 

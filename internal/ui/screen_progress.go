@@ -2,10 +2,13 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/installapply"
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
@@ -67,7 +70,8 @@ func (s *progressScreen) Init() tea.Cmd {
 	if a.installRunning {
 		return nil
 	}
-	if runner.NeedsSudo() && !runner.CheckSudoCached() {
+	a.stageInstallationAttempt(a.pendingInstallPlan)
+	if a.pendingInstallPlan != nil && a.pendingInstallPlan.needsSudo() && runner.NeedsSudo() && !runner.CheckSudoCached() {
 		// Prompt for sudo (exits the alt screen), then start the install.
 		return tea.Exec(sudoPromptCmd(), func(err error) tea.Msg {
 			return sudoCachedMsg{err: err}
@@ -87,6 +91,7 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// Cancel the running install worker + (sudo) package-manager subprocess
 			// before quitting so they are not orphaned when the TUI exits (C15).
 			a.teardownStream()
+			a.deepDiveContinuation = nil
 			return s, tea.Quit
 		case "enter":
 			// Only advance once the installation is complete.
@@ -98,6 +103,11 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			// Allow backing out only before the run starts (mirrors the legacy
 			// "[ESC] Back" hint, which is only shown when not running/complete).
 			if !a.installRunning && !a.installComplete {
+				if a.deepDiveContinuation != nil {
+					a.deepDiveContinuation = nil
+					a.invalidatePendingInstallPlan()
+					return s, NavigateTo(ScreenNavPicker)
+				}
 				return s, NavigateTo(ScreenFileTree)
 			}
 			return s, nil
@@ -109,7 +119,8 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		if a.installRunning {
 			return s, nil
 		}
-		if runner.NeedsSudo() && !runner.CheckSudoCached() {
+		a.stageInstallationAttempt(a.pendingInstallPlan)
+		if a.pendingInstallPlan != nil && a.pendingInstallPlan.needsSudo() && runner.NeedsSudo() && !runner.CheckSudoCached() {
 			return s, func() tea.Msg { return sudoRequiredMsg{} }
 		}
 		return s, a.startInstallation()
@@ -121,14 +132,17 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 
 	case sudoCachedMsg:
 		if msg.err != nil {
+			a.stageInstallationAttempt(a.pendingInstallPlan)
 			a.lastError = msg.err
+			a.finishInstallationAttempt(installationOutcomeFailed)
+			a.deepDiveContinuation = nil
 			return s, a.showError(msg.err)
 		}
 		return s, a.startInstallation()
 
 	// --- Streaming install output ---
 	case installOutputMsg:
-		a.installOutput = append(a.installOutput, msg.line.Text)
+		a.installOutput = append(a.installOutput, sanitizeLogLine(msg.line.Text))
 		s.capOutput()
 		if msg.line.Type == runner.OutputStep {
 			a.installStep++
@@ -139,23 +153,64 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		// Streamed progress from the install worker goroutine, applied here on the
 		// main loop so the worker never touches shared App state.
 		if msg.line != "" {
-			a.installOutput = append(a.installOutput, msg.line)
+			a.installOutput = append(a.installOutput, sanitizeLogLine(msg.line))
 			s.capOutput()
 		}
 		if msg.stepInc {
 			a.installStep++
 		}
 		if msg.done {
+			if msg.operationID != "" {
+				a.lastOperationID = msg.operationID
+			}
 			a.installEvents = nil
 			// Route into the done handler (mark complete / navigate / error).
-			return s.Update(installDoneMsg{err: msg.err, context: msg.context})
+			return s.Update(installDoneMsg{err: msg.err, context: msg.context, result: msg.result})
 		}
 		// Re-subscribe for the next event to keep the stream flowing.
 		return s, a.listenInstallEventsCmd()
 
 	case installDoneMsg:
-		a.installRunning = false
-		a.installComplete = true
+		outcome := installationOutcomeSucceeded
+		continuation := a.deepDiveContinuation
+		configurationOnly := a.pendingInstallPlan != nil && a.pendingInstallPlan.configurationOnly
+		if msg.err == nil && msg.result.Status == operation.StatusPhaseComplete && msg.result.Next == installapply.NextReplanRequired {
+			outcome = installationOutcomeReplanRequired
+		} else if msg.err != nil {
+			outcome = installationOutcomeFailed
+		}
+		if msg.err == nil && continuation != nil {
+			switch {
+			case continuation.stage == deepDiveContinuationPackageReview &&
+				outcome == installationOutcomeReplanRequired &&
+				msg.result.PhaseKind == operation.InstallPhasePrerequisite &&
+				msg.result.PhaseIndex == 1 &&
+				len(msg.result.RemainingTools()) != 0 &&
+				slices.Equal(msg.result.RequestedTools(), continuation.requestedTools):
+				// Phase 1 completed. Retain only intent and require a fresh phase 2 review.
+			case continuation.stage == deepDiveContinuationPackageReview &&
+				msg.result.Status == operation.StatusSucceeded &&
+				msg.result.Next == installapply.NextComplete &&
+				msg.result.PhaseKind == operation.InstallPhaseNPM &&
+				msg.result.PhaseIndex == 2 &&
+				len(msg.result.RemainingTools()) == 0 &&
+				slices.Equal(msg.result.RequestedTools(), continuation.requestedTools):
+				continuation.stage = deepDiveContinuationConfigReview
+				outcome = installationOutcomeConfigurationReviewRequired
+			case continuation.stage == deepDiveContinuationConfigReview && configurationOnly:
+				// The existing reviewed config worker completed the final operation.
+				outcome = installationOutcomeSucceeded
+				a.deepDiveContinuation = nil
+			default:
+				msg.err = fmt.Errorf("reviewed Deep Dive continuation result did not match the reviewed phase")
+				outcome = installationOutcomeFailed
+				a.deepDiveContinuation = nil
+			}
+		}
+		if msg.err != nil {
+			a.deepDiveContinuation = nil
+		}
+		a.finishInstallationAttemptWithResult(outcome, msg.result)
 		// The install worker has finished; drop the retained cancel handle so a
 		// later teardown (Ctrl+C on the summary) is a harmless no-op.
 		a.streamCancel = nil
@@ -168,21 +223,32 @@ func (s *progressScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.sudoKeepAliveStop = nil
 		}
 		if msg.err != nil {
+			// Some tools may have installed successfully before a later step
+			// failed. Invalidate and reload observations even on the error path so
+			// retry/Manage does not operate from stale pre-install state.
+			tools.GetRegistry().InvalidateCache()
+			a.manageInstalledReady = false
+			reloadCmd := a.startInstallCacheLoad()
 			if msg.context != "" {
-				a.lastError = fmt.Errorf("%v\n\nOutput:\n%s", msg.err, msg.context)
+				a.lastError = fmt.Errorf("%w\n\nOutput:\n%s", msg.err, msg.context)
 			} else {
 				a.lastError = msg.err
 			}
-			return s, a.showError(a.lastError)
+			return s, tea.Batch(a.showError(a.lastError), reloadCmd)
 		}
+		a.lastError = nil
 		// Successful install: the Manage / Deep-Dive install-status caches now
 		// show stale "not installed" for the just-installed tools. Invalidate both
 		// the registry's IsInstalled() cache and the App's manageInstalled cache so
 		// the next navigation triggers a fresh load (C10).
 		tools.GetRegistry().InvalidateCache()
 		a.manageInstalledReady = false
+		if outcome == installationOutcomeReplanRequired || outcome == installationOutcomeConfigurationReviewRequired {
+			a.invalidatePendingInstallPlan()
+			return s, a.startInstallCacheLoad()
+		}
+		a.installReviewTools = nil
 		return s, nil
-
 	}
 	return s, nil
 }
@@ -198,15 +264,46 @@ func (s *progressScreen) capOutput() {
 	}
 }
 
-// View renders the installation progress screen. It ports renderProgress,
-// reading the live App state. The width/height args are accepted for interface
-// conformance; the layout reads a.width/a.height directly.
+// View renders the installation progress screen. The supplied dimensions are
+// authoritative: ScreenManager owns the current terminal size, while the
+// dimensions retained on App can briefly lag during a resize.
 func (s *progressScreen) View(width, height int) string {
 	a := s.App()
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	// Below the minimum full-layout footprint, render a truthful one-line state
+	// instead of asking lipgloss to place an oversized bordered panel.
+	if width < 30 || height < 14 {
+		label := "Installing..."
+		if a.installComplete {
+			label = "Incomplete"
+			if a.installOutcome == installationOutcomeSucceeded && a.installSummaryFacts.outcome == installationOutcomeSucceeded {
+				label = "Complete"
+			} else if a.installOutcome == installationOutcomeReplanRequired && a.installSummaryFacts.outcome == installationOutcomeReplanRequired {
+				label = "Prerequisites complete — replan required"
+			} else if a.installOutcome == installationOutcomeConfigurationReviewRequired && a.installSummaryFacts.outcome == installationOutcomeConfigurationReviewRequired {
+				label = "Tools installed — configuration review required"
+			}
+		}
+		return PlaceWithBackground(width, height, truncateVisible(label, width))
+	}
 
 	title := TitleStyle.Render("Installing...")
-	if a.installComplete {
+	succeeded := a.installComplete && a.installOutcome == installationOutcomeSucceeded &&
+		a.installSummaryFacts.outcome == installationOutcomeSucceeded
+	replanRequired := a.installComplete && a.installOutcome == installationOutcomeReplanRequired &&
+		a.installSummaryFacts.outcome == installationOutcomeReplanRequired
+	configurationReviewRequired := a.installComplete && a.installOutcome == installationOutcomeConfigurationReviewRequired &&
+		a.installSummaryFacts.outcome == installationOutcomeConfigurationReviewRequired
+	if succeeded {
 		title = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true).Render("✓ Installation Complete!")
+	} else if replanRequired {
+		title = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("✓ Prerequisites Complete — Fresh Review Required")
+	} else if configurationReviewRequired {
+		title = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render("✓ Tools Installed — Configuration Review Required")
+	} else if a.installComplete {
+		title = lipgloss.NewStyle().Foreground(ColorYellow).Bold(true).Render("! Installation Incomplete")
 	}
 
 	// Build a concise display list from the always-core phases only; selected
@@ -227,6 +324,18 @@ func (s *progressScreen) View(width, height int) string {
 		{"Configuring fzf"},
 		{"Configuring tools"},
 	}
+	phaseKind := a.installSummaryFacts.phaseKind
+	if phaseKind == "" && a.pendingInstallPlan != nil {
+		if phase, phased := a.pendingInstallPlan.phase(); phased {
+			phaseKind = phase.Kind()
+		}
+	}
+	switch phaseKind {
+	case operation.InstallPhasePrerequisite:
+		displaySteps = []struct{ name string }{{"Installing Node/npm prerequisites"}}
+	case operation.InstallPhaseNPM:
+		displaySteps = []struct{ name string }{{"Installing reviewed npm tools"}}
+	}
 
 	// Total planned steps, set by startInstallation when the install begins.
 	// Falls back to the display list length for the rare case where the screen
@@ -239,10 +348,11 @@ func (s *progressScreen) View(width, height int) string {
 	// Map a.installStep (cumulative step count, one per worker stepLine) onto
 	// displaySteps so the highlighted entry tracks rough progress without ever
 	// flipping the whole list to complete while the install is still running.
+	failed := a.installComplete && a.installOutcome == installationOutcomeFailed
 	currentPhase := 0
-	if a.installComplete {
+	if succeeded || replanRequired || configurationReviewRequired {
 		currentPhase = len(displaySteps)
-	} else if a.installRunning && a.installStep > 0 {
+	} else if a.installStep > 0 {
 		// Scale the raw step counter proportionally onto the display list.
 		scaled := int(float64(a.installStep) / float64(totalSteps) * float64(len(displaySteps)))
 		if scaled >= len(displaySteps) {
@@ -251,78 +361,132 @@ func (s *progressScreen) View(width, height int) string {
 		currentPhase = scaled
 	}
 
-	var stepList strings.Builder
-	for i, st := range displaySteps {
+	phaseCount := 5
+	containerPadY := 1
+	if height <= 20 {
+		phaseCount = 2
+		containerPadY = 0
+	} else if height >= 34 {
+		phaseCount = len(displaySteps)
+	}
+	phaseStart := currentPhase - phaseCount + 1
+	if succeeded || replanRequired || configurationReviewRequired {
+		phaseStart = len(displaySteps) - phaseCount
+	}
+	phaseStart = clampInt(phaseStart, 0, maxInt(0, len(displaySteps)-phaseCount))
+	phaseEnd := min(len(displaySteps), phaseStart+phaseCount)
+
+	phaseLines := make([]string, 0, phaseEnd-phaseStart)
+	for i := phaseStart; i < phaseEnd; i++ {
+		st := displaySteps[i]
 		var status string
 		var style lipgloss.Style
 
-		if i < currentPhase {
+		switch {
+		case failed && i < currentPhase:
+			status = "•"
+			style = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		case failed && i == currentPhase:
+			status = "✗"
+			style = lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
+		case (succeeded || replanRequired || configurationReviewRequired) && i < currentPhase:
 			status = "✓"
 			style = lipgloss.NewStyle().Foreground(ColorGreen)
-		} else if i == currentPhase && a.installRunning {
+		case i < currentPhase:
+			status = "•"
+			style = lipgloss.NewStyle().Foreground(ColorTextMuted)
+		case i == currentPhase && a.installRunning:
 			status = "▶"
 			style = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
-		} else {
+		default:
 			status = "○"
 			style = lipgloss.NewStyle().Foreground(ColorTextMuted)
 		}
-		stepList.WriteString(style.Render(fmt.Sprintf("  %s %s\n", status, st.name)))
+		phaseLines = append(phaseLines, style.Render(fmt.Sprintf("  %s %s", status, st.name)))
 	}
+	stepList := strings.Join(phaseLines, "\n")
 
 	// Progress fraction derived from the ACTUAL planned phase count, so the bar
 	// reflects real completion rather than the fixed display list length.
 	progressPercent := float64(a.installStep) / float64(totalSteps)
-	if a.installComplete {
+	if succeeded || replanRequired || configurationReviewRequired {
 		progressPercent = 1.0
+	} else if progressPercent >= 1.0 {
+		// Only a sealed successful attempt may render a full bar. A failed,
+		// running, stale, or otherwise unknown attempt keeps its terminal phase
+		// visibly incomplete.
+		progressPercent = float64(maxInt(0, totalSteps-1)) / float64(totalSteps)
 	}
 	if progressPercent < 0 {
 		progressPercent = 0
 	} else if progressPercent > 1 {
 		progressPercent = 1
 	}
-	progressW := min(50, maxInt(20, a.width-30))
+	containerPadX := 1
+	if width >= 100 {
+		containerPadX = 2
+	}
+	contentWidth := maxInt(1, width-2-(2*containerPadX))
+	progressW := min(50, contentWidth)
 	progress := ProgressBar(progressPercent, progressW)
 
 	// Output panel - show real output.
-	var outputLines string
-	if len(a.installOutput) > 0 {
-		// Show last 6 lines.
+	outputCapacity := 3
+	if height <= 20 {
+		outputCapacity = 1
+	} else if height >= 34 {
+		outputCapacity = 8
+	}
+	panelOuterWidth := min(72, contentWidth)
+	panelInnerWidth := maxInt(1, panelOuterWidth-2)
+	var outputRows []string
+	switch {
+	case len(a.installOutput) > 0:
 		start := 0
-		if len(a.installOutput) > 6 {
-			start = len(a.installOutput) - 6
+		if len(a.installOutput) > outputCapacity {
+			start = len(a.installOutput) - outputCapacity
 		}
-		outputLines = strings.Join(a.installOutput[start:], "\n")
-	} else if a.installRunning {
-		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Starting installation...")
-	} else if !a.installComplete {
-		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Press ENTER to start")
+		outputRows = make([]string, 0, len(a.installOutput)-start)
+		for _, line := range a.installOutput[start:] {
+			outputRows = append(outputRows, truncateVisible(sanitizeLogLine(line), panelInnerWidth))
+		}
+	case a.installRunning:
+		outputRows = []string{"Starting installation..."}
+	case !a.installComplete:
+		outputRows = []string{"Press ENTER to start"}
+	default:
+		outputRows = []string{"No installer output captured"}
+	}
+	for len(outputRows) < outputCapacity {
+		outputRows = append(outputRows, "")
+	}
+	outputLines := strings.Join(outputRows, "\n")
+	if len(a.installOutput) == 0 {
+		outputLines = lipgloss.NewStyle().Foreground(ColorTextMuted).Render(outputLines)
 	}
 
 	output := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorBorder).
-		// Keep the output panel responsive so it doesn't overflow smaller terminals.
-		// Note: Width/Height apply before borders in lipgloss, so subtract 2 to
-		// target an approximate outer size.
-		Width(maxInt(20, min(72, a.width-10)-2)).
-		Height(clampInt(a.height/4, 6, 10)).
-		Padding(0, 1).
+		Width(panelInnerWidth).
+		Height(outputCapacity).
 		Render(outputLines)
 
 	var help string
-	if a.installComplete {
-		help = HelpStyle.Render("[ENTER] Continue")
-	} else if a.installRunning {
-		help = HelpStyle.Render("Installation in progress...")
-	} else {
-		help = HelpStyle.Render("[ENTER] Start    [ESC] Back")
+	switch {
+	case a.installComplete:
+		help = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("[ENTER] Continue")
+	case a.installRunning:
+		help = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Installation in progress...")
+	default:
+		help = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("[ENTER] Start    [ESC] Back")
 	}
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
 		"",
-		stepList.String(),
+		stepList,
 		"",
 		progress,
 		"",
@@ -331,5 +495,9 @@ func (s *progressScreen) View(width, height int) string {
 		help,
 	)
 
-	return PlaceWithBackground(a.width, a.height, ContainerStyle.Render(content))
+	container := ContainerStyle.
+		Padding(containerPadY, containerPadX).
+		Width(maxInt(1, width-2)).
+		Render(content)
+	return PlaceWithBackground(width, height, container)
 }

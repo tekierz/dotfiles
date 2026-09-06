@@ -63,7 +63,7 @@ func TestConfigFieldClickGhostty(t *testing.T) {
 		{"Font Size", 1},
 		{"Background Opacity", 2},
 		{"Blur Radius", 3},
-		{"Scrollback Lines", 4},
+		{"Scrollback Bytes", 4},
 		{"Cursor Style", 5},
 		{"New Tab Keybinding", 6},
 	}
@@ -194,12 +194,12 @@ func TestConfigFieldClickFamily(t *testing.T) {
 		{
 			name:  "lazygit",
 			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigLazyGitScreen(ctx) },
-			want:  []fieldCase{{"Side-by-Side Diff", 0}, {"Mouse Mode", 1}, {"Theme", 2}},
+			want:  []fieldCase{{"Side Panel Fraction", 0}, {"Mouse Events", 1}, {"Color Preset", 2}, {"Pager Preset", 3}},
 		},
 		{
 			name:  "glow",
 			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigGlowScreen(ctx) },
-			want:  []fieldCase{{"Style", 0}, {"Pager", 1}, {"Width", 2}},
+			want:  []fieldCase{{"Style", 0}, {"Use Pager", 1}, {"Width", 2}, {"Mouse", 3}, {"Show All Files", 4}, {"Line Numbers", 5}, {"Preserve Newlines", 6}},
 		},
 		{
 			name:  "fzf",
@@ -280,7 +280,7 @@ func TestConfigFieldClickWidthSweep(t *testing.T) {
 				{"Font Size", 1},
 				{"Background Opacity", 2},
 				{"Blur Radius", 3},
-				{"Scrollback Lines", 4},
+				{"Scrollback Bytes", 4},
 				{"Cursor Style", 5},
 				{"New Tab Keybinding", 6},
 			},

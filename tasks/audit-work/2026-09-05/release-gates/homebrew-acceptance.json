@@ -1,0 +1,40 @@
+{
+  "repository": "tekierz/homebrew-tap",
+  "head_sha": "79ef099b4ab6c8b31ccd9c330a87e9357ea04ca7",
+  "pr": "https://github.com/tekierz/homebrew-tap/pull/1",
+  "state": "draft, unmerged",
+  "run": "https://github.com/tekierz/homebrew-tap/actions/runs/34008359421",
+  "result": "success",
+  "second_run": "https://github.com/tekierz/homebrew-tap/actions/runs/34008357324",
+  "formula_version": "2.0.1",
+  "source_sha256": "6b0991db618e24402a14029ef13e9db71a9a9d8d69313f1fa73de7b6d9d6986d",
+  "platform": "macos-15 hosted arm64; /opt/homebrew",
+  "unit_tests": {
+    "runs": 3,
+    "assertions": 18,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0
+  },
+  "real_cases": [
+    "regular file",
+    "valid symlink",
+    "dangling symlink"
+  ],
+  "case_checks": [
+    "real source install through temporary local tap",
+    "both legacy executable fixtures retain inode/mode/content or link/target identities",
+    "brew test",
+    "dotfiles --help",
+    "dotfiles version exactly dotfiles version 2.0.1",
+    "real uninstall and own keg/link cleanup",
+    "legacy fixtures still unchanged after uninstall"
+  ],
+  "marker": "DOTFILES_HOMEBREW_ACCEPTANCE_PASSED cases=3",
+  "limits": [
+    "Current public tap main unchanged pending merge decision",
+    "Current v2.0.1 source; this does not test distribution of f7ff93f production code",
+    "No version-to-version upgrade or rollback",
+    "No owner-machine installation"
+  ]
+}

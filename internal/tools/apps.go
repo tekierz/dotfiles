@@ -2,11 +2,14 @@ package tools
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 
+	"github.com/tekierz/dotfiles/internal/operation"
 	"github.com/tekierz/dotfiles/internal/pkg"
 )
 
@@ -39,6 +42,14 @@ func NewZenBrowserTool() *ZenBrowserTool {
 
 // IsInstalled checks if Zen Browser is available (package, flatpak, app bundle, or command)
 func (t *ZenBrowserTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *ZenBrowserTool) FlatpakApplicationIDs() []string {
+	return []string{"io.github.nicothin.zen_browser", "io.github.nicothined.zen_browser", "app.zen_browser.zen", "zen"}
+}
+
+func (t *ZenBrowserTool) IsInstalledOutsidePackageManager(observation DirectInstallationObservation) bool {
 	// Check command
 	if _, err := exec.LookPath("zen-browser"); err == nil {
 		return true
@@ -46,9 +57,10 @@ func (t *ZenBrowserTool) IsInstalled() bool {
 	if _, err := exec.LookPath("zen"); err == nil {
 		return true
 	}
-	// Check flatpak (Linux) - multiple possible IDs
-	if isFlatpakInstalled("io.github.nicothin.zen_browser", "io.github.nicothined.zen_browser", "app.zen_browser.zen", "zen") {
-		return true
+	for _, applicationID := range t.FlatpakApplicationIDs() {
+		if observation.FlatpakApplications[applicationID] {
+			return true
+		}
 	}
 	// Check AppImage (Linux)
 	if hasAppImage("zen", "zen-browser", "ZenBrowser") {
@@ -62,8 +74,7 @@ func (t *ZenBrowserTool) IsInstalled() bool {
 	if hasMacOSApp("Zen Browser", "Zen") {
 		return true
 	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // CursorTool represents Cursor IDE
@@ -95,6 +106,10 @@ func NewCursorTool() *CursorTool {
 
 // IsInstalled checks if Cursor is available
 func (t *CursorTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *CursorTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("cursor"); err == nil {
 		return true
 	}
@@ -110,7 +125,7 @@ func (t *CursorTool) IsInstalled() bool {
 	if hasMacOSApp("Cursor") {
 		return true
 	}
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // LMStudioTool represents LM Studio
@@ -131,8 +146,7 @@ func NewLMStudioTool() *LMStudioTool {
 				pkg.PlatformMacOS: {"lm-studio"},
 				// lm-studio is AUR-only on Arch; use the actual AUR package name so
 				// paru can locate and build it. Plain pacman will not find this in
-				// official repos, but the installer already guards AUR installs behind
-				// the paru availability check.
+				// official repos; InstallRecipe requires the accepted paru manager.
 				pkg.PlatformArch: {"lmstudio-bin"},
 			},
 			configPaths: []string{},
@@ -144,8 +158,20 @@ func NewLMStudioTool() *LMStudioTool {
 	}
 }
 
+// InstallRecipe enforces the manager capability declared by this tool's metadata.
+func (t *LMStudioTool) InstallRecipe(environment InstallEnvironment) (operation.InstallRecipe, error) {
+	if environment.Platform == pkg.PlatformArch && environment.Manager != "paru" {
+		return operation.InstallRecipe{}, fmt.Errorf("%s requires paru for its AUR package", t.ID())
+	}
+	return DescribeInstall(&t.BaseTool, environment)
+}
+
 // IsInstalled checks if LM Studio is available
 func (t *LMStudioTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *LMStudioTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("lm-studio"); err == nil {
 		return true
 	}
@@ -175,7 +201,7 @@ func (t *LMStudioTool) IsInstalled() bool {
 	if hasMacOSApp("LM Studio", "LMStudio") {
 		return true
 	}
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // OBSTool represents OBS Studio
@@ -208,6 +234,10 @@ func NewOBSTool() *OBSTool {
 
 // IsInstalled checks if OBS Studio is available
 func (t *OBSTool) IsInstalled() bool {
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *OBSTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
 	if _, err := exec.LookPath("obs"); err == nil {
 		return true
 	}
@@ -219,7 +249,7 @@ func (t *OBSTool) IsInstalled() bool {
 	if hasMacOSApp("OBS", "OBS Studio") {
 		return true
 	}
-	return t.BaseTool.IsInstalled()
+	return false
 }
 
 // RectangleTool represents Rectangle window manager
@@ -251,12 +281,11 @@ func NewRectangleTool() *RectangleTool {
 
 // IsInstalled checks if Rectangle is available (Homebrew or app bundle)
 func (t *RectangleTool) IsInstalled() bool {
-	// Check macOS app bundle first
-	if hasMacOSApp("Rectangle") {
-		return true
-	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *RectangleTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("Rectangle")
 }
 
 // RaycastTool represents Raycast launcher
@@ -288,12 +317,11 @@ func NewRaycastTool() *RaycastTool {
 
 // IsInstalled checks if Raycast is available (Homebrew or app bundle)
 func (t *RaycastTool) IsInstalled() bool {
-	// Check macOS app bundle first
-	if hasMacOSApp("Raycast") {
-		return true
-	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *RaycastTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("Raycast")
 }
 
 // IINATool represents IINA media player
@@ -325,12 +353,11 @@ func NewIINATool() *IINATool {
 
 // IsInstalled checks if IINA is available (Homebrew or app bundle)
 func (t *IINATool) IsInstalled() bool {
-	// Check macOS app bundle first
-	if hasMacOSApp("IINA") {
-		return true
-	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *IINATool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("IINA")
 }
 
 // AppCleanerTool represents AppCleaner
@@ -362,31 +389,14 @@ func NewAppCleanerTool() *AppCleanerTool {
 
 // IsInstalled checks if AppCleaner is available (Homebrew or app bundle)
 func (t *AppCleanerTool) IsInstalled() bool {
-	// Check macOS app bundle first
-	if hasMacOSApp("AppCleaner") {
-		return true
-	}
-	// Fall back to package manager check
-	return t.BaseTool.IsInstalled()
+	return directInstallationDetected(t) || t.BaseTool.IsInstalled()
+}
+
+func (t *AppCleanerTool) IsInstalledOutsidePackageManager(DirectInstallationObservation) bool {
+	return hasMacOSApp("AppCleaner")
 }
 
 // Helper functions for detecting installed apps
-
-// isFlatpakInstalled checks if a flatpak app is installed (Linux only)
-func isFlatpakInstalled(appIDs ...string) bool {
-	flatpak, err := exec.LookPath("flatpak")
-	if err != nil {
-		return false
-	}
-
-	for _, appID := range appIDs {
-		cmd := exec.Command(flatpak, "info", appID)
-		if cmd.Run() == nil {
-			return true
-		}
-	}
-	return false
-}
 
 // hasDesktopEntry checks if a .desktop file exists for the app (Linux only).
 // It checks both the filename AND the Exec= field content for AppImage entries
@@ -406,6 +416,10 @@ func hasDesktopEntry(names ...string) bool {
 		"/var/lib/flatpak/exports/share/applications",
 	}
 
+	return hasDesktopEntryInDirs(searchPaths, names...)
+}
+
+func hasDesktopEntryInDirs(searchPaths []string, names ...string) bool {
 	for _, searchPath := range searchPaths {
 		entries, err := os.ReadDir(searchPath)
 		if err != nil {
@@ -416,23 +430,22 @@ func hasDesktopEntry(names ...string) bool {
 				continue
 			}
 
-			entryLower := strings.ToLower(entry.Name())
+			entryName := strings.TrimSuffix(entry.Name(), ".desktop")
 
 			// First check: filename match (e.g., "cursor.desktop", "zen-browser.desktop")
 			for _, name := range names {
-				if strings.Contains(entryLower, strings.ToLower(name)) {
+				if matchesToken(entryName, name) {
 					return true
 				}
 			}
 
-			// Second check: read Exec= field for AppImage entries
-			// AppImage desktop entries often have names like "appimagekit_xxx-Cursor.desktop"
-			// but the Exec= field contains the actual AppImage path
-			if strings.Contains(entryLower, "appimage") {
-				desktopPath := filepath.Join(searchPath, entry.Name())
-				if hasDesktopEntryExec(desktopPath, names...) {
-					return true
-				}
+			// Second check: match the Exec= binary. Covers AppImage entries
+			// ("appimagekit_xxx-Cursor.desktop") and reverse-DNS ids whose
+			// filename tokens hide the app name (com.obsproject.Studio.desktop
+			// has Exec=obs).
+			desktopPath := filepath.Join(searchPath, entry.Name())
+			if hasDesktopEntryExec(desktopPath, names...) {
+				return true
 			}
 		}
 	}
@@ -442,19 +455,20 @@ func hasDesktopEntry(names ...string) bool {
 // hasDesktopEntryExec reads a .desktop file and checks if its Exec= line
 // contains any of the given names.
 func hasDesktopEntryExec(path string, names ...string) bool {
+	// #nosec G304 -- path comes from fixed desktop-entry roots and a ReadDir name.
 	file, err := os.Open(path)
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "Exec=") {
-			execValue := strings.ToLower(line[5:])
+			execName := execBasename(line[5:])
 			for _, name := range names {
-				if strings.Contains(execValue, strings.ToLower(name)) {
+				if matchesToken(execName, name) {
 					return true
 				}
 			}
@@ -480,6 +494,10 @@ func hasAppImage(patterns ...string) bool {
 		"/usr/local/bin",
 	}
 
+	return hasAppImageInDirs(searchPaths, patterns...)
+}
+
+func hasAppImageInDirs(searchPaths []string, patterns ...string) bool {
 	for _, searchPath := range searchPaths {
 		entries, err := os.ReadDir(searchPath)
 		if err != nil {
@@ -490,21 +508,86 @@ func hasAppImage(patterns ...string) bool {
 				continue
 			}
 
-			entryLower := strings.ToLower(entry.Name())
+			entryName := entry.Name()
+			entryLower := strings.ToLower(entryName)
 
 			// Check if it's an AppImage file matching any pattern
 			for _, pattern := range patterns {
-				patternLower := strings.ToLower(pattern)
 				// Match AppImage files (e.g., "Cursor-0.45.11-x86_64.AppImage")
-				if strings.Contains(entryLower, patternLower) &&
-					(strings.HasSuffix(entryLower, ".appimage") ||
-						strings.Contains(entryLower, "appimage")) {
+				if (strings.HasSuffix(entryLower, ".appimage") ||
+					strings.Contains(entryLower, "appimage")) &&
+					matchesToken(entryName, pattern) {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+func matchesToken(fieldName, wanted string) bool {
+	fieldName = normalizeAppTokenField(fieldName)
+	wanted = normalizeAppTokenField(wanted)
+	if fieldName == "" || wanted == "" {
+		return false
+	}
+	if fieldName == wanted {
+		return true
+	}
+	fieldTokens := splitAppTokens(fieldName)
+	wantedTokens := splitAppTokens(wanted)
+	if len(wantedTokens) == 0 {
+		return false
+	}
+	for i := 0; i <= len(fieldTokens)-len(wantedTokens); i++ {
+		matched := true
+		for j, token := range wantedTokens {
+			if fieldTokens[i+j] != token {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAppTokenField(value string) string {
+	value = strings.TrimSpace(strings.Trim(value, `"'`))
+	value = filepath.Base(value)
+	lower := strings.ToLower(value)
+	for _, suffix := range []string{".desktop", ".appimage", ".app"} {
+		lower = strings.TrimSuffix(lower, suffix)
+	}
+	return lower
+}
+
+func splitAppTokens(value string) []string {
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func execBasename(execValue string) string {
+	execValue = strings.TrimSpace(execValue)
+	if execValue == "" {
+		return ""
+	}
+
+	if execValue[0] == '"' || execValue[0] == '\'' {
+		quote := execValue[0]
+		if end := strings.IndexByte(execValue[1:], quote); end >= 0 {
+			return execValue[1 : end+1]
+		}
+	}
+
+	fields := strings.Fields(execValue)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 // hasMacOSApp checks if a .app bundle exists in /Applications (macOS only)
@@ -520,6 +603,10 @@ func hasMacOSApp(names ...string) bool {
 		filepath.Join(home, "Applications"),
 	}
 
+	return hasMacOSAppInDirs(searchPaths, names...)
+}
+
+func hasMacOSAppInDirs(searchPaths []string, names ...string) bool {
 	for _, searchPath := range searchPaths {
 		entries, err := os.ReadDir(searchPath)
 		if err != nil {
@@ -527,9 +614,8 @@ func hasMacOSApp(names ...string) bool {
 		}
 		for _, entry := range entries {
 			if entry.IsDir() && strings.HasSuffix(entry.Name(), ".app") {
-				entryLower := strings.ToLower(entry.Name())
 				for _, name := range names {
-					if strings.Contains(entryLower, strings.ToLower(name)) {
+					if matchesToken(entry.Name(), name) {
 						return true
 					}
 				}

@@ -9,15 +9,21 @@ import (
 // for the specified UI group. Uses the tool registry as single source of truth.
 // Respects platform filtering - tools with a platformFilter only appear on matching platforms.
 func buildToolGroupDefaults(group tools.UIGroup) map[string]bool {
+	return buildToolGroupDefaultsForPlatform(group, pkg.DetectPlatform())
+}
+
+func buildToolGroupDefaultsForPlatform(group tools.UIGroup, currentPlatform pkg.Platform) map[string]bool {
 	result := make(map[string]bool)
-	currentPlatform := pkg.DetectPlatform()
 	for _, t := range tools.GetRegistry().All() {
 		if t.UIGroup() == group {
 			// Skip tools that are filtered to a different platform
 			if t.PlatformFilter() != "" && t.PlatformFilter() != currentPlatform {
 				continue
 			}
-			result[t.ID()] = t.DefaultEnabled()
+			// Unsupported optional tools remain visible but opt out by default.
+			// This prevents Debian/Pi defaults from scheduling known-impossible
+			// installs such as LazyGit, LazyDocker, and Glow.
+			result[t.ID()] = t.DefaultEnabled() && installerAvailable(t, currentPlatform)
 		}
 	}
 	return result
@@ -31,7 +37,7 @@ type DeepDiveConfig struct {
 	GhosttyTabBindings       string
 	GhosttyFontFamily        string // Font family name
 	GhosttyBlurRadius        int    // 0-100 (blur behind window)
-	GhosttyScrollbackLines   int    // Number of scrollback lines
+	GhosttyScrollbackLines   int    // Byte limit (legacy field name retained for config compatibility)
 	GhosttyCursorStyle       string // block, bar, underline
 	GhosttyWindowDecorations bool   // Native window decorations
 	GhosttyConfirmClose      bool   // Confirm before closing a surface
@@ -104,7 +110,7 @@ type DeepDiveConfig struct {
 	FzfPreview       bool
 	FzfHeight        int
 	FzfLayout        string
-	FzfDefaultOpts   string // extra opts
+	FzfDefaultOpts   string // additional fzf flags stored as inert data
 	FzfBorderStyle   string // border style
 	FzfPreviewWindow string // preview placement
 
@@ -124,10 +130,10 @@ type DeepDiveConfig struct {
 	CLIUtilities map[string]bool
 
 	// LazyGit settings
-	LazyGitSideBySide bool
-	LazyGitMouseMode  bool
-	LazyGitTheme      string
-	LazyGitPaging     string // delta/diff-so-fancy/never
+	LazyGitSidePanelWidth string
+	LazyGitMouseEvents    bool
+	LazyGitColorPreset    string
+	LazyGitPagerPreset    string
 
 	// LazyDocker settings
 	LazyDockerMouseMode bool
@@ -141,10 +147,13 @@ type DeepDiveConfig struct {
 	BtopShownBoxes string // shown boxes
 
 	// Glow settings
-	GlowPager string
-	GlowStyle string
-	GlowWidth int
-	GlowMouse bool // mouse support
+	GlowPager            string
+	GlowStyle            string
+	GlowWidth            int
+	GlowMouse            bool // mouse support
+	GlowAll              bool
+	GlowShowLineNumbers  bool
+	GlowPreserveNewLines bool
 
 	// Claude Code MCP settings
 	ClaudeCodeMCPs map[string]bool // MCP servers to enable
@@ -159,7 +168,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		GhosttyTabBindings:       "super",
 		GhosttyFontFamily:        "JetBrains Mono",
 		GhosttyBlurRadius:        0,
-		GhosttyScrollbackLines:   10000,
+		GhosttyScrollbackLines:   10_000_000,
 		GhosttyCursorStyle:       "block",
 		GhosttyWindowDecorations: true,
 		GhosttyConfirmClose:      true,
@@ -250,7 +259,7 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		YaziPreviewMode: "auto",
 		YaziSortBy:      "alphabetical",
 		YaziSortReverse: false,
-		YaziLineMode:    "size",
+		YaziLineMode:    "none",
 		YaziScrollOff:   5,
 
 		// FZF defaults
@@ -281,10 +290,10 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		CLIUtilities: buildToolGroupDefaults(tools.UIGroupCLIUtilities),
 
 		// LazyGit defaults
-		LazyGitSideBySide: true,
-		LazyGitMouseMode:  true,
-		LazyGitTheme:      "auto",
-		LazyGitPaging:     "delta",
+		LazyGitSidePanelWidth: "0.3333",
+		LazyGitMouseEvents:    true,
+		LazyGitColorPreset:    "standard",
+		LazyGitPagerPreset:    "builtin",
 
 		// LazyDocker defaults
 		LazyDockerMouseMode: true,
@@ -298,10 +307,10 @@ func NewDeepDiveConfig() *DeepDiveConfig {
 		BtopShownBoxes: "cpu mem net proc",
 
 		// Glow defaults
-		GlowPager: "auto",
+		GlowPager: "never",
 		GlowStyle: "auto",
 		GlowWidth: 80,
-		GlowMouse: true,
+		GlowMouse: false,
 
 		// Claude Code MCP defaults
 		ClaudeCodeMCPs: map[string]bool{
@@ -366,7 +375,7 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		},
 		{
 			Name:        "CLI Tools",
-			Description: "LazyGit, LazyDocker, btop, Glow",
+			Description: "LazyGit, LazyDocker, btop, Glow, Codex, Cursor Agent, Hermes Agent, OpenCode, Pi",
 			Screen:      ScreenConfigCLITools,
 			Icon:        "",
 		},
@@ -399,14 +408,14 @@ func GetDeepDiveMenuItems() []DeepDiveMenuItem {
 		// Optional Apps
 		{
 			Name:        "GUI Apps",
-			Description: "Zen Browser, Cursor, Sunshine, Moonlight",
+			Description: "Zen Browser, Cursor, Sunshine, Moonlight, LM Studio, OBS",
 			Screen:      ScreenConfigGUIApps,
 			Icon:        "󰏇",
 			Category:    "OPTIONAL APPS",
 		},
 		{
 			Name:        "macOS Apps",
-			Description: "Rectangle, Raycast, Stats, more",
+			Description: "Rectangle, Raycast, IINA, AppCleaner, T3 Code",
 			Screen:      ScreenConfigMacApps,
 			Icon:        "",
 			Platform:    "macos",

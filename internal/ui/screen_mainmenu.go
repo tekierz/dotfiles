@@ -50,7 +50,7 @@ func (s *mainMenuScreen) selectItem(index int) tea.Cmd {
 
 	// Start async operations for screens that need it (preserve legacy on-enter
 	// behavior that used to fire when the App switched to the target screen).
-	switch target {
+	switch target { //nolint:exhaustive // Only menu destinations with on-enter work need cases.
 	case ScreenManage:
 		if cmd := a.startInstallCacheLoad(); cmd != nil {
 			return tea.Batch(nav, cmd)
@@ -58,17 +58,17 @@ func (s *mainMenuScreen) selectItem(index int) tea.Cmd {
 	case ScreenBackups:
 		if !a.backupsLoading && !a.backupsLoaded {
 			a.backupsLoading = true
-			return tea.Batch(nav, loadBackupsCmd())
+			return tea.Batch(nav, a.startAsync(asyncBackups, loadBackupsCmd()))
 		}
 	case ScreenUpdate:
 		if !a.updateChecking && !a.updateCheckDone {
 			a.updateChecking = true
-			return tea.Batch(nav, checkUpdatesCmd())
+			return tea.Batch(nav, a.startAsync(asyncUpdates, checkUpdatesCmd()))
 		}
 	case ScreenUsers:
 		if !a.usersLoaded {
 			a.usersLoaded = true
-			return tea.Batch(nav, loadUsersCmd())
+			return tea.Batch(nav, a.startAsync(asyncUsers, loadUsersCmd()))
 		}
 	case ScreenHotkeys:
 		a.hotkeysReturn = ScreenMainMenu

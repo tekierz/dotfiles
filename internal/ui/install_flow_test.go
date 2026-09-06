@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 // drainWorker runs runInstallWorker synchronously and returns all events.
@@ -16,7 +18,13 @@ func drainWorker(t *testing.T, selectedTools []string, cfg DeepDiveConfig) []ins
 	t.Helper()
 	events := make(chan installEventMsg, 256)
 	ctx := context.Background()
-	go runInstallWorker(ctx, events, selectedTools, cfg, "catppuccin-mocha")
+	runtime := defaultToolInstallRuntime()
+	// Config-generation tests exercise writer parity/gating, not live install
+	// discovery or backup. Mark registered tools present and disable backup so
+	// the final-identity guards permit only the intended isolated writes.
+	runtime.isToolInstalled = func(tools.Tool) bool { return true }
+	runtime.autoBackup = func() (autoBackupResult, error) { return autoBackupResult{}, nil }
+	go runInstallWorkerWithRuntime(ctx, events, selectedTools, cfg, "catppuccin-mocha", runtime)
 	var out []installEventMsg
 	for ev := range events {
 		out = append(out, ev)
@@ -60,7 +68,7 @@ func TestConfigGating_DeselectedToolSkipsConfig(t *testing.T) {
 	lines := collectLines(events)
 
 	// Lazygit config should NOT be written.
-	lazygitPath := filepath.Join(home, ".config", "lazygit", "config.yml")
+	lazygitPath := filepath.Join(home, filepath.FromSlash(lazyGitTestRelPath()))
 	if _, err := os.Stat(lazygitPath); err == nil {
 		t.Errorf("lazygit config written even though lazygit was deselected: %s", lazygitPath)
 	}
@@ -81,13 +89,13 @@ func TestConfigGating_DeselectedToolSkipsConfig(t *testing.T) {
 	}
 
 	// Ghostty config SHOULD be written (always-core).
-	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config")
+	ghosttyPath := filepath.Join(home, ".config", "ghostty", "config.ghostty")
 	if _, err := os.Stat(ghosttyPath); err != nil {
 		t.Errorf("ghostty config not written even though it is always-core: %v (lines: %v)", err, lines)
 	}
 
 	// Glow config SHOULD be written (selected in CLITools).
-	glowPath := filepath.Join(home, ".config", "glow", "glow.yml")
+	glowPath := filepath.Join(home, filepath.FromSlash(glowTestRelPath()))
 	if _, err := os.Stat(glowPath); err != nil {
 		t.Errorf("glow config not written even though glow was selected: %v", err)
 	}
@@ -113,7 +121,7 @@ func TestConfigGating_SelectedToolWritesConfig(t *testing.T) {
 	_ = drainWorker(t, nil, cfg)
 
 	// lazygit config should exist.
-	lazygitPath := filepath.Join(home, ".config", "lazygit", "config.yml")
+	lazygitPath := filepath.Join(home, filepath.FromSlash(lazyGitTestRelPath()))
 	if _, err := os.Stat(lazygitPath); err != nil {
 		t.Errorf("lazygit config not written even though lazygit was selected: %v", lazygitPath)
 	}
@@ -130,9 +138,7 @@ func TestConfigGating_SelectedToolWritesConfig(t *testing.T) {
 func TestFailureAggregation_NamesAllFailedSteps(t *testing.T) {
 	// Point HOME at a non-existent / read-only path to force all Write*Config
 	// calls to fail (they call os.MkdirAll / os.WriteFile on HOME).
-	origHome := os.Getenv("HOME")
-	t.Cleanup(func() { os.Setenv("HOME", origHome) })
-	_ = os.Setenv("HOME", "/nonexistent/bad/home")
+	t.Setenv("HOME", "/nonexistent/bad/home")
 
 	// Use a config where lazygit, btop, glow are all selected (they will fail
 	// because the config directories cannot be created under the bad HOME).

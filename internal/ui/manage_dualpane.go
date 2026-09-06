@@ -2,16 +2,18 @@ package ui
 
 import (
 	"fmt"
+	"math"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/tekierz/dotfiles/internal/config"
+	"github.com/tekierz/dotfiles/internal/health"
 	"github.com/tekierz/dotfiles/internal/pkg"
-	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 )
 
@@ -64,101 +66,94 @@ type manageField struct {
 	unit string
 
 	// For option fields (kind == manageFieldOption).
-	options []string
+	options         []string
+	unknownReadOnly bool
 
 	// For numeric fields (kind == manageFieldNumber).
 	min  int
 	max  int
 	step int
+
+	// Optional exact validation for text fields. The editor keeps focus and
+	// leaves the model unchanged when validation fails.
+	validateText   func(string) error
+	readOnlyReason string
 }
 
 // manageItem is a tool entry in the left pane.
 type manageItem struct {
-	id           string
-	name         string
-	icon         string
-	description  string
-	category     tools.Category
-	installed    bool
-	configurable bool
+	id                string
+	name              string
+	icon              string
+	description       string
+	category          tools.Category
+	applicationType   tools.ApplicationType
+	installed         bool
+	configurable      bool
+	presence          health.Presence
+	installable       health.Installability
+	observed          bool
+	unavailableReason string
 }
 
-// manageSavedMsg is emitted after a save attempt.
-type manageSavedMsg struct{ err error }
-
-// manageInstallDoneMsg is emitted after attempting to install a tool/app.
-type manageInstallDoneMsg struct {
-	toolID string
-	err    error
-}
-
-func (a *App) saveManageConfigCmd() tea.Cmd {
-	// Capture by value (pointer is stable) and run file I/O in a command.
-	cfg := a.manageConfig
-	theme := a.theme
-	nav := a.navStyle
-	animationsEnabled := a.animationsEnabled
-
-	// Compute the set of tools to apply BEFORE the async closure runs, by diffing
-	// the live config against the baseline captured at load / last save. Scoping
-	// the apply to only the changed tools is the data-loss fix (P1-A2): a
-	// Ghostty-only edit must not rewrite ~/.tmux.conf, ~/.zshrc, ~/.gitconfig, etc.
-	// from manage.json defaults (overwriting any hand edits). A theme change is
-	// cross-cutting (all generated colors depend on it) and intentionally
-	// re-applies every tool — see changedManageTools.
-	baseline := a.manageConfigBaseline
-	changed := changedManageTools(&baseline, cfg, a.manageConfigBaselineTheme, theme)
-
-	return func() tea.Msg {
-		if err := config.SaveToolConfig("manage", cfg); err != nil {
-			return manageSavedMsg{err: err}
-		}
-
-		// Also persist global theme/nav so installer + CLI stay in sync.
-		g, err := config.LoadGlobalConfig()
-		if err != nil {
-			g = config.DefaultGlobalConfig()
-		}
-		g.Theme = theme
-		g.NavStyle = nav
-		g.DisableAnimations = !animationsEnabled
-
-		if err := config.SaveGlobalConfig(g); err != nil {
-			return manageSavedMsg{err: err}
-		}
-
-		// Apply the saved preferences to the REAL tool config files (C12), but ONLY
-		// for the tools the user actually changed. Before C12 the Manage editor only
-		// persisted manage.json + global prefs and claimed "Saved ✓" while no
-		// generator ever ran; the first C12 pass over-corrected by re-applying ALL
-		// tools every save (clobbering unrelated configs). This scoped apply funnels
-		// through applyOneToolConfig — the same scoped writer the standalone
-		// `dotfiles config <tool>` editor uses — so the two paths cannot drift, and
-		// it is a PURE file write (no TPM/Neovim clone; that stays at install time).
-		if errs := applyChangedManageTools(changed, manageConfigToDeepDive(cfg), theme); len(errs) > 0 {
-			return manageSavedMsg{err: firstErrorSummary(errs)}
-		}
-
-		return manageSavedMsg{err: nil}
+func installationUnavailableReason(tool tools.Tool) string {
+	provider, ok := tool.(interface{ InstallationUnavailableReason() string })
+	if !ok {
+		return ""
 	}
+	reason := strings.TrimSpace(sanitizeLogLine(provider.InstallationUnavailableReason()))
+	if reason == "" || len(reason) > 96 {
+		return ""
+	}
+	return reason
 }
 
-// checkSudoAndInstallCmd checks if sudo is needed and either prompts or starts install
-func (a *App) checkSudoAndInstallCmd(toolID string) tea.Cmd {
-	return func() tea.Msg {
-		mgr := pkg.DetectManager()
-		if mgr == nil {
-			return manageInstallDoneMsg{toolID: toolID, err: fmt.Errorf("no package manager detected")}
-		}
-
-		// Check if sudo is needed and not cached
-		if mgr.NeedsSudo() && !runner.CheckSudoCached() {
-			return manageSudoRequiredMsg{toolID: toolID}
-		}
-
-		// Sudo not needed or already cached - start streaming install
-		return manageStartInstallMsg{toolID: toolID}
+func (item manageItem) installationTruth() (health.Presence, health.Installability) {
+	if !item.observed {
+		return health.PresenceUnknown, health.InstallabilityUnknown
 	}
+	return item.presence, item.installable
+}
+
+func (item manageItem) installationAction() string {
+	presence, installability := item.installationTruth()
+	switch presence {
+	case health.PresencePresent:
+		return "none"
+	case health.PresencePartial:
+		if installability == health.InstallabilitySupported {
+			return "repair"
+		}
+	case health.PresenceMissing:
+		if installability == health.InstallabilitySupported {
+			return "install"
+		}
+	case health.PresenceUnknown:
+		return "blocked"
+	}
+	return "blocked"
+}
+
+func (item manageItem) installationLabel() string {
+	presence, installability := item.installationTruth()
+	switch presence {
+	case health.PresencePresent:
+		return "installed"
+	case health.PresencePartial:
+		switch installability {
+		case health.InstallabilitySupported:
+			return "partial — repair"
+		case health.InstallabilityUnsupported:
+			return "partial — unavailable"
+		case health.InstallabilityUnknown:
+			return "partial — availability unknown"
+		}
+	case health.PresenceMissing:
+		return "not installed"
+	case health.PresenceUnknown:
+		return "status unknown"
+	}
+	return "status unknown"
 }
 
 // manageLayout captures all geometry needed for consistent rendering and mouse hit-testing.
@@ -231,8 +226,13 @@ func (a *App) manageLayout() manageLayout {
 
 	gap := 1
 
-	// Default split: 1/3 tools, 2/3 details.
+	// Compact layouts keep the established one-third split. Wide layouts give
+	// the typed selector enough room for status, icon, type, name, and the full
+	// textual health label without compromising the details pane.
 	leftW := clampInt(a.width/3, 26, 42)
+	if a.width > 80 {
+		leftW = clampInt((a.width*2)/5, 32, 48)
+	}
 	minRight := 38
 	if a.width-leftW-gap < minRight {
 		leftW = maxInt(22, a.width-minRight-gap)
@@ -272,7 +272,7 @@ func (a *App) manageLayout() manageLayout {
 		rightGlobeY = rightListY + rightListH + 1
 	}
 
-	return manageLayout{
+	layout := manageLayout{
 		w: a.width,
 		h: a.height,
 
@@ -301,6 +301,37 @@ func (a *App) manageLayout() manageLayout {
 		rightGlobeY: rightGlobeY,
 		rightGlobeH: rightGlobeH,
 	}
+	if a.compactManageSinglePaneActive() {
+		// Compact Manage is a single full-width pane. Keep the legacy vertical
+		// anchors, but make rendering and hit-testing share the visible X span.
+		layout.gap = 0
+		layout.rightGlobeY = 0
+		layout.rightGlobeH = 0
+		if a.managePane == managePaneTools {
+			layout.leftX = 0
+			layout.leftW = layout.w
+			layout.leftListY = layout.rightListY
+			layout.leftListH = layout.rightListH
+			layout.rightX = layout.w
+			layout.rightW = 0
+		} else {
+			layout.leftW = 0
+			layout.rightX = 0
+			layout.rightW = layout.w
+		}
+	}
+	return layout
+}
+
+func (a *App) compactManageSinglePaneActive() bool {
+	if a == nil || a.width > 80 {
+		return false
+	}
+	if a.managePane == managePaneTools {
+		return true
+	}
+	items := a.manageItems()
+	return len(items) > 0 && a.manageIndex >= 0 && a.manageIndex < len(items) && items[a.manageIndex].id == "yazi"
 }
 
 func (a *App) manageEnsureToolsVisible(layout manageLayout, itemsLen int) {
@@ -343,28 +374,27 @@ func (a *App) manageEnsureFieldsVisible(layout manageLayout, fieldsLen int) {
 }
 
 func (a *App) manageItems() []manageItem {
-	reg := tools.GetRegistry()
-	all := reg.All()
-	platform := pkg.DetectPlatform()
-
-	// Prefer a stable, human-friendly ordering (category → name).
-	categoryOrder := map[tools.Category]int{
-		tools.CategoryShell:     0,
-		tools.CategoryTerminal:  1,
-		tools.CategoryEditor:    2,
-		tools.CategoryFile:      3,
-		tools.CategoryGit:       4,
-		tools.CategoryContainer: 5,
-		tools.CategoryUtility:   6,
-		tools.CategoryApp:       7,
+	toolSource := a.manageToolSource
+	if toolSource == nil {
+		toolSource = func() []tools.Tool { return tools.GetRegistry().All() }
 	}
+	all := slices.Clone(toolSource())
+	typed := a.installationSnapshot.Digest() != ""
+
+	// ApplicationType is display-only. Category and UIGroup keep their existing
+	// operational meaning and are never rewritten for selector presentation.
 	sort.SliceStable(all, func(i, j int) bool {
-		ci := categoryOrder[all[i].Category()]
-		cj := categoryOrder[all[j].Category()]
+		ci := tools.ApplicationTypeOrder(tools.ApplicationTypeOf(all[i]))
+		cj := tools.ApplicationTypeOrder(tools.ApplicationTypeOf(all[j]))
 		if ci != cj {
 			return ci < cj
 		}
-		return all[i].Name() < all[j].Name()
+		ni := strings.ToLower(all[i].Name())
+		nj := strings.ToLower(all[j].Name())
+		if ni != nj {
+			return ni < nj
+		}
+		return all[i].ID() < all[j].ID()
 	})
 
 	// Install cache should be populated asynchronously via startInstallCacheLoad().
@@ -373,33 +403,41 @@ func (a *App) manageItems() []manageItem {
 		a.manageInstalled = make(map[string]bool, len(all))
 	}
 
-	// Filter by platform support: hide tools/apps that can't be installed on this
-	// OS, but keep anything already installed.
-	//
-	// This is especially important for GUI apps: don't show macOS-only apps on
-	// Linux and vice versa.
-	if platform != pkg.PlatformUnknown {
-		filtered := make([]tools.Tool, 0, len(all))
-		for _, t := range all {
-			installed := a.manageInstalled[t.ID()]
-			supported := toolHasPackagesForPlatform(t, platform)
-			if installed || supported {
-				filtered = append(filtered, t)
-			}
+	// Before the first typed observation only, retain the legacy platform filter.
+	// Typed snapshots already bind installability to their accepted platform and
+	// Manage must never rediscover host truth while rendering or handling keys.
+	if !typed {
+		platform := pkg.PlatformUnknown
+		if a.manageDetectPlatform != nil {
+			platform = a.manageDetectPlatform()
 		}
-		all = filtered
+		if platform != pkg.PlatformUnknown {
+			filtered := make([]tools.Tool, 0, len(all))
+			for _, t := range all {
+				installed := a.manageInstalled[t.ID()]
+				supported := installerAvailable(t, platform)
+				if installed || supported {
+					filtered = append(filtered, t)
+				}
+			}
+			all = filtered
+		}
 	}
 
 	// Add a global section at the top.
 	items := []manageItem{
 		{
-			id:           "global",
-			name:         "Global",
-			icon:         "󰒓",
-			description:  "UI + platform preferences",
-			category:     "global",
-			installed:    true,
-			configurable: true,
+			id:              "global",
+			name:            "Global",
+			icon:            "󰒓",
+			description:     "UI + platform preferences",
+			category:        "global",
+			applicationType: tools.ApplicationTypeSystem,
+			installed:       true,
+			configurable:    true,
+			presence:        health.PresencePresent,
+			installable:     health.InstallabilityUnsupported,
+			observed:        true,
 		},
 	}
 
@@ -409,26 +447,39 @@ func (a *App) manageItems() []manageItem {
 			icon = fallbackToolIcon(t.ID(), t.Category())
 		}
 
+		presence := health.PresenceUnknown
+		installability := health.InstallabilityUnknown
+		observed := false
+		installed := a.manageInstalled[t.ID()]
+		if typed {
+			if observation, ok := a.installationSnapshot.Tool(t.ID()); ok {
+				presence = observation.Presence()
+				installability = observation.Installability()
+				observed = true
+			}
+			installed = presence == health.PresencePresent
+		} else if installed {
+			presence = health.PresencePresent
+			observed = true
+		}
+
 		items = append(items, manageItem{
-			id:           t.ID(),
-			name:         t.Name(),
-			icon:         icon,
-			description:  t.Description(),
-			category:     t.Category(),
-			installed:    a.manageInstalled[t.ID()],
-			configurable: t.HasConfig(),
+			id:                t.ID(),
+			name:              t.Name(),
+			icon:              icon,
+			description:       t.Description(),
+			category:          t.Category(),
+			applicationType:   tools.ApplicationTypeOf(t),
+			installed:         installed,
+			configurable:      t.HasConfig(),
+			presence:          presence,
+			installable:       installability,
+			observed:          observed,
+			unavailableReason: installationUnavailableReason(t),
 		})
 	}
 
 	return items
-}
-
-func toolHasPackagesForPlatform(t tools.Tool, platform pkg.Platform) bool {
-	pkgs := t.Packages()[platform]
-	if len(pkgs) == 0 {
-		pkgs = t.Packages()["all"]
-	}
-	return len(pkgs) > 0
 }
 
 func fallbackToolIcon(id string, cat tools.Category) string {
@@ -499,16 +550,18 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "font_family", label: "Font Family", description: "Terminal font family", kind: manageFieldText, str: &cfg.GhosttyFontFamily},
 			{key: "font_size", label: "Font Size", description: "Font size (pt)", kind: manageFieldNumber, n: &cfg.GhosttyFontSize, min: 8, max: 32, step: 1, unit: "pt"},
 			{key: "opacity", label: "Opacity", description: "Background opacity (%)", kind: manageFieldNumber, n: &cfg.GhosttyOpacity, min: 0, max: 100, step: 5, unit: "%"},
-			{key: "blur", label: "Blur Radius", description: "Background blur (platform dependent)", kind: manageFieldNumber, n: &cfg.GhosttyBlurRadius, min: 0, max: 40, step: 1},
+			{key: "blur", label: "Blur Radius", description: "Background blur (platform dependent)", kind: manageFieldNumber, n: &cfg.GhosttyBlurRadius, min: 0, max: 100, step: 1},
 			{key: "cursor", label: "Cursor Style", description: "Cursor shape", kind: manageFieldOption, str: &cfg.GhosstyCursorStyle, options: []string{"block", "bar", "underline"}},
-			{key: "scrollback", label: "Scrollback", description: "Scrollback history lines", kind: manageFieldNumber, n: &cfg.GhosttyScrollbackLines, min: 1000, max: 200000, step: 1000, unit: " lines"},
+			{key: "scrollback", label: "Scrollback Limit", description: "Maximum scrollback storage in bytes", kind: manageFieldNumber, n: &cfg.GhosttyScrollbackLines, min: 1_000_000, max: 100_000_000, step: 1_000_000, unit: " bytes"},
 			{key: "decor", label: "Window Decorations", description: "Show native window decorations", kind: manageFieldToggle, b: &cfg.GhosttyWindowDecorations},
 			{key: "confirm_close", label: "Confirm Close", description: "Prompt before closing window", kind: manageFieldToggle, b: &cfg.GhosttyConfirmClose},
+			{key: "tab_bindings", label: "Tab Bindings", description: "Modifier used for managed tab shortcuts", kind: manageFieldOption, str: &cfg.GhosttyTabBindings, options: []string{"super", "ctrl", "ctrl-shift"}},
 		}
 
 	case "tmux":
 		return []manageField{
 			{key: "prefix", label: "Prefix Key", description: "Leader key for tmux commands", kind: manageFieldOption, str: &cfg.TmuxPrefix, options: []string{"C-a", "C-b", "C-Space"}},
+			{key: "split_binds", label: "Split Bindings", description: "Keys used for horizontal and vertical splits", kind: manageFieldOption, str: &cfg.TmuxSplitBinds, options: []string{"percent", "pipes"}},
 			{key: "base", label: "Base Index", description: "Start window/pane numbering at", kind: manageFieldNumber, n: &cfg.TmuxBaseIndex, min: 0, max: 10, step: 1},
 			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.TmuxMouseMode},
 			{key: "status_pos", label: "Status Position", description: "Status bar placement", kind: manageFieldOption, str: &cfg.TmuxStatusPosition, options: []string{"top", "bottom"}},
@@ -554,24 +607,32 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 			{key: "branch", label: "Default Branch", description: "Default init branch name", kind: manageFieldOption, str: &cfg.GitDefaultBranch, options: []string{"main", "master", "develop"}},
 			{key: "setup_remote", label: "Auto Setup Remote", description: "Auto-create tracking remotes on push", kind: manageFieldToggle, b: &cfg.GitAutoSetupRemote},
 			{key: "rebase", label: "Pull Rebase", description: "Prefer rebase on git pull", kind: manageFieldToggle, b: &cfg.GitPullRebase},
-			{key: "diff", label: "Diff Tool", description: "Default diff tool", kind: manageFieldOption, str: &cfg.GitDiffTool, options: []string{"delta", "difftastic", "vimdiff"}},
+			{key: "diff", label: "Diff Tool", description: "Default diff tool", kind: manageFieldOption, str: &cfg.GitDiffTool, options: []string{"delta", "difftastic", "vimdiff", "nvimdiff"}},
 			{key: "merge", label: "Merge Tool", description: "Default merge tool", kind: manageFieldOption, str: &cfg.GitMergeTool, options: []string{"vimdiff", "nvimdiff", "meld"}},
-			{key: "creds", label: "Credential Helper", description: "Credential helper backend", kind: manageFieldOption, str: &cfg.GitCredentialHelper, options: []string{"store", "cache", "osxkeychain"}},
+			{key: "creds", label: "Credential Helper", description: "Credential helper backend", kind: manageFieldOption, str: &cfg.GitCredentialHelper, options: []string{"store", "cache", "osxkeychain", "none"}},
 			{key: "sign", label: "Sign Commits", description: "Require signed commits", kind: manageFieldToggle, b: &cfg.GitSignCommits},
+			{key: "delta_side", label: "Delta Side-by-Side", description: "Render Delta diffs in two columns", kind: manageFieldToggle, b: &cfg.GitDeltaSideBySide},
+			{key: "alias_st", label: "Alias st", description: "Manage git st = status", kind: manageFieldToggle, b: &cfg.GitAliasStatus},
+			{key: "alias_co", label: "Alias co", description: "Manage git co = checkout", kind: manageFieldToggle, b: &cfg.GitAliasCheckout},
+			{key: "alias_br", label: "Alias br", description: "Manage git br = branch", kind: manageFieldToggle, b: &cfg.GitAliasBranch},
+			{key: "alias_ci", label: "Alias ci", description: "Manage git ci = commit", kind: manageFieldToggle, b: &cfg.GitAliasCommit},
+			{key: "alias_lg", label: "Alias lg", description: "Manage compact graph-log alias", kind: manageFieldToggle, b: &cfg.GitAliasLogGraph},
 		}
 
 	case "yazi":
 		return []manageField{
-			{key: "hidden", label: "Show Hidden", description: "Show dotfiles by default", kind: manageFieldToggle, b: &cfg.YaziShowHidden},
-			{key: "sort_by", label: "Sort By", description: "Sort order", kind: manageFieldOption, str: &cfg.YaziSortBy, options: []string{"alphabetical", "modified", "size", "natural"}},
-			{key: "sort_rev", label: "Sort Reverse", description: "Reverse sort direction", kind: manageFieldToggle, b: &cfg.YaziSortReverse},
-			{key: "linemode", label: "Line Mode", description: "Line metadata style", kind: manageFieldOption, str: &cfg.YaziLineMode, options: []string{"size", "permissions", "mtime", "none"}},
-			{key: "scrolloff", label: "Scroll Offset", description: "Keep N items visible above/below cursor", kind: manageFieldNumber, n: &cfg.YaziScrollOff, min: 0, max: 20, step: 1, unit: " lines"},
+			{key: "keymap", label: "Keymap", description: yaziManageFieldDescription(cfg, "keymap"), kind: manageFieldOption, str: &cfg.YaziKeymap, options: []string{"vim", "emacs"}, readOnlyReason: yaziUIFieldBlockReason(a, "keymap")},
+			{key: "hidden", label: "Show Hidden", description: yaziManageFieldDescription(cfg, "hidden"), kind: manageFieldToggle, b: &cfg.YaziShowHidden, readOnlyReason: yaziUIFieldBlockReason(a, "hidden")},
+			{key: "preview_mode", label: "Preview Mode", description: yaziManageFieldDescription(cfg, "preview_mode"), kind: manageFieldOption, str: &cfg.YaziPreviewMode, options: []string{"auto", "always", "never"}, readOnlyReason: yaziUIFieldBlockReason(a, "preview_mode")},
+			{key: "sort_by", label: "Sort By", description: yaziManageFieldDescription(cfg, "sort_by"), kind: manageFieldOption, str: &cfg.YaziSortBy, options: []string{"alphabetical", "modified", "size", "natural"}, readOnlyReason: yaziUIFieldBlockReason(a, "sort_by")},
+			{key: "sort_rev", label: "Sort Reverse", description: yaziManageFieldDescription(cfg, "sort_rev"), kind: manageFieldToggle, b: &cfg.YaziSortReverse, readOnlyReason: yaziUIFieldBlockReason(a, "sort_rev")},
+			{key: "linemode", label: "Line Mode", description: yaziManageFieldDescription(cfg, "linemode"), kind: manageFieldOption, str: &cfg.YaziLineMode, options: []string{"size", "permissions", "mtime", "none"}, readOnlyReason: yaziUIFieldBlockReason(a, "linemode")},
+			{key: "scrolloff", label: "Scroll Offset", description: yaziManageFieldDescription(cfg, "scrolloff"), kind: manageFieldNumber, n: &cfg.YaziScrollOff, min: 0, max: 20, step: 1, unit: " lines", readOnlyReason: yaziUIFieldBlockReason(a, "scrolloff")},
 		}
 
 	case "fzf":
 		return []manageField{
-			{key: "opts", label: "Default Opts", description: "Extra CLI options passed to fzf", kind: manageFieldText, str: &cfg.FzfDefaultOpts},
+			{key: "opts", label: "Additional fzf Flags", description: "Literal fzf flags stored as data; shell code is never evaluated", kind: manageFieldText, str: &cfg.FzfDefaultOpts},
 			{key: "height", label: "Height", description: "Height percentage for fzf UI", kind: manageFieldNumber, n: &cfg.FzfHeight, min: 20, max: 100, step: 5, unit: "%"},
 			{key: "layout", label: "Layout", description: "Layout mode", kind: manageFieldOption, str: &cfg.FzfLayout, options: []string{"reverse", "default", "reverse-list"}},
 			{key: "border", label: "Border Style", description: "Border style for fzf window", kind: manageFieldOption, str: &cfg.FzfBorderStyle, options: []string{"rounded", "sharp", "bold", "none"}},
@@ -580,11 +641,12 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 		}
 
 	case "lazygit":
+		readOnlyReason := lazyGitManageUIBlockReason(a)
 		return []manageField{
-			{key: "side", label: "Side-by-Side Diff", description: "Use side-by-side diffs", kind: manageFieldToggle, b: &cfg.LazyGitSideBySide},
-			{key: "paging", label: "Paging", description: "Paging backend", kind: manageFieldOption, str: &cfg.LazyGitPaging, options: []string{"delta", "diff-so-fancy", "never"}},
-			{key: "mouse", label: "Mouse Mode", description: "Enable mouse interactions", kind: manageFieldToggle, b: &cfg.LazyGitMouseMode},
-			{key: "gui_theme", label: "GUI Theme", description: "GUI theme selection", kind: manageFieldOption, str: &cfg.LazyGitGuiTheme, options: []string{"auto", "light", "dark"}},
+			{key: "side_fraction", label: "Panel Fraction", description: "Exact global panel-width fraction (0 through 1); per-repo config may override it", kind: manageFieldText, str: &cfg.LazyGitSidePanelWidth, validateText: tools.ValidateLazyGitSidePanelWidth, readOnlyReason: readOnlyReason},
+			{key: "mouse", label: "Mouse Events", description: "Enable global mouse events; per-repo config may override it", kind: manageFieldToggle, b: &cfg.LazyGitMouseEvents, readOnlyReason: readOnlyReason},
+			{key: "color_preset", label: "Color Preset", description: "Standard or light high contrast; custom native colors remain read-only", kind: manageFieldOption, str: &cfg.LazyGitColorPreset, options: []string{"standard", "light-high-contrast"}, unknownReadOnly: true, readOnlyReason: readOnlyReason},
+			{key: "pager_preset", label: "Pager Preset", description: "Builtin or Delta dark pager (requires git-delta); custom native pagers remain read-only", kind: manageFieldOption, str: &cfg.LazyGitPagerPreset, options: []string{"builtin", "delta"}, unknownReadOnly: true, readOnlyReason: readOnlyReason},
 		}
 
 	case "lazydocker":
@@ -605,10 +667,13 @@ func (a *App) manageFieldsFor(itemID string) []manageField {
 
 	case "glow":
 		return []manageField{
-			{key: "style", label: "Style", description: "Style theme for Glow", kind: manageFieldOption, str: &cfg.GlowStyle, options: []string{"auto", "dark", "light", "notty"}},
-			{key: "pager", label: "Pager", description: "Pager program", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"auto", "less", "never"}},
-			{key: "width", label: "Width", description: "Max render width", kind: manageFieldNumber, n: &cfg.GlowWidth, min: 40, max: 240, step: 5, unit: " chars"},
-			{key: "mouse", label: "Mouse", description: "Enable mouse support in Glow", kind: manageFieldToggle, b: &cfg.GlowMouse},
+			{key: "style", label: "Style", description: "8 built-ins; imported custom paths are read-only until explicitly replaced", kind: manageFieldOption, str: &cfg.GlowStyle, options: []string{"auto", "ascii", "dark", "dracula", "tokyo-night", "light", "notty", "pink"}},
+			{key: "pager", label: "Use Pager", description: "Page CLI file rendering; $PAGER selects the command", kind: manageFieldOption, str: &cfg.GlowPager, options: []string{"auto", "never"}},
+			{key: "width", label: "Width", description: "Maximum render width; 0 is Auto (max 120; fallback 80)", kind: manageFieldNumber, n: &cfg.GlowWidth, min: 0, max: math.MaxInt, step: 1, unit: " chars"},
+			{key: "mouse", label: "Mouse", description: "Enable mouse support in the Glow TUI", kind: manageFieldToggle, b: &cfg.GlowMouse},
+			{key: "all", label: "Show All Files", description: "Include hidden and ignored files in the Glow TUI", kind: manageFieldToggle, b: &cfg.GlowAll},
+			{key: "line_numbers", label: "Line Numbers", description: "Show source line numbers in the Glow TUI", kind: manageFieldToggle, b: &cfg.GlowShowLineNumbers},
+			{key: "preserve_newlines", label: "Preserve Newlines", description: "Preserve newlines in the TUI; v2.1.2 CLI always preserves them", kind: manageFieldToggle, b: &cfg.GlowPreserveNewLines},
 		}
 
 	case "claude-code":
@@ -630,7 +695,9 @@ func (a *App) renderManageHeader(width int) string {
 	tabs := RenderTabBar(ScreenManage, width)
 
 	subText := "Dual-pane config editor • Click, scroll, and tweak everything"
-	if a.animationsEnabled {
+	if notice := a.manageInstallationNotice(); notice != "" {
+		subText = notice
+	} else if a.animationsEnabled {
 		subText = AnimatedSpinnerDots(a.uiFrame/2) + " " + subText
 	}
 	sub := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(subText, width))
@@ -641,6 +708,16 @@ func (a *App) renderManageHeader(width int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, tabs, sub, divider)
 }
 
+func (a *App) manageInstallationNotice() string {
+	if a.installationSnapshotError != "" {
+		return installationSnapshotUnavailable + " • stale"
+	}
+	if a.installationSnapshotStale {
+		return "stale installation status"
+	}
+	return ""
+}
+
 func (a *App) renderManageFooter(width int, items []manageItem, fields []manageField) string {
 	// Hint line: short and consistent.
 	hints := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(
@@ -649,19 +726,11 @@ func (a *App) renderManageFooter(width int, items []manageItem, fields []manageF
 
 	// Status line: either save feedback, or focused field description.
 	statusText := a.manageStatus
-	if a.manageInstalling {
-		name := a.manageInstallID
-		for _, it := range items {
-			if it.id == a.manageInstallID {
-				name = it.name
-				break
-			}
-		}
-		if a.animationsEnabled {
-			statusText = fmt.Sprintf("%s Installing %s…", AnimatedSpinnerDots(a.uiFrame), name)
-		} else {
-			statusText = fmt.Sprintf("Installing %s…", name)
-		}
+	if statusText == "" && len(items) > 0 {
+		statusText = items[clampInt(a.manageIndex, 0, len(items)-1)].unavailableReason
+	}
+	if statusText == "" && len(items) > 0 && items[clampInt(a.manageIndex, 0, len(items)-1)].id == "lazygit" && lazyGitManageUIBlockReason(a) != "" {
+		statusText = lazyGitManageUIBlockReason(a)
 	}
 	if statusText == "" && a.managePane == managePaneSettings && len(fields) > 0 {
 		idx := clampInt(a.configFieldIndex, 0, len(fields)-1)
@@ -736,14 +805,18 @@ func (a *App) renderManageToolsPanel(layout manageLayout, items []manageItem) st
 			icon += " "
 		}
 
-		// Right-aligned category tag (helps scanning without changing selection mapping).
-		cat := strings.ToUpper(string(it.category))
+		// The bounded ASCII type remains legible without color or Nerd Fonts.
+		cat := strings.ToUpper(it.installationLabel())
 		if it.id == "global" {
 			cat = "GLOBAL"
 		}
 		tag := tagStyle.Render(cat)
 
-		left := fmt.Sprintf("%s%s %s%s", cursor, status, icon, nameStyle.Render(it.name))
+		typePrefix := "[" + tools.ApplicationTypeToken(it.applicationType) + "] "
+		if it.id == "global" {
+			typePrefix = "[GLOBAL] "
+		}
+		left := fmt.Sprintf("%s%s %s%s%s", cursor, status, typePrefix, nameStyle.Render(it.name), icon)
 		// Small visual hint that settings exist.
 		if it.id != "global" && it.configurable {
 			left += lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  ")
@@ -791,11 +864,6 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 		borderColor = ColorCyan
 	}
 
-	// If installing, show log panel instead of settings
-	if a.manageInstalling || len(a.installLogs) > 0 {
-		return a.renderManageLogPanel(layout, items)
-	}
-
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
@@ -814,10 +882,19 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("SETTINGS")
 	statusBadge := ""
 	if item.id != "global" {
-		if item.installed {
-			statusBadge = " " + RenderBadge("INSTALLED", ColorBg, ColorGreen)
-		} else {
-			statusBadge = " " + RenderBadge("NOT INSTALLED", ColorText, ColorMuted)
+		badgeColor := ColorMuted
+		switch item.presence {
+		case health.PresencePresent:
+			badgeColor = ColorGreen
+		case health.PresencePartial:
+			badgeColor = ColorYellow
+		case health.PresenceMissing, health.PresenceUnknown:
+			badgeColor = ColorMuted
+		}
+		statusBadge = " " + RenderBadge(strings.ToUpper(item.installationLabel()), ColorBg, badgeColor)
+		statusBadge += a.nativeImportBadge(item.id)
+		if item.id == "lazygit" && a.nativeConfigState.LazyGit.RepoOverridesPossible {
+			statusBadge += " " + RenderBadge("REPO OVERRIDES", ColorBg, ColorYellow)
 		}
 	}
 	metaName := item.name
@@ -825,15 +902,20 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 		metaName = item.icon + " " + metaName
 	}
 	meta := lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(metaName) +
-		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description) +
-		statusBadge
+		lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description) + statusBadge
+	if item.id == "yazi" {
+		// Source ownership is primary metadata; keep it before the descriptive
+		// tail so narrow full layouts cannot truncate the truth badge.
+		meta = lipgloss.NewStyle().Foreground(ColorTextBright).Bold(true).Render(metaName) + statusBadge +
+			lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  "+item.description)
+	}
 
 	innerW := maxInt(0, layout.rightW-(layout.border*2)-(layout.padX*2))
 
 	// Field list lines (fixed height for stable layout).
 	visibleFieldLines := layout.rightListH
 	fieldCapacity := visibleFieldLines
-	if a.manageEditing && a.manageEditField != nil && fieldCapacity > 0 {
+	if a.manageEditing && (a.manageEditField != nil || a.manageEditNumber != nil) && fieldCapacity > 0 {
 		// Reserve the first line for the editor, but keep overall height stable.
 		fieldCapacity--
 	}
@@ -854,23 +936,15 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 				fieldLines = append(fieldLines, msgStyle.Render("No configurable settings for this tool."))
 			}
 
-			if !item.installed {
+			switch item.installationAction() {
+			case "install":
 				fieldLines = append(fieldLines, strong.Render("Press I to install"))
-			} else {
+			case "repair":
+				fieldLines = append(fieldLines, strong.Render("Press I to repair"))
+			case "none":
 				fieldLines = append(fieldLines, msgStyle.Render("Installed — press S to save global prefs"))
-			}
-
-			// Show package names for this platform (best-effort).
-			if t, ok := tools.GetRegistry().Get(item.id); ok {
-				platform := pkg.DetectPlatform()
-				pkgs := t.Packages()[platform]
-				if len(pkgs) == 0 {
-					pkgs = t.Packages()["all"]
-				}
-				if len(pkgs) > 0 {
-					pkgLine := msgStyle.Render("Packages: ") + strong.Render(strings.Join(pkgs, ", "))
-					fieldLines = append(fieldLines, pkgLine)
-				}
+			default:
+				fieldLines = append(fieldLines, msgStyle.Render("Installation action blocked"))
 			}
 		}
 	} else {
@@ -886,7 +960,7 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	}
 
 	var fieldsBlock string
-	if a.manageEditing && a.manageEditField != nil && visibleFieldLines > 0 {
+	if a.manageEditing && (a.manageEditField != nil || a.manageEditNumber != nil) && visibleFieldLines > 0 {
 		fieldsBlock = strings.Join(append([]string{a.renderManageInlineEditor(innerW)}, fieldLines...), "\n")
 	} else {
 		fieldsBlock = strings.Join(fieldLines, "\n")
@@ -894,8 +968,32 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 
 	// Exactly 3 header lines before the fields area (matches manageLayout.rightHeaderLines).
 	actionLine := ""
-	if item.id != "global" && !item.installed {
+	if item.id == "lazygit" && lazyGitManageUIBlockReason(a) != "" {
+		text := "READ-ONLY"
+		if a.nativeConfigState.LazyGit.RepoOverridesPossible {
+			text += " • REPO OVERRIDES"
+		}
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render(text + " • " + lazyGitManageUIBlockReason(a))
+	} else if item.id == "lazygit" {
+		switch {
+		case a.manageConfig.LazyGitPagerPreset == "delta":
+			reason := lazyGitDeltaAvailabilityReason(a)
+			if reason == "" {
+				actionLine = lipgloss.NewStyle().Foreground(ColorGreen).Render("Delta installed • uses delta --dark --paging=never")
+			} else {
+				actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render(reason)
+			}
+		case a.nativeConfigState.LazyGit.RepoOverridesPossible:
+			actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Global defaults; repository config may override them")
+		case item.installationAction() == "blocked":
+			actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("Installation action blocked")
+		}
+	} else if item.id != "global" && item.installationAction() == "install" {
 		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: install this tool/app")
+	} else if item.id != "global" && item.installationAction() == "repair" {
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("I: repair this tool/app")
+	} else if item.id != "global" && item.installationAction() == "blocked" {
+		actionLine = lipgloss.NewStyle().Foreground(ColorYellow).Render("Installation action blocked")
 	} else if item.id != "global" && len(fields) == 0 {
 		actionLine = lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No editable fields in manager yet")
 	}
@@ -923,6 +1021,241 @@ func (a *App) renderManageSettingsPanel(layout manageLayout, items []manageItem,
 	return panel.Render(content)
 }
 
+func (a *App) nativeImportBadge(toolID string) string {
+	var (
+		sources []tools.ConfigImportSource
+		fields  int
+		errText string
+	)
+	switch toolID {
+	case "git":
+		sources, fields, errText = a.nativeConfigState.Git.Sources, len(a.nativeConfigState.Git.Fields), a.nativeConfigState.GitError
+	case "ghostty":
+		sources, fields, errText = a.nativeConfigState.Ghostty.Sources, len(a.nativeConfigState.Ghostty.Fields), a.nativeConfigState.GhosttyError
+	case "tmux":
+		sources, fields, errText = a.nativeConfigState.Tmux.Sources, len(a.nativeConfigState.Tmux.Fields), a.nativeConfigState.TmuxError
+	case "btop":
+		sources, fields, errText = a.nativeConfigState.Btop.Sources, len(a.nativeConfigState.Btop.Fields), a.nativeConfigState.BtopError
+	case "glow":
+		sources, fields, errText = a.nativeConfigState.Glow.Sources, len(a.nativeConfigState.Glow.Fields), a.nativeConfigState.GlowError
+	case "lazygit":
+		sources, fields, errText = a.nativeConfigState.LazyGit.Sources, len(a.nativeConfigState.LazyGit.Fields), a.nativeConfigState.LazyGitError
+		if errText == "" {
+			errText = a.nativeConfigState.LazyGit.ReadOnlyReason
+		}
+	case "yazi":
+		imported := a.nativeConfigState.Yazi
+		if a.nativeConfigState.PreferenceError != "" || a.nativeConfigState.YaziError != "" || imported.Main.Ownership == tools.YaziOwnershipMalformed || imported.Keymap.Ownership == tools.YaziOwnershipMalformed {
+			return " " + RenderBadge("IMPORT BLOCKED", ColorBg, ColorYellow)
+		}
+		managed, native := false, false
+		for _, observation := range []tools.YaziFileObservation{imported.Main, imported.Keymap} {
+			switch observation.Ownership {
+			case tools.YaziOwnershipExactCurrent, tools.YaziOwnershipExactHistorical:
+				managed = true
+			case tools.YaziOwnershipNative:
+				native = true
+			case tools.YaziOwnershipMalformed:
+				// Defensive fail-closed handling if the precheck above changes.
+				return " " + RenderBadge("IMPORT BLOCKED", ColorBg, ColorYellow)
+			case tools.YaziOwnershipMissing, "":
+				// Missing sources contribute no badge.
+			}
+		}
+		switch {
+		case native && managed:
+			return " " + RenderBadge("NATIVE SOURCE", ColorBg, ColorCyan) + " " + RenderBadge("MANAGED SOURCE", ColorBg, ColorCyan)
+		case native:
+			return " " + RenderBadge("NATIVE SOURCE", ColorBg, ColorCyan)
+		case managed:
+			return " " + RenderBadge("MANAGED SOURCE", ColorBg, ColorCyan)
+		default:
+			return ""
+		}
+	default:
+		return ""
+	}
+	if errText != "" || a.nativeConfigState.PreferenceError != "" {
+		return " " + RenderBadge("IMPORT BLOCKED", ColorBg, ColorYellow)
+	}
+	if fields == 0 {
+		return ""
+	}
+	managed := false
+	native := false
+	for _, source := range sources {
+		if !source.Active {
+			continue
+		}
+		managed = managed || source.Managed
+		native = native || !source.Managed
+	}
+	label := "NATIVE SOURCE"
+	if managed && native {
+		label = "NATIVE + MANAGED"
+	} else if managed {
+		label = "MANAGED SOURCE"
+	}
+	return " " + RenderBadge(label, ColorBg, ColorCyan)
+}
+
+func (a *App) renderCompactManageYazi(layout manageLayout, fields []manageField) string {
+	rows := make([]string, layout.h)
+	put := func(y int, value string) {
+		if y < 0 || y >= len(rows) {
+			return
+		}
+		rows[y] = ansi.Truncate(sanitizeLogLine(value), layout.w, "…")
+	}
+	putWrapped := func(start, limit int, value string) {
+		wrapped := strings.Split(ansi.Wrap(sanitizeLogLine(value), layout.w, " /•:-"), "\n")
+		for index, line := range wrapped {
+			if start+index >= limit {
+				break
+			}
+			put(start+index, line)
+		}
+	}
+
+	focus := clampInt(a.configFieldIndex, 0, len(fields)-1)
+	blockedReason := ""
+	if len(fields) > 0 {
+		blockedReason = fields[focus].readOnlyReason
+	}
+	put(0, compactManageTabLine)
+	if notice := a.manageInstallationNotice(); notice != "" {
+		put(1, notice)
+	} else if blockedReason != "" {
+		putWrapped(1, layout.bodyY, "Read-only: "+blockedReason)
+	} else {
+		put(1, "Manage terminal tools • Yazi")
+	}
+	put(layout.bodyY, "YAZI SETTINGS"+ansi.Strip(a.nativeImportBadge("yazi")))
+
+	if theme := compactYaziThemeObservationText(a); theme != "" {
+		putWrapped(layout.bodyY+1, layout.bodyY+3, theme)
+	}
+	if provenance := yaziFocusedObservationText(a, focus); provenance != "" {
+		putWrapped(layout.bodyY+3, layout.rightListY, provenance)
+	} else if len(fields) > 0 {
+		put(layout.bodyY+3, yaziManageFieldDescription(a.manageConfig, fields[focus].key))
+	}
+
+	for index := a.manageFieldsScroll; index < len(fields) && index-a.manageFieldsScroll < layout.rightListH; index++ {
+		field := fields[index]
+		focused := a.managePane == managePaneSettings && index == focus
+		cursor := "  "
+		if focused {
+			cursor = "▸ "
+		}
+		value := ""
+		switch field.kind {
+		case manageFieldToggle:
+			if field.b != nil && *field.b {
+				value = "ON"
+			} else {
+				value = "OFF"
+			}
+		case manageFieldNumber:
+			if field.n != nil {
+				value = fmt.Sprintf("%d%s", *field.n, field.unit)
+			}
+		case manageFieldOption, manageFieldText:
+			if field.str != nil {
+				value = sanitizeLogLine(*field.str)
+			}
+		}
+		value = sanitizeLogLine(value)
+		marker := ""
+		if field.readOnlyReason != "" {
+			marker = " (read-only)"
+		}
+		prefix := cursor + field.label + ": "
+		if marker != "" {
+			value = ansi.Truncate(value, max(1, layout.w-lipgloss.Width(prefix)-lipgloss.Width(marker)), "…")
+		}
+		put(layout.rightListY+(index-a.manageFieldsScroll), prefix+value+marker)
+	}
+
+	items := a.manageItems()
+	uninstalled := len(items) > 0 && a.manageIndex >= 0 && a.manageIndex < len(items) && !items[a.manageIndex].installed
+	status := a.manageStatus
+	if status == "" && len(items) > 0 {
+		status = items[clampInt(a.manageIndex, 0, len(items)-1)].unavailableReason
+	}
+	if status != "" {
+		put(layout.h-2, status)
+	} else if uninstalled {
+		put(layout.h-2, "I install")
+	}
+	help := "Tab tools ↑↓ ←→ Space S save Esc back q quit"
+	if blockedReason != "" {
+		help = "Tab tools ↑↓ focused read-only S save Esc back q quit"
+	}
+	if layout.w >= 80 {
+		help += " • ? hotkeys"
+	}
+	put(layout.h-1, help)
+	return strings.Join(rows, "\n")
+}
+
+const compactManageTabLine = "1 Manage  2 Users  3 Hotkeys  4 Update  5 Backups"
+
+func detectCompactManageTabClick(x int) Screen {
+	labels := []struct {
+		text   string
+		screen Screen
+	}{
+		{"1 Manage", ScreenManage},
+		{"2 Users", ScreenUsers},
+		{"3 Hotkeys", ScreenHotkeys},
+		{"4 Update", ScreenUpdate},
+		{"5 Backups", ScreenBackups},
+	}
+	start := 0
+	for _, label := range labels {
+		end := start + lipgloss.Width(label.text)
+		if x >= start && x < end {
+			return label.screen
+		}
+		start = end + 2
+	}
+	return 0
+}
+
+func (a *App) renderCompactManageTools(layout manageLayout, items []manageItem) string {
+	rows := make([]string, layout.h)
+	put := func(y int, value string) {
+		if y >= 0 && y < len(rows) {
+			rows[y] = ansi.Truncate(sanitizeLogLine(value), layout.w, "…")
+		}
+	}
+	put(0, compactManageTabLine)
+	put(1, a.manageInstallationNotice())
+	put(layout.bodyY, "TOOLS • SETTINGS via Tab")
+	for index := a.manageToolsScroll; index < len(items) && index-a.manageToolsScroll < layout.leftListH; index++ {
+		cursor := "  "
+		if index == a.manageIndex {
+			cursor = "▸ "
+		}
+		status := items[index].installationLabel()
+		typeToken := tools.ApplicationTypeToken(items[index].applicationType)
+		if items[index].id == "global" {
+			typeToken = "GLOBAL"
+		}
+		put(layout.leftListY+(index-a.manageToolsScroll), fmt.Sprintf("%s[%s] %s • %s", cursor, typeToken, items[index].name, status))
+	}
+	status := a.manageStatus
+	if status == "" && len(items) > 0 {
+		status = items[clampInt(a.manageIndex, 0, len(items)-1)].unavailableReason
+	}
+	if status != "" {
+		put(layout.h-2, status)
+	}
+	put(layout.h-1, "Tab settings • ↑↓ move • Enter settings • Esc back • q quit")
+	return strings.Join(rows, "\n")
+}
+
 // renderManageFieldLine renders one settings row. applied=false means the field is
 // editable but is NOT wired to any generator (manageNotAppliedFields); a clear
 // "(not applied)" marker is appended so the user is never misled into thinking the
@@ -946,6 +1279,39 @@ func renderManageFieldLineBase(f manageField, focused bool) string {
 		labelStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Width(18)
 		valueStyle = lipgloss.NewStyle().Foreground(ColorText).Bold(true)
 	}
+	if f.readOnlyReason != "" {
+		value := "—"
+		switch f.kind {
+		case manageFieldToggle:
+			value = "OFF"
+			if f.b != nil && *f.b {
+				value = "ON"
+			}
+		case manageFieldText, manageFieldOption:
+			if f.str != nil && *f.str != "" {
+				value = *f.str
+			}
+			if f.kind == manageFieldOption {
+				switch f.key + ":" + value {
+				case "color_preset:custom", "pager_preset:custom":
+					value = "Custom"
+				case "color_preset:standard":
+					value = "Standard"
+				case "color_preset:light-high-contrast":
+					value = "Light High Contrast"
+				case "pager_preset:builtin":
+					value = "Builtin"
+				case "pager_preset:delta":
+					value = "Delta (dark)"
+				}
+			}
+		case manageFieldNumber:
+			if f.n != nil {
+				value = fmt.Sprintf("%d%s", *f.n, f.unit)
+			}
+		}
+		return fmt.Sprintf("%s%s %s %s", cursor, labelStyle.Render(f.label), valueStyle.Render(value), lipgloss.NewStyle().Foreground(ColorYellow).Render("(read-only)"))
+	}
 
 	switch f.kind {
 	case manageFieldToggle:
@@ -965,12 +1331,19 @@ func renderManageFieldLineBase(f manageField, focused bool) string {
 			leftArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("◀")
 			rightArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("▶")
 		}
-		val := valueStyle.Render(fmt.Sprintf("%d%s", *f.n, f.unit))
+		display := fmt.Sprintf("%d%s", *f.n, f.unit)
+		if f.key == "width" && f.min == 0 && *f.n == 0 {
+			display = "Auto (max 120; fallback 80)"
+		}
+		val := valueStyle.Render(display)
 		return fmt.Sprintf("%s%s %s %s %s", cursor, labelStyle.Render(f.label), leftArrow, val, rightArrow)
 
 	case manageFieldOption:
 		if f.str == nil || len(f.options) == 0 {
 			return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), valueStyle.Render("—"))
+		}
+		if f.unknownReadOnly && !oneOf(*f.str, f.options...) {
+			return fmt.Sprintf("%s%s %s", cursor, labelStyle.Render(f.label), lipgloss.NewStyle().Foreground(ColorYellow).Render("Custom (read-only)"))
 		}
 		leftArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("◀")
 		rightArrow := lipgloss.NewStyle().Foreground(ColorTextMuted).Render("▶")
@@ -978,7 +1351,16 @@ func renderManageFieldLineBase(f manageField, focused bool) string {
 			leftArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("◀")
 			rightArrow = lipgloss.NewStyle().Foreground(ColorCyan).Render("▶")
 		}
-		val := valueStyle.Render(*f.str)
+		display := *f.str
+		if f.key == "pager" {
+			switch *f.str {
+			case "auto":
+				display = "Enabled"
+			case "never":
+				display = "Disabled"
+			}
+		}
+		val := valueStyle.Render(display)
 		return fmt.Sprintf("%s%s %s %s %s", cursor, labelStyle.Render(f.label), leftArrow, val, rightArrow)
 
 	case manageFieldText:
@@ -1019,32 +1401,81 @@ func (a *App) renderManageInlineEditor(width int) string {
 		Render(plain)
 }
 
+func (a *App) manageFieldMutationBlocked(field manageField) bool {
+	if field.readOnlyReason == "" {
+		return false
+	}
+	a.manageStatus = field.label + " is read-only: " + field.readOnlyReason
+	return true
+}
+
 func (a *App) manageStartEditing(field manageField) {
-	if field.kind != manageFieldText || field.str == nil {
+	if a.manageFieldMutationBlocked(field) {
 		return
 	}
-
+	if field.kind != manageFieldText && field.kind != manageFieldNumber {
+		return
+	}
 	a.manageEditing = true
-	a.manageEditField = field.str
+	a.manageEditField = nil
+	a.manageEditNumber = nil
+	a.manageEditValidate = nil
+	if field.kind == manageFieldText {
+		if field.str == nil {
+			return
+		}
+		a.manageEditField = field.str
+		a.manageEditValidate = field.validateText
+		a.manageEditValue = *field.str
+	} else {
+		if field.n == nil {
+			return
+		}
+		a.manageEditNumber = field.n
+		a.manageEditMin = field.min
+		a.manageEditMax = field.max
+		a.manageEditValue = strconv.Itoa(*field.n)
+	}
 	a.manageEditFieldKey = field.label
-	a.manageEditValue = *field.str
 	a.manageEditCursor = utf8.RuneCountInString(a.manageEditValue)
 }
 
-func (a *App) manageCommitEditing() {
-	if !a.manageEditing || a.manageEditField == nil {
-		return
+func (a *App) manageCommitEditing() bool {
+	if !a.manageEditing {
+		return false
 	}
-	*a.manageEditField = a.manageEditValue
+	if a.manageEditField != nil {
+		if a.manageEditValidate != nil {
+			if err := a.manageEditValidate(a.manageEditValue); err != nil {
+				a.manageStatus = err.Error()
+				return false
+			}
+		}
+		*a.manageEditField = a.manageEditValue
+	} else if a.manageEditNumber != nil {
+		n, err := strconv.ParseInt(strings.TrimSpace(a.manageEditValue), 10, strconv.IntSize)
+		if err != nil || n < int64(a.manageEditMin) || n > int64(a.manageEditMax) {
+			a.manageStatus = "Enter a valid value within the field range"
+			return false
+		}
+		*a.manageEditNumber = int(n)
+	} else {
+		return false
+	}
 	a.manageEditing = false
 	a.manageEditField = nil
+	a.manageEditNumber = nil
 	a.manageEditFieldKey = ""
+	a.manageEditValidate = nil
+	return true
 }
 
 func (a *App) manageCancelEditing() {
 	a.manageEditing = false
 	a.manageEditField = nil
+	a.manageEditNumber = nil
 	a.manageEditFieldKey = ""
+	a.manageEditValidate = nil
 	a.manageEditValue = ""
 	a.manageEditCursor = 0
 }
@@ -1093,6 +1524,27 @@ func truncateVisible(s string, width int) string {
 	return ansi.Truncate(s, width, "…")
 }
 
+func sanitizeLogLine(s string) string {
+	stripped := ansi.Strip(s)
+	var b strings.Builder
+	b.Grow(len(stripped))
+	for _, r := range stripped {
+		switch {
+		case r == '\t':
+			b.WriteRune(' ')
+		case r < 0x20:
+			continue
+		case r == 0x7f:
+			continue
+		case r >= 0x80 && r <= 0x9f:
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func truncatePlain(s string, width int) string {
 	if width <= 0 {
 		return ""
@@ -1105,109 +1557,4 @@ func truncatePlain(s string, width int) string {
 		return "…"
 	}
 	return string(r[:width-1]) + "…"
-}
-
-// renderManageLogPanel renders the log panel when installing/updating
-func (a *App) renderManageLogPanel(layout manageLayout, items []manageItem) string {
-	borderColor := ColorCyan
-	if !a.manageInstalling {
-		borderColor = ColorBorder
-	}
-
-	// Get the tool name for the title
-	toolName := "Install"
-	for _, it := range items {
-		if it.id == a.manageInstallID {
-			toolName = it.name
-			break
-		}
-	}
-
-	// Build title with status
-	var title string
-	if a.manageInstalling {
-		spinner := AnimatedSpinnerDots(a.uiFrame)
-		if !a.animationsEnabled {
-			spinner = "..."
-		}
-		title = fmt.Sprintf("INSTALLING %s %s", strings.ToUpper(toolName), spinner)
-	} else {
-		title = fmt.Sprintf("INSTALL LOG: %s", strings.ToUpper(toolName))
-	}
-
-	// Build the styled log panel to match the dual-pane layout.
-	panel := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Padding(1, 1).
-		Width(maxInt(1, layout.rightW-2)).
-		Height(maxInt(1, layout.bodyH-2))
-
-	// Build content
-	innerWidth := maxInt(0, layout.rightW-4)
-	innerHeight := maxInt(0, layout.bodyH-6)
-
-	// Title line
-	titleStyle := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true)
-	titleLine := titleStyle.Render(title)
-
-	// Calculate visible log range
-	visibleLines := innerHeight
-	totalLines := len(a.installLogs)
-
-	var logLines []string
-	if totalLines == 0 {
-		// Empty state
-		if a.manageInstalling {
-			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Waiting for output..."))
-		} else {
-			logLines = append(logLines, lipgloss.NewStyle().Foreground(ColorTextMuted).Render("No logs"))
-		}
-	} else {
-		// Calculate range (scroll from bottom)
-		endIdx := totalLines - a.installLogScroll
-		if endIdx > totalLines {
-			endIdx = totalLines
-		}
-		if endIdx < 0 {
-			endIdx = 0
-		}
-		startIdx := endIdx - visibleLines
-		if startIdx < 0 {
-			startIdx = 0
-		}
-
-		for i := startIdx; i < endIdx; i++ {
-			line := a.installLogs[i]
-			if lipgloss.Width(line) > innerWidth {
-				line = truncateVisible(line, innerWidth)
-			}
-			logLines = append(logLines, line)
-		}
-	}
-
-	// Pad to fill height
-	for len(logLines) < visibleLines {
-		logLines = append([]string{""}, logLines...)
-	}
-
-	// Footer with hints
-	var footerText string
-	if a.manageInstalling {
-		footerText = "Installing..."
-	} else if len(a.installLogs) > 0 {
-		footerText = "C: clear • ↑↓: scroll"
-	}
-	footer := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(footerText)
-
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		titleLine,
-		"",
-		strings.Join(logLines, "\n"),
-		"",
-		footer,
-	)
-
-	return panel.Render(content)
 }

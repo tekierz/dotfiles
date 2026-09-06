@@ -187,6 +187,8 @@ var allNavigableScreens = []Screen{
 	ScreenConfigBtop,
 	ScreenConfigGlow,
 	ScreenConfigClaudeCode,
+	ScreenConfigSaveConfirm,
+	ScreenManageSaveConfirm,
 }
 
 // TestFactory_AllNavigableScreensMapped proves the factory returns a non-nil

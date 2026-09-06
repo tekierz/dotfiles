@@ -1,0 +1,3 @@
+=== RUN   TestGeneratedOptionsAreAcceptedByInstalledFzf
+--- PASS: TestGeneratedOptionsAreAcceptedByInstalledFzf (0.01s)
+PASS

@@ -1,0 +1,17 @@
+ok  	github.com/tekierz/dotfiles/cmd/dotfiles	(cached)
+ok  	github.com/tekierz/dotfiles/internal/backup	(cached)
+ok  	github.com/tekierz/dotfiles/internal/config	(cached)
+ok  	github.com/tekierz/dotfiles/internal/health	(cached)
+ok  	github.com/tekierz/dotfiles/internal/hotkeys	(cached)
+ok  	github.com/tekierz/dotfiles/internal/installapply	(cached)
+ok  	github.com/tekierz/dotfiles/internal/installplan	(cached)
+ok  	github.com/tekierz/dotfiles/internal/operation	(cached)
+ok  	github.com/tekierz/dotfiles/internal/pkg	(cached)
+ok  	github.com/tekierz/dotfiles/internal/planpublic	(cached)
+ok  	github.com/tekierz/dotfiles/internal/platformqa/cmd	(cached)
+ok  	github.com/tekierz/dotfiles/internal/runner	2.410s
+ok  	github.com/tekierz/dotfiles/internal/safefile	(cached)
+ok  	github.com/tekierz/dotfiles/internal/scripts	1.940s
+?   	github.com/tekierz/dotfiles/internal/theme	[no test files]
+ok  	github.com/tekierz/dotfiles/internal/tools	2.723s
+ok  	github.com/tekierz/dotfiles/internal/ui	29.549s

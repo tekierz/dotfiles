@@ -57,9 +57,9 @@ func (s *configGUIAppsScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // View renders the GUI apps selection screen.
 func (s *configGUIAppsScreen) View(width, height int) string {
 	a := s.App()
-
-	// Ensure install status is cached.
-	a.ensureInstallCache()
+	if a.installCacheLoading {
+		return installStatusLoadingView(a, width, height)
+	}
 
 	title := renderConfigTitle("", "GUI Apps", "Desktop applications (cross-platform)")
 

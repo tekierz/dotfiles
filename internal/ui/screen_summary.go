@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -32,12 +34,29 @@ func (s *SummaryScreen) Init() tea.Cmd {
 
 // Update handles input messages.
 func (s *SummaryScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "enter":
+			if app := s.App(); app != nil && app.installComplete {
+				switch {
+				case app.installOutcome == installationOutcomeReplanRequired && app.installSummaryFacts.outcome == installationOutcomeReplanRequired:
+					requested := app.installSummaryFacts.requestedToolIDs()
+					app.prepareInstallationReview()
+					if app.deepDiveContinuation == nil {
+						// Existing Manage continuation remains package-only.
+						app.installReviewTools = requested
+					}
+					return s, tea.Batch(NavigateTo(ScreenFileTree), app.startInstallCacheLoad())
+				case app.installOutcome == installationOutcomeConfigurationReviewRequired && app.installSummaryFacts.outcome == installationOutcomeConfigurationReviewRequired && app.deepDiveContinuation != nil:
+					app.prepareInstallationReview()
+					return s, tea.Batch(NavigateTo(ScreenFileTree), app.startInstallCacheLoad())
+				}
+			}
 			return s, tea.Quit
 		case "esc", "q":
+			if app := s.App(); app != nil {
+				app.deepDiveContinuation = nil
+			}
 			return s, tea.Quit
 		}
 	}
@@ -50,45 +69,116 @@ func (s *SummaryScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 // than hardcoded hex values, so the summary matches the rest of the UI and the
 // user's selected theme.
 func (s *SummaryScreen) View(width, height int) string {
-	title := lipgloss.NewStyle().
-		Foreground(ColorGreen).
-		Bold(true).
-		Render("✓ Installation Complete!")
-
 	theme := s.Theme()
 	navStyle := s.NavStyle()
+	facts := installationSummaryFacts{}
+	outcome := installationOutcomePending
+	complete := false
+	if app := s.App(); app != nil {
+		facts = app.installSummaryFacts
+		outcome = app.installOutcome
+		complete = app.installComplete
+	}
+	succeeded := complete && outcome == installationOutcomeSucceeded && facts.outcome == installationOutcomeSucceeded
+	replanRequired := complete && outcome == installationOutcomeReplanRequired && facts.outcome == installationOutcomeReplanRequired
+	configurationReviewRequired := complete && outcome == installationOutcomeConfigurationReviewRequired && facts.outcome == installationOutcomeConfigurationReviewRequired
 
-	summary := lipgloss.NewStyle().Foreground(ColorText).Render(fmt.Sprintf(`
-  Theme:      %s
-  Navigation: %s
-  Backup:     ~/.config/dotfiles/backups/
+	titleText := "! Installation Incomplete"
+	titleColor := ColorYellow
+	if succeeded {
+		titleText = "✓ Installation Complete!"
+		titleColor = ColorGreen
+	} else if replanRequired {
+		titleText = "✓ Prerequisites Installed — Fresh Review Required"
+		titleColor = ColorCyan
+	} else if configurationReviewRequired {
+		titleText = "✓ Tools Installed — Configuration Review Required"
+		titleColor = ColorCyan
+	}
+	title := lipgloss.NewStyle().Foreground(titleColor).Bold(true).Render(titleText)
 
-  Next steps:
+	planHash := "unavailable"
+	operationID := "unavailable"
+	if facts.planHash != "" {
+		planHash = facts.planHash
+		if len(planHash) > 12 {
+			planHash = planHash[:12]
+		}
+	}
+	if facts.operationID != "" {
+		operationID = facts.operationID
+	}
 
-  1. %s or restart terminal
-  2. %s to start tmux
-  3. %s to finish plugin installation
-  4. %s to customize prompt
-  5. %s to see hotkey reference
-`,
-		lipgloss.NewStyle().Foreground(ColorCyan).Render(theme),
-		lipgloss.NewStyle().Foreground(ColorCyan).Render(navStyle),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("source ~/.zshrc"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("tmux"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("nvim"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("p10k configure"),
-		lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("hk"),
-	))
-	summary = lipgloss.NewStyle().MaxWidth(max(20, width-6)).Render(summary)
+	lines := []string{
+		fmt.Sprintf("Plan:       %s (%d actions)", lipgloss.NewStyle().Foreground(ColorCyan).Render(planHash), facts.actionCount),
+		fmt.Sprintf("Operation:  %s", lipgloss.NewStyle().Foreground(ColorCyan).Render(operationID)),
+		fmt.Sprintf("Rollback scope: %d verified target(s)", facts.rollbackTargetCount),
+	}
+	if replanRequired {
+		remaining := strings.Join(facts.remainingToolIDs(), ", ")
+		if remaining == "" {
+			remaining = "selected npm tools"
+		}
+		lines = append(lines, "", fmt.Sprintf("Phase %d complete. Remaining: %s", facts.phaseIndex, remaining), "No npm phase was started automatically.")
+	} else if configurationReviewRequired {
+		lines = append(lines, "", "Package installation is complete.", "No configuration was written automatically.")
+	} else if height < 18 {
+		if succeeded {
+			lines = append(lines, "", "Next: "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles status"))
+		} else {
+			lines = append(lines, "", "Not verified. Review plan before retry.")
+		}
+	} else {
+		lines = append([]string{
+			fmt.Sprintf("Theme:      %s", lipgloss.NewStyle().Foreground(ColorCyan).Render(theme)),
+			fmt.Sprintf("Navigation: %s", lipgloss.NewStyle().Foreground(ColorCyan).Render(navStyle)),
+		}, lines...)
+	}
+	if height >= 18 && succeeded {
+		lines = append(lines,
+			"",
+			"Next steps:",
+			"1. Run "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles status")+" to verify health",
+			"2. Open "+lipgloss.NewStyle().Foreground(ColorNeonBlue).Render("dotfiles manage")+" for settings",
+		)
+	} else if height >= 18 && !replanRequired && !configurationReviewRequired {
+		lines = append(lines,
+			"",
+			"Completion was not verified.",
+			"Some actions may have completed.",
+			"Review the plan before retrying.",
+		)
+	}
+
+	horizontalPadding := 2
+	if width < 60 {
+		horizontalPadding = 1
+	}
+	contentWidth := max(12, width-2-(horizontalPadding*2))
+	wrapped := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			wrapped = append(wrapped, "")
+			continue
+		}
+		wrapped = append(wrapped, strings.Split(ansi.Wrap(line, contentWidth, " /-_"), "\n")...)
+	}
+	summary := lipgloss.NewStyle().Foreground(ColorText).MaxWidth(contentWidth).Render(strings.Join(wrapped, "\n"))
 
 	helpStyle := lipgloss.NewStyle().
 		Foreground(ColorTextMuted)
-	help := helpStyle.Render("[ENTER] Exit")
+	helpText := "[ENTER] Exit"
+	if replanRequired {
+		helpText = "[ENTER] Build Fresh Phase 2 Preview    [Q] Exit"
+	} else if configurationReviewRequired {
+		helpText = "[ENTER] Build Fresh Configuration Preview    [Q] Exit"
+	}
+	help := helpStyle.Render(helpText)
 
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorCyan).
-		Padding(1, 2)
+		Padding(1, horizontalPadding)
 
 	return lipgloss.Place(
 		width, height,

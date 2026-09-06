@@ -1,0 +1,14 @@
+{
+  "formulae": [
+    {
+      "name": "release/acceptance/dotfiles",
+      "installed_versions": [
+        "2.0.1"
+      ],
+      "current_version": "3.0.0",
+      "pinned": false,
+      "pinned_version": null
+    }
+  ],
+  "casks": []
+}

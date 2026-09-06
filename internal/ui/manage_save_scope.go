@@ -1,6 +1,8 @@
 package ui
 
-import "fmt"
+import (
+	"strings"
+)
 
 // manageGeneratorToolOrder is the stable set of tool IDs whose config files the
 // Manage save can write, in the deterministic order used for applying changes and
@@ -54,10 +56,11 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 			cfg.GitDeltaSideBySide, cfg.GitDefaultBranch, cfg.GitPullRebase,
 			cfg.GitSignCommits, cfg.GitCredentialHelper,
 			cfg.GitAutoSetupRemote, cfg.GitMergeTool, cfg.GitDiffTool,
+			strings.Join(cfg.GitAliases, "\x00"),
 		}
 	case "yazi":
 		return []any{
-			cfg.YaziShowHidden, cfg.YaziSortBy, cfg.YaziSortReverse,
+			cfg.YaziKeymap, cfg.YaziShowHidden, cfg.YaziPreviewMode, cfg.YaziSortBy, cfg.YaziSortReverse,
 			cfg.YaziLineMode, cfg.YaziScrollOff,
 		}
 	case "fzf":
@@ -67,8 +70,8 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 		}
 	case "lazygit":
 		return []any{
-			cfg.LazyGitSideBySide, cfg.LazyGitMouseMode, cfg.LazyGitTheme,
-			cfg.LazyGitPaging,
+			cfg.LazyGitSidePanelWidth, cfg.LazyGitMouseEvents, cfg.LazyGitColorPreset,
+			cfg.LazyGitPagerPreset,
 		}
 	case "btop":
 		return []any{
@@ -76,7 +79,7 @@ func toolDeepDiveFields(toolID string, cfg DeepDiveConfig) []any {
 			cfg.BtopTempScale, cfg.BtopShownBoxes,
 		}
 	case "glow":
-		return []any{cfg.GlowPager, cfg.GlowStyle, cfg.GlowWidth, cfg.GlowMouse}
+		return []any{cfg.GlowPager, cfg.GlowStyle, cfg.GlowWidth, cfg.GlowMouse, cfg.GlowAll, cfg.GlowShowLineNumbers, cfg.GlowPreserveNewLines}
 	}
 	return nil
 }
@@ -114,23 +117,17 @@ func sliceEqual(a, b []any) bool {
 // data-loss fix (P1-A2): a single tool's edit must never rewrite another tool's
 // config file from manage.json defaults.
 //
-// Theme is cross-cutting: every tool's generated colors depend on it, so a theme
-// change legitimately re-applies ALL tools (including claude-code). When the theme
-// is unchanged, only the tools whose own fields changed are returned.
+// Theme is deliberately not part of this diff. A global theme selection is
+// persisted as desired state, but it must not synthesize or rewrite every tool's
+// config from Manage defaults. Theme-dependent artifacts are applied through the
+// reviewed install plan, where selection, ownership, backup scope, and rollback
+// are explicit. Only tools whose own modeled fields changed are returned here.
 //
 // The result is ordered per manageGeneratorToolOrder (claude-code last) so apply
 // and error reporting are deterministic.
-func changedManageTools(baseline, current *ManageConfig, baselineTheme, currentTheme string) []string {
+func changedManageTools(baseline, current *ManageConfig, _, _ string) []string {
 	base := manageConfigToDeepDive(baseline)
 	cur := manageConfigToDeepDive(current)
-
-	// A theme change affects every tool's generated colors → re-apply all.
-	if baselineTheme != currentTheme {
-		changed := make([]string, 0, len(manageGeneratorToolOrder)+1)
-		changed = append(changed, manageGeneratorToolOrder...)
-		changed = append(changed, "claude-code")
-		return changed
-	}
 
 	var changed []string
 	for _, id := range manageGeneratorToolOrder {
@@ -142,28 +139,4 @@ func changedManageTools(baseline, current *ManageConfig, baselineTheme, currentT
 		changed = append(changed, "claude-code")
 	}
 	return changed
-}
-
-// applyChangedManageTools writes ONLY the config files for the given tool IDs,
-// reusing the scoped applyOneToolConfig writer so the Manage save shares the exact
-// generator-calling logic as the standalone `dotfiles config <tool>` path. It is
-// best-effort: every tool is attempted and ALL errors are collected (consistent
-// with the T2 silent-failure work).
-func applyChangedManageTools(toolIDs []string, cfg DeepDiveConfig, theme string) []error {
-	var errs []error
-	for _, id := range toolIDs {
-		if e := applyOneToolConfig(id, cfg, theme); len(e) > 0 {
-			errs = append(errs, e...)
-		}
-	}
-	if len(errs) == 0 {
-		return nil
-	}
-	return errs
-}
-
-// firstErrorSummary builds the "saved but failed to apply N file(s)" message used
-// when a scoped Manage save persists prefs but one or more generators fail.
-func firstErrorSummary(errs []error) error {
-	return fmt.Errorf("saved preferences but failed to apply %d config file(s); first: %w", len(errs), errs[0])
 }

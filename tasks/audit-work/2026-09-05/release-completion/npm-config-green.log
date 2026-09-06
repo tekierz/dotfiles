@@ -1,0 +1,139 @@
+=== RUN   TestNPMExecutionIdentityStartStreamingUsesAcceptedChainAndSanitizedEnvironment
+--- PASS: TestNPMExecutionIdentityStartStreamingUsesAcceptedChainAndSanitizedEnvironment (1.25s)
+=== RUN   TestNPMExecutionIdentityInstalledNPMConfigNeutralization
+    npm_execution_identity_start_test.go:147: real npm version=11.19.0
+--- PASS: TestNPMExecutionIdentityInstalledNPMConfigNeutralization (0.19s)
+=== RUN   TestNPMExecutionIdentityStartStreamingRejectsInheritedCaseCollision
+--- PASS: TestNPMExecutionIdentityStartStreamingRejectsInheritedCaseCollision (0.02s)
+=== RUN   TestObserveNPMExecutionIdentityRejectsAliasedComponents
+=== RUN   TestObserveNPMExecutionIdentityRejectsAliasedComponents/same
+=== RUN   TestObserveNPMExecutionIdentityRejectsAliasedComponents/symlink
+=== RUN   TestObserveNPMExecutionIdentityRejectsAliasedComponents/hardlink
+--- PASS: TestObserveNPMExecutionIdentityRejectsAliasedComponents (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsAliasedComponents/same (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsAliasedComponents/symlink (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsAliasedComponents/hardlink (0.00s)
+=== RUN   TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority
+=== RUN   TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/zero
+=== RUN   TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/nil-context
+=== RUN   TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/pre-cancelled
+=== RUN   TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/drift-npm
+=== RUN   TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/drift-node
+--- PASS: TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority (0.06s)
+    --- PASS: TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/zero (0.00s)
+    --- PASS: TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/nil-context (0.00s)
+    --- PASS: TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/pre-cancelled (0.00s)
+    --- PASS: TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/drift-npm (0.02s)
+    --- PASS: TestNPMExecutionIdentityStartStreamingRejectsInvalidOrDriftedAuthority/drift-node (0.02s)
+=== RUN   TestNPMExecutionIdentityStartStreamingRedactsDeterministicStartFailure
+--- PASS: TestNPMExecutionIdentityStartStreamingRedactsDeterministicStartFailure (0.00s)
+=== RUN   TestNPMExecutionIdentityStreamingFacadePropagatesExitAndCancelWithoutExposure
+=== RUN   TestNPMExecutionIdentityStreamingFacadePropagatesExitAndCancelWithoutExposure/nonzero-and-opaque
+=== RUN   TestNPMExecutionIdentityStreamingFacadePropagatesExitAndCancelWithoutExposure/cancel
+--- PASS: TestNPMExecutionIdentityStreamingFacadePropagatesExitAndCancelWithoutExposure (0.28s)
+    --- PASS: TestNPMExecutionIdentityStreamingFacadePropagatesExitAndCancelWithoutExposure/nonzero-and-opaque (0.25s)
+    --- PASS: TestNPMExecutionIdentityStreamingFacadePropagatesExitAndCancelWithoutExposure/cancel (0.03s)
+=== RUN   TestNPMExecutionIdentityObservesExactEnvNodeChainDeterministically
+--- PASS: TestNPMExecutionIdentityObservesExactEnvNodeChainDeterministically (0.00s)
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift/npm-content
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift/npm-mode
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift/npm-delete
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift/npm-symlink-retarget
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift/node-content
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift/node-mode
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift/node-delete
+=== RUN   TestNPMExecutionIdentityRejectsEveryComponentDrift/node-symlink-retarget
+--- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift (0.02s)
+    --- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift/npm-content (0.00s)
+    --- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift/npm-mode (0.00s)
+    --- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift/npm-delete (0.00s)
+    --- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift/npm-symlink-retarget (0.00s)
+    --- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift/node-content (0.00s)
+    --- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift/node-mode (0.00s)
+    --- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift/node-delete (0.00s)
+    --- PASS: TestNPMExecutionIdentityRejectsEveryComponentDrift/node-symlink-retarget (0.00s)
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/relative-npm
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/relative-node
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/missing-npm
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/missing-node
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/nonexec-npm
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/nonexec-node
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/oversize-npm
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/oversize-node
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/directory-npm
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/directory-node
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/loop-npm
+=== RUN   TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/loop-node
+--- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths (0.01s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/relative-npm (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/relative-node (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/missing-npm (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/missing-node (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/nonexec-npm (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/nonexec-node (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/oversize-npm (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/oversize-node (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/directory-npm (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/directory-node (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/loop-npm (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsUnsafeInputsWithoutLeakingPaths/loop-node (0.00s)
+=== RUN   TestObserveNPMExecutionIdentityRejectsFIFOComponentsWithoutHanging
+=== RUN   TestObserveNPMExecutionIdentityRejectsFIFOComponentsWithoutHanging/npm
+=== RUN   TestObserveNPMExecutionIdentityRejectsFIFOComponentsWithoutHanging/node
+--- PASS: TestObserveNPMExecutionIdentityRejectsFIFOComponentsWithoutHanging (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsFIFOComponentsWithoutHanging/npm (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRejectsFIFOComponentsWithoutHanging/node (0.00s)
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/empty-interpreter
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/extra-argument
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/leading-space
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/no-newline
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/missing
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/absolute-node
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/env-python
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/env-options
+=== RUN   TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/carriage-return
+--- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang (0.01s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/empty-interpreter (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/extra-argument (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/leading-space (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/no-newline (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/missing (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/absolute-node (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/env-python (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/env-options (0.00s)
+    --- PASS: TestObserveNPMExecutionIdentityRequiresExactEnvNodeShebang/carriage-return (0.00s)
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-macho-32
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-macho-32-swapped
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-macho-64-swapped
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-fat
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-fat-swapped
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-fat-64
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-fat-64-swapped
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-elf
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-macho-64
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/reject-shebang
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/reject-plain-text
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/reject-truncated
+=== RUN   TestNPMExecutionIdentityRequiresNativeNodeFormat/reject-bad-magic
+--- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat (0.02s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-macho-32 (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-macho-32-swapped (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-macho-64-swapped (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-fat (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-fat-swapped (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-fat-64 (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-fat-64-swapped (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-elf (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/accept-macho-64 (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/reject-shebang (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/reject-plain-text (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/reject-truncated (0.00s)
+    --- PASS: TestNPMExecutionIdentityRequiresNativeNodeFormat/reject-bad-magic (0.00s)
+=== RUN   TestNPMExecutionIdentityPublicSurfaceIsOpaqueAndPathFree
+--- PASS: TestNPMExecutionIdentityPublicSurfaceIsOpaqueAndPathFree (0.00s)
+PASS
+ok  	github.com/tekierz/dotfiles/internal/pkg	3.186s

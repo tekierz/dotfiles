@@ -1,0 +1,12 @@
+title = "dotfiles secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Frozen Yazi keymap SHA-256 test fixture"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^0a2fd17b29dedb66a5af0cb976e9c1bfd16e036a57336d4447f1cc0f1e84c9de$''']
+paths = ['''^internal/tools/yazi_import_test\.go$''']

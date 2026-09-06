@@ -51,13 +51,14 @@ func (s *hotkeysScreen) Init() tea.Cmd { return nil }
 func (s *hotkeysScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// 'q' quits from the hotkeys screen (matches the legacy global quit which
-		// only suppressed 'q' during installs / inline edits, neither of which
-		// apply here).
-		if msg.String() == "q" {
+		if msg.String() == "ctrl+c" {
 			return s, tea.Quit
 		}
-		if msg.String() == "ctrl+c" {
+		a := s.App()
+		// 'q' quits from the Hotkeys screen except while the alias editor is
+		// active (so typing 'q' into an alias doesn't quit). This mirrors the
+		// text-capture guard used by Manage and Users.
+		if msg.String() == "q" && (a == nil || !a.hotkeysAddingAlias) {
 			return s, tea.Quit
 		}
 		return s, s.handleKey(msg)
@@ -302,13 +303,13 @@ func (s *hotkeysScreen) handleAliasInput(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "left", "h":
+	case "left":
 		if a.hotkeysAliasCursor > 0 {
 			a.hotkeysAliasCursor--
 		}
 		return nil
 
-	case "right", "l":
+	case "right":
 		maxLen := a.hotkeysAliasCurrentFieldLen()
 		if a.hotkeysAliasCursor < maxLen {
 			a.hotkeysAliasCursor++
@@ -332,8 +333,9 @@ func (s *hotkeysScreen) handleAliasInput(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	default:
-		// Insert typed runes (ignore non-rune keys and alt-modified keys)
-		if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 && !msg.Alt {
+		// Insert typed runes (ignore non-rune keys and alt-modified keys).
+		// Bubble Tea reports a lone space as KeySpace rather than KeyRunes.
+		if (msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace) && len(msg.Runes) > 0 && !msg.Alt {
 			a.hotkeysAliasInsertRunes(msg.Runes)
 		}
 		return nil
@@ -355,7 +357,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the
 	// already-active tab (this screen).
 	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+		if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -369,7 +371,7 @@ func (s *hotkeysScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Wheel scroll.
 	if m.IsWheel() {
 		delta := 0
-		switch m.Button {
+		switch m.Button { //nolint:exhaustive // Only vertical wheel actions are meaningful here.
 		case tea.MouseButtonWheelUp:
 			delta = -1
 		case tea.MouseButtonWheelDown:
@@ -735,8 +737,14 @@ func (a *App) toggleHotkeyFavorite(categoryID, itemKey string) {
 	userHotkeys := a.getCurrentUserHotkeys()
 	userHotkeys.ToggleFavorite(categoryID, itemKey)
 	a.hotkeysFavorites.SetUserHotkeys(username, userHotkeys)
-	// Save to disk
-	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
+	// Save to disk. A failure here would otherwise be silent: the star renders as
+	// set from the in-memory toggle but never persists, so surface it in the
+	// footer status instead of discarding the error.
+	if err := config.SaveHotkeysConfig(a.hotkeysFavorites); err != nil {
+		a.hotkeysStatus = "Failed to save favorite: " + err.Error()
+	} else {
+		a.hotkeysStatus = ""
+	}
 }
 
 // hotkeysAliasCurrentFieldLen returns the rune count of the current alias field
@@ -819,7 +827,13 @@ func (a *App) hotkeysSaveAlias() {
 	userHotkeys.Aliases[a.hotkeysAliasName] = a.hotkeysAliasCommand
 	username := a.getCurrentUsername()
 	a.hotkeysFavorites.SetUserHotkeys(username, userHotkeys)
-	_ = config.SaveHotkeysConfig(a.hotkeysFavorites)
+	// Surface a persistence failure in the footer status instead of silently
+	// dropping it: the alias would appear accepted but never reach disk.
+	if err := config.SaveHotkeysConfig(a.hotkeysFavorites); err != nil {
+		a.hotkeysStatus = "Failed to save alias: " + err.Error()
+	} else {
+		a.hotkeysStatus = ""
+	}
 }
 
 // hotkeysCancelAlias cancels alias editing and resets state
@@ -862,13 +876,19 @@ func (a *App) renderHotkeysFooter(width int, cats []hotkeys.Category) string {
 		statusText = fmt.Sprintf("%s %s — %d items", cat.Icon, cat.Name, len(cat.Items))
 	}
 	if a.hotkeyFilter != "" {
-		statusText = statusText + lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  (filtered)")
+		statusText += lipgloss.NewStyle().Foreground(ColorTextMuted).Render("  (filtered)")
 	}
 	if a.hotkeysFavoritesOnly {
-		statusText = statusText + lipgloss.NewStyle().Foreground(ColorYellow).Render("  [favorites only]")
+		statusText += lipgloss.NewStyle().Foreground(ColorYellow).Render("  [favorites only]")
 	}
 	if statusText == "" {
 		statusText = " "
+	}
+	// A persistence error from the last favorite toggle / alias save takes over the
+	// status line (in red) so it is not lost behind the category summary.
+	if a.hotkeysStatus != "" {
+		errStatus := lipgloss.NewStyle().Foreground(ColorRed).Render(truncateVisible(a.hotkeysStatus, width))
+		return lipgloss.JoinVertical(lipgloss.Left, hints, errStatus)
 	}
 	status := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(statusText, width))
 	return lipgloss.JoinVertical(lipgloss.Left, hints, status)
@@ -971,21 +991,14 @@ func (a *App) renderHotkeysItemsPanel(layout hotkeysLayout, cats []hotkeys.Categ
 
 	// Filter to favorites only if mode is enabled
 	displayItems := items
-	itemIndices := make([]int, len(items)) // Map display index to original index
-	for i := range items {
-		itemIndices[i] = i
-	}
 	if a.hotkeysFavoritesOnly {
 		var filteredItems []hotkeys.Item
-		var filteredIndices []int
-		for i, it := range items {
+		for _, it := range items {
 			if a.isHotkeyFavorite(cat.ID, it.ID) {
 				filteredItems = append(filteredItems, it)
-				filteredIndices = append(filteredIndices, i)
 			}
 		}
 		displayItems = filteredItems
-		itemIndices = filteredIndices
 	}
 
 	title := lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("ITEMS")
@@ -1101,15 +1114,14 @@ func (a *App) renderHotkeysAliasDialog(width int) string {
 		return truncateVisible(display, width-10)
 	}
 
-	nameLabel := "Name:    "
-	cmdLabel := "Command: "
-
+	var nameLabel string
 	if a.hotkeysAliasField == 0 {
 		nameLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Name:    ")
 	} else {
 		nameLabel = labelStyle.Render("Name:    ")
 	}
 
+	var cmdLabel string
 	if a.hotkeysAliasField == 1 {
 		cmdLabel = labelStyle.Bold(true).Foreground(ColorCyan).Render("Command: ")
 	} else {

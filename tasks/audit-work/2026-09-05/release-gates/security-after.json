@@ -1,0 +1,12 @@
+{
+  "repository": "tekierz/dotfiles",
+  "verified_at_utc": "2026-09-06T03:18:17Z",
+  "vulnerability_alerts_get_status": 204,
+  "dependency_graph_compare": "success; see dependency-comparison.json",
+  "dependency_review_run": 33989635030,
+  "dependency_review": "success",
+  "automatic_dependency_update_prs": "disabled",
+  "secret_scanning": "disabled",
+  "secret_scanning_push_protection": "disabled",
+  "branch_protection": "unchanged"
+}

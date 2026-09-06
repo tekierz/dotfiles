@@ -1,0 +1,7 @@
+candidate_commit=7214af5b6832404b4d758322320efac951275146
+candidate_version=3.0.0
+candidate_url=https://github.com/tekierz/dotfiles/archive/7214af5b6832404b4d758322320efac951275146.tar.gz
+candidate_sha256=429d86a03b09a519a204ba220101bb6b9549e44aba56e51bb6f55f21ded66eb4
+old_version=2.0.1
+old_url=https://github.com/tekierz/dotfiles/archive/refs/tags/v2.0.1.tar.gz
+old_sha256=6b0991db618e24402a14029ef13e9db71a9a9d8d69313f1fa73de7b6d9d6986d

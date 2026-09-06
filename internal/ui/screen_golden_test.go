@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/tools"
 )
 
 // keyMsg builds a deterministic tea.KeyMsg for the named keys used by these
@@ -49,6 +50,7 @@ func newGoldenContext(t *testing.T) *ScreenContext {
 	withTempHome(t)
 
 	app := NewApp(true)
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 
 	ctx := &ScreenContext{
 		app:               app,
@@ -78,8 +80,8 @@ func TestErrorScreenGolden(t *testing.T) {
 	wantSubstrings := []string{
 		"Error Occurred",
 		errText,
-		"[R] Retry",
-		"[S] Skip",
+		"[R] Review Plan",
+		"[S] Skip to Summary",
 		"[Q] Quit",
 	}
 	for _, want := range wantSubstrings {
@@ -104,6 +106,9 @@ func TestErrorScreenGoldenNilError(t *testing.T) {
 // It renders the key summary labels deterministically and reflects the theme.
 func TestSummaryScreenGolden(t *testing.T) {
 	ctx := newGoldenContext(t)
+	ctx.app.installComplete = true
+	ctx.app.installOutcome = installationOutcomeSucceeded
+	ctx.app.installSummaryFacts.outcome = installationOutcomeSucceeded
 	screen := NewSummaryScreen(ctx)
 
 	out := screen.View(ctx.Width, ctx.Height)
@@ -117,7 +122,7 @@ func TestSummaryScreenGolden(t *testing.T) {
 		"Theme:",
 		"Navigation:",
 		"Next steps:",
-		"source ~/.zshrc",
+		"dotfiles status",
 		"[ENTER] Exit",
 		// Theme/nav values come from the context.
 		"neon-seapunk",
@@ -257,30 +262,35 @@ func TestNavPickerScreenGolden(t *testing.T) {
 func TestFileTreeScreenGolden(t *testing.T) {
 	ctx := newGoldenContext(t)
 
-	// Pre-populate the install cache so ensureInstallCache() returns early and
-	// the output is deterministic regardless of the host environment.
-	ctx.app.manageInstalled = map[string]bool{}
-	ctx.app.manageInstalledReady = true
+	// Pre-populate the install cache so the pure View reads deterministic state
+	// regardless of the host environment.
+	seedTypedReadyInstallCache(t, ctx.app, map[string]bool{})
 
 	screen := NewFileTreeScreen(ctx)
+	_ = screen.Init()
 	out := screen.View(ctx.Width, ctx.Height)
 
 	if strings.TrimSpace(out) == "" {
 		t.Fatal("fileTreeScreen.View() returned empty output")
 	}
 
-	// The "Files to be Modified" section is static and always rendered.
+	// Preview is rendered from the exact immutable plan accepted by Enter.
 	wantSubstrings := []string{
-		"Installation Summary",
-		"Files to be Modified",
-		"ghostty/",
-		"yazi/",
-		".zshrc",
-		"Start Installation",
+		"Reviewed Installation Plan",
+		"Plan:",
+		"install ",
+		"Exact Plan",
+		"Blocked",
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(out, want) {
 			t.Errorf("fileTreeScreen.View() missing %q\n---\n%s\n---", want, out)
+		}
+	}
+	detailed := screen.View(ctx.Width, 400)
+	for _, want := range []string{"package_manager:", "detector package_receipt:", "Risk:"} {
+		if !strings.Contains(detailed, want) {
+			t.Errorf("reviewed install provenance missing %q\n---\n%s\n---", want, detailed)
 		}
 	}
 
@@ -334,9 +344,7 @@ func newDeepDiveContext(t *testing.T) *ScreenContext {
 	if ctx.app.deepDiveConfig == nil {
 		ctx.app.deepDiveConfig = NewDeepDiveConfig()
 	}
-	ctx.app.manageInstalled = map[string]bool{}
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
+	seedTypedReadyInstallCache(t, ctx.app, map[string]bool{})
 	return ctx
 }
 
@@ -359,8 +367,7 @@ func TestDeepDiveMenuScreenGolden(t *testing.T) {
 		"Ghostty",
 		"Tmux",
 		"Zsh",
-		"Neovim",
-		"Continue to Installation",
+		"↓ more",
 		"navigate",
 	}
 	for _, want := range wantSubstrings {
@@ -554,6 +561,41 @@ func TestConfigMacAppsScreenGolden(t *testing.T) {
 	}
 }
 
+func TestConfigMacAppsItemsHaveRegistryBacking(t *testing.T) {
+	registry := tools.NewRegistry()
+	screenIDs := make(map[string]struct{}, len(macAppItems))
+
+	for _, app := range macAppItems {
+		if _, exists := screenIDs[app.id]; exists {
+			t.Errorf("macAppItems contains duplicate id %q", app.id)
+		}
+		screenIDs[app.id] = struct{}{}
+
+		tool, ok := registry.Get(app.id)
+		if !ok {
+			t.Errorf("macAppItems contains %q without a registry entry", app.id)
+			continue
+		}
+		if tool.UIGroup() != tools.UIGroupMacApps {
+			t.Errorf("macAppItems contains %q with UIGroup %q, want %q", app.id, tool.UIGroup(), tools.UIGroupMacApps)
+		}
+	}
+
+	registryIDs := make(map[string]struct{})
+	for _, tool := range registry.All() {
+		if tool.UIGroup() == tools.UIGroupMacApps {
+			registryIDs[tool.ID()] = struct{}{}
+			if _, ok := screenIDs[tool.ID()]; !ok {
+				t.Errorf("UIGroupMacApps registry tool %q is missing from macAppItems", tool.ID())
+			}
+		}
+	}
+
+	if len(screenIDs) != len(registryIDs) {
+		t.Errorf("macAppItems count = %d, UIGroupMacApps registry count = %d", len(screenIDs), len(registryIDs))
+	}
+}
+
 // TestConfigMacAppsToggleAndBack verifies list navigation: space toggles the
 // focused (not-installed) app, and esc resets the index and navigates back.
 func TestConfigMacAppsToggleAndBack(t *testing.T) {
@@ -591,8 +633,7 @@ func TestConfigGhosttyReachableViaManager(t *testing.T) {
 	}
 	app.screenMgr.SetSize(80, 24)
 	// Pre-populate cache so any install-aware screens render deterministically.
-	app.manageInstalled = map[string]bool{}
-	app.manageInstalledReady = true
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenConfigGhostty)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenConfigGhostty")
@@ -759,9 +800,10 @@ func TestConfigLazyGitScreenGolden(t *testing.T) {
 
 	wantSubstrings := []string{
 		"LazyGit",
-		"Side-by-Side Diff",
-		"Mouse Mode",
-		"Theme",
+		"Side Panel Fraction",
+		"Pager Preset",
+		"Mouse Events",
+		"Color Preset",
 		"navigate",
 	}
 	for _, want := range wantSubstrings {
@@ -779,19 +821,19 @@ func TestConfigLazyGitScreenGolden(t *testing.T) {
 // toggles the focused boolean field and esc navigates back, resetting the index.
 func TestConfigLazyGitToggleAndBack(t *testing.T) {
 	ctx := newDeepDiveContext(t)
-	ctx.app.configFieldIndex = 0 // Side-by-Side Diff
-	before := ctx.app.deepDiveConfig.LazyGitSideBySide
+	ctx.app.configFieldIndex = 1 // Mouse Events
+	before := ctx.app.deepDiveConfig.LazyGitMouseEvents
 
 	screen := NewConfigLazyGitScreen(ctx)
-	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.LazyGitSideBySide == before {
-		t.Errorf("space should toggle LazyGitSideBySide from %v", before)
+	if _, _ = screen.Update(keyMsg(" ")); ctx.app.deepDiveConfig.LazyGitMouseEvents == before {
+		t.Errorf("space should toggle LazyGitMouseEvents from %v", before)
 	}
 
 	// Move to the Theme field and adjust it with 'right'.
 	ctx.app.configFieldIndex = 2
-	themeBefore := ctx.app.deepDiveConfig.LazyGitTheme
-	if _, _ = screen.Update(keyMsg("right")); ctx.app.deepDiveConfig.LazyGitTheme == themeBefore {
-		t.Errorf("right should cycle LazyGitTheme from %q", themeBefore)
+	themeBefore := ctx.app.deepDiveConfig.LazyGitColorPreset
+	if _, _ = screen.Update(keyMsg("right")); ctx.app.deepDiveConfig.LazyGitColorPreset == themeBefore {
+		t.Errorf("right should cycle LazyGitColorPreset from %q", themeBefore)
 	}
 
 	_, cmd := screen.Update(keyMsg("esc"))
@@ -955,8 +997,7 @@ func TestConfigClaudeCodeReachableViaManager(t *testing.T) {
 		t.Fatal("NewApp should always initialize screenMgr")
 	}
 	app.screenMgr.SetSize(80, 24)
-	app.manageInstalled = map[string]bool{}
-	app.manageInstalledReady = true
+	seedTypedReadyInstallCache(t, app, map[string]bool{})
 
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenConfigClaudeCode)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenConfigClaudeCode")
@@ -1046,6 +1087,9 @@ func TestMigratedScreensReachableViaManager(t *testing.T) {
 	}
 
 	// Summary should also be reachable through the manager.
+	app.installComplete = true
+	app.installOutcome = installationOutcomeSucceeded
+	app.installSummaryFacts.outcome = installationOutcomeSucceeded
 	scmd := app.showSummary()
 	if scmd == nil {
 		t.Fatal("showSummary should return a NavigateTo command when manager is active")
@@ -1402,12 +1446,10 @@ func newManageContext(t *testing.T) *ScreenContext {
 		ctx.app.manageConfig = NewManageConfig()
 	}
 	// Seeded install-status cache (deterministic; no package-manager calls).
-	ctx.app.manageInstalled = map[string]bool{
+	seedTypedReadyInstallCache(t, ctx.app, map[string]bool{
 		"ghostty": true,
 		"tmux":    true,
-	}
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
+	})
 	// The dual-pane layout/render reads a.width/a.height directly.
 	ctx.app.width = ctx.Width
 	ctx.app.height = ctx.Height
@@ -1517,9 +1559,7 @@ func TestManageScreenReachableViaManager(t *testing.T) {
 	app.screenMgr.SetSize(80, 24)
 	app.width, app.height = 80, 24
 	// Seed the cache so the render shows the panes, not the loading spinner.
-	app.manageInstalled = map[string]bool{"ghostty": true}
-	app.manageInstalledReady = true
-	app.installCacheLoading = false
+	seedTypedReadyInstallCache(t, app, map[string]bool{"ghostty": true})
 
 	if _, handled := app.screenMgr.Update(NavigateTo(ScreenManage)()); !handled {
 		t.Fatal("manager should handle the NavigateMsg to ScreenManage")
@@ -1536,77 +1576,6 @@ func TestManageScreenReachableViaManager(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("managed manageScreen should render %q\n---\n%s\n---", want, view)
 		}
-	}
-}
-
-// TestManageScreenInstallDoneAsyncInHandler proves the global-handler wiring for
-// the manage install completion: feeding a manageInstallDoneMsg to App.Update
-// updates App state and requests an install-status cache reload (Phase B + C10
-// fix). The streaming/terminal install messages are handled globally in
-// App.Update so they survive navigation, so the test drives App.Update.
-func TestManageScreenInstallDoneAsyncInHandler(t *testing.T) {
-	ctx := newManageContext(t)
-	// Simulate an install in progress with a ready cache (so the reload is the
-	// one triggered by the completion, not a pre-existing load).
-	ctx.app.manageInstalling = true
-	ctx.app.manageInstallID = "ghostty"
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
-
-	_, cmd := ctx.app.Update(manageInstallDoneMsg{toolID: "ghostty", err: nil})
-
-	if ctx.app.manageInstalling {
-		t.Error("manageInstallDoneMsg should clear manageInstalling")
-	}
-	if ctx.app.manageInstallID != "" {
-		t.Errorf("manageInstallDoneMsg should clear manageInstallID, got %q", ctx.app.manageInstallID)
-	}
-	if ctx.app.manageStatus != "Installed ✓" {
-		t.Errorf("manageStatus = %q, want \"Installed ✓\"", ctx.app.manageStatus)
-	}
-	// Phase B fix: completion must invalidate the cache and re-issue the reload.
-	if ctx.app.manageInstalledReady {
-		t.Error("manageInstallDoneMsg should set manageInstalledReady=false to force a refresh")
-	}
-	if cmd == nil {
-		t.Fatal("manageInstallDoneMsg should return a cache-reload command (startInstallCacheLoad)")
-	}
-	if !ctx.app.installCacheLoading {
-		t.Error("manageInstallDoneMsg should kick the install-cache reload (installCacheLoading=true)")
-	}
-}
-
-// TestManageScreenInstallWithLogsAsyncInHandler proves the streaming-install
-// terminal message is handled globally in App.Update: manageInstallWithLogsMsg
-// appends the collected logs, clears the installing flag, and (on success)
-// requests a cache reload. Handled in App.Update so it survives navigation.
-func TestManageScreenInstallWithLogsAsyncInHandler(t *testing.T) {
-	ctx := newManageContext(t)
-	ctx.app.manageInstalling = true
-	ctx.app.manageInstallID = "ghostty"
-	ctx.app.manageInstalledReady = true
-	ctx.app.installCacheLoading = false
-	ctx.app.clearInstallLogs()
-
-	_, cmd := ctx.app.Update(manageInstallWithLogsMsg{
-		toolID: "ghostty",
-		logs:   []string{"Installing ghostty...", "done"},
-		err:    nil,
-	})
-	if ctx.app.manageInstalling {
-		t.Error("manageInstallWithLogsMsg should clear manageInstalling")
-	}
-	if len(ctx.app.installLogs) != 2 || ctx.app.installLogs[0] != "Installing ghostty..." {
-		t.Errorf("manageInstallWithLogsMsg should append collected logs, got %v", ctx.app.installLogs)
-	}
-	if !strings.Contains(ctx.app.manageStatus, "Installed successfully") {
-		t.Errorf("manageStatus = %q, want a success message", ctx.app.manageStatus)
-	}
-	if ctx.app.manageInstalledReady {
-		t.Error("manageInstallWithLogsMsg success should set manageInstalledReady=false")
-	}
-	if cmd == nil {
-		t.Fatal("manageInstallWithLogsMsg success should return a cache-reload command")
 	}
 }
 
@@ -1922,6 +1891,8 @@ func TestProgressScreenCompleteGolden(t *testing.T) {
 	ctx.app.width, ctx.app.height = ctx.Width, ctx.Height
 	ctx.app.installRunning = false
 	ctx.app.installComplete = true
+	ctx.app.installOutcome = installationOutcomeSucceeded
+	ctx.app.installSummaryFacts.outcome = installationOutcomeSucceeded
 
 	screen := NewProgressScreen(ctx)
 	out := screen.View(ctx.Width, ctx.Height)
@@ -1994,6 +1965,9 @@ func TestProgressScreenInstallDoneSuccess(t *testing.T) {
 	if !ctx.app.installComplete {
 		t.Error("done event should set installComplete")
 	}
+	if ctx.app.installOutcome != installationOutcomeSucceeded || ctx.app.installSummaryFacts.outcome != installationOutcomeSucceeded {
+		t.Errorf("done event outcome=%q facts=%q, want succeeded", ctx.app.installOutcome, ctx.app.installSummaryFacts.outcome)
+	}
 	if ctx.app.installEvents != nil {
 		t.Error("done event should nil out installEvents")
 	}
@@ -2010,6 +1984,9 @@ func TestProgressScreenInstallDoneError(t *testing.T) {
 	if ctx.app.lastError == nil || !strings.Contains(ctx.app.lastError.Error(), "boom") {
 		t.Errorf("done error event should record lastError, got %v", ctx.app.lastError)
 	}
+	if ctx.app.installOutcome != installationOutcomeFailed || ctx.app.installSummaryFacts.outcome != installationOutcomeFailed {
+		t.Errorf("error event outcome=%q facts=%q, want failed", ctx.app.installOutcome, ctx.app.installSummaryFacts.outcome)
+	}
 	if !strings.Contains(ctx.app.lastError.Error(), "last lines") {
 		t.Errorf("done error event should include the output context, got %v", ctx.app.lastError)
 	}
@@ -2019,9 +1996,13 @@ func TestProgressScreenInstallDoneError(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("done error event should return a NavigateTo(ScreenError) command")
 	}
-	nav, ok := cmd().(NavigateMsg)
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("done error event should batch navigation with cache reload, got %#v", cmd())
+	}
+	nav, ok := batch[0]().(NavigateMsg)
 	if !ok || nav.To != ScreenError {
-		t.Errorf("done error event should navigate to ScreenError, got %#v", cmd())
+		t.Errorf("done error event should navigate to ScreenError, got %#v", nav)
 	}
 }
 

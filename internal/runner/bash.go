@@ -1,14 +1,14 @@
 package runner
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 )
 
 // OutputLine represents a line of output from the bash script
@@ -33,6 +33,8 @@ const (
 // Runner executes bash functions and captures output
 type Runner struct{}
 
+const probeTimeout = 5 * time.Second
+
 // NewRunner creates a new bash runner
 func NewRunner() *Runner {
 	return &Runner{}
@@ -41,7 +43,9 @@ func NewRunner() *Runner {
 // NeedsSudo returns true if the current OS requires sudo for package installation
 func NeedsSudo() bool {
 	// Check if we're on Linux (macOS uses Homebrew which doesn't need sudo)
-	cmd := exec.Command("uname", "-s")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "uname", "-s")
 	output, err := cmd.Output()
 	if err != nil {
 		return false
@@ -51,7 +55,9 @@ func NeedsSudo() bool {
 
 // CheckSudoCached returns true if sudo credentials are already cached
 func CheckSudoCached() bool {
-	cmd := exec.Command("sudo", "-n", "true")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sudo", "-n", "true")
 	return cmd.Run() == nil
 }
 
@@ -62,17 +68,21 @@ func CheckSudoCached() bool {
 // sudo timestamp mid-run (C16). stdin is left detached so it can never block
 // waiting for a password.
 func RefreshSudo() error {
-	cmd := exec.Command("sudo", "-n", "-v")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sudo", "-n", "-v")
 	cmd.Stdin = nil
 	return cmd.Run()
 }
 
-// StreamingCmd wraps an exec.Cmd with real-time output streaming
+// StreamingCmd exposes one real-time output stream. Cmd is nil for composite
+// facades such as an ordered streaming sequence.
 type StreamingCmd struct {
 	Cmd    *exec.Cmd
 	Output <-chan string
 	Done   <-chan error
 	cancel context.CancelFunc
+	wait   func() error
 }
 
 // Cancel stops the running command
@@ -84,82 +94,73 @@ func (s *StreamingCmd) Cancel() {
 
 // Wait blocks until the command completes and returns the error (if any)
 func (s *StreamingCmd) Wait() error {
+	if s.wait != nil {
+		return s.wait()
+	}
 	return <-s.Done
 }
 
 // RunStreaming executes a command and streams output line-by-line
 // Returns a StreamingCmd that provides channels for output and completion
 func RunStreaming(ctx context.Context, name string, args ...string) (*StreamingCmd, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(ctx, name, args...)
+	//nolint:noctx // startStreamingLifecycle owns context cancellation and process-group cleanup.
+	cmd := exec.Command(name, args...) // #nosec G204 -- Typed runner boundary intentionally accepts executable and literal argv; no shell interpolation.
 	cmd.Env = os.Environ()
 	// Connect stdin to /dev/null to prevent commands from hanging waiting for input
 	cmd.Stdin = nil
-
-	stdout, err := cmd.StdoutPipe()
+	lifecycle, err := startStreamingLifecycle(ctx, cmd)
 	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		stdout.Close()
-		cancel()
-		return nil, fmt.Errorf("stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		stdout.Close()
-		stderr.Close()
-		cancel()
 		return nil, fmt.Errorf("start command: %w", err)
 	}
-
-	outputCh := make(chan string, 100)
-	doneCh := make(chan error, 1)
-
-	// Stream stdout and stderr concurrently
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	streamPipe := func(pipe io.ReadCloser) {
-		defer wg.Done()
-		defer pipe.Close()
-		scanner := bufio.NewScanner(pipe)
-		// Increase buffer size for long lines (package manager output can be verbose)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			select {
-			case outputCh <- scanner.Text():
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
-
-	go streamPipe(stdout)
-	go streamPipe(stderr)
-
-	// Wait for command to finish and close channels
-	go func() {
-		wg.Wait()
-		close(outputCh)
-		doneCh <- cmd.Wait()
-		close(doneCh)
-	}()
-
 	return &StreamingCmd{
 		Cmd:    cmd,
-		Output: outputCh,
-		Done:   doneCh,
-		cancel: cancel,
+		Output: lifecycle.Output(),
+		Done:   lifecycle.Done(),
+		cancel: lifecycle.Cancel,
+		wait:   lifecycle.Wait,
 	}, nil
 }
 
-// RunStreamingWithSudo executes a command with sudo and streams output
-// The sudo credentials should be cached before calling this function
+// RunStreamingWithSudo executes one accepted package-manager command through
+// the privileged supervisor and streams output. The sudo credentials must be
+// cached before calling this function; sudo is always invoked non-interactively.
 func RunStreamingWithSudo(ctx context.Context, name string, args ...string) (*StreamingCmd, error) {
-	sudoArgs := append([]string{name}, args...)
-	return RunStreaming(ctx, "sudo", sudoArgs...)
+	command, err := buildPrivilegedLauncher(ctx, name, args, defaultPrivilegedLauncherResolvers())
+	if err != nil {
+		return nil, err
+	}
+	control, err := command.StdinPipe()
+	if err != nil {
+		return nil, errPrivilegedSupervisorUnavailable
+	}
+
+	var closeOnce sync.Once
+	closeControl := func() {
+		closeOnce.Do(func() { _ = control.Close() })
+	}
+	deps := defaultStreamingLifecycleDeps()
+	// The unprivileged parent cannot signal the sudo-owned process group. Closing
+	// the inherited control pipe asks the root supervisor to kill and reap its
+	// own exact descendant group instead.
+	deps.signalGroup = func(int, syscall.Signal) error {
+		closeControl()
+		return nil
+	}
+	deps.signalLeader = func(int, syscall.Signal) error {
+		closeControl()
+		return nil
+	}
+	lifecycle, err := startStreamingLifecycleWithDeps(ctx, command, deps)
+	if err != nil {
+		closeControl()
+		return nil, fmt.Errorf("start privileged command: %w", err)
+	}
+	cancel := func() {
+		closeControl()
+		lifecycle.Cancel()
+	}
+	return &StreamingCmd{
+		Cmd: command, Output: lifecycle.Output(), Done: lifecycle.Done(),
+		cancel: cancel, wait: lifecycle.Wait,
+	}, nil
 }

@@ -1,10 +1,13 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tekierz/dotfiles/internal/safefile"
 )
 
 func TestValidateUsername(t *testing.T) {
@@ -109,7 +112,7 @@ func TestDefaultUserProfile(t *testing.T) {
 	}
 }
 
-func setupTestConfigDir(t *testing.T) (string, func()) {
+func setupTestConfigDir(t *testing.T) func() {
 	t.Helper()
 
 	// Create temp directory
@@ -119,30 +122,17 @@ func setupTestConfigDir(t *testing.T) (string, func()) {
 		t.Fatalf("failed to create test config dir: %v", err)
 	}
 
-	// Store and replace env vars
-	origXDG := os.Getenv("XDG_CONFIG_HOME")
-	origHome := os.Getenv("HOME")
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
-	os.Setenv("HOME", dir)
+	// t.Setenv restores the original process environment during test cleanup.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	t.Setenv("HOME", dir)
 
-	cleanup := func() {
-		if origXDG != "" {
-			os.Setenv("XDG_CONFIG_HOME", origXDG)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-		if origHome != "" {
-			os.Setenv("HOME", origHome)
-		} else {
-			os.Unsetenv("HOME")
-		}
-	}
+	cleanup := func() {}
 
-	return dir, cleanup
+	return cleanup
 }
 
 func TestUserProfileCRUD(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Test Save
@@ -224,8 +214,50 @@ func TestUserProfileCRUD(t *testing.T) {
 	}
 }
 
+func TestDeleteUserProfileRejectsIntermediateSymlink(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "alice.json")
+	if err := os.WriteFile(victim, []byte(`{"sentinel":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, UsersDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	err := DeleteUserProfile("alice")
+	if !errors.Is(err, safefile.ErrSymlink) {
+		t.Fatalf("DeleteUserProfile error = %v, want ErrSymlink", err)
+	}
+	if got, err := os.ReadFile(victim); err != nil || string(got) != `{"sentinel":true}` {
+		t.Fatalf("outside profile changed: data=%s error=%v", got, err)
+	}
+}
+
+func TestListUserProfilesMissingDirectoryIsEmptyAndDoesNotCreate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	users, err := ListUserProfiles()
+	if err != nil {
+		t.Fatalf("ListUserProfiles missing directory: %v", err)
+	}
+	if len(users) != 0 {
+		t.Fatalf("ListUserProfiles missing directory = %v, want empty", users)
+	}
+	if _, err := os.Lstat(UsersDir()); !os.IsNotExist(err) {
+		t.Fatalf("ListUserProfiles created users directory: %v", err)
+	}
+}
+
 func TestLoadUserProfile_Errors(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Invalid username
@@ -253,7 +285,7 @@ func TestSaveUserProfile_InvalidUsername(t *testing.T) {
 }
 
 func TestApplyUserProfile(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Create a user profile
@@ -288,7 +320,7 @@ func TestApplyUserProfile(t *testing.T) {
 }
 
 func TestGetActiveUser(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// No active user initially
@@ -323,7 +355,7 @@ func TestGetActiveUser(t *testing.T) {
 }
 
 func TestClearActiveUser(t *testing.T) {
-	_, cleanup := setupTestConfigDir(t)
+	cleanup := setupTestConfigDir(t)
 	defer cleanup()
 
 	// Set an active user

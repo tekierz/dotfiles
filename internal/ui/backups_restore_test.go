@@ -52,3 +52,43 @@ func TestRestoreReportingReflectsSkipped(t *testing.T) {
 		}
 	})
 }
+
+func TestRestoreReportingReflectsCommittedWarnings(t *testing.T) {
+	ctx := newGoldenContext(t)
+	s := NewBackupsScreen(ctx)
+
+	s.Update(backupRestoreDoneMsg{
+		name:     "bk",
+		count:    1,
+		warnings: 1,
+		details:  []string{"warning .zshrc: committed but parent fsync failed"},
+	})
+
+	got := ctx.app.backupStatus
+	if !strings.Contains(got, "Restored 1") || !strings.Contains(got, "warning") {
+		t.Fatalf("backupStatus = %q, want truthful committed-warning status", got)
+	}
+}
+
+func TestRestoreReportingIncludesSkippedAndCommittedWarningCounts(t *testing.T) {
+	ctx := newGoldenContext(t)
+	s := NewBackupsScreen(ctx)
+
+	s.Update(backupRestoreDoneMsg{
+		name:     "bk",
+		count:    2,
+		skipped:  3,
+		warnings: 1,
+		details: []string{
+			"skipped .config/nvim: directory restore unavailable",
+			"warning .zshrc: committed but parent fsync failed",
+		},
+	})
+
+	got := ctx.app.backupStatus
+	for _, want := range []string{"Restored 2", "3 skipped", "1 warning", "skipped .config/nvim", "warning .zshrc"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("combined backupStatus = %q, missing %q", got, want)
+		}
+	}
+}

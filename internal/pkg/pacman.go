@@ -3,6 +3,7 @@ package pkg
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -12,27 +13,65 @@ import (
 
 // PacmanManager implements PackageManager for Arch Linux (pacman/paru)
 type PacmanManager struct {
-	pacmanPath string
-	useParu    bool // Use paru for AUR support
+	useParu  bool // Use paru for AUR support
+	identity ExecutableIdentity
+	state    executableResolutionState
+	// Optional private instance dependency; nil uses the real trusted launcher.
+	privilegedStreaming func(context.Context, string, ...string) (*runner.StreamingCmd, error)
 }
 
 // NewPacmanManager creates a new pacman manager
 func NewPacmanManager(preferParu bool) *PacmanManager {
-	pm := &PacmanManager{}
+	return newPacmanManager(preferParu, exec.LookPath)
+}
+
+func newPacmanManager(preferParu bool, lookup executableLookup) *PacmanManager {
+	manager := &PacmanManager{}
 
 	if preferParu {
-		if path, err := exec.LookPath("paru"); err == nil {
-			pm.pacmanPath = path
-			pm.useParu = true
-			return pm
+		resolution := resolveManagerExecutable("paru", lookup)
+		if resolution.state == executableResolutionValid {
+			manager.identity = resolution.identity
+			manager.state = resolution.state
+			manager.useParu = true
+			return manager
+		}
+		if resolution.state != executableResolutionMissing {
+			manager.state = resolution.state
+			return manager
 		}
 	}
 
-	if path, err := exec.LookPath("pacman"); err == nil {
-		pm.pacmanPath = path
-	}
+	resolution := resolveManagerExecutable("pacman", lookup)
+	manager.identity = resolution.identity
+	manager.state = resolution.state
+	return manager
+}
 
-	return pm
+func (p *PacmanManager) ExecutableIdentity() (ExecutableIdentity, bool) {
+	if p == nil || p.state != executableResolutionValid || !validExecutableIdentity(p.identity) {
+		return ExecutableIdentity{}, false
+	}
+	return p.identity, true
+}
+
+func (p *PacmanManager) executablePath() string {
+	identity, ok := p.ExecutableIdentity()
+	if !ok {
+		return ""
+	}
+	return identity.invocationPath
+}
+
+func (p PacmanManager) String() string {
+	if p.useParu {
+		return "paru_manager"
+	}
+	return "pacman_manager"
+}
+
+func (p PacmanManager) GoString() string {
+	return p.String()
 }
 
 func (p *PacmanManager) Name() string {
@@ -43,24 +82,27 @@ func (p *PacmanManager) Name() string {
 }
 
 func (p *PacmanManager) IsAvailable() bool {
-	return p.pacmanPath != ""
+	return p.executablePath() != ""
 }
 
 func (p *PacmanManager) Install(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if p.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	args := []string{"-S", "--noconfirm", "--needed"}
 	args = append(args, packages...)
 
-	var cmd *exec.Cmd
 	if p.useParu {
-		cmd = exec.Command(p.pacmanPath, args...)
-	} else {
-		cmd = exec.Command("sudo", append([]string{p.pacmanPath}, args...)...)
+		cmd, cancel := packageCommand(packageMutationTimeout, p.executablePath(), args...)
+		defer cancel()
+		return cmd.Run()
 	}
-
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{p.executablePath()}, args...)...)
+	defer cancel()
 	return cmd.Run()
 }
 
@@ -68,20 +110,44 @@ func (p *PacmanManager) Uninstall(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if p.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	args := []string{"-R", "--noconfirm"}
 	args = append(args, packages...)
-	cmd := exec.Command("sudo", append([]string{p.pacmanPath}, args...)...)
+	if p.useParu {
+		cmd, cancel := packageCommand(packageMutationTimeout, p.executablePath(), args...)
+		defer cancel()
+		return cmd.Run()
+	}
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{p.executablePath()}, args...)...)
+	defer cancel()
 	return cmd.Run()
 }
 
 func (p *PacmanManager) IsInstalled(pkg string) bool {
-	cmd := exec.Command(p.pacmanPath, "-Q", pkg)
+	if p.executablePath() == "" {
+		return false
+	}
+	return p.IsInstalledContext(context.Background(), pkg)
+}
+
+func (p *PacmanManager) IsInstalledContext(ctx context.Context, pkg string) bool {
+	if p.executablePath() == "" {
+		return false
+	}
+	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, p.executablePath(), "-Q", pkg)
+	defer cancel()
 	return cmd.Run() == nil
 }
 
 func (p *PacmanManager) GetVersion(pkg string) (string, error) {
-	cmd := exec.Command(p.pacmanPath, "-Q", pkg)
+	if p.executablePath() == "" {
+		return "", errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Q", pkg)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -99,6 +165,9 @@ func (p *PacmanManager) GetVersion(pkg string) (string, error) {
 }
 
 func (p *PacmanManager) CheckOutdated() ([]Package, error) {
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	// Use checkupdates for official repos (safer, doesn't require root)
 	var packages []Package
 
@@ -111,7 +180,8 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 
 	// Check AUR updates if using paru
 	if p.useParu {
-		aurCmd := exec.Command(p.pacmanPath, "-Qua")
+		aurCmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Qua")
+		defer cancel()
 		var aurOut bytes.Buffer
 		aurCmd.Stdout = &aurOut
 		// `pacman -Qua` exits non-zero when there are no foreign updates, so
@@ -130,8 +200,12 @@ func (p *PacmanManager) CheckOutdated() ([]Package, error) {
 // root), and falls back to `pacman -Qu` when checkupdates is not installed so a
 // missing optional dependency does not silently report "up to date".
 func (p *PacmanManager) checkOfficialUpdates() (string, error) {
+	if p.executablePath() == "" {
+		return "", errPackageManagerUnavailable
+	}
 	if _, err := exec.LookPath("checkupdates"); err == nil {
-		cmd := exec.Command("checkupdates")
+		cmd, cancel := packageCommand(packageRefreshTimeout, "checkupdates")
+		defer cancel()
 		var out bytes.Buffer
 		cmd.Stdout = &out
 
@@ -140,7 +214,8 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 		// failure (e.g. a stale temp DB) that should be surfaced.
 		err := cmd.Run()
 		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
 				return "", nil
 			}
 			return "", fmt.Errorf("checkupdates failed: %w", err)
@@ -149,20 +224,116 @@ func (p *PacmanManager) checkOfficialUpdates() (string, error) {
 	}
 
 	// Fallback: `pacman -Qu` reads the local sync DB and works without the
-	// pacman-contrib package. It exits non-zero when there are no updates, so
-	// distinguish that (empty output) from a real failure.
-	cmd := exec.Command(p.pacmanPath, "-Qu")
-	var out bytes.Buffer
+	// pacman-contrib package. It exits 1 with empty stdout when nothing is
+	// outdated, and may still print benign diagnostics to stderr. Other
+	// failures (DB lock, corrupt sync DB) also exit non-zero and write
+	// diagnostics to stderr and/or use a different exit code. Distinguish the
+	// genuine no-updates case from a real error so failures aren't silently
+	// reported as "up to date".
+	cmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Qu")
+	defer cancel()
+	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		// `pacman -Qu` returns exit code 1 with empty output when nothing is
-		// outdated; treat empty output as "no updates" rather than an error.
-		if strings.TrimSpace(out.String()) == "" {
-			return "", nil
+		exitCode := -1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
 		}
-		return "", fmt.Errorf("pacman -Qu failed: %w", err)
+		return classifyPacmanQuResult(exitCode, out.String(), errBuf.String(), err)
 	}
 	return out.String(), nil
+}
+
+func classifyPacmanQuResult(exitCode int, stdout, stderr string, runErr error) (string, error) {
+	if runErr == nil {
+		return stdout, nil
+	}
+
+	stderrText := filterPacmanLocalNewerWarnings(stderr)
+	if hasPacmanDatabaseFailure(stderrText) {
+		return "", pacmanQuFailure(runErr, stderrText)
+	}
+
+	if exitCode == 1 {
+		if hasPacmanErrorMarker(stderrText) {
+			return "", pacmanQuFailure(runErr, stderrText)
+		}
+		if strings.TrimSpace(stdout) == "" {
+			return "", nil
+		}
+		return stdout, nil
+	}
+
+	return "", pacmanQuFailure(runErr, stderrText)
+}
+
+func pacmanQuFailure(err error, stderr string) error {
+	if stderr != "" {
+		return fmt.Errorf("pacman -Qu failed: %w: %s", err, stderr)
+	}
+	return fmt.Errorf("pacman -Qu failed: %w", err)
+}
+
+func filterPacmanLocalNewerWarnings(stderr string) string {
+	var remaining []string
+	for _, line := range strings.Split(stderr, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || isPacmanLocalNewerWarning(trimmed) {
+			continue
+		}
+		remaining = append(remaining, trimmed)
+	}
+	return strings.Join(remaining, "\n")
+}
+
+func hasPacmanDatabaseFailure(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	markers := []string{
+		"could not lock database",
+		"unable to lock database",
+		"/var/lib/pacman/db.lck",
+		"failed to synchronize all databases",
+		"invalid or corrupted database",
+		"invalid or corrupt database",
+		"corrupted database",
+		"corrupt database",
+		"database is incorrect version",
+		"could not parse package description file",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+
+	return (strings.Contains(lower, "database file") && strings.Contains(lower, "does not exist")) ||
+		(strings.Contains(lower, "could not open file") && strings.Contains(lower, "/var/lib/pacman/sync/"))
+}
+
+func hasPacmanErrorMarker(stderr string) bool {
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "error:") {
+			return true
+		}
+	}
+	return false
+}
+
+func isPacmanLocalNewerWarning(line string) bool {
+	if !strings.HasPrefix(line, "warning: ") {
+		return false
+	}
+
+	message := strings.TrimPrefix(line, "warning: ")
+	localMarker := ": local ("
+	localIndex := strings.Index(message, localMarker)
+	if localIndex <= 0 {
+		return false
+	}
+
+	return strings.Contains(message[localIndex+len(localMarker):], ") is newer than ")
 }
 
 // parsePacmanUpdates parses "name oldver -> newver" lines (as produced by
@@ -197,32 +368,50 @@ func (p *PacmanManager) Update(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
-
-	args := []string{"-S", "--noconfirm"}
-	args = append(args, packages...)
-
-	var cmd *exec.Cmd
-	if p.useParu {
-		cmd = exec.Command(p.pacmanPath, args...)
-	} else {
-		cmd = exec.Command("sudo", append([]string{p.pacmanPath}, args...)...)
+	if p.executablePath() == "" {
+		return errPackageManagerUnavailable
 	}
 
+	args := pacmanUpdateArgs(nil, packages)
+
+	if p.useParu {
+		cmd, cancel := packageCommand(packageMutationTimeout, p.executablePath(), args...)
+		defer cancel()
+		return cmd.Run()
+	}
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", append([]string{p.executablePath()}, args...)...)
+	defer cancel()
 	return cmd.Run()
 }
 
+func pacmanUpdateArgs(extraFlags []string, packages []string) []string {
+	// Use -Syu for selected updates: checkupdates reads a private fresh DB, while
+	// -S would use stale sync DBs and bare -Sy risks a partial upgrade.
+	args := []string{"-Syu", "--noconfirm"}
+	args = append(args, extraFlags...)
+	return append(args, packages...)
+}
+
 func (p *PacmanManager) UpdateAll() error {
-	var cmd *exec.Cmd
-	if p.useParu {
-		cmd = exec.Command(p.pacmanPath, "-Syu", "--noconfirm")
-	} else {
-		cmd = exec.Command("sudo", p.pacmanPath, "-Syu", "--noconfirm")
+	if p.executablePath() == "" {
+		return errPackageManagerUnavailable
 	}
+	if p.useParu {
+		cmd, cancel := packageCommand(packageMutationTimeout, p.executablePath(), "-Syu", "--noconfirm")
+		defer cancel()
+		return cmd.Run()
+	}
+	cmd, cancel := packageCommand(packageMutationTimeout, "sudo", p.executablePath(), "-Syu", "--noconfirm")
+	defer cancel()
 	return cmd.Run()
 }
 
 func (p *PacmanManager) Search(query string) ([]Package, error) {
-	cmd := exec.Command(p.pacmanPath, "-Ss", query)
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Ss", query)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -290,7 +479,11 @@ func parsePacmanSearch(output string) []Package {
 }
 
 func (p *PacmanManager) ListInstalled() ([]Package, error) {
-	cmd := exec.Command(p.pacmanPath, "-Q")
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, p.executablePath(), "-Q")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -326,19 +519,28 @@ func (p *PacmanManager) InstallStreaming(ctx context.Context, packages ...string
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
 	}
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally
 		// Running with sudo causes permission issues with AUR builds
 		args := []string{"-S", "--noconfirm", "--needed", "--skipreview", "--noprovides", "--removemake"}
 		args = append(args, packages...)
-		return runner.RunStreaming(ctx, p.pacmanPath, args...)
+		return runner.RunStreaming(ctx, p.executablePath(), args...)
+	}
+	if identity, ok := p.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+		return nil, errPackageManagerUnavailable
 	}
 
 	// pacman needs sudo
 	args := []string{"-S", "--noconfirm", "--needed"}
 	args = append(args, packages...)
-	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+	if p.privilegedStreaming != nil {
+		return p.privilegedStreaming(ctx, p.executablePath(), args...)
+	}
+	return runner.RunStreamingWithSudo(ctx, p.executablePath(), args...)
 }
 
 // UpdateStreaming updates packages with real-time output streaming
@@ -346,25 +548,41 @@ func (p *PacmanManager) UpdateStreaming(ctx context.Context, packages ...string)
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
 	}
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally
-		args := []string{"-S", "--noconfirm", "--skipreview", "--noprovides"}
-		args = append(args, packages...)
-		return runner.RunStreaming(ctx, p.pacmanPath, args...)
+		args := pacmanUpdateArgs([]string{"--skipreview", "--noprovides"}, packages)
+		return runner.RunStreaming(ctx, p.executablePath(), args...)
+	}
+	if identity, ok := p.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+		return nil, errPackageManagerUnavailable
 	}
 
 	// pacman needs sudo
-	args := []string{"-S", "--noconfirm"}
-	args = append(args, packages...)
-	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, args...)
+	args := pacmanUpdateArgs(nil, packages)
+	if p.privilegedStreaming != nil {
+		return p.privilegedStreaming(ctx, p.executablePath(), args...)
+	}
+	return runner.RunStreamingWithSudo(ctx, p.executablePath(), args...)
 }
 
 // UpdateAllStreaming updates all packages with real-time output streaming
 func (p *PacmanManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
+	if p.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	if p.useParu {
 		// paru should NOT be run with sudo - it handles sudo internally
-		return runner.RunStreaming(ctx, p.pacmanPath, "-Syu", "--noconfirm", "--skipreview", "--noprovides")
+		return runner.RunStreaming(ctx, p.executablePath(), "-Syu", "--noconfirm", "--skipreview", "--noprovides")
 	}
-	return runner.RunStreamingWithSudo(ctx, p.pacmanPath, "-Syu", "--noconfirm")
+	if identity, ok := p.ExecutableIdentity(); !ok || identity.Revalidate() != nil {
+		return nil, errPackageManagerUnavailable
+	}
+	if p.privilegedStreaming != nil {
+		return p.privilegedStreaming(ctx, p.executablePath(), "-Syu", "--noconfirm")
+	}
+	return runner.RunStreamingWithSudo(ctx, p.executablePath(), "-Syu", "--noconfirm")
 }

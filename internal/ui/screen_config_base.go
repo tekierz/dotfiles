@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -56,22 +57,22 @@ func (s *configFieldNav) Init() tea.Cmd {
 // Accurate to handleMsg: up/down move, left/right/space change, enter/esc back.
 // Do NOT advertise "enter select" — enter calls back(), not adjust().
 func (s *configFieldNav) footer() string {
+	if a := s.App(); a != nil && a.configStandalone {
+		return HelpStyle.Render("↑↓ navigate • ←→/space change • enter preview • esc/q cancel")
+	}
 	return HelpStyle.Render("↑↓ navigate • ←→/space change • enter/esc back")
 }
 
-// back resets the focused field and returns to the deep-dive menu through the
-// manager. Mirrors the legacy "esc/enter" behavior (configFieldIndex = 0).
-//
-// When the screen was launched standalone via `dotfiles config <tool>` there is
-// no install step to apply the edits and no deep-dive menu to return to, so we
-// persist the in-memory deepDiveConfig to the real config files (via the shared
-// apply path) and quit instead of discarding the edits (C27).
+// back resets the focused field. In the wizard it returns to the deep-dive
+// menu; in standalone mode Enter freezes a reviewed config-save plan and opens
+// its confirmation screen. Standalone Esc/q are handled before back and cancel
+// without planning or mutation.
 func (s *configFieldNav) back() (bool, tea.Cmd) {
 	a := s.App()
 	if a != nil {
 		a.configFieldIndex = 0
 		if a.configStandalone {
-			return true, a.applyStandaloneConfigCmd()
+			return true, a.prepareStandaloneConfigSave()
 		}
 	}
 	return true, NavigateTo(ScreenDeepDiveMenu)
@@ -97,7 +98,13 @@ func (s *configFieldNav) handleMsg(msg tea.Msg) tea.Cmd {
 			if a.configFieldIndex < s.maxField(a) {
 				a.configFieldIndex++
 			}
-		case "esc", "enter":
+		case "esc":
+			if a.configStandalone {
+				return tea.Quit
+			}
+			_, cmd := s.back()
+			return cmd
+		case "enter":
 			_, cmd := s.back()
 			return cmd
 		default:
@@ -458,8 +465,24 @@ type configListNav struct {
 // ID returns the screen identifier.
 func (s *configListNav) ID() Screen { return s.id }
 
-// Init returns any initial commands (none on entry).
-func (s *configListNav) Init() tea.Cmd { return nil }
+// Init triggers the async install-cache load on entry (idempotent). Every
+// list-nav screen renders install-state color coding, so the base owns the
+// trigger; a future embedder that doesn't need it can override with nil.
+func (s *configListNav) Init() tea.Cmd {
+	if a := s.App(); a != nil {
+		return a.startInstallCacheLoad()
+	}
+	return nil
+}
+
+// installStatusLoadingView is the shared loading frame shown while the async
+// install-status query is in flight (mirrors the manage screen's treatment).
+func installStatusLoadingView(a *App, width, height int) string {
+	spinner := AnimatedSpinnerDots(a.uiFrame)
+	style := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	return PlaceWithBackground(width, height,
+		style.Render(fmt.Sprintf("%s Loading installation status...", spinner)))
+}
 
 // footer returns the pre-rendered help line for list-nav screens.
 // Accurate to handleMsg: up/down move, space toggles, enter/esc back.

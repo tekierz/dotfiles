@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    name: Exact tag quality
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  release:
+    name: Verified release
+    needs: [quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the exact tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 branch, verified 2026-07-10
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up the module Go toolchain
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6 branch, verified 2026-07-10
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify release tag and source provenance
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$RELEASE_SHA"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+
+      - name: Install pinned release tooling
+        env:
+          GOBIN: ${{ runner.temp }}/release-bin
+        run: |
+          mkdir -p "$GOBIN"
+          echo "$GOBIN" >> "$GITHUB_PATH"
+          go install github.com/goreleaser/goreleaser/v2@v2.17.0
+          go install github.com/anchore/syft/cmd/syft@v1.44.0
+
+      - name: Build a draft release with archives and SBOMs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: goreleaser release --clean --release-notes "docs/release-notes-${GITHUB_REF_NAME}.md"
+
+      - name: Verify exact release contents
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          set -eu
+          version="${RELEASE_VERSION#v}"
+          verify_root="$RUNNER_TEMP/dotfiles-release-verify"
+          mkdir -p "$verify_root"
+          archive_count=0
+          for os in darwin linux; do
+            for arch in amd64 arm64; do
+              stem="dotfiles_${version}_${os}_${arch}"
+              archive="dist/${stem}.tar.gz"
+              sbom="${archive}.sbom.json"
+              test -f "$archive"
+              test -f "$sbom"
+              test "$(tar -tzf "$archive" | cut -d/ -f1 | sort -u | wc -l | tr -d ' ')" = 1
+              mkdir -p "$verify_root/$stem"
+              tar -xzf "$archive" -C "$verify_root/$stem"
+              binary="$(find "$verify_root/$stem" -type f -name dotfiles -print -quit)"
+              test -n "$binary"
+              test -x "$binary"
+              test -f "$(dirname "$binary")/LICENSE"
+              test -f "$(dirname "$binary")/README.md"
+              test -f "$(dirname "$binary")/THIRD_PARTY_NOTICES.md"
+              test -f "$(dirname "$binary")/LICENSES/MIT.txt"
+              test -f "$(dirname "$binary")/LICENSES/Apache-2.0.txt"
+              test -f "$(dirname "$binary")/LICENSES/Go-PATENTS.txt"
+              test -f "$(dirname "$binary")/LICENSES/pflag-BSD-3-Clause.txt"
+              test -f "$(dirname "$binary")/LICENSES/x-sys-BSD-3-Clause.txt"
+              if [ "$os/$arch" = "linux/amd64" ]; then
+                test "$("$binary" version)" = "dotfiles version $version"
+                test "$("$binary" --version)" = "dotfiles version $version"
+              fi
+              archive_count=$((archive_count + 1))
+            done
+          done
+          test "$archive_count" = 4
+          source_archive="dist/dotfiles_${version}_source.tar.gz"
+          test -f "$source_archive"
+          test -f "${source_archive}.sbom.json"
+          tar -tzf "$source_archive" > "$verify_root/source-contents.txt"
+          for path in \
+            LICENSE \
+            README.md \
+            THIRD_PARTY_NOTICES.md \
+            LICENSES/MIT.txt \
+            LICENSES/Apache-2.0.txt \
+            LICENSES/Go-PATENTS.txt \
+            LICENSES/pflag-BSD-3-Clause.txt \
+            LICENSES/x-sys-BSD-3-Clause.txt
+          do
+            grep -Fx "dotfiles-${version}/${path}" "$verify_root/source-contents.txt"
+          done
+          test "$(find dist -maxdepth 1 -name '*.tar.gz' -type f | wc -l | tr -d ' ')" = 5
+          test "$(find dist -maxdepth 1 -name '*.sbom.json' -type f | wc -l | tr -d ' ')" = 5
+          jq -e '[.[] | select(.type == "Archive") | [.goos, .goarch]] | sort == [["darwin","amd64"],["darwin","arm64"],["linux","amd64"],["linux","arm64"]]' dist/artifacts.json
+          jq -e '[.[] | select(.type == "Source")] | length == 1' dist/artifacts.json
+          for sbom in dist/*.sbom.json; do
+            jq -e '.spdxVersion | startswith("SPDX-")' "$sbom" >/dev/null
+          done
+          (cd dist && sha256sum --check dotfiles_artifact_checksums.txt)
+          (cd dist && sha256sum -- *.tar.gz *.sbom.json > dotfiles_release_checksums.txt)
+          (cd dist && sha256sum --check dotfiles_release_checksums.txt)
+
+      - name: Upload the complete release checksum manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/dotfiles_release_checksums.txt --clobber
+
+      - name: Attest every checksummed release artifact
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4 branch, verified 2026-07-10
+        with:
+          subject-checksums: dist/dotfiles_release_checksums.txt
+
+      - name: Publish the verified draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

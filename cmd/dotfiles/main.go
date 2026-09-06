@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,14 +15,33 @@ import (
 	"github.com/tekierz/dotfiles/internal/backup"
 	"github.com/tekierz/dotfiles/internal/config"
 	"github.com/tekierz/dotfiles/internal/pkg"
+	"github.com/tekierz/dotfiles/internal/runner"
 	"github.com/tekierz/dotfiles/internal/tools"
 	"github.com/tekierz/dotfiles/internal/ui"
 )
 
 var (
 	skipIntro bool
-	version   = "2.0.1"
+	version   = "dev"
 )
+
+func updateArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 || len(args) == 1 && args[0] == "check" {
+		return nil
+	}
+	return fmt.Errorf("invalid arguments: expected %s", cmd.UseLine())
+}
+
+func themeArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 || len(args) == 1 && args[0] == "list" || len(args) == 2 && args[0] == "set" {
+		return nil
+	}
+	return fmt.Errorf("invalid arguments: expected %s [list|set <name>]", cmd.CommandPath())
+}
+
+func silentCommandFailure() error {
+	return &commandExitError{code: 1, silent: true}
+}
 
 // rootCmd is the base command
 var rootCmd = &cobra.Command{
@@ -33,9 +54,10 @@ tools including zsh, tmux, neovim, yazi, ghostty, and more.
 
 Quick user switch:
   dotfiles --<Username>    Switch to user profile (e.g., dotfiles --Pratik)`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		// Default: launch TUI main menu
-		launchTUI(ui.ScreenMainMenu)
+		return launchTUI(ui.ScreenMainMenu)
 	},
 }
 
@@ -43,12 +65,12 @@ Quick user switch:
 var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Launch installation wizard",
-	Run: func(cmd *cobra.Command, args []string) {
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if skipIntro {
-			launchTUI(ui.ScreenWelcome)
-		} else {
-			launchTUI(ui.ScreenAnimation)
+			return launchTUI(ui.ScreenWelcome)
 		}
+		return launchTUI(ui.ScreenAnimation)
 	},
 }
 
@@ -56,8 +78,9 @@ var installCmd = &cobra.Command{
 var manageCmd = &cobra.Command{
 	Use:   "manage",
 	Short: "Manage tool configurations",
-	Run: func(cmd *cobra.Command, args []string) {
-		launchTUI(ui.ScreenManage)
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return launchTUI(ui.ScreenManage)
 	},
 }
 
@@ -65,14 +88,14 @@ var manageCmd = &cobra.Command{
 var updateCmd = &cobra.Command{
 	Use:   "update [check]",
 	Short: "Check and install package updates",
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) > 0 && args[0] == "check" {
+	Args:  updateArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 1 {
 			// CLI mode: print outdated packages
-			checkUpdates()
-		} else {
-			// TUI mode: interactive update screen
-			launchTUI(ui.ScreenUpdate)
+			return checkUpdates()
 		}
+		// TUI mode: interactive update screen
+		return launchTUI(ui.ScreenUpdate)
 	},
 }
 
@@ -80,22 +103,23 @@ var updateCmd = &cobra.Command{
 var themeCmd = &cobra.Command{
 	Use:   "theme [set <name>]",
 	Short: "View or change theme",
-	Run: func(cmd *cobra.Command, args []string) {
+	Args:  themeArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			// No args: launch TUI picker
-			launchTUI(ui.ScreenThemePicker)
-			return
+			return launchTUI(ui.ScreenThemePicker)
 		}
 
-		if args[0] == "set" && len(args) > 1 {
+		if args[0] == "set" {
 			// Direct set
-			setTheme(args[1])
-		} else if args[0] == "list" {
+			return setTheme(args[1])
+		}
+		if args[0] == "list" {
 			// List available themes
 			listThemes()
-		} else {
-			fmt.Println("Usage: dotfiles theme [set <name>|list]")
+			return nil
 		}
+		return nil
 	},
 }
 
@@ -106,16 +130,11 @@ var configCmd = &cobra.Command{
 	Short: "Configure a specific tool",
 	Long: "Configure a specific tool. Without flags, launches TUI.\n\n" +
 		"Available tools: " + strings.Join(ui.ConfigurableToolIDs(), ", "),
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 {
-			// No tool specified: show help
-			_ = cmd.Help()
-			return
-		}
-
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check for flags (direct set mode)
 		// For now, launch TUI for the specific tool
-		launchToolConfig(args[0])
+		return launchToolConfig(args[0])
 	},
 }
 
@@ -124,31 +143,35 @@ var hotkeysCmd = &cobra.Command{
 	Use:     "hotkeys",
 	Aliases: []string{"hk"},
 	Short:   "View hotkey reference",
-	Run: func(cmd *cobra.Command, args []string) {
+	Args:    cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		tool, _ := cmd.Flags().GetString("tool")
 		if tool != "" {
-			launchHotkeysFiltered(tool)
-		} else {
-			launchTUI(ui.ScreenHotkeys)
+			return launchHotkeysFiltered(tool)
 		}
+		return launchTUI(ui.ScreenHotkeys)
 	},
 }
 
-// statusCmd shows current status
-var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show current configuration status",
-	Run: func(cmd *cobra.Command, args []string) {
-		showStatus()
-	},
-}
+// statusCmd shows current status.
+var statusCmd = newRegisteredStatusCommand()
+
+// planCmd prints the deterministic, install-only public plan contract.
+var planCmd = newRegisteredPlanCommand()
+
+// applyCmd executes only an exact freshly reviewed installation plan.
+var applyCmd = newRegisteredApplyCommand()
+
+// supportCmd prints one deterministic, redacted support document.
+var supportCmd = newRegisteredSupportCommand()
 
 // backupsCmd lists available backups
 var backupsCmd = &cobra.Command{
 	Use:   "backups",
 	Short: "List available backups",
-	Run: func(cmd *cobra.Command, args []string) {
-		listBackups()
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return listBackups()
 	},
 }
 
@@ -156,16 +179,20 @@ var backupsCmd = &cobra.Command{
 var restoreCmd = &cobra.Command{
 	Use:   "restore [backup-name]",
 	Short: "Restore from a backup",
-	Run: func(cmd *cobra.Command, args []string) {
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			// TUI mode: select backup
-			launchTUI(ui.ScreenBackups)
-		} else {
-			// CLI mode: restore specific backup
-			if _, err := restoreBackup(args[0]); err != nil {
-				os.Exit(1)
-			}
+			return launchTUI(ui.ScreenBackups)
 		}
+
+		// CLI mode: restore specific backup. Return through Cobra so the shared
+		// command runner owns the process exit instead of terminating from the
+		// command callback.
+		if _, _, err := restoreBackup(args[0]); err != nil {
+			return &commandExitError{code: 1, silent: true}
+		}
+		return nil
 	},
 }
 
@@ -173,6 +200,7 @@ var restoreCmd = &cobra.Command{
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version information",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("dotfiles version %s\n", version)
 	},
@@ -192,12 +220,12 @@ Examples:
   dotfiles user Pratik       # Switch to Pratik (prompts to create if new)
   dotfiles user add Alice    # Create new user Alice
   dotfiles user delete Bob   # Delete user Bob`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			showCurrentUser()
-			return
+			return showCurrentUser()
 		}
-		switchToUser(args[0])
+		return switchToUser(args[0])
 	},
 }
 
@@ -218,11 +246,11 @@ Examples:
   dotfiles user add Bob --theme dracula --nav vim
   dotfiles user add Carol --keyboard macos`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		theme, _ := cmd.Flags().GetString("theme")
 		nav, _ := cmd.Flags().GetString("nav")
 		keyboard, _ := cmd.Flags().GetString("keyboard")
-		addUser(args[0], theme, nav, keyboard)
+		return addUser(args[0], theme, nav, keyboard)
 	},
 }
 
@@ -232,9 +260,9 @@ var userDeleteCmd = &cobra.Command{
 	Aliases: []string{"rm", "remove"},
 	Short:   "Delete user profile",
 	Args:    cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		force, _ := cmd.Flags().GetBool("force")
-		deleteUser(args[0], force)
+		return deleteUser(args[0], force)
 	},
 }
 
@@ -242,37 +270,44 @@ var userDeleteCmd = &cobra.Command{
 var usersCmd = &cobra.Command{
 	Use:   "users",
 	Short: "List all user profiles",
-	Run: func(cmd *cobra.Command, args []string) {
-		listUsers()
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return listUsers()
 	},
 }
 
-// uninstallCmd removes dotfiles and restores original config
+// uninstallCmd restores original config and reports conservative cleanup guidance.
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
-	Short: "Remove dotfiles and restore original configuration",
-	Long: `Uninstall dotfiles completely and restore your original configuration.
+	Short: "Restore backups and show safe manual uninstall guidance",
+	Long: `Safely prepare to uninstall dotfiles and restore your original configuration.
 
-This will:
-  - Restore configuration files from backup (if available)
-  - Remove dotfiles binaries from ~/.local/bin
-  - Remove utility scripts (hk, caff, sshh)
-  - Remove dotfiles configuration directory
+This command can restore configuration files from the latest backup. Automatic
+deletion is disabled until dotfiles has an ownership manifest, provenance checks,
+and descriptor-anchored recursive removal. Binaries, helpers, packages, and the
+dotfiles configuration directory are retained even when --force is used.
 
-Use --keep-config to preserve the ~/.config/dotfiles directory.
-Use --keep-binaries to preserve installed binaries.
-Use --no-restore to skip restoring backups.`,
-	Run: func(cmd *cobra.Command, args []string) {
+Remove the Homebrew-managed main binary separately with:
+  brew uninstall tekierz/tap/dotfiles
+
+Use --no-restore to skip the backup restore attempt. The --keep-config and
+--keep-binaries flags remain accepted for compatibility; retention is currently
+unconditional.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		keepConfig, _ := cmd.Flags().GetBool("keep-config")
 		keepBinaries, _ := cmd.Flags().GetBool("keep-binaries")
 		noRestore, _ := cmd.Flags().GetBool("no-restore")
 		force, _ := cmd.Flags().GetBool("force")
 
-		runUninstall(keepConfig, keepBinaries, noRestore, force)
+		return runUninstall(keepConfig, keepBinaries, noRestore, force)
 	},
 }
 
 func init() {
+	rootCmd.Version = version
+	rootCmd.SetVersionTemplate("dotfiles version {{.Version}}\n")
+
 	// Global flags
 	rootCmd.PersistentFlags().BoolVar(&skipIntro, "skip-intro", false, "Skip intro animation")
 
@@ -280,10 +315,10 @@ func init() {
 	hotkeysCmd.Flags().String("tool", "", "Filter hotkeys by tool (tmux, zsh, neovim, etc.)")
 
 	// Uninstall flags
-	uninstallCmd.Flags().Bool("keep-config", false, "Keep ~/.config/dotfiles directory")
-	uninstallCmd.Flags().Bool("keep-binaries", false, "Keep installed binaries")
+	uninstallCmd.Flags().Bool("keep-config", false, "Compatibility flag; configuration is always retained")
+	uninstallCmd.Flags().Bool("keep-binaries", false, "Compatibility flag; binaries and helpers are always retained")
 	uninstallCmd.Flags().Bool("no-restore", false, "Skip restoring backups")
-	uninstallCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
+	uninstallCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt (does not enable deletion)")
 
 	// User command flags
 	userAddCmd.Flags().String("theme", "", "Theme name (e.g., catppuccin-mocha)")
@@ -303,15 +338,27 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(hotkeysCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(planCmd)
+	rootCmd.AddCommand(applyCmd)
+	rootCmd.AddCommand(supportCmd)
 	rootCmd.AddCommand(backupsCmd)
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(userCmd)
 	rootCmd.AddCommand(usersCmd)
 }
 
 func main() {
+	if err := validateEffectiveUser(effectiveUserID()); err != nil {
+		if handled, code := runner.DispatchPrivilegedSupervisor(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
+			os.Exit(code)
+		}
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	// Handle --<Username> quick switch before Cobra parses flags
 	// This allows "dotfiles --Alice" to work as a quick user switch
 	if len(os.Args) == 2 {
@@ -321,46 +368,75 @@ func main() {
 			// Skip if it's a known flag or looks like a help request
 			if username != "help" && username != "version" && username != "skip-intro" {
 				if config.ValidateUsername(username) == nil && config.UserExists(username) {
-					switchToUser(username)
+					if err := switchToUser(username); err != nil {
+						os.Exit(1)
+					}
 					return
 				}
 				// If username is valid but doesn't exist, show helpful message
 				if config.ValidateUsername(username) == nil {
 					fmt.Printf("User %q does not exist.\n", username)
 					fmt.Println("Create with: dotfiles user add", username)
-					return
+					os.Exit(1)
 				}
 			}
 		}
 	}
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if code := executeRoot(os.Args[1:], os.Stdout, os.Stderr); code != 0 {
+		os.Exit(code)
 	}
 }
 
+func executeRoot(args []string, stdout, stderr io.Writer) int {
+	previousSilenceErrors, previousSilenceUsage := rootCmd.SilenceErrors, rootCmd.SilenceUsage
+	rootCmd.SilenceErrors, rootCmd.SilenceUsage = true, true
+	defer func() {
+		rootCmd.SilenceErrors, rootCmd.SilenceUsage = previousSilenceErrors, previousSilenceUsage
+	}()
+	rootCmd.SetArgs(args)
+	rootCmd.SetOut(stdout)
+	rootCmd.SetErr(stderr)
+	if err := rootCmd.Execute(); err != nil {
+		var exit *commandExitError
+		if errors.As(err, &exit) {
+			if !exit.silent {
+				if _, writeErr := fmt.Fprintln(stderr, exit.Error()); writeErr != nil {
+					return 1
+				}
+			}
+			return exit.code
+		}
+		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+			return 1
+		}
+		return 1
+	}
+	return 0
+}
+
 // launchTUI launches the TUI at a specific screen
-func launchTUI(screen ui.Screen) {
+func launchTUI(screen ui.Screen) error {
 	app := ui.NewApp(skipIntro)
 	app.SetStartScreen(screen)
 
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
+	return nil
 }
 
 // launchToolConfig launches TUI for a specific tool config
-func launchToolConfig(tool string) {
+func launchToolConfig(tool string) error {
 	app := ui.NewApp(true)
 
 	screen, ok := ui.GetToolConfigScreen(tool)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Unknown tool: %s\n", tool)
 		fmt.Println("Available: " + strings.Join(ui.ConfigurableToolIDs(), ", "))
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	app.SetStartScreen(screen)
@@ -368,12 +444,13 @@ func launchToolConfig(tool string) {
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
+	return nil
 }
 
 // launchHotkeysFiltered launches hotkey viewer filtered to a tool
-func launchHotkeysFiltered(tool string) {
+func launchHotkeysFiltered(tool string) error {
 	app := ui.NewApp(true)
 	app.SetStartScreen(ui.ScreenHotkeys)
 	app.SetHotkeyFilter(tool)
@@ -381,35 +458,37 @@ func launchHotkeysFiltered(tool string) {
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
+	return nil
 }
 
 // setTheme sets the theme directly via CLI
-func setTheme(theme string) {
+func setTheme(theme string) error {
 	if !config.IsValidTheme(theme) {
 		fmt.Fprintf(os.Stderr, "Invalid theme: %s\n", theme)
 		fmt.Println("Available themes:")
 		for _, t := range config.AvailableThemes {
 			fmt.Printf("  %s\n", t)
 		}
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	cfg.Theme = theme
 	if err := config.SaveGlobalConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	fmt.Printf("Theme set to: %s\n", theme)
 	fmt.Println("Run 'dotfiles install' to apply the new theme to all tools.")
+	return nil
 }
 
 // listThemes prints available themes
@@ -442,31 +521,29 @@ func listThemesWithConfig(cfg *config.GlobalConfig) {
 	}
 }
 
-// showStatus prints current configuration status
-func showStatus() {
+// writeHumanStatus prints the legacy human-readable configuration status.
+func writeHumanStatus(writer io.Writer) error {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error loading config: %w", err)
 	}
 
-	fmt.Println("Dotfiles Status")
-	fmt.Println("===============")
+	output := make([]byte, 0, 1024)
+	output = append(output, "Dotfiles Status\n===============\n"...)
 	if cfg.ActiveUser != "" {
-		fmt.Printf("User:       %s\n", cfg.ActiveUser)
+		output = fmt.Appendf(output, "User:       %s\n", cfg.ActiveUser)
 	}
-	fmt.Printf("Theme:      %s\n", cfg.Theme)
-	fmt.Printf("Navigation: %s\n", cfg.NavStyle)
-	fmt.Printf("Config dir: %s\n", config.ConfigDir())
-	fmt.Println()
+	output = fmt.Appendf(output, "Theme:      %s\n", cfg.Theme)
+	output = fmt.Appendf(output, "Navigation: %s\n", cfg.NavStyle)
+	output = fmt.Appendf(output, "Config dir: %s\n\n", config.ConfigDir())
 
 	// Show installed tools (filtered by platform)
 	registry := tools.GetRegistry()
 	installed := registry.Installed()
 	notInstalled := registry.NotInstalledForPlatform()
 
-	fmt.Printf("Installed Tools: %d/%d\n", len(installed), registry.CountForPlatform())
-	fmt.Println("─────────────────────────")
+	output = fmt.Appendf(output, "Installed Tools: %d/%d\n", len(installed), registry.CountForPlatform())
+	output = append(output, "─────────────────────────\n"...)
 
 	// Group by category
 	byCategory := make(map[tools.Category][]tools.Tool)
@@ -499,121 +576,121 @@ func showStatus() {
 					names = append(names, t.Name())
 				}
 			}
-			fmt.Printf("  %s: %s\n", strings.Title(string(cat)), strings.Join(names, ", "))
+			categoryName := string(cat)
+			categoryName = strings.ToUpper(categoryName[:1]) + categoryName[1:]
+			output = fmt.Appendf(output, "  %s: %s\n", categoryName, strings.Join(names, ", "))
 		}
 	}
 
 	if len(notInstalled) > 0 {
-		fmt.Println()
-		fmt.Printf("Not Installed: %d tools\n", len(notInstalled))
+		output = append(output, '\n')
+		output = fmt.Appendf(output, "Not Installed: %d tools\n", len(notInstalled))
 		names := make([]string, 0, len(notInstalled))
 		for _, t := range notInstalled {
 			names = append(names, t.Name())
 		}
-		fmt.Printf("  %s\n", strings.Join(names, ", "))
+		output = fmt.Appendf(output, "  %s\n", strings.Join(names, ", "))
 	}
+	written, err := writer.Write(output)
+	if err != nil {
+		return err
+	}
+	if written != len(output) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // checkUpdates prints outdated packages (CLI mode)
-func checkUpdates() {
+func checkUpdates() error {
 	fmt.Println("Checking for updates...")
 
-	mgr := pkg.DetectManager()
-	if mgr == nil {
-		fmt.Println("No package manager detected.")
-		return
-	}
-
-	fmt.Printf("Using %s package manager\n\n", mgr.Name())
-
-	updates, err := pkg.CheckDotfilesUpdates()
+	managedPackages := tools.GetRegistry().ManagedPackagesForPlatform(pkg.DetectPlatform())
+	updates, err := pkg.CheckManagedUpdates(managedPackages)
+	partialFailure := false
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error checking updates: %v\n", err)
-		return
+		// Partial results (one of several managers failed) still print.
+		if len(updates) == 0 {
+			fmt.Fprintf(os.Stderr, "Error checking updates: %v\n", err)
+			return silentCommandFailure()
+		}
+		fmt.Fprintf(os.Stderr, "Warning: some update checks failed: %v\n\n", err)
+		partialFailure = true
 	}
 
 	if len(updates) == 0 {
 		fmt.Println("All packages are up to date!")
-		return
+		return nil
 	}
 
-	fmt.Printf("Found %d outdated package(s):\n\n", len(updates))
-	fmt.Printf("%-25s %-15s %-15s\n", "PACKAGE", "CURRENT", "LATEST")
-	fmt.Printf("%-25s %-15s %-15s\n", "-------", "-------", "------")
+	fmt.Printf("Found %d outdated package(s) via %s:\n\n", len(updates), updateProviderSummary(updates))
+	fmt.Printf("%-25s %-10s %-15s %-15s\n", "PACKAGE", "PROVIDER", "CURRENT", "LATEST")
+	fmt.Printf("%-25s %-10s %-15s %-15s\n", "-------", "--------", "-------", "------")
 	for _, p := range updates {
-		fmt.Printf("%-25s %-15s %-15s\n", p.Name, p.CurrentVersion, p.LatestVersion)
+		fmt.Printf("%-25s %-10s %-15s %-15s\n", p.Name, updateProviderLabel(p), p.CurrentVersion, p.LatestVersion)
 	}
 	fmt.Println()
 	fmt.Println("Run 'dotfiles update' for interactive update selection.")
+	if partialFailure {
+		return silentCommandFailure()
+	}
+	return nil
+}
+
+func updateProviderLabel(update pkg.Package) string {
+	if provider := update.ExecutionProvider(); provider != "" {
+		return string(provider)
+	}
+	return "unbound"
+}
+
+func updateProviderSummary(updates []pkg.Package) string {
+	providers := pkg.ExecutionProviders(updates)
+	labels := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		labels = append(labels, string(provider))
+	}
+	if len(labels) == 0 {
+		return "unbound provider"
+	}
+	return strings.Join(labels, ", ")
 }
 
 // listBackups prints available backups
-func listBackups() {
+func listBackups() error {
 	backupDir := filepath.Join(config.ConfigDir(), "backups")
 
-	entries, err := os.ReadDir(backupDir)
+	entries, err := backup.ListCatalog(backupDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("No backups found.")
-			fmt.Printf("Backup directory: %s\n", backupDir)
-			return
-		}
 		fmt.Fprintf(os.Stderr, "Error reading backups: %v\n", err)
-		return
+		return silentCommandFailure()
 	}
-
-	// Filter for directories only (backups are stored in timestamped dirs)
-	var backups []os.DirEntry
-	for _, e := range entries {
-		if e.IsDir() {
-			backups = append(backups, e)
-		}
-	}
-
-	if len(backups) == 0 {
+	if len(entries) == 0 {
 		fmt.Println("No backups found.")
-		return
+		fmt.Printf("Backup directory: %s\n", backupDir)
+		return nil
 	}
 
-	// Sort by name (timestamps sort chronologically)
-	sort.Slice(backups, func(i, j int) bool {
-		return backups[i].Name() > backups[j].Name() // Most recent first
-	})
-
-	fmt.Printf("Available backups (%d):\n", len(backups))
+	fmt.Printf("Available backups (%d):\n", len(entries))
 	fmt.Println("─────────────────────────")
 
-	for _, b := range backups {
-		info, err := b.Info()
-		if err != nil {
-			fmt.Printf("  %s\n", b.Name())
-			continue
-		}
-
-		// Count backed-up dotfiles; skip the manifest (metadata, not a dotfile).
-		files, _ := os.ReadDir(filepath.Join(backupDir, b.Name()))
-		fileCount := 0
-		for _, f := range files {
-			if !f.IsDir() && f.Name() != backup.ManifestName {
-				fileCount++
-			}
-		}
-
+	for _, entry := range entries {
 		fmt.Printf("  %s  (%d files, %s)\n",
-			b.Name(),
-			fileCount,
-			info.ModTime().Format("Jan 02 15:04"))
+			entry.Name,
+			entry.FileCount,
+			entry.Timestamp.Format("Jan 02 15:04"))
 	}
 
 	fmt.Println()
 	fmt.Println("To restore: dotfiles restore <backup-name>")
+	return nil
 }
 
 // restoreBackup restores a specific backup. It returns the number of files
-// successfully restored and a fatal error for failures that prevent any
-// restore (missing/invalid backup, unreadable backup dir, unknown home). The
-// path mapping, traversal guard, and mode preservation are shared with the TUI
-// via the internal/backup package so the two paths cannot diverge.
+// successfully restored, the number of entries skipped, and a fatal error for
+// failures that prevent a clean restore. The path mapping, traversal guard, and
+// mode preservation are shared with the TUI via the internal/backup package so
+// the two paths cannot diverge.
 // isValidBackupName reports whether name is a safe single-component backup name.
 // A backup lives at <config>/backups/<name>; allowing "..", absolute paths, or
 // path separators would let an externally-supplied name traverse out of the
@@ -632,215 +709,259 @@ func isValidBackupName(name string) bool {
 	return name == filepath.Base(name)
 }
 
-func restoreBackup(name string) (int, error) {
+func restoreBackup(name string) (int, int, error) {
 	if !isValidBackupName(name) {
 		fmt.Fprintf(os.Stderr, "Invalid backup name: %q\n", name)
 		fmt.Println("Run 'dotfiles backups' to see available backups.")
-		return 0, fmt.Errorf("invalid backup name: %q", name)
+		return 0, 0, fmt.Errorf("invalid backup name: %q", name)
 	}
 
-	backupDir := filepath.Join(config.ConfigDir(), "backups", name)
-
-	info, err := os.Stat(backupDir)
+	backupsDir := filepath.Join(config.ConfigDir(), "backups")
+	catalog, err := backup.ListCatalog(backupsDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "Backup '%s' not found.\n", name)
-			fmt.Println("Run 'dotfiles backups' to see available backups.")
-			return 0, err
-		}
 		fmt.Fprintf(os.Stderr, "Error accessing backup: %v\n", err)
-		return 0, err
+		return 0, 0, err
 	}
-
-	if !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "'%s' is not a valid backup directory.\n", name)
-		return 0, fmt.Errorf("%q is not a valid backup directory", name)
+	var selected *backup.CatalogEntry
+	for index := range catalog {
+		if catalog[index].Name == name {
+			selected = &catalog[index]
+			break
+		}
 	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
-		return 0, err
+	if selected == nil {
+		fmt.Fprintf(os.Stderr, "Backup '%s' not found or has no valid manifest.\n", name)
+		fmt.Println("Run 'dotfiles backups' to see available backups.")
+		return 0, 0, os.ErrNotExist
 	}
-
-	fmt.Printf("Restoring backup: %s\n", name)
-
-	result, err := backup.Restore(backupDir, home)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading backup: %v\n", err)
-		return 0, err
-	}
-
-	for _, relPath := range result.Restored {
-		fmt.Printf("  Restored: %s\n", relPath)
-	}
-	for item, reason := range result.Skipped {
-		fmt.Fprintf(os.Stderr, "  Warning: Skipping %s - %s\n", item, reason)
-	}
-
-	fmt.Printf("\nRestored %d files from backup.\n", result.Count())
-	return result.Count(), nil
+	return restoreBackupEntry(*selected)
 }
 
-// runUninstall removes dotfiles and optionally restores original configuration
-func runUninstall(keepConfig, keepBinaries, noRestore, force bool) {
+func restoreBackupEntry(selected backup.CatalogEntry) (int, int, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
-		os.Exit(1)
+		return 0, 0, err
+	}
+
+	fmt.Printf("Restoring backup: %s\n", selected.Name)
+
+	// The retained CatalogEntry carries private source and manifest authority.
+	// Its public Name/Path/count fields are display-only and never participate
+	// in execution after selection.
+	result, err := backup.RestoreCatalogEntry(selected, home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error restoring backup: %v\n", err)
+		return 0, 0, err
+	}
+
+	for _, relPath := range sortedRestorePaths(result.Restored) {
+		fmt.Printf("  Restored: %s\n", relPath)
+	}
+	for _, relPath := range sortedRestorePaths(result.Removed) {
+		fmt.Printf("  Removed: %s\n", relPath)
+	}
+	for _, item := range sortedRestoreMapKeys(result.Skipped) {
+		reason := result.Skipped[item]
+		fmt.Fprintf(os.Stderr, "  Warning: Skipping %s - %s\n", item, reason)
+	}
+	for _, item := range sortedRestoreMapKeys(result.Warnings) {
+		warning := result.Warnings[item]
+		fmt.Fprintf(os.Stderr, "  Warning: Restored %s - %s\n", item, warning)
+	}
+
+	fmt.Printf("\nRestore summary: %d restored, %d removed, %d skipped, %d warnings.\n",
+		result.Count(), len(result.Removed), len(result.Skipped), len(result.Warnings))
+	if outcomeErr := restoreOutcomeError(result); outcomeErr != nil {
+		fmt.Fprintf(os.Stderr, "Restore incomplete: %v\n", outcomeErr)
+		return result.Count(), len(result.Skipped), outcomeErr
+	}
+	return result.Count(), 0, nil
+}
+
+func sortedRestorePaths(paths []string) []string {
+	ordered := append([]string(nil), paths...)
+	sort.Strings(ordered)
+	return ordered
+}
+
+func sortedRestoreMapKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func restoreOutcomeError(result backup.RestoreResult) error {
+	var problems []string
+	if len(result.Skipped) > 0 {
+		problems = append(problems, fmt.Sprintf("%d backup entries could not be restored", len(result.Skipped)))
+	}
+	if len(result.Warnings) > 0 {
+		problems = append(problems, fmt.Sprintf("%d restored backup entries have durability/verification warnings", len(result.Warnings)))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(problems, "; "))
+}
+
+// runUninstall optionally restores original configuration and reports retained
+// resources. Cleanup is deliberately fail-closed: without an ownership manifest,
+// provenance checks, and descriptor-anchored recursive removal, no binary,
+// helper, or dotfiles state directory is safe to delete automatically.
+var readUninstallBackupDir = os.ReadDir
+
+func runUninstall(keepConfig, keepBinaries, noRestore, force bool) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("get home directory: %w", err)
 	}
 
 	configDir := config.ConfigDir()
 
-	// Show what will be done
-	fmt.Println("Dotfiles Uninstaller")
-	fmt.Println("====================")
+	printUninstallPreview(!keepConfig || !keepBinaries, noRestore)
+	confirmed, err := confirmUninstall(force)
+	if err != nil || !confirmed {
+		return err
+	}
+
+	var restoreErr error
+	if !noRestore {
+		restoreErr = restoreLatestUninstallBackup(configDir)
+	}
+	printUninstallGuidance(home, configDir)
+	return restoreErr
+}
+
+func printUninstallPreview(deletionRequested, noRestore bool) {
+	fmt.Println("Safe Dotfiles Uninstall")
+	fmt.Println("=======================")
 	fmt.Println()
 	fmt.Println("This will:")
 
 	if !noRestore {
 		fmt.Println("  • Restore configuration files from latest backup (if available)")
 	}
-	if !keepBinaries {
-		fmt.Println("  • Remove dotfiles binaries (dotfiles, dotfiles-tui, dotfiles-setup)")
-		fmt.Println("  • Remove utility scripts (hk, caff, y)")
-	}
-	if !keepConfig {
-		fmt.Printf("  • Remove configuration directory (%s)\n", configDir)
+	fmt.Println("  • Retain binaries, helpers, packages, and the dotfiles configuration directory")
+	if deletionRequested {
+		fmt.Println("  • Decline automatic deletion because ownership and anchored-removal safeguards are not implemented")
 	}
 	fmt.Println()
+}
 
-	// Prompt for confirmation unless --force
-	if !force {
-		fmt.Print("Continue with uninstall? [y/N]: ")
-		reader := bufio.NewReader(os.Stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
-			os.Exit(1)
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
-			fmt.Println("Uninstall cancelled.")
-			return
-		}
-		fmt.Println()
+func confirmUninstall(force bool) (bool, error) {
+	if force {
+		return true, nil
 	}
+	fmt.Print("Continue with restore and manual uninstall guidance? [y/N]: ")
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("read uninstall confirmation: %w", err)
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response != "y" && response != "yes" {
+		fmt.Println("Uninstall cancelled.")
+		return false, nil
+	}
+	fmt.Println()
+	return true, nil
+}
 
+func restoreLatestUninstallBackup(configDir string) error {
 	// Restore from latest backup.
 	//
-	// The backups directory lives *inside* configDir, so removing configDir
-	// below destroys the only copy of the user's original configs. If a
-	// restore was requested but failed (error or 0 files restored), we must
-	// NOT delete the config dir — that would delete the safety net before
-	// confirming the rescue worked. In that case we force keepConfig on so the
-	// backups survive and the user can retry manually.
-	if !noRestore {
-		fmt.Println("Checking for backups...")
-		backupDir := filepath.Join(configDir, "backups")
-		if entries, err := os.ReadDir(backupDir); err == nil && len(entries) > 0 {
-			// Find most recent backup (directories sorted by timestamp)
-			var latestBackup string
-			for _, e := range entries {
-				if e.IsDir() {
-					if latestBackup == "" || e.Name() > latestBackup {
-						latestBackup = e.Name()
-					}
-				}
-			}
-			if latestBackup != "" {
-				fmt.Printf("Restoring from backup: %s\n", latestBackup)
-				count, err := restoreBackup(latestBackup)
-				fmt.Println()
-				if (err != nil || count == 0) && !keepConfig {
-					fmt.Fprintln(os.Stderr, "Restore did not complete successfully; keeping configuration directory so backups are preserved.")
-					fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
-					fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")
-					fmt.Fprintln(os.Stderr)
-					keepConfig = true
-				}
-			}
-		} else {
-			fmt.Println("No backups found to restore.")
-			fmt.Println()
-		}
-	}
-
-	// Remove binaries
-	if !keepBinaries {
-		fmt.Println("Removing binaries...")
-
-		// Binaries to remove
-		binaries := []string{
-			"dotfiles",
-			"dotfiles-tui",
-			"dotfiles-setup",
-			"hk",
-			"caff",
-			"y",
-		}
-
-		// Locations to check
-		locations := []string{
-			filepath.Join(home, ".local", "bin"),
-			"/usr/local/bin",
-		}
-
-		removed := 0
-		for _, loc := range locations {
-			for _, bin := range binaries {
-				binPath := filepath.Join(loc, bin)
-				if _, err := os.Stat(binPath); err == nil {
-					if err := os.Remove(binPath); err != nil {
-						fmt.Fprintf(os.Stderr, "  Warning: Could not remove %s: %v\n", binPath, err)
-					} else {
-						fmt.Printf("  Removed: %s\n", binPath)
-						removed++
-					}
-				}
-			}
-		}
-
-		if removed == 0 {
-			fmt.Println("  No binaries found to remove.")
-		}
+	// The backups directory lives inside configDir. If restore is incomplete,
+	// report the preserved safety net explicitly. Cleanup below is disabled in
+	// every case, so the backups survive even after a successful restore.
+	fmt.Println("Checking for backups...")
+	backupDir := filepath.Join(configDir, "backups")
+	_, readErr := readUninstallBackupDir(backupDir)
+	switch {
+	case errors.Is(readErr, os.ErrNotExist):
+		fmt.Println("No backup directory found; nothing was restored.")
 		fmt.Println()
+		return nil
+	case readErr != nil:
+		problem := fmt.Errorf("read backup directory %s: %w", backupDir, readErr)
+		fmt.Fprintf(os.Stderr, "Could not inspect backups: %v\n", problem)
+		fmt.Fprintf(os.Stderr, "Backup state was left untouched at: %s\n\n", backupDir)
+		return problem
 	}
 
-	// Remove config directory
-	if !keepConfig {
-		fmt.Printf("Removing configuration directory: %s\n", configDir)
-		if _, err := os.Stat(configDir); err == nil {
-			if err := os.RemoveAll(configDir); err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: Could not remove config directory: %v\n", err)
-			} else {
-				fmt.Println("  Configuration directory removed.")
-			}
-		} else {
-			fmt.Println("  Configuration directory not found.")
-		}
+	entries, catalogErr := backup.ListCatalog(backupDir)
+	if catalogErr != nil {
+		problem := fmt.Errorf("read backup catalog %s: %w", backupDir, catalogErr)
+		fmt.Fprintf(os.Stderr, "Could not inspect backups: %v\n", problem)
+		fmt.Fprintf(os.Stderr, "Backup state was left untouched at: %s\n\n", backupDir)
+		return problem
+	}
+	if len(entries) == 0 {
+		fmt.Println("No backup session directories found; nothing was restored.")
 		fmt.Println()
+		return nil
 	}
+	latestBackup := entries[0]
+	count, skipped, restoreErr := restoreBackupEntry(latestBackup)
+	fmt.Println()
+	if restoreErr == nil && skipped == 0 && count > 0 {
+		return nil
+	}
+	if restoreErr == nil {
+		restoreErr = fmt.Errorf("restore produced %d restored and %d skipped entries", count, skipped)
+	}
+	fmt.Fprintln(os.Stderr, "Restore did not complete successfully; keeping configuration directory so backups are preserved.")
+	fmt.Fprintf(os.Stderr, "Your backups remain at: %s\n", backupDir)
+	fmt.Fprintln(os.Stderr, "Re-run 'dotfiles restore <backup-name>' or remove the directory manually once recovered.")
+	fmt.Fprintln(os.Stderr)
+	return fmt.Errorf("restore backup %s: %w", latestBackup.Name, restoreErr)
+}
 
-	fmt.Println("Uninstall complete!")
+func printUninstallGuidance(home, configDir string) {
+	// Gate 0: do not infer ownership from a basename or recursively remove a
+	// path-resolved config directory. Re-enable cleanup only after installation
+	// records exact owned artifacts and recursive deletion is descriptor-anchored.
+	fmt.Println("Automatic deletion is disabled in this release.")
+	fmt.Println("No binaries, helpers, packages, or dotfiles state directory were deleted by uninstall cleanup.")
 	fmt.Println()
-	fmt.Println("Note: The following may still need manual cleanup:")
-	fmt.Println("  • Shell configuration (~/.zshrc, ~/.bashrc)")
-	fmt.Println("  • Tmux configuration (~/.tmux.conf)")
-	fmt.Println("  • Ghostty configuration (~/.config/ghostty)")
-	fmt.Println("  • Neovim configuration (~/.config/nvim)")
-	fmt.Println("  • Installed packages (use your package manager)")
+	fmt.Println("Why: this build cannot yet prove artifact ownership and does not have anchored recursive removal.")
 	fmt.Println()
-	fmt.Println("To completely remove dotfiles from Homebrew:")
+	fmt.Println("Remove the Homebrew-managed main binary with:")
 	fmt.Println("  brew uninstall tekierz/tap/dotfiles")
+	fmt.Println()
+	fmt.Println("Paths intentionally left untouched if present (verify ownership before manual removal):")
+	retainedPaths := []string{
+		configDir,
+		filepath.Join(home, ".local", "bin", "dotfiles"),
+		filepath.Join(home, ".local", "bin", "dotfiles-tui"),
+		filepath.Join(home, ".local", "bin", "dotfiles-setup"),
+		filepath.Join(home, ".local", "bin", "hk"),
+		filepath.Join(home, ".local", "bin", "caff"),
+		filepath.Join(home, ".local", "bin", "sshh"),
+		"/usr/local/bin/dotfiles",
+		"/usr/local/bin/dotfiles-tui",
+		"/usr/local/bin/dotfiles-setup",
+		"/usr/local/bin/hk",
+		"/usr/local/bin/caff",
+		"/usr/local/bin/sshh",
+	}
+	for _, path := range retainedPaths {
+		if path != "" {
+			fmt.Printf("  • %s\n", path)
+		}
+	}
+	fmt.Println("Package-managed tools and external helpers such as sshh were retained; use their owning package manager.")
 }
 
 // showCurrentUser displays the current active user
-func showCurrentUser() {
+func showCurrentUser() error {
 	profile, err := config.GetActiveUser()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting active user: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	if profile == nil {
@@ -848,20 +969,21 @@ func showCurrentUser() {
 		fmt.Println()
 		fmt.Println("Create a user profile with:")
 		fmt.Println("  dotfiles user add <name>")
-		return
+		return nil
 	}
 
 	fmt.Printf("Active User: %s\n", profile.Name)
 	fmt.Printf("  Theme:    %s\n", profile.Theme)
 	fmt.Printf("  Nav:      %s\n", profile.NavStyle)
 	fmt.Printf("  Keyboard: %s\n", profile.KeyboardStyle)
+	return nil
 }
 
 // switchToUser switches to a user profile, prompting to create if it doesn't exist
-func switchToUser(name string) {
+func switchToUser(name string) error {
 	if err := config.ValidateUsername(name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	if !config.UserExists(name) {
@@ -872,28 +994,27 @@ func switchToUser(name string) {
 		response, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
-			os.Exit(1)
+			return silentCommandFailure()
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
 			fmt.Println("Cancelled.")
-			return
+			return nil
 		}
 
 		// Create with defaults
-		addUser(name, "", "", "")
-		return
+		return addUser(name, "", "", "")
 	}
 
 	profile, err := config.LoadUserProfile(name)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading user profile: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	if err := config.ApplyUserProfile(profile); err != nil {
 		fmt.Fprintf(os.Stderr, "Error applying user profile: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	fmt.Printf("Switched to user: %s\n", profile.Name)
@@ -902,13 +1023,14 @@ func switchToUser(name string) {
 	fmt.Printf("  Keyboard: %s\n", profile.KeyboardStyle)
 	fmt.Println()
 	fmt.Println("Run 'dotfiles install' to apply theme changes to all tools.")
+	return nil
 }
 
 // addUser creates a new user profile
-func addUser(name, theme, nav, keyboard string) {
+func addUser(name, theme, nav, keyboard string) error {
 	if err := config.ValidateUsername(name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	if config.UserExists(name) {
@@ -919,12 +1041,12 @@ func addUser(name, theme, nav, keyboard string) {
 		response, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
-			os.Exit(1)
+			return silentCommandFailure()
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
 			fmt.Println("Cancelled.")
-			return
+			return nil
 		}
 	}
 
@@ -938,7 +1060,7 @@ func addUser(name, theme, nav, keyboard string) {
 			for _, t := range config.AvailableThemes {
 				fmt.Printf("  %s\n", t)
 			}
-			os.Exit(1)
+			return silentCommandFailure()
 		}
 		profile.Theme = theme
 	}
@@ -947,7 +1069,7 @@ func addUser(name, theme, nav, keyboard string) {
 		if !config.IsValidNavStyle(nav) {
 			fmt.Fprintf(os.Stderr, "Invalid nav style: %s\n", nav)
 			fmt.Println("Valid options: emacs, vim")
-			os.Exit(1)
+			return silentCommandFailure()
 		}
 		profile.NavStyle = nav
 	}
@@ -956,14 +1078,14 @@ func addUser(name, theme, nav, keyboard string) {
 		if !config.IsValidKeyboardStyle(keyboard) {
 			fmt.Fprintf(os.Stderr, "Invalid keyboard style: %s\n", keyboard)
 			fmt.Println("Valid options: macos, linux")
-			os.Exit(1)
+			return silentCommandFailure()
 		}
 		profile.KeyboardStyle = keyboard
 	}
 
 	if err := config.SaveUserProfile(profile); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving user profile: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	fmt.Printf("Created user profile: %s\n", profile.Name)
@@ -972,18 +1094,19 @@ func addUser(name, theme, nav, keyboard string) {
 	fmt.Printf("  Keyboard: %s\n", profile.KeyboardStyle)
 	fmt.Println()
 	fmt.Printf("Switch to this user with: dotfiles user %s\n", name)
+	return nil
 }
 
 // deleteUser removes a user profile
-func deleteUser(name string, force bool) {
+func deleteUser(name string, force bool) error {
 	if err := config.ValidateUsername(name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	if !config.UserExists(name) {
 		fmt.Fprintf(os.Stderr, "User %q does not exist.\n", name)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	// Check if this is the active user
@@ -1000,36 +1123,38 @@ func deleteUser(name string, force bool) {
 		response, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
-			os.Exit(1)
+			return silentCommandFailure()
 		}
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
 			fmt.Println("Cancelled.")
-			return
+			return nil
 		}
 	}
 
 	if err := config.DeleteUserProfile(name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error deleting user profile: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	// Clear active user if we deleted them
 	if isActive {
 		if err := config.ClearActiveUser(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Could not clear active user: %v\n", err)
+			return silentCommandFailure()
 		}
 	}
 
 	fmt.Printf("Deleted user profile: %s\n", name)
+	return nil
 }
 
 // listUsers displays all user profiles
-func listUsers() {
+func listUsers() error {
 	users, err := config.ListUserProfiles()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error listing users: %v\n", err)
-		os.Exit(1)
+		return silentCommandFailure()
 	}
 
 	if len(users) == 0 {
@@ -1037,7 +1162,7 @@ func listUsers() {
 		fmt.Println()
 		fmt.Println("Create a user profile with:")
 		fmt.Println("  dotfiles user add <name>")
-		return
+		return nil
 	}
 
 	// Get active user for marking
@@ -1050,10 +1175,12 @@ func listUsers() {
 	fmt.Printf("User Profiles (%d):\n", len(users))
 	fmt.Println("─────────────────────────")
 
+	partialFailure := false
 	for _, name := range users {
 		profile, err := config.LoadUserProfile(name)
 		if err != nil {
 			fmt.Printf("  %s (error loading)\n", name)
+			partialFailure = true
 			continue
 		}
 
@@ -1069,4 +1196,8 @@ func listUsers() {
 
 	fmt.Println()
 	fmt.Println("● = active user")
+	if partialFailure {
+		return silentCommandFailure()
+	}
+	return nil
 }

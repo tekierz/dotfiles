@@ -1,0 +1,37 @@
+{
+  "homebrew_version": "6.0.20",
+  "used_options": [],
+  "unused_options": [],
+  "built_as_bottle": false,
+  "poured_from_bottle": false,
+  "loaded_from_api": false,
+  "loaded_from_internal_api": false,
+  "installed_on_request": true,
+  "changed_files": null,
+  "time": 1788670369,
+  "source_modified_time": 1788670248,
+  "compiler": "clang",
+  "aliases": [],
+  "runtime_dependencies": [],
+  "source": {
+    "tap": "release/acceptance",
+    "tap_git_head": null,
+    "spec": "stable",
+    "path": "/opt/homebrew/Library/Taps/release/homebrew-acceptance/Formula/dotfiles.rb",
+    "versions": {
+      "stable": "3.0.0",
+      "head": null,
+      "version_scheme": 0,
+      "compatibility_version": null
+    }
+  },
+  "arch": "arm64",
+  "built_on": {
+    "os": "Macintosh",
+    "os_version": "macOS 15.7",
+    "cpu_family": "dunno",
+    "xcode": "16.4",
+    "clt": "16.4.0.0.1.1747106510",
+    "preferred_perl": "5.34"
+  }
+}

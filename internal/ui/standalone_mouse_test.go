@@ -79,7 +79,7 @@ func TestDeepDiveMenuClick(t *testing.T) {
 }
 
 // TestManageRightPaneLogGuard verifies that while the install-log view occupies
-// the right pane (manageInstalling or installLogs present), a click in that
+// the right pane (installLogs present), a click in that
 // region does NOT mutate the hidden settings fields.
 func TestManageRightPaneLogGuard(t *testing.T) {
 	ctx := newManageContext(t)
@@ -95,7 +95,6 @@ func TestManageRightPaneLogGuard(t *testing.T) {
 
 	// Sanity: with no log active, a right-pane click DOES focus a field.
 	ctx.app.installLogs = nil
-	ctx.app.manageInstalling = false
 	ctx.app.configFieldIndex = 99
 	ctx.app.managePane = managePaneTools
 	screen.Update(clickAt(x, y))
@@ -337,7 +336,7 @@ func TestConfigListClick(t *testing.T) {
 			name:  "macapps",
 			build: func(ctx *ScreenContext) ScreenHandler { return NewConfigMacAppsScreen(ctx) },
 			index: func(a *App) int { return a.macAppIndex },
-			want:  []itemCase{{"Rectangle", 0}, {"Raycast", 1}, {"Karabiner", 6}, {"AppCleaner", 9}},
+			want:  []itemCase{{"Rectangle", 0}, {"Raycast", 1}, {"IINA", 2}, {"AppCleaner", 3}},
 		},
 		{
 			name:  "cliutilities",
@@ -391,7 +390,7 @@ func TestConfigListClick(t *testing.T) {
 		ctx.Width, ctx.Height = w, h
 		screen := NewConfigCLIToolsScreen(ctx)
 		out := screen.View(w, h)
-		y := labelLineY(t, out, "AI-powered coding")
+		y := labelLineY(t, out, "Claude Code")
 		if y < 0 {
 			t.Fatal("claude-code row not found")
 		}

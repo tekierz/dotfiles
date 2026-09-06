@@ -18,6 +18,10 @@ dotfiles hotkeys            # Launch TUI hotkey viewer (alias: hk)
 dotfiles update             # Launch interactive TUI update screen
 dotfiles update check       # Print outdated packages (CLI)
 dotfiles status             # Print status (CLI)
+dotfiles plan --json --tool <id> # Print deterministic explicit install plan JSON
+dotfiles apply --yes --plan-hash <hash> --tool <id> # Apply exact fresh install authority
+dotfiles doctor [--json]    # Diagnose executable provenance and PATH collisions
+dotfiles doctor repair      # Preview/confirm ownership-proven stale binary quarantine
 dotfiles backups            # List backups (CLI)
 dotfiles restore            # Launch TUI backup selector (ScreenBackups)
 dotfiles restore <name>     # Restore a specific backup (CLI)
@@ -26,7 +30,7 @@ dotfiles theme list         # List themes (CLI)
 dotfiles theme set <name>   # Set theme directly (CLI)
 dotfiles config <tool>      # Configure a tool (ghostty, tmux, zsh, neovim, git, yazi, fzf, apps, utilities)
 dotfiles version            # Print version information
-dotfiles uninstall          # Remove dotfiles and restore original config
+dotfiles uninstall          # Restore backups and show safe manual cleanup guidance
 dotfiles user               # Show current active user
 dotfiles user [name]        # Switch to a user profile (prompts to create if new)
 dotfiles user add <name>    # Create a new user profile

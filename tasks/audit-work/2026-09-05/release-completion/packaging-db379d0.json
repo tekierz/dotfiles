@@ -1,0 +1,123 @@
+{
+  "result": "passed",
+  "rehearsal_only": true,
+  "source_commit": "db379d0ae2183c149ce66d62b5734f2e371e0d35",
+  "version": "3.0.0-rehearsal",
+  "artifact_root": "/var/folders/nj/yy_m0fqn0h17kjf0nq779nhh0000gn/T/dotfiles-v3-fixed-rehearsal-28dn5sgj/dist",
+  "archives": [
+    {
+      "platform": "darwin/amd64",
+      "archive": "dotfiles_3.0.0-rehearsal_darwin_amd64.tar.gz",
+      "binary_sha256": "95ce88d5ec24a4152fe219ee7803f3c04425c0245564907f626d60dd82f39666",
+      "go_version": "go1.26.8",
+      "vcs_revision": "db379d0ae2183c149ce66d62b5734f2e371e0d35",
+      "vcs_modified": true,
+      "license_contents": "exact source match"
+    },
+    {
+      "platform": "darwin/arm64",
+      "archive": "dotfiles_3.0.0-rehearsal_darwin_arm64.tar.gz",
+      "binary_sha256": "6b9affec26d86fa681325328a6ce58153125409d1c72a6878be880f8b44faba8",
+      "go_version": "go1.26.8",
+      "vcs_revision": "db379d0ae2183c149ce66d62b5734f2e371e0d35",
+      "vcs_modified": true,
+      "license_contents": "exact source match",
+      "runtime_version_output": "dotfiles version 3.0.0-rehearsal",
+      "runtime_exit": 0
+    },
+    {
+      "platform": "linux/amd64",
+      "archive": "dotfiles_3.0.0-rehearsal_linux_amd64.tar.gz",
+      "binary_sha256": "7315696b60457a6cc9fce6c6c224c0715dd3cf4961731d571035901b11a15493",
+      "go_version": "go1.26.8",
+      "vcs_revision": "db379d0ae2183c149ce66d62b5734f2e371e0d35",
+      "vcs_modified": true,
+      "license_contents": "exact source match"
+    },
+    {
+      "platform": "linux/arm64",
+      "archive": "dotfiles_3.0.0-rehearsal_linux_arm64.tar.gz",
+      "binary_sha256": "57abe855166494d0fd49f64153f7dd9d84b248204cdb6c3486dbb22065ffb377",
+      "go_version": "go1.26.8",
+      "vcs_revision": "db379d0ae2183c149ce66d62b5734f2e371e0d35",
+      "vcs_modified": true,
+      "license_contents": "exact source match"
+    }
+  ],
+  "source_archive": {
+    "file": "dotfiles_3.0.0-rehearsal_source.tar.gz",
+    "sha256": "cee9265a39f31c5fb8ce3d33d66b47659cb3c768b2dc523f5f389dcede5471c1",
+    "pax_commit": "db379d0ae2183c149ce66d62b5734f2e371e0d35",
+    "product_files_byte_matched_to_workspace": 403,
+    "product_manifest_sha256": "916e5c2900d67e560b27b658e0017cf76b86e2ab1367273bf15850b74229a960"
+  },
+  "sboms": [
+    {
+      "file": "dotfiles_3.0.0-rehearsal_darwin_amd64.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 23,
+      "sha256": "dc0f14a910e32b9c654e190096770f9f41e09a74ebc407b64174a262f69281ac"
+    },
+    {
+      "file": "dotfiles_3.0.0-rehearsal_darwin_arm64.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 23,
+      "sha256": "ff5a1e68c2d26fa0428745c5fb5d49c658f4e30f009623cb353712b40c12b6b9"
+    },
+    {
+      "file": "dotfiles_3.0.0-rehearsal_linux_amd64.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 23,
+      "sha256": "f203f8b287a7fb9841f784e0a47b9e7747b6f9716ebb1d2912398608f8417cc8"
+    },
+    {
+      "file": "dotfiles_3.0.0-rehearsal_linux_arm64.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 23,
+      "sha256": "b199be8fca3a3033ca6bbdb61da66b8f08a2c4bbc67dfd2b8e25866995453ba5"
+    },
+    {
+      "file": "dotfiles_3.0.0-rehearsal_source.tar.gz.sbom.json",
+      "spdx_version": "SPDX-2.3",
+      "packages": 49,
+      "sha256": "3c5234c472bbadecef9ba41b63361d8b0083b8dd761b0129d84f050aed454f86"
+    }
+  ],
+  "all_ten_checksums_verified": {
+    "dotfiles_3.0.0-rehearsal_darwin_amd64.tar.gz": "1eedfe8ee4d5fa326162e018f96de2d0d38ab7e42a9bac10e794c44773e425ba",
+    "dotfiles_3.0.0-rehearsal_darwin_amd64.tar.gz.sbom.json": "dc0f14a910e32b9c654e190096770f9f41e09a74ebc407b64174a262f69281ac",
+    "dotfiles_3.0.0-rehearsal_darwin_arm64.tar.gz": "1a6472b875e7cd2c5080c2c69e0c4958993b25824e5a5f22656e01928b0ebe04",
+    "dotfiles_3.0.0-rehearsal_darwin_arm64.tar.gz.sbom.json": "ff5a1e68c2d26fa0428745c5fb5d49c658f4e30f009623cb353712b40c12b6b9",
+    "dotfiles_3.0.0-rehearsal_linux_amd64.tar.gz": "f58c124124e40814a4f21c558b0eaa9825f31c0ba542a14be8e743f237022b4b",
+    "dotfiles_3.0.0-rehearsal_linux_amd64.tar.gz.sbom.json": "f203f8b287a7fb9841f784e0a47b9e7747b6f9716ebb1d2912398608f8417cc8",
+    "dotfiles_3.0.0-rehearsal_linux_arm64.tar.gz": "5fef3e1f334ed997a9ce275606118b00c6e380084257fa266ad01cbfb0645611",
+    "dotfiles_3.0.0-rehearsal_linux_arm64.tar.gz.sbom.json": "b199be8fca3a3033ca6bbdb61da66b8f08a2c4bbc67dfd2b8e25866995453ba5",
+    "dotfiles_3.0.0-rehearsal_source.tar.gz": "cee9265a39f31c5fb8ce3d33d66b47659cb3c768b2dc523f5f389dcede5471c1",
+    "dotfiles_3.0.0-rehearsal_source.tar.gz.sbom.json": "3c5234c472bbadecef9ba41b63361d8b0083b8dd761b0129d84f050aed454f86"
+  },
+  "licenses": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSES/Apache-2.0.txt",
+    "LICENSES/Go-PATENTS.txt",
+    "LICENSES/MIT.txt",
+    "LICENSES/pflag-BSD-3-Clause.txt",
+    "LICENSES/x-sys-BSD-3-Clause.txt"
+  ],
+  "checks": [
+    "Four expected OS/architecture archives plus source",
+    "Five nonempty SPDX-2.3 documents with unique package IDs",
+    "All ten archive/SBOM checksums match checksum manifest",
+    "Every runtime archive has exact source license/notices and README bytes",
+    "All four archived binaries have executable mode, correct GOOS/GOARCH, Go 1.26.8, expected VCS revision",
+    "Extracted Darwin arm64 binary runs version and reports 3.0.0-rehearsal",
+    "Source archive PAX commit matches metadata and binary VCS revision; cmd/internal/go.mod/go.sum byte-match workspace"
+  ],
+  "limits": [
+    "Snapshot rehearsal only; no release was published",
+    "All binaries carry vcs.modified=true; source/product bytes independently matched to current workspace, excluding OS-generated internal/.DS_Store",
+    "Darwin amd64 and both Linux binaries were inspected but not executed here",
+    "SPDX structural/content checks only; no external full-schema validation or package license legal audit",
+    "Published release checksums, signatures/attestations, Homebrew install/upgrade still require actual release verification"
+  ]
+}

@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, release-remediation, "integration/**"]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -12,13 +13,20 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 branch, verified 2026-07-10
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6 branch, verified 2026-07-10
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Verify modules
+        run: go mod verify
+
+      - name: Check module files are tidy
+        run: go mod tidy -diff
 
       - name: Check formatting
         run: |
@@ -32,54 +40,62 @@ jobs:
         run: go vet ./...
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
-        # Advisory: pinned to v2.5.0 (golangci-lint supports Go 1.25 since
-        # v2.4.0). Flip to blocking once it has run clean against the project's
-        # Go version for a few cycles. internal/ui is excluded from gocyclo/dupl
-        # in .golangci.yml (large switch-based View/Update funcs) — revisit.
-        continue-on-error: true
-        with:
-          version: v2.5.0
-          args: --timeout=5m
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+          golangci-lint run --timeout=5m
+
+      - name: Validate release configuration
+        run: |
+          go install github.com/goreleaser/goreleaser/v2@v2.17.0
+          goreleaser check
+
+      - name: Validate GitHub Actions workflows
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          actionlint .github/workflows/*.yml
 
       - name: Run staticcheck
-        uses: dominikh/staticcheck-action@v1
-        # Advisory: kept at `latest` — no tagged staticcheck release is built
-        # with / confirmed against Go 1.25 yet (2025.1.x is built with Go 1.24
-        # and has known Go 1.25 compatibility issues, dominikh/go-tools#1674).
-        # Pin to an exact tag and flip to blocking once a Go 1.25 release ships.
-        continue-on-error: true
-        with:
-          version: latest
-          install-go: false
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          staticcheck ./...
+
+      - name: Run ShellCheck
+        run: shellcheck scripts/*.sh tests/*.sh
 
   security:
     name: Security
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 branch, verified 2026-07-10
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6 branch, verified 2026-07-10
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Run govulncheck
-        # Advisory: pinned to v1.1.4 (latest tagged x/vuln release; compiles
-        # against the Go 1.25 toolchain installed by setup-go). Flip to blocking
-        # once it has run clean against the project's Go version for a few cycles.
-        continue-on-error: true
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Scan source for committed secrets
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          gitleaks dir --redact --no-banner .
 
-      - uses: actions/setup-go@v5
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 branch, verified 2026-07-10
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6 branch, verified 2026-07-10
         with:
           go-version-file: go.mod
           cache: true
@@ -93,16 +109,28 @@ jobs:
       - name: Run tests with race detector
         run: go test -race ./...
 
+      - name: Verify isolated privileged supervisor lifecycle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -c -o "$RUNNER_TEMP/dotfiles-privileged.test" ./internal/runner
+          sudo env CI=true DOTFILES_PRIVILEGED_CI=1 "$RUNNER_TEMP/dotfiles-privileged.test" \
+            -test.run='^TestPrivilegedSupervisorCI$' -test.v -test.timeout=2m \
+            | tee "$RUNNER_TEMP/privileged-supervisor.log"
+          grep -F 'DOTFILES_PRIVILEGED_CI_EXECUTED cases=8' "$RUNNER_TEMP/privileged-supervisor.log"
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 branch, verified 2026-07-10
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6 branch, verified 2026-07-10
         with:
           go-version-file: go.mod
           cache: true
@@ -112,3 +140,36 @@ jobs:
 
       - name: Verify binary runs
         run: ./bin/dotfiles --help
+
+  test-gate:
+    name: Test
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require every platform test
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+        run: test "$TEST_RESULT" = success
+
+  release-gate:
+    name: Release Gate
+    if: always()
+    needs: [lint, security, test, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require every blocking CI job
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          test "$LINT_RESULT" = success
+          test "$SECURITY_RESULT" = success
+          test "$TEST_RESULT" = success
+          test "$BUILD_RESULT" = success

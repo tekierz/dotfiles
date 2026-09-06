@@ -4,6 +4,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tekierz/dotfiles/internal/backup"
+	"github.com/tekierz/dotfiles/internal/installapply"
 	"github.com/tekierz/dotfiles/internal/pkg"
 	"github.com/tekierz/dotfiles/internal/runner"
 )
@@ -26,6 +28,7 @@ type installOutputMsg struct {
 type installDoneMsg struct {
 	err     error
 	context string // last few lines of output for error context
+	result  installapply.Result
 }
 
 // installStartMsg triggers installation start
@@ -45,36 +48,16 @@ type updateCheckDoneMsg struct {
 	err     error
 }
 
-// installCacheDoneMsg indicates the async install cache loading completed
-type installCacheDoneMsg struct {
-	installed map[string]bool
-}
-
 // updateRunDoneMsg indicates an update operation completed
 type updateRunDoneMsg struct {
 	results []pkg.UpdateResult
 	err     error
 }
 
-// installLogMsg carries a single log line from streaming install/update
-type installLogMsg struct {
-	line string
-}
-
-// manageSudoRequiredMsg indicates sudo is needed before manage install
-type manageSudoRequiredMsg struct {
-	toolID string
-}
-
 // updateSudoRequiredMsg indicates sudo is needed before update
 type updateSudoRequiredMsg struct {
 	packages []pkg.Package
 	all      bool
-}
-
-// manageStartInstallMsg triggers streaming install after sudo is cached
-type manageStartInstallMsg struct {
-	toolID string
 }
 
 // updateStartMsg triggers streaming update after sudo is cached
@@ -90,6 +73,7 @@ type BackupEntry struct {
 	FileCount int
 	Size      int64 // bytes
 	Path      string
+	Catalog   backup.CatalogEntry
 }
 
 // backupsLoadedMsg indicates the async backup list loading completed
@@ -100,10 +84,13 @@ type backupsLoadedMsg struct {
 
 // backupRestoreDoneMsg indicates a restore operation completed
 type backupRestoreDoneMsg struct {
-	name    string
-	count   int // files successfully restored
-	skipped int // files that could NOT be restored (traversal/symlink/IO errors)
-	err     error
+	name     string
+	count    int // files successfully restored
+	removed  int // files/directories removed because they did not exist before
+	skipped  int // files that could NOT be restored (traversal/symlink/IO errors)
+	warnings int // committed restores with durability/verification warnings
+	details  []string
+	err      error
 }
 
 // backupDeleteDoneMsg indicates a delete operation completed
@@ -114,15 +101,9 @@ type backupDeleteDoneMsg struct {
 
 // backupCreateDoneMsg indicates a new backup was created
 type backupCreateDoneMsg struct {
-	name string
-	err  error
-}
-
-// manageInstallWithLogsMsg carries install result with collected logs
-type manageInstallWithLogsMsg struct {
-	toolID string
-	logs   []string
-	err    error
+	name    string
+	warning string
+	err     error
 }
 
 // updateWithLogsMsg carries update result with collected logs

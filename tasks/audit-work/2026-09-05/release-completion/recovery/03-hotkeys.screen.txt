@@ -1,0 +1,24 @@
+ 1 󰒓 Manage   2 󰀄 Users   3 󰌌 Hotkeys   4 󰚰 Update   5 󰁯 Backups                
+⣽ Cheatsheets + keybindings (matches manager)                                   
+────────────────────────────────────────────────────────────────────────────────
+╭────────────────────────╮ ╭───────────────────────────────────────────────────╮
+│                        │ │                                                   │
+│ CATEGORIES             │ │ ITEMS                                             │
+│ 22 sections            │ │  Tmux                                             │
+│                        │ │                                                   │
+│ ▸  Tmux            25  │ │   > Prefix + |       Split pane vertically        │
+│    Zsh (emacs/Ma…   5  │ │     Prefix + -       Split pane horizontally      │
+│   󰉋 Yazi           10  │ │     Alt-Arrow        Navigate panes               │
+│   󰍉 fzf             4  │ │     Prefix + H/J/K/L Resize panes                 │
+│   󰆍 Ghostty         5  │ │     Prefix + z       Toggle pane zoom             │
+│    Neovim          11  │ │     Prefix + x       Close current pane           │
+│   󰊢 LazyGit        10  │ │     Prefix + !       Convert pane to window       │
+│   󰙅 eza             4  │ │     Prefix + q       Show pane numbers            │
+│   󰄛 zoxide          3  │ │     Prefix + {/}     Swap pane left/right         │
+│   󰒓 Dotfiles        5  │ │     Prefix + c       New window                   │
+│    Git             10  │ │     Prefix + n/p     Next/previous window         │
+│                        │ │                                                   │
+╰────────────────────────╯ ╰───────────────────────────────────────────────────╯
+Tab pane  ↑↓ move  ←→ switch  f favorite  F filter  a add alias                 
+Click select  Scroll  Esc back  q quit                                          
+ Tmux — 25 items                                                                

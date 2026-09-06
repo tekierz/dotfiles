@@ -2,6 +2,7 @@ package tools
 
 import (
 	"reflect"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -55,11 +56,23 @@ var expectedTools = map[string]toolSpec{
 		hasConfig: true, configPaths: 1,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"nodejs", "npm"}, pkg.PlatformDebian: {"nodejs", "npm"}, pkg.PlatformMacOS: {"node"}},
 	},
+	"codex": {
+		name: "Codex", description: "OpenAI coding agent for the terminal", category: CategoryUtility, icon: "\U000f06a9",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{pkg.PlatformMacOS: {"node"}},
+	},
 	"cursor": {
 		name: "Cursor", description: "AI-first code editor", category: CategoryApp, icon: "\U000f09a8",
 		uiGroup: UIGroupGUIApps, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
 		hasConfig: false, configPaths: 0,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"cursor-bin"}, pkg.PlatformMacOS: {"cursor"}},
+	},
+	"cursor-agent": {
+		name: "Cursor Agent", description: "Cursor's coding agent for the terminal", category: CategoryUtility, icon: "\U000f06a9",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{},
 	},
 	"delta": {
 		name: "Delta", description: "Syntax-highlighting pager for git diffs", category: CategoryGit, icon: "\U000f0627",
@@ -88,26 +101,32 @@ var expectedTools = map[string]toolSpec{
 	"fzf": {
 		name: "fzf", description: "Command-line fuzzy finder", category: CategoryUtility, icon: "\U000f0349",
 		uiGroup: UIGroupNone, configScreen: 15, isHeavy: false, defaultEnabled: true, platformFilter: "",
-		hasConfig: false, configPaths: 0,
+		hasConfig: true, configPaths: 1,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"fzf"}, pkg.PlatformDebian: {"fzf"}, pkg.PlatformMacOS: {"fzf"}},
 	},
 	"ghostty": {
 		name: "Ghostty", description: "GPU-accelerated terminal emulator", category: CategoryTerminal, icon: "\U000f018d",
 		uiGroup: UIGroupNone, configScreen: 9, isHeavy: false, defaultEnabled: true, platformFilter: "",
-		hasConfig: true, configPaths: 1,
+		hasConfig: true, configPaths: ghosttyExpectedConfigPathCount(),
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"ghostty"}, pkg.PlatformMacOS: {"ghostty"}},
 	},
 	"git": {
 		name: "Git", description: "Distributed version control system", category: CategoryGit, icon: "",
 		uiGroup: UIGroupNone, configScreen: 13, isHeavy: false, defaultEnabled: true, platformFilter: "",
-		hasConfig: true, configPaths: 1,
+		hasConfig: true, configPaths: 2,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"git"}, pkg.PlatformDebian: {"git"}, pkg.PlatformMacOS: {"git"}},
 	},
 	"glow": {
 		name: "Glow", description: "Render markdown on the CLI", category: CategoryUtility, icon: "\U000f0219",
 		uiGroup: UIGroupCLITools, configScreen: 31, isHeavy: false, defaultEnabled: true, platformFilter: "",
-		hasConfig: false, configPaths: 0,
+		hasConfig: true, configPaths: 1,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"glow"}, pkg.PlatformMacOS: {"glow"}},
+	},
+	"hermes": {
+		name: "Hermes Agent", description: "Autonomous AI agent runtime by Nous Research (discovery only)", category: CategoryUtility, icon: "\U000f06a9",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{},
 	},
 	"iina": {
 		name: "IINA", description: "Modern media player for macOS", category: CategoryApp, icon: "\U000f057c",
@@ -151,6 +170,18 @@ var expectedTools = map[string]toolSpec{
 		hasConfig: false, configPaths: 0,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"obs-studio"}, pkg.PlatformDebian: {"obs-studio"}, pkg.PlatformMacOS: {"obs"}},
 	},
+	"opencode": {
+		name: "OpenCode", description: "Open-source coding agent for the terminal", category: CategoryUtility, icon: "\U000f06a9",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"opencode"}, pkg.PlatformMacOS: {"anomalyco/tap/opencode"}},
+	},
+	"pi": {
+		name: "Pi", description: "Minimal, extensible coding agent", category: CategoryUtility, icon: "π",
+		uiGroup: UIGroupCLITools, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{pkg.PlatformMacOS: {"node"}},
+	},
 	"raycast": {
 		name: "Raycast", description: "Productivity launcher for macOS", category: CategoryApp, icon: "\U000f0238",
 		uiGroup: UIGroupMacApps, configScreen: 0, isHeavy: false, defaultEnabled: true, platformFilter: pkg.PlatformMacOS,
@@ -174,6 +205,12 @@ var expectedTools = map[string]toolSpec{
 		uiGroup: UIGroupGUIApps, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: "",
 		hasConfig: false, configPaths: 0,
 		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"sunshine"}, pkg.PlatformDebian: {"sunshine"}, pkg.PlatformMacOS: {"sunshine"}},
+	},
+	"t3-code": {
+		name: "T3 Code", description: "Desktop frontend for coding agents", category: CategoryApp, icon: "󰚩",
+		uiGroup: UIGroupMacApps, configScreen: 0, isHeavy: false, defaultEnabled: false, platformFilter: pkg.PlatformMacOS,
+		hasConfig: false, configPaths: 0,
+		packages: map[pkg.Platform][]string{},
 	},
 	"tailscale": {
 		name: "Tailscale", description: "Mesh VPN for secure networking", category: CategoryUtility, icon: "\U000f0582",
@@ -209,8 +246,15 @@ var expectedTools = map[string]toolSpec{
 		name: "Zsh", description: "Z shell with plugins and customization", category: CategoryShell, icon: "",
 		uiGroup: UIGroupNone, configScreen: 11, isHeavy: false, defaultEnabled: true, platformFilter: "",
 		hasConfig: true, configPaths: 2,
-		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions"}, pkg.PlatformDebian: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting"}, pkg.PlatformMacOS: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions"}},
+		packages: map[pkg.Platform][]string{pkg.PlatformArch: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "zsh-theme-powerlevel10k"}, pkg.PlatformDebian: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting"}, pkg.PlatformMacOS: {"zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions", "powerlevel10k"}},
 	},
+}
+
+func ghosttyExpectedConfigPathCount() int {
+	if runtime.GOOS == "darwin" {
+		return 4
+	}
+	return 2
 }
 
 // TestRegistryToolMetadataSnapshot is a characterization test that asserts the
@@ -583,6 +627,25 @@ func TestPackagesForPlatform(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBaseToolPlatformExplicitInstallAndObservation(t *testing.T) {
+	mgr := pkg.NewMockPackageManager()
+	zsh := NewZshTool()
+
+	if err := zsh.InstallForPlatform(mgr, pkg.PlatformPi); err != nil {
+		t.Fatalf("InstallForPlatform(Pi): %v", err)
+	}
+	want := PackagesForPlatform(zsh.Packages(), pkg.PlatformPi)
+	if len(mgr.InstallCalls) != 1 || !reflect.DeepEqual(mgr.InstallCalls[0], want) {
+		t.Fatalf("Pi execution installed %v, want Debian fallback %v", mgr.InstallCalls, want)
+	}
+	if !zsh.IsInstalledForPlatform(mgr, pkg.PlatformPi) {
+		t.Fatal("explicit Pi observation did not see its Debian fallback packages")
+	}
+	if zsh.IsInstalledForPlatform(mgr, pkg.PlatformMacOS) {
+		t.Fatal("explicit macOS observation leaked the Pi/Debian package state")
 	}
 }
 

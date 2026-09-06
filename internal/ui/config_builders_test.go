@@ -89,10 +89,10 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 	dd.FzfBorderStyle = "rounded"
 	dd.FzfPreviewWindow = "up:50%"
 
-	dd.LazyGitSideBySide = false
-	dd.LazyGitMouseMode = false
-	dd.LazyGitTheme = "dark"
-	dd.LazyGitPaging = "less"
+	dd.LazyGitSidePanelWidth = "0.42"
+	dd.LazyGitMouseEvents = false
+	dd.LazyGitColorPreset = "light-high-contrast"
+	dd.LazyGitPagerPreset = "delta"
 
 	dd.BtopTheme = "tokyo-night"
 	dd.BtopUpdateMs = 500
@@ -105,6 +105,9 @@ func sampleDeepDiveConfig() DeepDiveConfig {
 	dd.GlowStyle = "dark"
 	dd.GlowWidth = 100
 	dd.GlowMouse = true
+	dd.GlowAll = true
+	dd.GlowShowLineNumbers = true
+	dd.GlowPreserveNewLines = true
 
 	return dd
 }
@@ -222,10 +225,10 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 	}
 
 	if got, want := lazygitConfigFrom(cfg), (tools.LazyGitConfig{
-		SideBySide: cfg.LazyGitSideBySide,
-		MouseMode:  cfg.LazyGitMouseMode,
-		Theme:      cfg.LazyGitTheme,
-		Paging:     cfg.LazyGitPaging,
+		SidePanelWidth: cfg.LazyGitSidePanelWidth,
+		MouseEvents:    cfg.LazyGitMouseEvents,
+		ColorPreset:    cfg.LazyGitColorPreset,
+		PagerPreset:    cfg.LazyGitPagerPreset,
 	}); got != want {
 		t.Errorf("lazygitConfigFrom mismatch:\n got %+v\nwant %+v", got, want)
 	}
@@ -242,10 +245,13 @@ func TestConfigBuildersMatchInstallStructs(t *testing.T) {
 	}
 
 	if got, want := glowConfigFrom(cfg), (tools.GlowConfig{
-		Pager: cfg.GlowPager,
-		Style: cfg.GlowStyle,
-		Width: cfg.GlowWidth,
-		Mouse: cfg.GlowMouse,
+		Pager:            cfg.GlowPager,
+		Style:            cfg.GlowStyle,
+		Width:            cfg.GlowWidth,
+		Mouse:            cfg.GlowMouse,
+		All:              cfg.GlowAll,
+		ShowLineNumbers:  cfg.GlowShowLineNumbers,
+		PreserveNewLines: cfg.GlowPreserveNewLines,
 	}); got != want {
 		t.Errorf("glowConfigFrom mismatch:\n got %+v\nwant %+v", got, want)
 	}
@@ -273,7 +279,7 @@ func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 		relPath string
 		write   func(theme string) error // install-side translation
 	}{
-		{"ghostty", ".config/ghostty/config", func(th string) error {
+		{"ghostty", ".config/ghostty/config.ghostty", func(th string) error {
 			return tools.WriteGhosttyConfig(ghosttyConfigFrom(cfg), th)
 		}},
 		{"tmux", ".tmux.conf", func(th string) error {
@@ -291,13 +297,13 @@ func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 		{"fzf", ".config/fzf/fzf.zsh", func(th string) error {
 			return tools.WriteFzfConfig(fzfConfigFrom(cfg), th)
 		}},
-		{"lazygit", ".config/lazygit/config.yml", func(th string) error {
+		{"lazygit", lazyGitTestRelPath(), func(th string) error {
 			return tools.WriteLazyGitConfig(lazygitConfigFrom(cfg), th)
 		}},
 		{"btop", ".config/btop/btop.conf", func(th string) error {
 			return tools.WriteBtopConfig(btopConfigFrom(cfg), th)
 		}},
-		{"glow", ".config/glow/glow.yml", func(th string) error {
+		{"glow", glowTestRelPath(), func(th string) error {
 			return tools.WriteGlowConfig(glowConfigFrom(cfg), th)
 		}},
 	}
@@ -328,24 +334,8 @@ func TestInstallAndConfigApplyProduceSameFiles(t *testing.T) {
 func writeInIsolatedHome(t *testing.T, fn func() error) string {
 	t.Helper()
 	dir := t.TempDir()
-	origHome, hadHome := os.LookupEnv("HOME")
-	origXDG, hadXDG := os.LookupEnv("XDG_CONFIG_HOME")
-	if err := os.Setenv("HOME", dir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	_ = os.Unsetenv("XDG_CONFIG_HOME")
-	defer func() {
-		if hadHome {
-			os.Setenv("HOME", origHome)
-		} else {
-			os.Unsetenv("HOME")
-		}
-		if hadXDG {
-			os.Setenv("XDG_CONFIG_HOME", origXDG)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	}()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	if err := fn(); err != nil {
 		t.Fatalf("write: %v", err)
 	}

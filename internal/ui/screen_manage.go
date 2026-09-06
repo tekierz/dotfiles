@@ -3,11 +3,35 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tekierz/dotfiles/internal/health"
 )
+
+func adjustManageNumber(value, dir, step, minValue, maxValue int) int {
+	if step <= 0 {
+		step = 1
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	if dir > 0 {
+		if value > maxValue-step {
+			return maxValue
+		}
+		return value + step
+	}
+	if value < minValue+step {
+		return minValue
+	}
+	return value - step
+}
 
 // manageScreen is the migrated ScreenHandler for the live dual-pane Manage
 // screen (the management-tab "Manage" entry).
@@ -17,9 +41,7 @@ import (
 // manageInstalledReady / installCacheLoading), the scroll offsets
 // (manageToolsScroll, manageFieldsScroll), the inline-edit fields (manageEditing,
 // manageEditValue, manageEditCursor, manageEditField, manageEditFieldKey), the
-// status line (manageStatus), the install flags (manageInstalling,
-// manageInstallID) and the streaming-install log buffer (installLogs /
-// installLogScroll / installLogAutoScroll) are all read/written through
+// status line (manageStatus) and editable state are all read/written through
 // s.App(). The dual-pane layout, item list, field list and every renderManage*
 // helper remain methods on *App and are reused unchanged.
 //
@@ -30,24 +52,8 @@ import (
 // entered. The cache result (installCacheDoneMsg) is applied globally in
 // App.Update before delegation, so it is intentionally NOT handled here.
 //
-// Async handling: manageSavedMsg is handled here while this screen is active.
-// The streaming/terminal install messages (manageInstallDoneMsg,
-// manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg) are
-// instead handled GLOBALLY in App.Update before delegation (see streaming.go),
-// so the finalize + cache-refresh chain survives navigation away from this
-// screen (the install worker + package-manager subprocess outlive the screen):
-//   - manageSudoRequiredMsg -> tea.Exec(sudo prompt) -> manageStartInstallMsg
-//   - manageStartInstallMsg -> register cancelable ctx/streamCancel, then
-//     a.streamingInstallToolCmd(ctx, toolID) (FIX 3: so teardownStream cancels it)
-//   - manageInstallWithLogsMsg success -> InvalidateCache + manageInstalledReady
-//     =false + re-issue a.startInstallCacheLoad() so the install-status cache
-//     refreshes (Phase B + C10 fix).
-//
-// Streaming model / no data race: a.streamingInstallToolCmd runs the package
-// install inside a tea.Cmd closure, collects all output into a local slice, and
-// returns a single terminal manageInstallWithLogsMsg carrying the logs. No
-// goroutine touches shared App state, so the manage install is the safe
-// collect-then-message pattern (no per-line stream to re-arm, no race).
+// Installs are routed through the reviewed plan and shared installation worker;
+// Manage has no separate direct package-install message path.
 type manageScreen struct {
 	BaseScreen
 }
@@ -83,6 +89,13 @@ func (s *manageScreen) navigateTab(target Screen) tea.Cmd {
 // Update handles keyboard, mouse, and the Manage async result messages.
 func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	a := s.App()
+	theme, nav, animations := a.theme, a.navStyle, a.animationsEnabled
+	defer func() {
+		if a.theme != theme || a.navStyle != nav || a.animationsEnabled != animations {
+			a.syncSharedSettings()
+			a.invalidateSettingsReviews()
+		}
+	}()
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -98,26 +111,8 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			return s, tea.Quit
 		}
 		return s, s.handleKey(msg)
-
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
-
-	// --- Async results (delegated here while this screen is active) ---
-	case manageSavedMsg:
-		if msg.err != nil {
-			a.manageStatus = fmt.Sprintf("Save failed: %v", msg.err)
-		} else {
-			a.manageStatus = "Saved ✓"
-			// Refresh the diff baseline so the next save only applies tools changed
-			// since THIS save (otherwise a second save would re-apply the same tools).
-			a.snapshotManageBaseline()
-		}
-		return s, nil
-
-		// The streaming/terminal install messages (manageInstallDoneMsg,
-		// manageSudoRequiredMsg, manageStartInstallMsg, manageInstallWithLogsMsg)
-		// are handled GLOBALLY in App.Update before delegation so the
-		// finalize/cache-refresh chain survives navigation; they never reach here.
 	}
 	return s, nil
 }
@@ -127,6 +122,16 @@ func (s *manageScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	a := s.App()
 	key := msg.String()
+	lazyGitBlockReason := ""
+	itemsAtInput := a.manageItems()
+	if len(itemsAtInput) > 0 && itemsAtInput[clampInt(a.manageIndex, 0, len(itemsAtInput)-1)].id == "lazygit" {
+		lazyGitBlockReason = lazyGitManageUIBlockReason(a)
+	}
+	if a.manageEditing && lazyGitBlockReason != "" {
+		a.manageCancelEditing()
+		a.manageStatus = "LazyGit settings are read-only: " + lazyGitBlockReason
+		return nil
+	}
 
 	// Inline string editor captures keys first so typing doesn't trigger global
 	// bindings.
@@ -137,8 +142,9 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 
 		case "enter":
-			a.manageCommitEditing()
-			a.manageStatus = "Updated ✓"
+			if a.manageCommitEditing() {
+				a.manageStatus = "Updated ✓"
+			}
 			return nil
 
 		case "left", "h":
@@ -230,9 +236,16 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if !ok {
 			return
 		}
+		if a.manageFieldMutationBlocked(f) {
+			return
+		}
 		switch f.kind {
 		case manageFieldOption:
 			if f.str != nil && len(f.options) > 0 {
+				if f.unknownReadOnly && !oneOf(*f.str, f.options...) {
+					a.manageStatus = "Custom native LazyGit values are read-only"
+					return
+				}
 				*f.str = cycleStringOption(f.options, *f.str, dir > 0)
 				if f.key == "theme" {
 					a.syncThemeIndex()
@@ -244,14 +257,19 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				if step == 0 {
 					step = 1
 				}
-				*f.n = clampInt(*f.n+(dir*step), f.min, f.max)
+				*f.n = adjustManageNumber(*f.n, dir, step, f.min, f.max)
 			}
+		case manageFieldText, manageFieldToggle:
+			// Text fields use edit mode; toggles have no ordered adjustment.
 		}
 	}
 
 	toggleField := func() {
 		f, ok := currentField()
 		if !ok {
+			return
+		}
+		if a.manageFieldMutationBlocked(f) {
 			return
 		}
 		if f.kind == manageFieldToggle && f.b != nil {
@@ -265,22 +283,6 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return
 		}
 		a.manageStartEditing(f)
-	}
-
-	// Block navigating away while a tool install is streaming: the terminal
-	// manageInstallWithLogsMsg is only handled by this active screen, so leaving
-	// would drop it, strand manageInstalling=true, and orphan the install
-	// subprocess. (The 'i' install trigger is already guarded.)
-	if a.manageInstalling {
-		switch key {
-		case "esc":
-			a.manageStatus = "Install in progress…"
-			return nil
-		}
-		if _, ok := tabNavigationTarget(key); ok {
-			a.manageStatus = "Install in progress…"
-			return nil
-		}
 	}
 
 	// Handle tab navigation first (1-5 keys). A number key for the already-active
@@ -311,33 +313,77 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Save (persist to config).
 	case "s", "ctrl+s":
-		a.manageStatus = "Saving…"
-		return a.saveManageConfigCmd()
+		a.manageStatus = ""
+		return a.prepareManageSave()
 
-	case "i":
-		// Install selected tool/app (settings pane only).
-		if a.managePane != managePaneSettings {
-			return nil
-		}
+	case "i", "I":
+		// Install the selected tool/app from either pane. Both panes consume the
+		// same accepted installation snapshot and build the same reviewed,
+		// single-tool plan; rendering focus must not change install authority.
 		item := items[a.manageIndex]
 		if item.id == "global" {
 			a.manageStatus = "Select a tool/app to install"
 			return nil
 		}
-		if a.manageInstalling {
+		if a.installationSnapshotLoading || a.installCacheLoading {
+			a.manageStatus = "Installation status loading"
 			return nil
 		}
-		if item.installed {
+		if a.installationSnapshotError != "" {
+			a.manageStatus = installationSnapshotUnavailable
+			return nil
+		}
+		if a.installationSnapshotStale {
+			a.manageStatus = "Installation status stale"
+			return nil
+		}
+		if !a.installationSnapshotReady {
+			a.manageStatus = "Installation status unknown"
+			return nil
+		}
+		presence, installability := item.installationTruth()
+		if presence == health.PresencePresent {
 			a.manageStatus = "Already installed"
 			return nil
 		}
+		if item.unavailableReason != "" {
+			a.manageStatus = item.unavailableReason
+			return nil
+		}
+		if presence == health.PresenceUnknown {
+			a.manageStatus = "Installation status unknown"
+			return nil
+		}
+		if installability == health.InstallabilityUnsupported {
+			a.manageStatus = "Installation unavailable on " + a.installationSnapshot.Platform()
+			return nil
+		}
+		if installability != health.InstallabilitySupported {
+			a.manageStatus = "Installation availability unknown"
+			return nil
+		}
+		action := item.installationAction()
+		if action != "install" && action != "repair" {
+			a.manageStatus = "Installation status unknown"
+			return nil
+		}
 
-		// Clear logs and start install flow (will check sudo first).
-		a.clearInstallLogs()
-		a.manageStatus = ""
-		a.manageInstalling = true
-		a.manageInstallID = item.id
-		return a.checkSudoAndInstallCmd(item.id)
+		plan, err := buildInstallPlanForTools(a, defaultToolInstallRuntime(), time.Now(), []string{item.id})
+		if err != nil || plan == nil || plan.hasBlocked() {
+			a.pendingInstallPlan = nil
+			if err == nil {
+				err = fmt.Errorf("%s", installationSnapshotUnavailable)
+			}
+			a.installPlanError = err
+			a.manageStatus = installationSnapshotUnavailable
+			return nil
+		}
+		a.pendingInstallPlan = plan
+		a.installReviewTools = []string{item.id}
+		a.installPlanError = nil
+		a.installPlanScroll = 0
+		a.manageStatus = strings.ToUpper(action[:1]) + action[1:] + " requested"
+		return NavigateTo(ScreenFileTree)
 
 	case "?":
 		// Jump to hotkeys/cheatsheet for the selected tool.
@@ -354,36 +400,6 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.hotkeysReturn = ScreenManage
 		// ScreenHotkeys is migrated; route through the ScreenManager.
 		return NavigateTo(ScreenHotkeys)
-
-	case "c", "C":
-		// Clear install logs (only when not installing).
-		if !a.manageInstalling && len(a.installLogs) > 0 {
-			a.clearInstallLogs()
-			a.manageStatus = "Logs cleared"
-		}
-		return nil
-
-	case "pgup", "ctrl+u":
-		// Scroll logs up (when viewing logs).
-		if len(a.installLogs) > 0 {
-			a.installLogScroll += 10
-			maxScroll := CalculateMaxLogScroll(len(a.installLogs), layout.bodyH-6)
-			if a.installLogScroll > maxScroll {
-				a.installLogScroll = maxScroll
-			}
-			a.installLogAutoScroll = false
-		}
-		return nil
-
-	case "pgdown", "ctrl+d":
-		// Scroll logs down (when viewing logs).
-		if len(a.installLogs) > 0 {
-			a.installLogScroll -= 10
-			if a.installLogScroll < 0 {
-				a.installLogScroll = 0
-			}
-		}
-		return nil
 	}
 
 	// Pane-specific navigation.
@@ -416,6 +432,10 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	// Settings pane.
+	if lazyGitBlockReason != "" && oneOf(key, "left", "right", "h", "l", " ", "enter") {
+		a.manageStatus = "LazyGit settings are read-only: " + lazyGitBlockReason
+		return nil
+	}
 	switch key {
 	case "up", "k":
 		if a.configFieldIndex > 0 {
@@ -454,6 +474,8 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				adjustField(1)
 			case manageFieldNumber:
 				adjustField(1)
+			case manageFieldText:
+				// Space is inserted only while the text editor is active.
 			}
 		}
 		return nil
@@ -468,12 +490,9 @@ func (s *manageScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				if f.key == "animations" && a.animationsEnabled && !wasEnabled {
 					return tickUI()
 				}
-			case manageFieldText:
+			case manageFieldText, manageFieldNumber:
 				startEditingField()
 			case manageFieldOption:
-				adjustField(1)
-			case manageFieldNumber:
-				// No modal editor for numbers yet; treat as increment.
 				adjustField(1)
 			}
 		}
@@ -503,10 +522,13 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Handle tab bar clicks (Y=0 is the tab bar line). Ignore a click on the
 	// already-active tab (this screen). Migrated destinations enter managed mode;
 	// legacy destinations (Users) fall back to legacy mode harmlessly. Both go
-	// through navigateTab (NavigateTo + on-enter load). Blocked while installing
-	// so the streaming install message can't be dropped by a screen switch.
-	if !a.manageInstalling && m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-		if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+	// through navigateTab (NavigateTo + on-enter load).
+	if m.Y == 0 && m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
+		target := a.detectTabClick(m.X)
+		if a.compactManageSinglePaneActive() {
+			target = detectCompactManageTabClick(m.X)
+		}
+		if screen := target; screen != 0 && screen != s.ID() {
 			return s.navigateTab(screen)
 		}
 	}
@@ -525,7 +547,7 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Wheel scroll: choose pane based on mouse X.
 	if m.IsWheel() {
 		delta := 0
-		switch m.Button {
+		switch m.Button { //nolint:exhaustive // Only vertical wheel actions are meaningful here.
 		case tea.MouseButtonWheelUp:
 			delta = -1
 		case tea.MouseButtonWheelDown:
@@ -535,10 +557,28 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 
 		if m.X < layout.rightX { // left side (tools)
-			a.manageToolsScroll = clampInt(a.manageToolsScroll+delta, 0, layout.maxToolsScroll(len(items)))
+			oldScroll := a.manageToolsScroll
+			newScroll := clampInt(oldScroll+delta, 0, layout.maxToolsScroll(len(items)))
+			a.manageToolsScroll = newScroll
+			if a.manageIndex == oldScroll {
+				a.manageIndex = newScroll
+			} else if a.manageIndex < newScroll {
+				a.manageIndex = newScroll
+			} else if a.manageIndex >= newScroll+layout.leftListH {
+				a.manageIndex = newScroll + layout.leftListH - 1
+			}
 		} else { // right side (fields)
 			fields := a.manageFieldsFor(items[a.manageIndex].id)
-			a.manageFieldsScroll = clampInt(a.manageFieldsScroll+delta, 0, layout.maxFieldsScroll(len(fields)))
+			oldScroll := a.manageFieldsScroll
+			newScroll := clampInt(oldScroll+delta, 0, layout.maxFieldsScroll(len(fields)))
+			a.manageFieldsScroll = newScroll
+			if a.configFieldIndex == oldScroll {
+				a.configFieldIndex = newScroll
+			} else if a.configFieldIndex < newScroll {
+				a.configFieldIndex = newScroll
+			} else if a.configFieldIndex >= newScroll+layout.rightListH {
+				a.configFieldIndex = newScroll + layout.rightListH - 1
+			}
 		}
 		return nil
 	}
@@ -570,14 +610,6 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 	// Click in right pane fields area: focus + edit/toggle/adjust.
 	if layout.inRightList(m.X, m.Y) {
-		// While the install-log view occupies the right pane, the settings fields
-		// are not rendered (renderManageSettingsPanel swaps to the log panel when
-		// installing or logs exist). Ignore field hit-testing in that state so a
-		// click in the log region does not mutate hidden settings fields.
-		if a.manageInstalling || len(a.installLogs) > 0 {
-			return nil
-		}
-
 		items := a.manageItems()
 		if len(items) == 0 {
 			return nil
@@ -597,8 +629,17 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		a.managePane = managePaneSettings
 		a.configFieldIndex = fieldIdx
 		a.manageEnsureFieldsVisible(layout, len(fields))
+		if items[a.manageIndex].id == "lazygit" {
+			if reason := lazyGitManageUIBlockReason(a); reason != "" {
+				a.manageStatus = "LazyGit settings are read-only: " + reason
+				return nil
+			}
+		}
 
 		f := fields[fieldIdx]
+		if a.manageFieldMutationBlocked(f) {
+			return nil
+		}
 		switch f.kind {
 		case manageFieldToggle:
 			if f.b != nil {
@@ -613,6 +654,10 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			// Click on left half cycles backward, right half cycles forward.
 			forward := m.X >= (layout.rightX + layout.rightW/2)
 			if f.str != nil && len(f.options) > 0 {
+				if f.unknownReadOnly && !oneOf(*f.str, f.options...) {
+					a.manageStatus = "Custom native LazyGit values are read-only"
+					return nil
+				}
 				*f.str = cycleStringOption(f.options, *f.str, forward)
 				if f.key == "theme" {
 					a.syncThemeIndex()
@@ -629,7 +674,7 @@ func (s *manageScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 				if step == 0 {
 					step = 1
 				}
-				*f.n = clampInt(*f.n+dir*step, f.min, f.max)
+				*f.n = adjustManageNumber(*f.n, dir, step, f.min, f.max)
 			}
 		case manageFieldText:
 			// Single click just focuses. Enter starts editing (keyboard) for now.
@@ -658,7 +703,7 @@ func (s *manageScreen) View(width, height int) string {
 	}
 
 	// Show loading state if the install-status cache is being populated.
-	if a.installCacheLoading {
+	if a.installCacheLoading || a.installationSnapshotLoading {
 		spinner := AnimatedSpinnerDots(a.uiFrame)
 		loadingStyle := lipgloss.NewStyle().
 			Foreground(ColorCyan).
@@ -688,6 +733,14 @@ func (s *manageScreen) View(width, height int) string {
 		fields = a.manageFieldsFor(items[a.manageIndex].id)
 	}
 	a.manageEnsureFieldsVisible(layout, len(fields))
+	if a.compactManageSinglePaneActive() {
+		if a.managePane == managePaneTools {
+			return a.renderCompactManageTools(layout, items)
+		}
+		if len(items) > 0 && items[a.manageIndex].id == "yazi" {
+			return a.renderCompactManageYazi(layout, fields)
+		}
+	}
 
 	header := a.renderManageHeader(layout.w)
 	footer := a.renderManageFooter(layout.w, items, fields)

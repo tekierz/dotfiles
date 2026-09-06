@@ -13,13 +13,18 @@ import (
 
 // BrewManager implements PackageManager for Homebrew
 type BrewManager struct {
-	brewPath string
+	identity ExecutableIdentity
+	state    executableResolutionState
 }
 
 // NewBrewManager creates a new Homebrew manager
 func NewBrewManager() *BrewManager {
-	path, _ := exec.LookPath("brew")
-	return &BrewManager{brewPath: path}
+	return newBrewManager(exec.LookPath)
+}
+
+func newBrewManager(lookup executableLookup) *BrewManager {
+	resolution := resolveManagerExecutable("brew", lookup)
+	return &BrewManager{identity: resolution.identity, state: resolution.state}
 }
 
 func (b *BrewManager) Name() string {
@@ -27,16 +32,43 @@ func (b *BrewManager) Name() string {
 }
 
 func (b *BrewManager) IsAvailable() bool {
-	return b.brewPath != ""
+	return b.executablePath() != ""
+}
+
+func (b *BrewManager) ExecutableIdentity() (ExecutableIdentity, bool) {
+	if b == nil || b.state != executableResolutionValid || !validExecutableIdentity(b.identity) {
+		return ExecutableIdentity{}, false
+	}
+	return b.identity, true
+}
+
+func (b *BrewManager) executablePath() string {
+	identity, ok := b.ExecutableIdentity()
+	if !ok {
+		return ""
+	}
+	return identity.invocationPath
+}
+
+func (BrewManager) String() string {
+	return "brew_manager"
+}
+
+func (manager BrewManager) GoString() string {
+	return manager.String()
 }
 
 func (b *BrewManager) Install(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if b.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	args := append([]string{"install"}, packages...)
-	cmd := exec.Command(b.brewPath, args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, b.executablePath(), args...)
+	defer cancel()
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run()
@@ -46,19 +78,38 @@ func (b *BrewManager) Uninstall(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if b.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	args := append([]string{"uninstall"}, packages...)
-	cmd := exec.Command(b.brewPath, args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, b.executablePath(), args...)
+	defer cancel()
 	return cmd.Run()
 }
 
 func (b *BrewManager) IsInstalled(pkg string) bool {
-	cmd := exec.Command(b.brewPath, "list", pkg)
+	if b.executablePath() == "" {
+		return false
+	}
+	return b.IsInstalledContext(context.Background(), pkg)
+}
+
+func (b *BrewManager) IsInstalledContext(ctx context.Context, pkg string) bool {
+	if b.executablePath() == "" {
+		return false
+	}
+	cmd, cancel := packageCommandWithContext(ctx, packageQueryTimeout, b.executablePath(), "list", pkg)
+	defer cancel()
 	return cmd.Run() == nil
 }
 
 func (b *BrewManager) GetVersion(pkg string) (string, error) {
-	cmd := exec.Command(b.brewPath, "info", "--json=v2", pkg)
+	if b.executablePath() == "" {
+		return "", errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, b.executablePath(), "info", "--json=v2", pkg)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -98,9 +149,39 @@ func (b *BrewManager) GetVersion(pkg string) (string, error) {
 }
 
 func (b *BrewManager) CheckOutdated() ([]Package, error) {
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 	// --greedy includes auto-updating casks that would otherwise be skipped
 	// by `brew outdated` (they report as up-to-date without this flag).
-	cmd := exec.Command(b.brewPath, "outdated", "--json=v2", "--greedy")
+	cmd, cancel := packageCommand(packageQueryTimeout, b.executablePath(), "outdated", "--json=v2", "--greedy")
+	defer cancel()
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	return parseBrewOutdated(out.Bytes())
+}
+
+// CheckOutdatedNonGreedy reports outdated packages WITHOUT `--greedy`, so
+// auto-updating and `version :latest` casks are excluded. Those casks always
+// appear under `brew outdated --greedy` because brew cannot track their version,
+// which makes the greedy list useless as a "did this upgrade actually fail?"
+// oracle: they would be reported outdated forever, regardless of upgrade state.
+// The non-greedy list contains only packages whose version brew can verify, so a
+// package that REMAINS in it after an upgrade genuinely failed. recheckOutdatedNames
+// uses this after a partial-batch failure to keep formulae (and version-tracked
+// casks) honest while not falsely marking the auto-updaters brew cannot judge.
+// Parsing/filtering is shared with CheckOutdated via parseBrewOutdated.
+func (b *BrewManager) CheckOutdatedNonGreedy() ([]Package, error) {
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, b.executablePath(), "outdated", "--json=v2")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -186,19 +267,63 @@ func (b *BrewManager) Update(packages ...string) error {
 	if len(packages) == 0 {
 		return nil
 	}
+	if b.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
 
 	args := append([]string{"upgrade"}, packages...)
-	cmd := exec.Command(b.brewPath, args...)
+	cmd, cancel := packageCommand(packageMutationTimeout, b.executablePath(), args...)
+	defer cancel()
 	return cmd.Run()
 }
 
+// outdatedPackageNames returns the names of the outdated packages dotfiles
+// tracks and displays (formulae + casks from CheckOutdated, with pinned formulae
+// and empty-version casks already filtered out). "Update all" upgrades exactly
+// this set by name instead of running a bare `brew upgrade`, which would sweep in
+// every outdated formula and cask on the machine — a surprise full-system upgrade
+// from the Updates screen's "update all". Naming the packages explicitly also
+// forces the greedy auto-updating casks CheckOutdated surfaces (bare `brew
+// upgrade` skips them), so the action matches the list on screen.
+func (b *BrewManager) outdatedPackageNames() ([]string, error) {
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	outdated, err := b.CheckOutdated()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(outdated))
+	for _, p := range outdated {
+		names = append(names, p.Name)
+	}
+	return names, nil
+}
+
 func (b *BrewManager) UpdateAll() error {
-	cmd := exec.Command(b.brewPath, "upgrade")
+	if b.executablePath() == "" {
+		return errPackageManagerUnavailable
+	}
+	names, err := b.outdatedPackageNames()
+	if err != nil {
+		return fmt.Errorf("failed to determine outdated packages: %w", err)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	args := append([]string{"upgrade"}, names...)
+	cmd, cancel := packageCommand(packageMutationTimeout, b.executablePath(), args...)
+	defer cancel()
 	return cmd.Run()
 }
 
 func (b *BrewManager) Search(query string) ([]Package, error) {
-	cmd := exec.Command(b.brewPath, "search", query)
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, b.executablePath(), "search", query)
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -221,7 +346,14 @@ func (b *BrewManager) Search(query string) ([]Package, error) {
 }
 
 func (b *BrewManager) ListInstalled() ([]Package, error) {
-	cmd := exec.Command(b.brewPath, "list", "--versions")
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	// Scope formulae explicitly. An unscoped list can traverse casks and fail on
+	// unrelated untrusted taps even after emitting otherwise valid formula data.
+	// Casks are captured independently by ListInstalledCasks.
+	cmd, cancel := packageCommand(packageQueryTimeout, b.executablePath(), "list", "--formula", "--versions")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -229,8 +361,12 @@ func (b *BrewManager) ListInstalled() ([]Package, error) {
 		return nil, err
 	}
 
+	return parseBrewInstalledFormulae(out.Bytes()), nil
+}
+
+func parseBrewInstalledFormulae(data []byte) []Package {
 	var packages []Package
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	for _, line := range lines {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
@@ -242,14 +378,18 @@ func (b *BrewManager) ListInstalled() ([]Package, error) {
 		}
 	}
 
-	return packages, nil
+	return packages
 }
 
 // ListInstalledCasks returns all installed Homebrew casks as their cask tokens.
 // This is a single `brew list --cask` call, used to batch cask detection so that
 // cask-backed tools (e.g. sunshine, tailscale) don't each shell out individually.
 func (b *BrewManager) ListInstalledCasks() ([]string, error) {
-	cmd := exec.Command(b.brewPath, "list", "--cask")
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	cmd, cancel := packageCommand(packageQueryTimeout, b.executablePath(), "list", "--cask")
+	defer cancel()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -279,9 +419,41 @@ func (b *BrewManager) InstallStreaming(ctx context.Context, packages ...string) 
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
 	}
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 
 	args := append([]string{"install"}, packages...)
-	return runner.RunStreaming(ctx, b.brewPath, args...)
+	return runner.RunStreaming(ctx, b.executablePath(), args...)
+}
+
+func (b *BrewManager) InstallCasksStreaming(ctx context.Context, casks ...string) (*runner.StreamingCmd, error) {
+	if len(casks) == 0 {
+		return nil, fmt.Errorf("no casks specified")
+	}
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	for _, cask := range casks {
+		if !validCaskToken(cask) {
+			return nil, fmt.Errorf("invalid Homebrew cask token %q", cask)
+		}
+	}
+	args := append([]string{"install", "--cask"}, casks...)
+	return runner.RunStreaming(ctx, b.executablePath(), args...)
+}
+
+func validCaskToken(value string) bool {
+	if value == "" || value[0] == '-' {
+		return false
+	}
+	for _, r := range value {
+		allowed := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("+._@-", r)
+		if !allowed {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateStreaming updates packages with real-time output streaming
@@ -289,12 +461,33 @@ func (b *BrewManager) UpdateStreaming(ctx context.Context, packages ...string) (
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no packages specified")
 	}
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
 
 	args := append([]string{"upgrade"}, packages...)
-	return runner.RunStreaming(ctx, b.brewPath, args...)
+	return runner.RunStreaming(ctx, b.executablePath(), args...)
 }
 
-// UpdateAllStreaming updates all packages with real-time output streaming
+// UpdateAllStreaming upgrades only the outdated packages dotfiles tracks/displays
+// (see outdatedPackageNames), streaming output live. It deliberately does NOT run
+// a bare `brew upgrade`, which would upgrade every outdated formula and cask on
+// the system — the user must not get a surprise full-system upgrade from the
+// Updates screen's "update all".
 func (b *BrewManager) UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error) {
-	return runner.RunStreaming(ctx, b.brewPath, "upgrade")
+	if b.executablePath() == "" {
+		return nil, errPackageManagerUnavailable
+	}
+	names, err := b.outdatedPackageNames()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine outdated packages: %w", err)
+	}
+	if len(names) == 0 {
+		// Nothing outdated: return a no-op rather than falling through to a bare
+		// `brew upgrade`. The caller treats a nil command as a clean completion.
+		return nil, nil
+	}
+
+	args := append([]string{"upgrade"}, names...)
+	return runner.RunStreaming(ctx, b.executablePath(), args...)
 }

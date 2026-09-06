@@ -3,7 +3,9 @@ package pkg
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -31,6 +33,47 @@ type Package struct {
 	Outdated       bool   `json:"outdated"`
 	InstalledBy    string `json:"installed_by"` // brew, pacman, apt, manual
 	Description    string `json:"description,omitempty"`
+	provider       ExecutionProvider
+}
+
+// ExecutionProvider identifies the package manager instance that discovered an
+// update and therefore owns its eventual execution route. It is deliberately
+// separate from Package.InstalledBy, which remains display provenance (for
+// example, Paru may report a package as coming from "aur" or "pacman").
+type ExecutionProvider string
+
+const (
+	ExecutionProviderBrew   ExecutionProvider = "brew"
+	ExecutionProviderPacman ExecutionProvider = "pacman"
+	ExecutionProviderParu   ExecutionProvider = "paru"
+	ExecutionProviderAPT    ExecutionProvider = "apt"
+)
+
+// ExecutionProvider returns the immutable execution authority stamped by the
+// update discovery coordinator. A zero value means no execution authority was
+// accepted and must fail closed at an execution boundary.
+func (p Package) ExecutionProvider() ExecutionProvider {
+	return p.provider
+}
+
+// ExecutionProviderForManager projects a supported manager onto its execution
+// domain. Unknown manager names intentionally have no authority.
+func ExecutionProviderForManager(manager PackageManager) ExecutionProvider {
+	if manager == nil {
+		return ""
+	}
+	switch manager.Name() {
+	case string(ExecutionProviderBrew):
+		return ExecutionProviderBrew
+	case string(ExecutionProviderPacman):
+		return ExecutionProviderPacman
+	case string(ExecutionProviderParu):
+		return ExecutionProviderParu
+	case string(ExecutionProviderAPT):
+		return ExecutionProviderAPT
+	default:
+		return ""
+	}
 }
 
 // PackageManager defines the interface for package management operations
@@ -79,6 +122,58 @@ type PackageManager interface {
 
 	// UpdateAllStreaming updates all packages with real-time output streaming
 	UpdateAllStreaming(ctx context.Context) (*runner.StreamingCmd, error)
+}
+
+// ExecutableIdentityProvider is an optional capability implemented by package
+// managers whose executable was observed during construction. PackageManager
+// deliberately does not require it so independent implementations remain
+// source-compatible.
+type ExecutableIdentityProvider interface {
+	ExecutableIdentity() (ExecutableIdentity, bool)
+}
+
+type executableLookup func(string) (string, error)
+
+type executableResolutionState uint8
+
+const (
+	executableResolutionInvalid executableResolutionState = iota
+	executableResolutionMissing
+	executableResolutionValid
+)
+
+var errPackageManagerUnavailable = errors.New("package manager executable unavailable")
+
+type executableResolution struct {
+	identity ExecutableIdentity
+	state    executableResolutionState
+}
+
+func resolveManagerExecutable(name string, lookup executableLookup) executableResolution {
+	if lookup == nil {
+		return executableResolution{state: executableResolutionInvalid}
+	}
+	path, err := lookup(name)
+	if err != nil {
+		if path == "" && errors.Is(err, exec.ErrNotFound) {
+			return executableResolution{state: executableResolutionMissing}
+		}
+		return executableResolution{state: executableResolutionInvalid}
+	}
+	if !validExecutableIdentityPath(path) {
+		return executableResolution{state: executableResolutionInvalid}
+	}
+	identity, err := ObserveExecutableIdentity(path)
+	if err != nil {
+		return executableResolution{state: executableResolutionInvalid}
+	}
+	return executableResolution{identity: identity, state: executableResolutionValid}
+}
+
+// HomebrewCaskManager is deliberately narrow: callers can request only fixed
+// cask tokens, never arbitrary Homebrew arguments.
+type HomebrewCaskManager interface {
+	InstallCasksStreaming(context.Context, ...string) (*runner.StreamingCmd, error)
 }
 
 // Platform represents the current operating system
@@ -144,14 +239,13 @@ func detectManagerImpl() PackageManager {
 		if paru := NewPacmanManager(true); paru.IsAvailable() {
 			return paru
 		}
-		if pacman := NewPacmanManager(false); pacman.IsAvailable() {
-			return pacman
-		}
 	case PlatformDebian, PlatformPi:
 		// Raspberry Pi uses apt like Debian
 		if apt := NewAptManager(); apt.IsAvailable() {
 			return apt
 		}
+	case PlatformUnknown:
+		// No supported package manager can be inferred for an unknown platform.
 	}
 
 	return nil
@@ -167,8 +261,6 @@ func AllManagers() []PackageManager {
 	// Prefer paru if available (handles both official + AUR)
 	if paru := NewPacmanManager(true); paru.IsAvailable() {
 		managers = append(managers, paru)
-	} else if pacman := NewPacmanManager(false); pacman.IsAvailable() {
-		managers = append(managers, pacman)
 	}
 	if apt := NewAptManager(); apt.IsAvailable() {
 		managers = append(managers, apt)
@@ -199,7 +291,7 @@ func isRaspberryPi() bool {
 
 	// Fallback: check /proc/cpuinfo for Raspberry Pi
 	if f, err := os.Open("/proc/cpuinfo"); err == nil {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			line := strings.ToLower(scanner.Text())
@@ -236,7 +328,7 @@ func getTotalMemoryMBImpl() int {
 	if err != nil {
 		return 0
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {

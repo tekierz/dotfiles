@@ -1,0 +1,24 @@
+ 1 󰒓 Manage   2 󰀄 Users   3 󰌌 Hotkeys   4 󰚰 Update   5 󰁯 Backups                
+                                                                                
+ Backups                                                                        
+0 backup(s) available                                                           
+                                                                                
+No backups found.                                                               
+                                                                                
+Press 'n' to create a new backup.                                               
+                                                                                
+                                                                                
+n new backup • r refresh • 1-4 switch tabs • esc menu • q quit                  
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                

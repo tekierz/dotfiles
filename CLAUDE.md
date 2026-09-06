@@ -2,12 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Subagent model policy — updated 2026-09-05
+
+- Use `gpt-6-astra` for every subagent: research, planning, implementation, review, and verification.
+- Use low reasoning for straightforward inventory or mechanical tasks, medium for ordinary implementation, and high or higher for difficult architecture, security, concurrency, and adversarial review.
+- Keep one bounded task per agent and disjoint writable ownership. Agent roles do not select different models.
+- This policy supersedes older Sol/Terra, GPT-5.x, Claude-family, or wrapper-model assignments in repository instructions, plans, lessons, and global guidance.
+- If Astra is unavailable, report that limitation rather than silently substituting another model.
+
 ## Project Overview
 
-This is **dotfiles**: a cross-platform terminal environment management platform that creates a consistent terminal experience across macOS, Linux (Arch/Debian), and Raspberry Pi. It includes:
-
-- **Go TUI Application** (`cmd/dotfiles/`) - Interactive installer and management platform using Bubble Tea
-- **Legacy Bash Script** (`bin/dotfiles-setup`) - Original setup script (~3,700 lines of bash)
+This is **dotfiles**: a cross-platform terminal environment management platform
+that creates a consistent terminal experience across macOS, Linux (Arch/Debian),
+and Raspberry Pi. Its supported product is the **Go TUI application**
+(`cmd/dotfiles/`), an interactive installer and management platform using Bubble
+Tea. The former `bin/dotfiles-setup` Bash product was retired from active
+distribution; Git history is the historical record and migration guidance lives
+in `docs/legacy-migration.md`.
 
 The Go application provides installation, configuration, and updates for zsh, tmux, Ghostty, neovim, yazi, and 25+ other terminal tools with unified theming. v2.1 added Tailscale (VPN), Sunshine/Moonlight (game streaming), and Claude Code (MCP configuration).
 
@@ -22,20 +33,19 @@ internal/
   pkg/                   # Package manager abstraction (brew/pacman/apt)
   runner/                # Bash script execution
   scripts/               # Embedded utility scripts (hk, caff, sshh)
-  tools/                 # Tool registry (30 tools)
+  tools/                 # Tool registry (34 tools)
   ui/                    # Bubble Tea TUI (~15,700 lines)
 bin/
-  dotfiles               # Built Go binary
-  dotfiles-setup         # Legacy bash script
-  dotfiles-setup.ps1     # Windows PowerShell setup script
+  dotfiles               # Built Go binary (gitignored build output)
 docs/
   tools.md               # Detailed tool reference
+  legacy-migration.md    # Migration from the retired Bash product
   security-scanning.md   # Security scanning reference
   archive/               # Completed/superseded planning docs (historical)
 tasks/
   todo.md                # Active plan (release readiness)
   release-audit-2026-07-03.md  # Full audit report backing the plan
-  new-tools-spec.md      # Open spec: six AI CLI tools (not yet implemented)
+  new-tools-spec.md      # Superseded AI-tool prototype (historical only)
   archive/               # Completed remediation plans (historical)
 ```
 
@@ -57,7 +67,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 | Package | Purpose |
 |---------|---------|
 | `internal/ui/` | Bubble Tea TUI (Model-Update-View pattern) |
-| `internal/tools/` | Tool registry with 30 tools |
+| `internal/tools/` | Tool registry with 34 tools |
 | `internal/pkg/` | Package manager abstraction |
 | `internal/config/` | JSON configuration management |
 | `internal/hotkeys/` | Hotkey definitions |
@@ -65,7 +75,7 @@ The formula is maintained in the separate [homebrew-tap](https://github.com/teki
 
 ### Screen Navigation
 
-The TUI uses screen-based navigation with 31 screens (the `Screen` enum in
+The TUI uses screen-based navigation (the `Screen` enum in
 `internal/ui/app.go`):
 - Wizard: Intro, ThemeSelect, NavStyle, DeepDive, Summary
 - Management: MainMenu, Manage, Update, Hotkeys, Backups
@@ -73,10 +83,11 @@ The TUI uses screen-based navigation with 31 screens (the `Screen` enum in
 
 Each screen is a `ScreenHandler` implemented in package `ui` in a `screen_*.go`
 file (e.g. `screen_welcome.go`, `screen_manage.go`, `screen_config_*.go`).
-`App.Update` delegates to the `ScreenManager` (`uiTickMsg` and
-`installCacheDoneMsg` are handled globally first); `App.View` delegates to
-`ScreenManager.View()`. `NewApp` always wires the `ScreenManager` via
-`initScreenManager()`.
+`App.Update` reduces App-owned installation, Updates, Backups and Users results
+before screen dispatch, rejecting stale or duplicate request generations.
+`App.View` delegates to `ScreenManager.View()`. `NewApp` prepares the first
+handler without starting work; `App.Init` initializes the final CLI destination
+once and retains its command. Normal navigation initializes the target handler.
 
 ### Async Patterns
 
@@ -107,6 +118,9 @@ dotfiles manage           # Launch TUI management
 dotfiles hotkeys          # Launch TUI hotkey viewer
 dotfiles config <tool>    # Configure a specific tool
 dotfiles status           # Print status (CLI)
+dotfiles plan --json --tool <id> # Print an explicit, install-only public plan
+dotfiles apply --yes --plan-hash <hash> --tool <id> # Apply an exact fresh install plan
+dotfiles support --json   # Print bounded, redacted support JSON to stdout for review
 dotfiles backups          # List backups (CLI)
 dotfiles restore <name>   # Restore backup (CLI)
 dotfiles theme list       # List themes (CLI)
@@ -118,6 +132,16 @@ dotfiles version          # Print version
 dotfiles uninstall        # Remove dotfiles and restore config
 ```
 
+### Support-output guidance
+
+`dotfiles support --json` is the only reviewed support-sharing projection. It
+writes one bounded JSON document to stdout and never creates an archive/file or
+uploads output. Users must inspect it before sharing. Do not describe
+`doctor --json`, private operation journals, configuration files, or logs as
+share-safe; they contain diagnostic/private data outside the public allowlist.
+Exit 0 means complete JSON, exit 2 may mean partial valid JSON (or syntax failure
+with no JSON), and exit 1 is a generic fatal projection/output failure.
+
 ## Key Concepts
 
 - **16 themes** with unified colors across all tools
@@ -125,7 +149,8 @@ dotfiles uninstall        # Remove dotfiles and restore config
 - **Platform detection**: macOS (Homebrew), Arch (pacman/paru), Debian (apt)
 - **Tool registry**: Interface-based tool definitions with platform-specific packages
 - **Backup & restore**: Timestamped backups in `~/.config/dotfiles/backups/`
-- **Legacy cleanup**: `cleanupOldInstallations()` removes old dotfiles-tui/dotfiles-setup binaries
+- **Legacy diagnostics**: `dotfiles doctor` reports stale `dotfiles-tui` and
+  `dotfiles-setup` binaries without executing or deleting them
 
 ## Development
 

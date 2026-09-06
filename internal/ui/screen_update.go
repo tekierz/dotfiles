@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,7 +25,8 @@ import (
 // the check runs exactly once however the screen is entered.
 //
 // Async handling: the on-enter check result (updateCheckDoneMsg) is handled
-// here while this screen is active. The streaming/terminal update messages
+// here after App validates its generation, regardless of the active tab.
+// The streaming/terminal update messages
 // (updateSudoRequiredMsg, updateStartMsg, updateStreamMsg) are instead handled
 // GLOBALLY in App.Update before delegation, so the re-arm/finalize/refresh
 // chain survives navigation away from this screen (the worker goroutine +
@@ -38,7 +40,7 @@ import (
 // event on the main loop -- appending the line to installLogs so it renders
 // LIVE -- and RE-ISSUES listenUpdateStreamCmd until the `done` event, which
 // finalizes via a.finishUpdate. The worker never touches shared App state, so
-// there is no data race. The shared installLogMsg stays in App.Update.
+// there is no data race. Shared stream events stay in App.Update.
 type updateScreen struct {
 	BaseScreen
 }
@@ -61,7 +63,7 @@ func (s *updateScreen) Init() tea.Cmd {
 	}
 	if !a.updateChecking && !a.updateCheckDone {
 		a.updateChecking = true
-		return checkUpdatesCmd()
+		return a.startAsync(asyncUpdates, checkUpdatesCmd())
 	}
 	return nil
 }
@@ -89,7 +91,7 @@ func (s *updateScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
 
-	// --- Async results (delegated here while this screen is active) ---
+	// --- App routes accepted async results here even while another tab is active. ---
 	case updateCheckDoneMsg:
 		a.updateChecking = false
 		a.updateCheckDone = true
@@ -165,7 +167,12 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			var packagesToUpdate []pkg.Package
 			if len(a.updateSelected) > 0 {
 				// Update selected packages
+				indices := make([]int, 0, len(a.updateSelected))
 				for idx := range a.updateSelected {
+					indices = append(indices, idx)
+				}
+				sort.Ints(indices)
+				for _, idx := range indices {
 					if idx < len(a.updateResults) {
 						packagesToUpdate = append(packagesToUpdate, a.updateResults[idx])
 					}
@@ -177,14 +184,29 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			if len(packagesToUpdate) > 0 {
 				a.clearInstallLogs()
 				a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
+				// pacman/paru run -Syu: targeted updates ride a full system
+				// upgrade (partial upgrades break Arch). Say so.
+				if updateIncludesSystemUpgrade(packagesToUpdate) {
+					a.updateStatus = fmt.Sprintf("Updating %d package(s) + full system upgrade (-Syu)...", len(packagesToUpdate))
+				}
 				return checkSudoAndUpdateCmd(packagesToUpdate, false)
 			}
 		}
-	case "a": // Update all packages
+	case "a": // Update all *displayed* packages
 		if len(a.updateResults) > 0 && !a.updateChecking && !a.updateRunning {
 			a.clearInstallLogs()
-			a.updateStatus = "Updating all packages..."
-			return checkSudoAndUpdateCmd(nil, true)
+			// Upgrade exactly the dotfiles-tracked packages shown on screen,
+			// not every outdated system package. Route through the per-package
+			// path (the same one 'enter' uses) so "update all" matches the list
+			// the user sees; on pacman this still rides a -Syu full upgrade
+			// (partial upgrades break Arch), which the status text discloses.
+			packagesToUpdate := make([]pkg.Package, len(a.updateResults))
+			copy(packagesToUpdate, a.updateResults)
+			a.updateStatus = fmt.Sprintf("Updating %d package(s)...", len(packagesToUpdate))
+			if updateIncludesSystemUpgrade(packagesToUpdate) {
+				a.updateStatus = fmt.Sprintf("Updating %d package(s) + full system upgrade (-Syu)...", len(packagesToUpdate))
+			}
+			return checkSudoAndUpdateCmd(packagesToUpdate, false)
 		}
 	case "r": // Refresh updates
 		a.updateCheckDone = false
@@ -194,7 +216,7 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.updateStatus = ""
 		a.updateSelected = make(map[int]bool)
 		a.clearInstallLogs()
-		return checkUpdatesCmd()
+		return a.startAsync(asyncUpdates, checkUpdatesCmd())
 	case "c", "C": // Clear logs
 		if !a.updateRunning && len(a.installLogs) > 0 {
 			a.clearInstallLogs()
@@ -223,6 +245,16 @@ func (s *updateScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func updateIncludesSystemUpgrade(packages []pkg.Package) bool {
+	for _, update := range packages {
+		provider := update.ExecutionProvider()
+		if provider == pkg.ExecutionProviderPacman || provider == pkg.ExecutionProviderParu {
+			return true
+		}
+	}
+	return false
+}
+
 // handleMouse handles tab-bar clicks on the update screen (routes through the
 // ScreenManager via NavigateTo).
 func (s *updateScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
@@ -245,7 +277,7 @@ func (s *updateScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 	// Ignore a click on the already-active tab (this screen).
-	if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+	if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 		return s.navigateTab(screen)
 	}
 	return nil
@@ -278,19 +310,11 @@ func (s *updateScreen) View(width, height int) string {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Top, content)
 	}
 
-	// Check for errors
-	if a.updateError != nil {
+	// A check error with no results is fatal; with partial results (one of
+	// several managers failed) the list still renders, plus a warning line.
+	if a.updateError != nil && len(a.updateResults) == 0 {
 		body := lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("Error: %v", a.updateError))
 		help := HelpStyle.Render("r refresh • 1-4 switch tabs • esc menu • q quit")
-		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, "", help)
-		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Top, content)
-	}
-
-	// Check if no package manager detected (results will be nil with no error)
-	mgr := pkg.DetectManager()
-	if mgr == nil {
-		body := lipgloss.NewStyle().Foreground(ColorRed).Render("No package manager detected")
-		help := HelpStyle.Render("1-4 switch tabs • esc menu • q quit")
 		content := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", title, "", body, "", help)
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Top, content)
 	}
@@ -314,11 +338,11 @@ func (s *updateScreen) View(width, height int) string {
 
 	// Build subtitle with selection count
 	selectedCount := len(a.updateSelected)
-	subtitleText := fmt.Sprintf("Found %d outdated package(s)", len(updates))
+	subtitleText := fmt.Sprintf("Found %d outdated package(s) via %s", len(updates), updateProviderSummaryText(updates))
 	if selectedCount > 0 {
 		subtitleText += fmt.Sprintf(" • %d selected", selectedCount)
 	}
-	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(subtitleText)
+	subtitle := lipgloss.NewStyle().Foreground(ColorTextMuted).Render(truncateVisible(subtitleText, maxInt(1, width)))
 
 	// Show status message if any
 	var statusLine string
@@ -327,19 +351,45 @@ func (s *updateScreen) View(width, height int) string {
 		if strings.Contains(a.updateStatus, "failed") {
 			statusStyle = lipgloss.NewStyle().Foreground(ColorRed)
 		}
-		statusLine = statusStyle.Render(a.updateStatus)
+		statusLine = statusStyle.Render(truncateVisible(a.updateStatus, maxInt(1, width)))
 	}
 
-	boxOuterW := min(92, maxInt(44, width-8))
-	innerTextW := maxInt(20, boxOuterW-4) // border(2) + paddingX(2)
+	boxOuterW := min(92, maxInt(4, width-4))
+	innerTextW := maxInt(1, boxOuterW-4) // border(2) + paddingX(2)
+
+	// Measure chrome first so both result rows and footer stay inside the terminal.
+	helpText := "↑↓ navigate • space select • enter update • a update all • r refresh • esc menu"
+	if width < 80 {
+		helpText = "↑↓ move • space select • enter update\na all • r refresh • esc menu"
+	}
+	helpStyle := HelpStyle.Width(maxInt(1, width))
+	if height < 20 {
+		helpStyle = helpStyle.Padding(0, 0)
+	}
+	help := helpStyle.Render(helpText)
+	contentParts := []string{tabBar, "", title, subtitle}
+	if a.updateError != nil {
+		contentParts = append(contentParts, lipgloss.NewStyle().Foreground(ColorYellow).Render(
+			truncateVisible(fmt.Sprintf("⚠ some checks failed: %v", a.updateError), maxInt(1, width))))
+	}
+	if statusLine != "" {
+		contentParts = append(contentParts, statusLine)
+	}
+	prefix := lipgloss.JoinVertical(lipgloss.Left, append(contentParts, "")...)
+	suffix := lipgloss.JoinVertical(lipgloss.Left, "", help)
+	// Two column-heading rows, two border rows, and one visible-range row.
+	rows := maxInt(1, height-lipgloss.Height(prefix)-lipgloss.Height(suffix)-5)
+	start := maxInt(0, min(a.updateIndex-rows+1, len(updates)-rows))
+	end := min(len(updates), start+rows)
 
 	// Package list
 	var pkgLines []string
 	headerStyle := lipgloss.NewStyle().Foreground(ColorMagenta).Bold(true)
-	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-25s %-12s %-12s", "PACKAGE", "CURRENT", "LATEST")), innerTextW))
-	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-25s %-12s %-12s", strings.Repeat("─", 25), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
+	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-21s %-8s %-12s %-12s", "PACKAGE", "PROVIDER", "CURRENT", "LATEST")), innerTextW))
+	pkgLines = append(pkgLines, truncateVisible(headerStyle.Render(fmt.Sprintf("   %-21s %-8s %-12s %-12s", strings.Repeat("─", 21), strings.Repeat("─", 8), strings.Repeat("─", 12), strings.Repeat("─", 12))), innerTextW))
 
-	for i, p := range updates {
+	for i := start; i < end; i++ {
+		p := updates[i]
 		cursor := "  "
 		checkbox := "○"
 		style := lipgloss.NewStyle().Foreground(ColorText)
@@ -357,15 +407,17 @@ func (s *updateScreen) View(width, height int) string {
 			style = style.Bold(true)
 		}
 
-		line := fmt.Sprintf("%s%s %-25s %s → %s",
+		line := fmt.Sprintf("%s%s %-21s %-8s %s → %s",
 			cursor,
 			checkStyle.Render(checkbox),
 			style.Render(p.Name),
+			lipgloss.NewStyle().Foreground(ColorCyan).Render(updateProviderLabel(p)),
 			versionStyle.Render(p.CurrentVersion),
 			newStyle.Render(p.LatestVersion))
 		pkgLines = append(pkgLines, truncateVisible(line, innerTextW))
 	}
 
+	pkgLines = append(pkgLines, truncateVisible(fmt.Sprintf("Showing %d–%d of %d", start+1, end, len(updates)), innerTextW))
 	packageList := strings.Join(pkgLines, "\n")
 
 	listBox := lipgloss.NewStyle().
@@ -375,20 +427,30 @@ func (s *updateScreen) View(width, height int) string {
 		Width(maxInt(1, boxOuterW-2)). // border adds 2
 		Render(packageList)
 
-	help := HelpStyle.Render("↑↓ navigate • space select • enter update • a update all • r refresh • esc menu")
-
-	// Build content with optional status line
-	var contentParts []string
-	contentParts = append(contentParts, tabBar, "", title, subtitle)
-	if statusLine != "" {
-		contentParts = append(contentParts, statusLine)
-	}
-	contentParts = append(contentParts, "", listBox, "", help)
-	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
+	content := lipgloss.JoinVertical(lipgloss.Left, prefix, listBox, suffix)
 
 	return lipgloss.Place(width, height,
 		lipgloss.Center, lipgloss.Top,
 		content)
+}
+
+func updateProviderLabel(update pkg.Package) string {
+	if provider := update.ExecutionProvider(); provider != "" {
+		return string(provider)
+	}
+	return "unbound"
+}
+
+func updateProviderSummaryText(updates []pkg.Package) string {
+	providers := pkg.ExecutionProviders(updates)
+	labels := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		labels = append(labels, string(provider))
+	}
+	if len(labels) == 0 {
+		return "unbound provider"
+	}
+	return strings.Join(labels, ", ")
 }
 
 // viewWithLogs renders the update screen with the streaming log panel.

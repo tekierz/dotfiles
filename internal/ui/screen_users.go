@@ -73,16 +73,21 @@ type userSavedMsg struct {
 	err  error
 }
 
-// userDeletedMsg is sent after deleting a user profile
+// userDeletedMsg is sent after deleting a user profile. warn carries a non-fatal
+// warning (e.g. the active-user marker could not be cleared) so the deletion is
+// still reported as succeeded while the secondary failure is surfaced rather than
+// swallowed.
 type userDeletedMsg struct {
 	name string
 	err  error
+	warn string
 }
 
 // userSwitchedMsg is sent after switching to a user
 type userSwitchedMsg struct {
-	name string
-	err  error
+	name     string
+	err      error
+	settings *config.GlobalConfig
 }
 
 // loadUsersCmd loads all user profiles
@@ -115,6 +120,14 @@ func loadUsersCmd() tea.Cmd {
 		}
 
 		return userLoadedMsg{users: users, activeUser: activeUser}
+	}
+}
+
+// createUserCmd keeps the New action separate from explicit Save/upsert.
+func createUserCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		err := config.CreateUserProfile(config.DefaultUserProfile(name))
+		return userSavedMsg{name: name, err: err}
 	}
 }
 
@@ -152,10 +165,16 @@ func deleteUserCmd(name string) tea.Cmd {
 		// hotkeys/favorites system (keyed by global config's ActiveUser) is not
 		// left pointing at a now-nonexistent profile, orphaning its data.
 		if cfg, err := config.LoadGlobalConfig(); err == nil && cfg != nil && cfg.ActiveUser == name {
-			// Best effort: a failure here leaves the profile deleted but the
-			// active marker stale; surface nothing further since the deletion
-			// itself succeeded.
-			_ = config.ClearActiveUser()
+			// The deletion itself succeeded, so this is a non-fatal warning rather
+			// than a delete failure: if clearing fails, the stale active marker
+			// orphans the deleted user's hotkeys/favorites, so surface it (instead
+			// of swallowing it) while still reporting the delete as done.
+			if cerr := config.ClearActiveUser(); cerr != nil {
+				return userDeletedMsg{
+					name: name,
+					warn: fmt.Sprintf("active-user marker not cleared: %v", cerr),
+				}
+			}
 		}
 
 		return userDeletedMsg{name: name}
@@ -169,10 +188,17 @@ func switchUserCmd(name string) tea.Cmd {
 		if err != nil {
 			return userSwitchedMsg{name: name, err: err}
 		}
-		if err := config.ApplyUserProfile(profile); err != nil {
+		settings, err := config.LoadGlobalConfig()
+		if err != nil {
 			return userSwitchedMsg{name: name, err: err}
 		}
-		return userSwitchedMsg{name: name}
+		settings.Theme, settings.NavStyle, settings.ActiveUser = profile.Theme, profile.NavStyle, profile.Name
+		if err := config.SaveGlobalConfig(settings); err != nil {
+			return userSwitchedMsg{name: name, err: err}
+		}
+		// Return the exact saved settings, including the retained motion policy;
+		// reloading after the write could adopt an unrelated subsequent edit.
+		return userSwitchedMsg{name: name, settings: config.CloneGlobalConfig(settings)}
 	}
 }
 
@@ -193,12 +219,9 @@ func switchUserCmd(name string) tea.Cmd {
 // kicks this load before navigating, and both guard on usersLoaded, so the list
 // loads exactly once however the screen is entered.
 //
-// Async-in-handler: because the ScreenManager delegates every non-navigation
-// message to this handler while it is active, the Users async results are
-// handled here (not in App.Update): userLoadedMsg, userSavedMsg, userDeletedMsg,
-// userSwitchedMsg. The save/delete/switch results re-issue loadUsersCmd to
-// refresh the list. Deleting the active user clears ActiveUser inside
-// deleteUserCmd (the Phase B fix), preserved here.
+// App validates generation-bound completions globally and invokes these reducers
+// regardless of the active tab. Save/delete/switch retain their follow-up read.
+// Deleting the active user still clears ActiveUser inside deleteUserCmd.
 type usersScreen struct {
 	BaseScreen
 }
@@ -221,7 +244,7 @@ func (s *usersScreen) Init() tea.Cmd {
 	}
 	if !a.usersLoaded {
 		a.usersLoaded = true
-		return loadUsersCmd()
+		return a.startAsync(asyncUsers, loadUsersCmd())
 	}
 	return nil
 }
@@ -253,7 +276,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 	case tea.MouseMsg:
 		return s, s.handleMouse(msg)
 
-	// --- Async results (delegated here while this screen is active) ---
+	// --- App routes accepted async results here even while another tab is active. ---
 	case userLoadedMsg:
 		if msg.err != nil {
 			// Reset the guard so re-entering the screen retries the load
@@ -261,6 +284,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 			a.usersLoaded = false
 			a.usersStatus = fmt.Sprintf("Load failed: %v", msg.err)
 		} else {
+			a.usersLoaded = true
 			a.usersItems = msg.users
 			a.usersStatus = ""
 		}
@@ -272,7 +296,7 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		} else {
 			a.usersStatus = fmt.Sprintf("Saved %s ✓", msg.name)
 			// Reload user list.
-			return s, loadUsersCmd()
+			return s, a.startAsync(asyncUsers, loadUsersCmd())
 		}
 		return s, nil
 
@@ -280,12 +304,16 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		if msg.err != nil {
 			a.usersStatus = fmt.Sprintf("Delete failed: %v", msg.err)
 		} else {
-			a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
+			if msg.warn != "" {
+				a.usersStatus = fmt.Sprintf("Deleted %s (warning: %s)", msg.name, msg.warn)
+			} else {
+				a.usersStatus = fmt.Sprintf("Deleted %s", msg.name)
+			}
 			// Reload user list and adjust index.
 			if a.usersIndex > 0 {
 				a.usersIndex--
 			}
-			return s, loadUsersCmd()
+			return s, a.startAsync(asyncUsers, loadUsersCmd())
 		}
 		return s, nil
 
@@ -293,9 +321,13 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 		if msg.err != nil {
 			a.usersStatus = fmt.Sprintf("Switch failed: %v", msg.err)
 		} else {
+			if msg.settings == nil {
+				a.usersStatus = "Switch failed: saved settings unavailable"
+				return s, nil
+			}
+			adoption := a.adoptProfileSettings(msg.settings)
 			a.usersStatus = fmt.Sprintf("Switched to %s ✓", msg.name)
-			// Reload user list to update active indicator.
-			return s, loadUsersCmd()
+			return s, tea.Batch(adoption, a.startAsync(asyncUsers, loadUsersCmd()))
 		}
 		return s, nil
 	}
@@ -307,9 +339,16 @@ func (s *usersScreen) Update(msg tea.Msg) (ScreenHandler, tea.Cmd) {
 func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 	a := s.App()
 	key := msg.String()
+	if a.asyncRequests[asyncUserOperation].pending {
+		if target, ok := tabNavigationTarget(key); ok && target != s.ID() {
+			return s.navigateTab(target)
+		}
+		return nil
+	}
 
 	// Handle new user name input.
-	if a.usersCreating {
+	switch {
+	case a.usersCreating:
 		switch key {
 		case "esc":
 			a.usersCreating = false
@@ -325,7 +364,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.usersCreating = false
 				name := a.usersNewName
 				a.usersNewName = ""
-				return saveUserCmd(name, "catppuccin-mocha", "emacs", "linux")
+				return a.startAsync(asyncUserOperation, createUserCmd(name))
 			}
 			return nil
 		case "backspace":
@@ -354,7 +393,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.usersDeleting = false
 			if a.usersIndex < len(a.usersItems) {
 				name := a.usersItems[a.usersIndex].name
-				return deleteUserCmd(name)
+				return a.startAsync(asyncUserOperation, deleteUserCmd(name))
 			}
 			return nil
 		case "n", "N", "esc":
@@ -439,7 +478,7 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			// Switch to selected user.
 			if a.usersIndex < len(a.usersItems) {
 				name := a.usersItems[a.usersIndex].name
-				return switchUserCmd(name)
+				return a.startAsync(asyncUserOperation, switchUserCmd(name))
 			}
 		} else {
 			// Cycle option field.
@@ -470,13 +509,13 @@ func (s *usersScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// Save current user's settings.
 		if len(a.usersItems) > 0 && a.usersIndex < len(a.usersItems) {
 			item := a.usersItems[a.usersIndex]
-			return saveUserCmd(item.name, item.theme, item.navStyle, item.keyboard)
+			return a.startAsync(asyncUserOperation, saveUserCmd(item.name, item.theme, item.navStyle, item.keyboard))
 		}
 		return nil
 
 	case "r":
 		// Refresh user list.
-		return loadUsersCmd()
+		return a.startAsync(asyncUsers, loadUsersCmd())
 
 	case "esc":
 		// ScreenMainMenu is migrated; route through the ScreenManager. ('q' is
@@ -574,7 +613,7 @@ func (s *usersScreen) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// click on the already-active tab (this screen).
 	if m.Y == 0 {
 		if m.Action == tea.MouseActionPress && m.Button == tea.MouseButtonLeft {
-			if screen, _ := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
+			if screen := a.detectTabClick(m.X); screen != 0 && screen != s.ID() {
 				return s.navigateTab(screen)
 			}
 		}
@@ -710,7 +749,8 @@ func (a *App) renderUsersListPane(width, height int) string {
 		Width(width).
 		Padding(0, 1)
 
-	if a.usersCreating {
+	switch {
+	case a.usersCreating:
 		b.WriteString(headerStyle.Render("New User: " + a.usersNewName + "█"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().
@@ -718,7 +758,7 @@ func (a *App) renderUsersListPane(width, height int) string {
 			Padding(0, 1).
 			Render("Enter name, Esc to cancel"))
 		b.WriteString("\n\n")
-	} else if a.usersDeleting && a.usersIndex < len(a.usersItems) {
+	case a.usersDeleting && a.usersIndex < len(a.usersItems):
 		b.WriteString(headerStyle.Render("Delete " + a.usersItems[a.usersIndex].name + "?"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().
@@ -726,7 +766,7 @@ func (a *App) renderUsersListPane(width, height int) string {
 			Padding(0, 1).
 			Render("Press Y to confirm, N to cancel"))
 		b.WriteString("\n\n")
-	} else {
+	default:
 		b.WriteString(headerStyle.Render("User Profiles"))
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().

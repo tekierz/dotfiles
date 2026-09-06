@@ -1,0 +1,21 @@
+{
+  "artifact": "tasks/release-gates-2026-09-05.html",
+  "browser": "Playwright Chromium",
+  "viewports": [
+    1440,
+    390,
+    320
+  ],
+  "page_overflow": false,
+  "status_rows": 6,
+  "local_links_and_anchors": "passed",
+  "desktop_mobile_visual_inspection": "passed",
+  "print_pdf": "generated and text checked locally",
+  "original_audit_update": {
+    "finding_rows": 18,
+    "dependency_review_resolved": true,
+    "release_guide_link": true
+  },
+  "screenshots": "Private recovery archive; output/playwright/release-gates-*.png",
+  "screens": "pty-screens.html"
+}

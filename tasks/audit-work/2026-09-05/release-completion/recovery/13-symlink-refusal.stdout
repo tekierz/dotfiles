@@ -1,0 +1,10 @@
+Restoring backup: 2026-09-05_21-56-12
+  Restored: .config/ghostty/config
+  Restored: .config/nvim/init.lua
+  Restored: .config/yazi/keymap.toml
+  Restored: .config/yazi/theme.toml
+  Restored: .config/yazi/yazi.toml
+  Restored: .gitconfig
+  Restored: .tmux.conf
+
+Restore summary: 7 restored, 0 removed, 1 skipped, 0 warnings.
