@@ -52,6 +52,7 @@
     "codeql_findings": "passed; zero open branch alerts",
     "synthetic_recovery_checks": 11,
     "packaging": "passed; ordinary clean clone; vcs.modified=false",
-    "authenticated_integrations": "not tested"
+    "authenticated_integrations": "candidate-specific, Pi and authenticated MCP not tested",
+    "existing_claude_authentication": "passed; Claude2.1.263 one-word model response, zero tools/MCP servers loaded"
   }
 }

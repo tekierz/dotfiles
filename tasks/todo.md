@@ -32,6 +32,7 @@ Spec and decision record: [release completion](../docs/release-completion-2026-0
 - [x] Run real candidate Homebrew clean install, v2.0.1 upgrade, and package rollback at `7214af5`.
 - [x] Run real Debian version transitions, native Linux ARM64, and Arch acceptance at `7214af5`.
 - [x] Verify live supported Codex/Pi npm installation/startup and MCP handshake at `7214af5`; authenticated integrations remain separate.
+- [x] Verify an authenticated one-word response from existing Claude 2.1.263 with no tools; candidate/Pi/authenticated MCP acceptance remains separate.
 - [ ] Complete owner terminal/font/mouse, tested whole-disk snapshot recovery, and actual Raspberry Pi observations.
 - [x] Prepare draft promotion PR #6 and authored v3.0.0 release notes wired to the existing workflow.
 - [ ] Obtain remaining hardware/owner/authentication evidence, promote main, publish through existing tagged release workflow, and verify the updated tap.

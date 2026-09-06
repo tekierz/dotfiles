@@ -80,3 +80,5 @@
 - Pinned Go 1.26.8 ignores linked-worktree `.git` files for embedded VCS metadata, even with `-buildvcs=true`. A clean ordinary local clone with a real `.git` directory restores exact `vcs.revision` and `vcs.modified=false`; use it for provenance-sensitive release rehearsals rather than weakening verification or changing product build flags.
 
 - Validate release-evidence links against Git’s tracked/indexed files, not only filesystem existence. Repository-wide log ignores can silently omit bounded synthetic test evidence; explicitly stage only the reviewed evidence files instead of changing global ignore rules.
+
+- Real CLI JSON output can be an event array despite help describing a single result. Preserve private raw output before reducing evidence, then select the result event explicitly; count CLI invocations separately from model turns and unknown HTTP requests.
