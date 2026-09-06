@@ -31,14 +31,11 @@ Final source passed local Go 1.26.8 normal/race suites, Darwin/Linux lint, vet a
 
 Initial failed test runs are retained as evidence: unsuitable temporary-directory ownership was corrected in the local harness; inherited XDG/Yazi and host npm/node assumptions were reproduced and fixed in tests. Product authority checks were retained.
 
-## Remaining release decisions
+## Release acceptance continuation
 
-1. Adopt the prepared [Homebrew ownership repair](audit-work/2026-09-05/homebrew-proposal/README.md). Its current v2.0.1 archive hash is verified and temporary formula tests pass 15 assertions. It has not been published to the tap. The future product release needs its own immutable source/hash and isolated clean-install, upgrade, uninstall and rollback trials.
-2. Run real owner/platform acceptance: interactive TUI and backup recovery, Debian/Arch/macOS package transitions, Raspberry Pi resource behavior, npm integration installation/authentication, and pinned remote/MCP startup. Safe fixtures, cross-builds and ephemeral Linux root tests do not substitute for these trials.
-3. Resolve repository policy before publication. Dependency Review currently fails because GitHub's dependency graph is disabled, not because it found a new dependency advisory. Enabling that setting is separately pending user input. Existing main protection requires Lint, Test and Build (ubuntu-latest), with strict freshness disabled. Release Gate enforcement and other security settings remain explicit owner decisions.
-4. Promote reviewed source to main, select a release version, run the exact tag gate, and publish only after the above gates. Main and release tags were not changed. Developer ID signing/notarization requires separate credentials and policy.
+The [release guide](release-gates-2026-09-05.html) and [execution record](release-gates-2026-09-05.md) supersede the previous pending-gate status. Dependency graph/alerts are enabled and Dependency Review passes. Integration `739f82f` passed full CI, CodeQL and eight real Debian acceptance cases, including installation and a supervised no-op update. Ten isolated Darwin PTY assertions passed against the integrated production source. [Homebrew PR #1](https://github.com/tekierz/homebrew-tap/pull/1) passes 18 assertions plus three actual hosted macOS install/uninstall cycles and awaits its merge decision.
 
-No owner package install, privileged update, destructive worktree cleanup, force push or release publication was performed during this program.
+Remaining work is exact-candidate upgrade/rollback and additional platform/integration acceptance, owner policy decisions, main promotion, version selection and approved publication. The tap still targets v2.0.1. Owner package operations, main and release tags were not changed.
 
 ## Unpublished release rehearsal and artifact review
 

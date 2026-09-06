@@ -12,6 +12,16 @@ Canonical current plan: [integration-plan-2026-09-05.md](integration-plan-2026-0
 - [x] Complete change-level dirty-worktree analysis and publish the reviewed preservation checkpoint (97 exact remote archive matches; `release-remediation` checkpoint `391a793`).
 - [x] Build and verify the combined candidate and integrate bounded fixes; final source f7ff93f passed remote CI/CodeQL, local gates and unpublished packaging. See [integration results](integration-results-2026-09-05.md) for remaining release gates.
 
+## Remaining release gates — active continuation
+
+Plan: [readable release guide](release-gates-2026-09-05.html) and [execution record](release-gates-2026-09-05.md). Continue from verified integration `4a4cf57`; source repairs are complete, release acceptance is not.
+
+- [x] Enable dependency graph/alerts and verify Dependency Review passes; branch protection decisions remain explicit.
+- [x] Publish a reviewable Homebrew ownership-only repair with its verified tests.
+- [x] Execute the next disposable real-platform acceptance slice.
+- [x] Exercise isolated interactive TUI and backup recovery flows; record hardware limits.
+- [x] Update the human-readable guide and remaining promotion decisions.
+
 ## Human-readable HTML audit guide — 2026-09-05
 
 - [x] Define the guide around the completed audit, its branch distinctions, and evidence limits.
