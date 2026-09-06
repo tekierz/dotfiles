@@ -19,6 +19,7 @@ import (
 const qaRoot = "/opt/dotfiles-platform-qa"
 const qaExecutable = qaRoot + "/platformqa"
 const qaAuthorization = "dotfiles-platform-qa-debian-v1\n"
+const qaArchAuthorization = "dotfiles-platform-qa-arch-v1\n"
 
 func main() { os.Exit(run()) }
 
@@ -40,11 +41,23 @@ func run() int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	manager := pkg.NewAptManager()
-	expected, err := pkg.ObserveExecutableIdentity("/usr/bin/apt")
+	var manager acceptanceManager = pkg.NewAptManager()
+	platform, managerPath := "DEBIAN", "/usr/bin/apt"
+	authorization, err := os.ReadFile(qaRoot + "/authorized")
+	if err != nil {
+		return 125
+	}
+	if string(authorization) == qaArchAuthorization {
+		manager = pkg.NewPacmanManager(false)
+		platform, managerPath = "ARCH", "/usr/bin/pacman"
+		if os.Args[1] == "receipt-held" || os.Args[1] == "upgrade" {
+			return 125
+		}
+	}
+	expected, err := pkg.ObserveExecutableIdentity(managerPath)
 	captured, ok := manager.ExecutableIdentity()
 	if err != nil || !ok || captured.Digest() != expected.Digest() {
-		fmt.Fprintln(os.Stderr, "unexpected APT executable identity")
+		fmt.Fprintln(os.Stderr, "unexpected package manager executable identity")
 		return 1
 	}
 	switch os.Args[1] {
@@ -53,13 +66,15 @@ func run() int {
 	case "receipt-held":
 		err = verifyReceipt(ctx, manager, "hold ok installed")
 	case "update":
-		err = verifyUpdate(ctx, manager)
+		err = verifyUpdate(ctx, manager, false)
+	case "upgrade":
+		err = verifyUpdate(ctx, manager, true)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "platform acceptance failed: %v\n", err)
 		return 1
 	}
-	fmt.Printf("DOTFILES_DEBIAN_QA_EXECUTED mode=%s\n", os.Args[1])
+	fmt.Printf("DOTFILES_%s_QA_EXECUTED mode=%s\n", platform, os.Args[1])
 	return 0
 }
 
@@ -67,7 +82,7 @@ func normalRequestAllowed(uid int, ci, github, optin string, args []string) bool
 	if uid == 0 || ci != "true" || github != "true" || optin != "1" || len(args) != 1 {
 		return false
 	}
-	return args[0] == "receipt" || args[0] == "receipt-held" || args[0] == "update"
+	return args[0] == "receipt" || args[0] == "receipt-held" || args[0] == "update" || args[0] == "upgrade"
 }
 
 // A temporary HOME or ambient opt-in alone cannot authorize this executable on
@@ -95,18 +110,32 @@ func checkPreparation(executable string, lstat func(string) (os.FileInfo, error)
 	if err != nil {
 		return err
 	}
-	if string(data) != qaAuthorization {
+	if string(data) != qaAuthorization && string(data) != qaArchAuthorization {
 		return errors.New("missing acceptance authorization")
 	}
 	return nil
 }
 
-func verifyReceipt(ctx context.Context, manager *pkg.AptManager, wantStatus string) error {
-	output, err := exec.CommandContext(ctx, "/usr/bin/dpkg-query", "-W", "-f=${Status}\t${Version}", "fzf").Output()
+type acceptanceManager interface {
+	pkg.PackageManager
+	pkg.ExecutableIdentityProvider
+	IsInstalledContext(context.Context, string) bool
+}
+
+func verifyReceipt(ctx context.Context, manager acceptanceManager, wantStatus string) error {
+	command := exec.CommandContext(ctx, "/usr/bin/dpkg-query", "-W", "-f=${Status}\t${Version}", "fzf")
+	if manager.Name() == "pacman" {
+		command = exec.CommandContext(ctx, "/usr/bin/pacman", "-Q", "fzf")
+	}
+	output, err := command.Output()
 	if err != nil {
 		return err
 	}
 	fields := strings.Split(strings.TrimSpace(string(output)), "\t")
+	if manager.Name() == "pacman" {
+		fields = strings.Fields(string(output))
+		wantStatus = "fzf"
+	}
 	if len(fields) != 2 || fields[0] != wantStatus || fields[1] == "" {
 		return fmt.Errorf("native receipt mismatch: %q", output)
 	}
@@ -118,9 +147,9 @@ func verifyReceipt(ctx context.Context, manager *pkg.AptManager, wantStatus stri
 		return err
 	}
 	if version != fields[1] {
-		return errors.New("individual receipt version disagrees with dpkg")
+		return errors.New("individual receipt version disagrees with native manager")
 	}
-	installed, err := manager.ListInstalledContext(ctx)
+	installed, err := manager.ListInstalled()
 	if err != nil {
 		return err
 	}
@@ -140,7 +169,7 @@ func verifyReceipt(ctx context.Context, manager *pkg.AptManager, wantStatus stri
 	return nil
 }
 
-func verifyUpdate(ctx context.Context, manager *pkg.AptManager) error {
+func verifyUpdate(ctx context.Context, manager acceptanceManager, requireUpgrade bool) error {
 	before, err := manager.GetVersion("fzf")
 	if err != nil {
 		return err
@@ -150,10 +179,10 @@ func verifyUpdate(ctx context.Context, manager *pkg.AptManager) error {
 		return err
 	}
 	if command == nil {
-		return errors.New("missing APT update sequence")
+		return errors.New("missing package update sequence")
 	}
-	// The real sequence drains apt update before apt install, using captured
-	// identity and the production sudo supervisor. No test factory is injected.
+	// Execute the real production update with captured identity and the sudo
+	// supervisor. No test factory is injected.
 	for line := range command.Output {
 		fmt.Println(line)
 	}
@@ -167,9 +196,16 @@ func verifyUpdate(ctx context.Context, manager *pkg.AptManager) error {
 	if err != nil {
 		return err
 	}
-	if before != after {
-		return errors.New("repository version changed during no-op acceptance; rerun on a stable snapshot")
+	if requireUpgrade {
+		if manager.Name() != "apt" || exec.CommandContext(ctx, "/usr/bin/dpkg", "--compare-versions", before, "lt", after).Run() != nil {
+			return errors.New("expected a real version-increasing APT update")
+		}
+		fmt.Printf("update evidence=version-change before=%s after=%s\n", before, after)
+	} else {
+		if before != after {
+			return errors.New("repository version changed during no-op acceptance; rerun on a stable snapshot")
+		}
+		fmt.Printf("update evidence=no-op version=%s\n", after)
 	}
-	fmt.Printf("update evidence=no-op version=%s\n", after)
 	return nil
 }

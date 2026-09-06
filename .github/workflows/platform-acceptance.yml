@@ -9,10 +9,29 @@ permissions:
   contents: read
 
 jobs:
-  debian:
-    name: Debian 13 real package acceptance
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+  linux:
+    name: ${{ matrix.label }} real package acceptance
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Debian 13 amd64
+            runner: ubuntu-24.04
+            distro: debian
+            arch: amd64
+            image: debian@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+          - label: Debian 13 arm64
+            runner: ubuntu-24.04-arm
+            distro: debian
+            arch: arm64
+            image: debian@sha256:7215f78f35ffe58fe13f244fac9c4f21326d55187271fbb3e1a8aa5cc7e387ab
+          - label: Arch Linux amd64
+            runner: ubuntu-24.04
+            distro: arch
+            arch: amd64
+            image: archlinux@sha256:818793c894d94534c22f2149154a39ebaee57e4e67321023b0866a1d5722036c
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -23,32 +42,64 @@ jobs:
           cache: true
       - name: Build exact source acceptance binaries
         shell: bash
+        env:
+          QA_DISTRO: ${{ matrix.distro }}
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/debian-inputs" "$RUNNER_TEMP/debian-evidence"
-          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/debian-inputs/dotfiles" ./cmd/dotfiles
-          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/debian-inputs/platformqa" ./internal/platformqa/cmd
-          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/debian-inputs/tools.test" ./internal/tools
-          cp scripts/platform-acceptance-debian.sh "$RUNNER_TEMP/debian-inputs/run.sh"
-          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/debian-evidence/source-sha.txt"
-      - name: Run disposable Debian package transactions
+          mkdir -p "$RUNNER_TEMP/platform-inputs" "$RUNNER_TEMP/platform-evidence"
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/platform-inputs/dotfiles" ./cmd/dotfiles
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/platform-inputs/platformqa" ./internal/platformqa/cmd
+          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/platform-inputs/tools.test" ./internal/tools
+          cp "scripts/platform-acceptance-${QA_DISTRO}.sh" "$RUNNER_TEMP/platform-inputs/run.sh"
+          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/platform-evidence/source-sha.txt"
+      - name: Run disposable Linux package transactions
         shell: bash
+        env:
+          QA_IMAGE: ${{ matrix.image }}
+          QA_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          # Docker Hub library/debian trixie-slim linux/amd64 manifest, verified 2026-09-05.
-          image='debian@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f'
-          printf '%s\n' "$image" > "$RUNNER_TEMP/debian-evidence/image.txt"
-          docker run --rm --platform linux/amd64 --pids-limit 256 \
+          # Official Docker Library platform manifests, verified 2026-09-05.
+          image="$QA_IMAGE"
+          printf '%s\n' "$image" > "$RUNNER_TEMP/platform-evidence/image.txt"
+          docker run --rm --platform "linux/$QA_ARCH" --pids-limit 256 \
             --env CI=true --env GITHUB_ACTIONS=true --env DOTFILES_PLATFORM_ACCEPTANCE=1 \
-            --mount "type=bind,src=$RUNNER_TEMP/debian-inputs,dst=/inputs,readonly" \
-            --mount "type=bind,src=$RUNNER_TEMP/debian-evidence,dst=/evidence" \
-            "$image" /bin/bash /inputs/run.sh 2>&1 | tee "$RUNNER_TEMP/debian-evidence/bootstrap.log"
-          grep -Fx 'DOTFILES_DEBIAN_PLATFORM_EXECUTED cases=8 update=no-op' "$RUNNER_TEMP/debian-evidence/result.txt"
+            --mount "type=bind,src=$RUNNER_TEMP/platform-inputs,dst=/inputs,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/platform-evidence,dst=/evidence" \
+            "$image" /bin/bash /inputs/run.sh 2>&1 | tee "$RUNNER_TEMP/platform-evidence/bootstrap.log"
+          case "$QA_IMAGE" in
+            debian@*) grep -Fx 'DOTFILES_DEBIAN_PLATFORM_EXECUTED cases=10 update=version-change rollback=operator-package' "$RUNNER_TEMP/platform-evidence/result.txt" ;;
+            archlinux@*) grep -Fx 'DOTFILES_ARCH_PLATFORM_EXECUTED cases=7 update=no-op' "$RUNNER_TEMP/platform-evidence/result.txt" ;;
+            *) exit 1 ;;
+          esac
       - name: Upload synthetic acceptance evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: debian-platform-${{ github.sha }}
-          path: ${{ runner.temp }}/debian-evidence
+          name: platform-${{ matrix.distro }}-${{ matrix.arch }}-${{ github.sha }}
+          path: ${{ runner.temp }}/platform-evidence
+          retention-days: 7
+          if-no-files-found: error
+
+  homebrew-transition:
+    name: Homebrew candidate install upgrade rollback
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Verify exact candidate Homebrew transitions
+        shell: bash
+        env:
+          RELEASE_VERSION: 3.0.0
+          DOTFILES_RELEASE_ACCEPTANCE: "1"
+        run: bash scripts/release-acceptance-homebrew.sh
+      - name: Upload synthetic Homebrew evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: homebrew-transition-${{ github.sha }}
+          path: ${{ runner.temp }}/dotfiles-homebrew-evidence
           retention-days: 7
           if-no-files-found: error

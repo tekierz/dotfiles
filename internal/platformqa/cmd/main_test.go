@@ -21,7 +21,7 @@ func (info guardFileInfo) IsDir() bool        { return info.mode.IsDir() }
 func (info guardFileInfo) Sys() any           { return &syscall.Stat_t{Uid: info.uid} }
 
 func TestPreparationRefusesOwnerAndMutableInstallations(t *testing.T) {
-	for _, failure := range []string{"none", "wrong-executable", "symlink", "writable", "foreign-owner", "missing-file", "bad-authorization"} {
+	for _, failure := range []string{"none", "arch", "wrong-executable", "symlink", "writable", "foreign-owner", "missing-file", "bad-authorization"} {
 		t.Run(failure, func(t *testing.T) {
 			executable := qaExecutable
 			if failure == "wrong-executable" {
@@ -47,13 +47,16 @@ func TestPreparationRefusesOwnerAndMutableInstallations(t *testing.T) {
 				return info, nil
 			}
 			read := func(string) ([]byte, error) {
+				if failure == "arch" {
+					return []byte(qaArchAuthorization), nil
+				}
 				if failure == "bad-authorization" {
 					return []byte("owner environment"), nil
 				}
 				return []byte(qaAuthorization), nil
 			}
 			err := checkPreparation(executable, lstat, read)
-			if (err == nil) != (failure == "none") {
+			if (err == nil) != (failure == "none" || failure == "arch") {
 				t.Fatalf("guard=%v", err)
 			}
 		})
@@ -66,7 +69,7 @@ func TestPreparationRefusesOwnerAndMutableInstallations(t *testing.T) {
 }
 
 func TestNormalRequestRequiresExplicitNonrootCI(t *testing.T) {
-	for _, mode := range []string{"receipt", "receipt-held", "update"} {
+	for _, mode := range []string{"receipt", "receipt-held", "update", "upgrade"} {
 		if !normalRequestAllowed(1001, "true", "true", "1", []string{mode}) {
 			t.Fatal(mode)
 		}
